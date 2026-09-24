@@ -103,12 +103,14 @@ def _modernize_word(word: str) -> str:
     return "".join(characters)
 
 
-# Single-cell mistakes in ECDICT that no rule can tell apart from a correct cell: voiced th written voiceless.
+# Single-cell mistakes in ECDICT that no rule can tell apart from a correct cell: voiced th written voiceless, a dropped
+# sound.
 # Found by reading the 200 most frequent words and every th- function word; add to it the same way, by word.
 CORRECTIONS = {
     "this": "ðɪs",
     "thou": "ðaʊ",
     "thither": "ˈðɪðə",
+    "electric": "ɪˈlektrɪk",  # ECDICT: i'lektik
 }
 
 
