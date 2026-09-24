@@ -53,27 +53,40 @@ static inline NSString *MSIMEGlossLineLanguage(NSString *line, NSUInteger index,
     return [target isEqual:@"ja"] ? @"ja" : nil;
 }
 
-// Romaji of Japanese text, word by word from the system tokenizer, joined without spaces. Empty when the tokenizer
-// has no Latin transcription for it (it is not Japanese, or not text the tokenizer knows).
+// Romaji of Japanese text, word by word from the system tokenizer, one space between words: 今日は天気がいいですね reads
+// "kyou wa tenki ga ii desu ne", which a learner can match to the words; run together it cannot be read. The particles
+// は, へ and を are read wa, e and o, as they are spoken, and so is the は that ends a greeting such as こんにちは. Empty
+// when a token has no Latin transcription (the text is not Japanese the tokenizer knows): half a reading is not shown.
 static inline NSString *MSIMEJapaneseRomaji(NSString *text)
 {
     if (text.length == 0) return @"";
+    static NSDictionary<NSString *, NSString *> *spoken = @{
+        @"は" : @"wa", @"へ" : @"e", @"を" : @"o",
+        @"こんにちは" : @"konnichiwa", @"こんばんは" : @"konbanwa",
+    };
     CFLocaleRef locale = CFLocaleCreate(kCFAllocatorDefault, CFSTR("ja"));
     CFStringTokenizerRef tokenizer = CFStringTokenizerCreate(kCFAllocatorDefault, (__bridge CFStringRef)text,
                                                              CFRangeMake(0, (CFIndex)text.length), kCFStringTokenizerUnitWord, locale);
     if (locale) CFRelease(locale);
     if (!tokenizer) return @"";
-    NSMutableString *romaji = [NSMutableString string];
+    NSMutableArray<NSString *> *words = [NSMutableArray array];
     BOOL complete = YES;
     while (CFStringTokenizerAdvanceToNextToken(tokenizer) != kCFStringTokenizerTokenNone) {
+        const CFRange range = CFStringTokenizerGetCurrentTokenRange(tokenizer);
+        NSString *surface = [text substringWithRange:NSMakeRange((NSUInteger)range.location, (NSUInteger)range.length)];
+        if (spoken[surface]) {
+            [words addObject:spoken[surface]];
+            continue;
+        }
         CFTypeRef latin = CFStringTokenizerCopyCurrentTokenAttribute(tokenizer, kCFStringTokenizerAttributeLatinTranscription);
-        if (latin && CFGetTypeID(latin) == CFStringGetTypeID()) [romaji appendString:(__bridge NSString *)latin];
-        else complete = NO;
+        if (latin && CFGetTypeID(latin) == CFStringGetTypeID() && CFStringGetLength((CFStringRef)latin) > 0)
+            [words addObject:(__bridge NSString *)latin];
+        else
+            complete = NO;
         if (latin) CFRelease(latin);
     }
     CFRelease(tokenizer);
-    // A token without a transcription would leave a hole in the reading; half a reading is not shown.
-    return complete ? [romaji copy] : @"";
+    return complete ? [words componentsJoinedByString:@" "] : @"";
 }
 
 // The per-line pronunciation of a candidate's gloss, "\n"-joined parallel to its lines, or empty when no line has one.

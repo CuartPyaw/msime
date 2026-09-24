@@ -36,6 +36,12 @@ int main()
         Check([MSIMEJapaneseRomaji(@"学校") isEqual:@"gakkou"], "学校 -> gakkou");
         Check([MSIMEJapaneseRomaji(@"ありがとう") isEqual:@"arigatou"], "kana -> romaji");
         Check([MSIMEJapaneseRomaji(@"") isEqual:@""], "empty -> empty");
+        // Words are spaced so a learner can match them; particles and greetings read as spoken.
+        Check([MSIMEJapaneseRomaji(@"今日は天気がいいですね") isEqual:@"kyou wa tenki ga ii desu ne"], "a sentence is spaced by word");
+        Check([MSIMEJapaneseRomaji(@"東京へ行きます") isEqual:@"toukyou e iki masu"], "the particle へ reads e");
+        Check([MSIMEJapaneseRomaji(@"私を") isEqual:@"watakushi o"], "the particle を reads o");
+        Check([MSIMEJapaneseRomaji(@"こんにちは") isEqual:@"konnichiwa"], "a greeting's final は reads wa");
+        Check([MSIMEJapaneseRomaji(@"はな") isEqual:@"hana"], "は inside a word keeps ha");
 
         NSDictionary *english = @{ @"love; affection" : @"/lʌv/", @"hello" : @"/həˈləu/" };
         // A Chinese candidate with an English and a Japanese line: one reading per line.
