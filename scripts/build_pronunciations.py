@@ -66,10 +66,46 @@ IPA_LETTERS = set("abcdefhijklmnopqrstuvwxyz") | set(
 ) | set("()-. ")
 
 
+VOWELS = set("aeiouæɑɒɔəɜɪʊʌɛ")
+
+
+def _stressed(word: str, index: int) -> bool:
+    """Whether the vowel at ``index`` opens the syllable a stress mark (or the start of the word) points at."""
+    start = max(word.rfind("ˈ", 0, index), word.rfind("ˌ", 0, index)) + 1
+    return not any(character in VOWELS for character in word[start:index])
+
+
+def _modernize_word(word: str) -> str:
+    # NURSE and the old open-e spellings.
+    word = word.replace("əː", "ɜː").replace("ɛə", "eə").replace("ɛ", "e")
+    # Closing diphthongs: the second element is the lax vowel in current notation.
+    for old, new in (("ei", "eɪ"), ("ai", "aɪ"), ("ɔi", "ɔɪ"), ("ɒi", "ɔɪ"), ("əu", "əʊ"), ("ou", "əʊ"), ("au", "aʊ")):
+        word = word.replace(old, new)
+    characters = list(word)
+    for index, character in enumerate(characters):
+        following = characters[index + 1] if index + 1 < len(characters) else ""
+        after = characters[index + 2] if index + 2 < len(characters) else ""
+        if character in "iu" and following == "ə" and after != "ʊ" and _stressed(word, index):
+            # Centring diphthongs, in a stressed syllable only: here hiə -> hɪə, but media ˈmiːdiə keeps its i.
+            characters[index] = "ɪ" if character == "i" else "ʊ"
+        elif character in "iu" and following and following != "ː" and following not in VOWELS:
+            # A short vowel before a consonant is the lax one; final and prevocalic i/u keep the happY convention.
+            characters[index] = "ɪ" if character == "i" else "ʊ"
+        elif character == "ɔ" and following not in ("ː", "ɪ"):
+            characters[index] = "ɒ"
+    return "".join(characters)
+
+
+def modernize(ipa: str) -> str:
+    """ECDICT's older British notation (dei, həˈləu, bəːd, buk) in the notation current learner's dictionaries use
+    (deɪ, həˈləʊ, bɜːd, bʊk). Text already in current notation is left as it is, so a cell mixing both is safe."""
+    return " ".join(_modernize_word(word) for word in ipa.split(" "))
+
+
 def clean_phonetic(raw: str) -> str | None:
-    """The first variant of an ECDICT phonetic cell in IPA, or None when it is not one."""
+    """The first variant of an ECDICT phonetic cell in modern IPA, or None when it is not one."""
     text = raw.strip()
-    for separator in (";", "；", ", ", "，"):
+    for separator in (";", "；", ", ", "，", ". "):
         text = text.split(separator, 1)[0]
     text = text.strip().strip("/[]").strip()
     if not text:
@@ -81,7 +117,7 @@ def clean_phonetic(raw: str) -> str | None:
         return None
     if text.count("(") != text.count(")") or len(text) > MAX_PHONETIC_CHARS:
         return None
-    return text
+    return modernize(text)
 
 
 def usable_word(word: str) -> bool:

@@ -26,18 +26,53 @@ def check(condition: bool, message: str) -> None:
 # (ECDICT cell, expected IPA or None)
 PHONETICS = [
     ("lʌv", "lʌv"),
-    ("hә'lәu", "həˈləu"),  # Cyrillic schwa, ASCII primary stress
+    ("hә'lәu", "həˈləʊ"),  # Cyrillic schwa, ASCII primary stress, then modern IPA
     ("kәm'pju:tә", "kəmˈpjuːtə"),  # ASCII length mark
     (",skrɑ:vən'hɑ:ɡə", "ˌskrɑːvənˈhɑːɡə"),  # leading comma is secondary stress
     ("ðem; ðəm", "ðem"),  # several variants: the first
     ("ɪg'zem(p)t; eg-", "ɪɡˈzem(p)t"),  # optional sound kept, ASCII g made IPA
     ("ˈteliˌprɔmptə(璻)", None),  # stray CJK
-    ("kɑ:'lɔtə; 意大利语kɑ:r'lɔ:ttɑ:", "kɑːˈlɔtə"),  # the note is in the dropped variant
+    ("kɑ:'lɔtə; 意大利语kɑ:r'lɔ:ttɑ:", "kɑːˈlɒtə"),  # the note is in the dropped variant
     ("[ˈɔ:ltmən", "ˈɔːltmən"),  # a stray bracket at the edge
     ("ˈæmfθətəz", None),  # private-use characters
-    (".eibi:si:'dєәriәn", ".eibiːsiːˈdɛəriən"),  # Cyrillic ie; the dot is an IPA syllable break
+    (".eibi:si:'dєәriәn", ".eɪbiːsiːˈdeəriən"),  # Cyrillic ie; the dot is an IPA syllable break
     ("", None),
     ("ˈbæb(ə", None),  # unbalanced
+]
+
+# (ECDICT cell after clean_phonetic, modern British IPA) — real rows; expectations follow the Cambridge/Oxford
+# learner's dictionaries, including their happY convention (final and prevocalic i stay i).
+MODERN = [
+    ("dei", "deɪ"),  # day
+    ("həˈləu", "həˈləʊ"),  # hello
+    ("ɡou", "ɡəʊ"),  # go, American-style ou
+    ("skai", "skaɪ"),  # sky
+    ("bɒi", "bɔɪ"),  # boy, already half modern
+    ("nau", "naʊ"),  # now
+    ("bəːd", "bɜːd"),  # bird
+    ("hiə", "hɪə"),  # here
+    ("aiˈdiə", "aɪˈdɪə"),  # idea: stressed iə
+    ("ˈriəli", "ˈrɪəli"),  # really
+    ("ˈmiːdiə", "ˈmiːdiə"),  # media: unstressed iə stays
+    ("hɛə", "heə"),  # hair
+    ("puə", "pʊə"),  # poor
+    ("kjuə", "kjʊə"),  # cure
+    ("ʃuə", "ʃʊə"),  # sure
+    ("ˈjuːʒuəl", "ˈjuːʒuəl"),  # usual: unstressed uə stays
+    ("ˈsiti", "ˈsɪti"),  # city
+    ("ˈhæpi", "ˈhæpi"),  # happy
+    ("buk", "bʊk"),  # book
+    ("hɒt", "hɒt"),  # hot
+    ("ˈdikʃənəri", "ˈdɪkʃənəri"),  # dictionary
+    ("ˈvidiəu", "ˈvɪdiəʊ"),  # video: prevocalic i stays
+    ("ˈneiʃən", "ˈneɪʃən"),  # nation
+    ("ˈtəukjəu", "ˈtəʊkjəʊ"),  # tokyo
+    ("lʌv", "lʌv"),
+    ("kəmˈpjuːtə", "kəmˈpjuːtə"),
+    ("ˌæbəˈlɪʃənɪsts", "ˌæbəˈlɪʃənɪsts"),  # modern input is left as it is
+    ("ˈmiːl", "ˈmiːl"),
+    ("ɔːl", "ɔːl"),
+    ("ˈfɔː", "ˈfɔː"),
 ]
 
 WORDS = [
@@ -55,6 +90,11 @@ def main() -> int:
     for raw, expected in PHONETICS:
         found = generator.clean_phonetic(raw)
         check(found == expected, f"clean_phonetic({raw!r}) = {found!r}, expected {expected!r}")
+    for raw, expected in MODERN:
+        found = generator.modernize(raw)
+        check(found == expected, f"modernize({raw!r}) = {found!r}, expected {expected!r}")
+        check(generator.modernize(found) == found, f"modernize is not idempotent on {found!r}")
+    check(generator.clean_phonetic("puə. pɒː") == "pʊə", "a '. ' variant separator keeps the first variant")
     for word, expected in WORDS:
         check(generator.usable_word(word) is expected, f"usable_word({word!r}) should be {expected}")
 
@@ -63,7 +103,7 @@ def main() -> int:
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(["word", "phonetic", "translation"])
-            writer.writerow(["May", "mei", "n. 五月"])
+            writer.writerow(["May", "mei", "n. 五月"])  # modernised to meɪ, but the lowercase row wins
             writer.writerow(["may", "meɪ", "aux. 可以"])
             writer.writerow(["June", "dʒu:n", "n. 六月"])
             writer.writerow(["love", "lʌv", "n. 爱"])

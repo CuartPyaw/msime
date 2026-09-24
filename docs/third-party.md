@@ -206,8 +206,8 @@ kaikki 每周覆盖同一个 URL，所以能复现构建的是 `filtered_input`�
 | 文件 | `ecdict.csv`（`sha256:1a6947e0…c3cf`）与 `LICENSE`（`sha256:f8552dd2…ed0f`，1,063 字节），都在锁里 |
 | 许可 | MIT，`Copyright (c) 2025 Linwei` |
 | 生成器 | `scripts/build_pronunciations.py`，只用 Python 标准库，下载与校验复用 `fetch_wordbooks.fetch` |
-| 产物 | `pronunciations/en-phonetic.db`（`en_phonetics(word, phonetic)`，`meta.kind = en_phonetic`，`user_version = 1`，约 18.8 万词、5.5 MB），外加 `pronunciations-NOTICE.txt`（含 ECDICT 的 LICENSE 全文） |
-| 取词范围 | 纯 ASCII 字母词（可含 `-`、`'`），键为小写；同键时取小写词头那一行；`phonetic` 只取第一种读法，西里尔 `ә`、ASCII `'`/`:`/`,` 等写法规范成 IPA，规范后仍含 IPA 以外字符（中文注释、私用区字符、不配对括号）的整条丢弃 |
+| 产物 | `pronunciations/en-phonetic.db`（`en_phonetics(word, phonetic)`，`meta.kind = en_phonetic`，`user_version = 1`，约 18.8 万词、5.7 MB），外加 `pronunciations-NOTICE.txt`（含 ECDICT 的 LICENSE 全文） |
+| 取词范围 | 纯 ASCII 字母词（可含 `-`、`'`），键为小写；同键时取小写词头那一行；`phonetic` 只取第一种读法，西里尔 `ә`、ASCII `'`/`:`/`,` 等写法规范成 IPA，规范后仍含 IPA 以外字符（中文注释、私用区字符、不配对括号）的整条丢弃；ECDICT 约七成条目是旧式英式注音（`dei`、`həˈləu`、`bəːd`、`buk`），生成时按规则改成现行学习词典的写法（`deɪ`、`həˈləʊ`、`bɜːd`、`bʊk`），词尾与元音前的 `i` 保留 happY 惯例，已是现行写法的部分不变 |
 
 同样**放在 resources 的兄弟目录 `pronunciations/`**，理由与 `offline-glosses/` 相同。目前只在本地生成（同一份输入、同一 SQLite 版本逐字节相同），还没有发布位置，也还没接入各平台的发布工作流。
 
