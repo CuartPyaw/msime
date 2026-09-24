@@ -78,6 +78,13 @@ def _stressed(word: str, index: int) -> bool:
 def _modernize_word(word: str) -> str:
     # NURSE and the old open-e spellings.
     word = word.replace("əː", "ɜː").replace("ɛə", "eə").replace("ɛ", "e")
+    # ECDICT writes the THOUGHT vowel with the LOT letter (all ɒːl, more mɒː, water ˈwɒːtə); ɒ is only ever short, so
+    # ɒː is always ɔː.
+    word = word.replace("ɒː", "ɔː")
+    # what hwɒt, why hwai: the older /hw/ of wh-words is /w/ in current British notation.
+    stress = len(word) - len(word.lstrip("ˈˌ"))
+    if word[stress:].startswith("hw"):
+        word = word[:stress] + word[stress + 1 :]
     # Closing diphthongs: the second element is the lax vowel in current notation.
     for old, new in (("ei", "eɪ"), ("ai", "aɪ"), ("ɔi", "ɔɪ"), ("ɒi", "ɔɪ"), ("əu", "əʊ"), ("ou", "əʊ"), ("au", "aʊ")):
         word = word.replace(old, new)
@@ -96,6 +103,27 @@ def _modernize_word(word: str) -> str:
     return "".join(characters)
 
 
+# Single-cell mistakes in ECDICT that no rule can tell apart from a correct cell: voiced th written voiceless.
+# Found by reading the 200 most frequent words and every th- function word; add to it the same way, by word.
+CORRECTIONS = {
+    "this": "ðɪs",
+    "thou": "ðaʊ",
+    "thither": "ˈðɪðə",
+}
+
+
+def _first_of_dotted_variants(text: str) -> str:
+    """ECDICT's '.' is usually a syllable break (streetwalker ˈstriːt.wɔːkə) but sometimes separates two whole
+    readings (live liv.laiv). A part after the dot that starts with the same sound as the cell is a second reading."""
+    head = text.lstrip("ˈˌ")
+    dot = head.find(".", 1)
+    if dot > 0:
+        rest = head[dot + 1 :].lstrip("ˈˌ")
+        if rest[:1] and rest[:1] == head[:1]:
+            return text[: len(text) - len(head) + dot]
+    return text
+
+
 def modernize(ipa: str) -> str:
     """ECDICT's older British notation (dei, həˈləu, bəːd, buk) in the notation current learner's dictionaries use
     (deɪ, həˈləʊ, bɜːd, bʊk). Text already in current notation is left as it is, so a cell mixing both is safe."""
@@ -107,7 +135,7 @@ def clean_phonetic(raw: str) -> str | None:
     text = raw.strip()
     for separator in (";", "；", ", ", "，", ". "):
         text = text.split(separator, 1)[0]
-    text = text.strip().strip("/[]").strip()
+    text = _first_of_dotted_variants(text.strip().strip("/[]").strip())
     if not text:
         return None
     # A comma that is not a variant separator is ECDICT's secondary-stress mark.
@@ -148,6 +176,7 @@ def collect(csv_path: Path) -> dict[str, str]:
             rows[key] = phonetic
             if word == key:
                 exact.add(key)
+    rows.update(CORRECTIONS)
     return rows
 
 

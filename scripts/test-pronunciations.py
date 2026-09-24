@@ -67,6 +67,13 @@ MODERN = [
     ("ˈvidiəu", "ˈvɪdiəʊ"),  # video: prevocalic i stays
     ("ˈneiʃən", "ˈneɪʃən"),  # nation
     ("ˈtəukjəu", "ˈtəʊkjəʊ"),  # tokyo
+    ("ˈmɒːnɪŋ", "ˈmɔːnɪŋ"),  # morning: ECDICT writes THOUGHT with the LOT letter
+    ("ɒːl", "ɔːl"),  # all
+    ("ˈwɒːtə", "ˈwɔːtə"),  # water
+    ("hwaɪ", "waɪ"),  # why: older /hw/
+    ("hwɒt", "wɒt"),  # what
+    ("ˈhwaɪtli", "ˈwaɪtli"),  # whitely: after a stress mark
+    ("bɪˈheɪv", "bɪˈheɪv"),  # an h that is not wh stays
     ("lʌv", "lʌv"),
     ("kəmˈpjuːtə", "kəmˈpjuːtə"),
     ("ˌæbəˈlɪʃənɪsts", "ˌæbəˈlɪʃənɪsts"),  # modern input is left as it is
@@ -95,6 +102,9 @@ def main() -> int:
         check(found == expected, f"modernize({raw!r}) = {found!r}, expected {expected!r}")
         check(generator.modernize(found) == found, f"modernize is not idempotent on {found!r}")
     check(generator.clean_phonetic("puə. pɒː") == "pʊə", "a '. ' variant separator keeps the first variant")
+    check(generator.clean_phonetic("liv.laiv") == "lɪv", "a dot before a second reading keeps the first")
+    check(generator.clean_phonetic("'stri:t.wɔ:kə") == "ˈstriːt.wɔːkə", "a dot inside one reading is a syllable break")
+    check(generator.clean_phonetic("ə.bɔ:ti'feiʃənt") == "ə.bɔːtɪˈfeɪʃənt", "a leading-syllable dot stays")
     for word, expected in WORDS:
         check(generator.usable_word(word) is expected, f"usable_word({word!r}) should be {expected}")
 
@@ -113,6 +123,7 @@ def main() -> int:
         check(rows.get("may") == "meɪ", f"the lowercase headword wins a shared key: {rows.get('may')!r}")
         check(rows.get("june") == "dʒuːn", f"a capitalised headword is keyed lowercase: {rows.get('june')!r}")
         check("nophonetic" not in rows and "-ing" not in rows, "rows without a usable word or IPA are dropped")
+        check(rows.get("this") == "ðɪs", f"ECDICT's voiceless this is corrected: {rows.get('this')!r}")
 
         database = Path(directory) / "en-phonetic.db"
         generator.write_database(database, rows, {"kind": "en_phonetic"})
