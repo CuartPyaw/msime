@@ -3,6 +3,7 @@ package app.msime.client;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -36,6 +37,7 @@ public final class DoubaoRecognizer {
     private static final int CONNECT_TIMEOUT_MILLIS = 10_000;
     private static final int READ_TIMEOUT_MILLIS = 30_000;
     private static final int MAX_MILLIS = 60_000;
+    private static final int MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
     /** The shared Doubao decoder accepts one-megabyte wire frames; keep room for a WebSocket header. */
     private static final int MAX_INBOUND_FRAME_BYTES = 1_048_576 + 10;
     /** Roughly 100 ms of 16 kHz mono PCM: small enough to stream, large enough not to thrash. */
@@ -120,6 +122,7 @@ public final class DoubaoRecognizer {
         int limit = WavAudio.SAMPLE_RATE * 2 / 1000 * MAX_MILLIS;
         String transcript = null;
         boolean finished = false;
+        ByteArrayOutputStream fragmented = null;
         while (!finished) {
             if (cancelled.get()) return null;
             boolean last = stopped.get() || sent >= limit;
@@ -151,11 +154,31 @@ public final class DoubaoRecognizer {
                         sendFrame(out, WebSocketFrames.OPCODE_PONG, decoded.payload());
                         continue;
                     }
+                    if (decoded.opcode() == WebSocketFrames.OPCODE_PONG) continue;
                     if (decoded.opcode() != WebSocketFrames.OPCODE_BINARY
                             && decoded.opcode() != WebSocketFrames.OPCODE_CONTINUATION) {
                         continue;
                     }
-                    Update update = update(decoded.payload());
+                    byte[] payload;
+                    if (decoded.opcode() == WebSocketFrames.OPCODE_BINARY) {
+                        // A new data message cannot begin while a previous one is fragmented.
+                        if (fragmented != null) return transcript;
+                        if (decoded.fin()) {
+                            payload = decoded.payload();
+                        } else {
+                            fragmented = new ByteArrayOutputStream(decoded.payload().length);
+                            if (!append(fragmented, decoded.payload())) return transcript;
+                            continue;
+                        }
+                    } else {
+                        // Continuation frames only have meaning after an unfinished binary frame.
+                        if (fragmented == null) return transcript;
+                        if (!append(fragmented, decoded.payload())) return transcript;
+                        if (!decoded.fin()) continue;
+                        payload = fragmented.toByteArray();
+                        fragmented = null;
+                    }
+                    Update update = update(payload);
                     if (update == null) return transcript;
                     if (update.text != null && !update.text.isEmpty()) {
                         transcript = update.text;
@@ -171,6 +194,12 @@ public final class DoubaoRecognizer {
             if (last && !finished) return transcript;
         }
         return transcript;
+    }
+
+    private static boolean append(ByteArrayOutputStream message, byte[] payload) {
+        if (payload.length > MAX_MESSAGE_BYTES - message.size()) return false;
+        message.write(payload, 0, payload.length);
+        return true;
     }
 
     private record Update(String text, boolean last) {}
