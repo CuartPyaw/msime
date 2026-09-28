@@ -5,7 +5,7 @@
 
 另一半是文件缺失：plist 里这些键是字符串，资源改名之后不会报错，菜单直接回落到一个通用图标。
 
-菜单栏的图标取自当前输入模式，永远不取 bundle 那一级，所以模式图标是产品标志进入菜单栏的唯一通路：中文模式用标志，英文模式用「英」。两个模式共用同一个文件、或者同一个模式给菜单和面板写了不同文件，都会让菜单栏分不出模式——这也是标志不能干脆两个模式都用的原因。
+输入源列表里每一条显示的都是同一个标志：每个输入模式的菜单图标和面板图标都指向 bundle 自己的菜单图标，中文、英文和日语三条不会各自漂成不同的图标。
 """
 
 import plistlib
@@ -96,23 +96,21 @@ def main() -> int:
     for mode, body in sorted(modes.items()):
         menu, palette = body.get("tsInputModeMenuIconFileKey"), body.get("tsInputModePaletteIconFileKey")
         if not menu:
-            failures.append(f"input mode {mode} names no menu icon; the menu bar cannot show which mode is active")
+            failures.append(f"input mode {mode} names no menu icon; its entry would fall back to a generic icon")
             continue
         if palette != menu:
             failures.append(f"input mode {mode} names {menu} for the menu but {palette} for the palette")
         mode_icons[mode] = menu
-    for icon in sorted(set(mode_icons.values())):
-        sharing = sorted(mode for mode, value in mode_icons.items() if value == icon)
-        if len(sharing) > 1:
-            failures.append(f"{', '.join(sharing)} share {icon}; the menu bar icon would not change with the mode")
-    if len(modes) < 2:
-        failures.append("bundle 声明的输入模式少于两个，菜单栏图标就无法在标志与「英」之间切换")
+    logos = named.get("tsInputMethodIconFileKey", set())
+    for mode, icon in sorted(mode_icons.items()):
+        if icon not in logos:
+            failures.append(f"input mode {mode} names {icon} rather than the bundle's logo; the input-source list would mix icons")
 
     if failures:
         for failure in failures:
             print(failure, file=sys.stderr)
         return 1
-    print(f"{sum(len(v) for v in named.values())} icon references resolve; the menu icons carry both pages and each of the {len(mode_icons)} input modes has its own.")
+    print(f"{sum(len(v) for v in named.values())} icon references resolve; the menu icons carry both pages and all {len(mode_icons)} input modes show the bundle's logo.")
     return 0
 
 

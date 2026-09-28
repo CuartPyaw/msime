@@ -1,6 +1,6 @@
 #!/usr/bin/env xcrun swift
 
-// Renders the input menu's template TIFFs: MSIMEClientInputMethodMenuIcon.tiff from the stroke in MSIMEClientInputMethodMenuIcon.svg, and the two input-mode icons MSIMEClientInputMethodMenuIconChinese.tiff (中) and MSIMEClientInputMethodMenuIconEnglish.tiff (英) from the glyphs their SVGs name.
+// Renders the input menu's template TIFF, MSIMEClientInputMethodMenuIcon.tiff, from the stroke in MSIMEClientInputMethodMenuIcon.svg. The bundle and all three input modes use it.
 //
 // The input menu draws this through HIToolbox rather than through NSImage, and that path reads the TIFF's
 // pages, not the DPI metadata of a single one: a lone 2x page is taken for a 32-point image, which the
@@ -12,7 +12,6 @@
 // Leaves the TIFFs beside the SVGs unless another directory is given.
 
 import AppKit
-import CoreText
 import Foundation
 
 // 标志本身，逐点取自产品图稿 apps/desktop/app-icon.svg 里那条 stroke="white" 的路径：110 单位画布、
@@ -31,25 +30,6 @@ func metasequoiaStroke() -> CGPath {
                   control1: CGPoint(x: 72.562, y: 65.84),
                   control2: CGPoint(x: 107.728, y: 71.024))
     return path.copy(strokingWithWidth: 8, lineCap: .round, lineJoin: .miter, miterLimit: 4)
-}
-
-// The input-mode icons are one glyph each, taken from the same face their SVGs name so the SVG preview and the shipped TIFF agree. PingFang SC ships with every macOS the bundle supports; a missing face fails the script rather than rendering a substitute.
-let modeGlyphFontName = "PingFangSC-Semibold"
-
-func glyphOutline(_ character: String) throws -> CGPath {
-    let font = CTFontCreateWithName(modeGlyphFontName as CFString, 64, nil)
-    guard (CTFontCopyPostScriptName(font) as String) == modeGlyphFontName else {
-        throw CocoaError(.fileReadNoSuchFile, userInfo: [NSLocalizedDescriptionKey: "\(modeGlyphFontName) is not installed"])
-    }
-    var characters = Array(character.utf16)
-    var glyphs = [CGGlyph](repeating: 0, count: characters.count)
-    guard CTFontGetGlyphsForCharacters(font, &characters, &glyphs, characters.count), glyphs.count == 1,
-          let outline = CTFontCreatePathForGlyph(font, glyphs[0], nil) else {
-        throw CocoaError(.fileReadCorruptFile, userInfo: [NSLocalizedDescriptionKey: "\(modeGlyphFontName) has no glyph for \(character)"])
-    }
-    // Font outlines point y up; the renderer below expects the SVG's y-down space, so flip once here.
-    var flip = CGAffineTransform(scaleX: 1, y: -1)
-    return outline.copy(using: &flip) ?? outline
 }
 
 // One thirty-second of the tile stays clear on every side so the round caps do not sit on the edge.
@@ -126,5 +106,3 @@ func writeIcon(_ shape: CGPath, named name: String) throws {
 }
 
 try writeIcon(metasequoiaStroke(), named: "MSIMEClientInputMethodMenuIcon")
-try writeIcon(try glyphOutline("中"), named: "MSIMEClientInputMethodMenuIconChinese")
-try writeIcon(try glyphOutline("英"), named: "MSIMEClientInputMethodMenuIconEnglish")
