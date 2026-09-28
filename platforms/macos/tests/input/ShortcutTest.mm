@@ -6043,6 +6043,30 @@ int main(int argc, char **argv) {
         assert([previous.accessibilityLabel isEqual:@"上一页候选"]);
         assert([next.accessibilityLabel isEqual:@"下一页候选"]);
         assert(previous.frame.size.height == 26 && next.frame.size.width == 28);
+        // A gloss-only update keeps the candidate identity and row geometry, so the visible row can
+        // be updated in place without rebuilding its AppKit button.
+        NSMutableDictionary *glossReuseView = [@{
+            @"session": @1, @"generation": @2, @"focused": @YES, @"page": @0, @"page_count": @1,
+            @"editing_text": @"ceshi",
+            @"candidates": @[@{@"text": @"测试", @"highlighted": @YES,
+                               @"id": @{ @"session": @1, @"generation": @2, @"index": @0 }}]
+        } mutableCopy];
+        NSDictionary *beforeGlossView = [glossReuseView copy];
+        [controller setValue:beforeGlossView forKey:@"view"];
+        [controller renderCandidates];
+        MSIMECandidateButton *reusedBeforeGloss = PageButton(layoutPanel.contentView, 0);
+        NSMutableDictionary *glossReuseCandidate = [glossReuseView[@"candidates"][0] mutableCopy];
+        glossReuseCandidate[@"translation"] = @"x";
+        glossReuseView[@"candidates"] = @[glossReuseCandidate];
+        [controller setValue:[glossReuseView copy] forKey:@"view"];
+        [controller renderCandidates];
+        MSIMECandidateButton *reusedAfterGloss = PageButton(layoutPanel.contentView, 0);
+        assert(reusedAfterGloss == reusedBeforeGloss && [reusedAfterGloss.translation isEqual:@"x"] &&
+               [reusedAfterGloss.toolTip containsString:@"\nx"]);
+        [controller setValue:[pageView copy] forKey:@"view"];
+        [controller renderCandidates];
+        previous = (id)PageButton(layoutPanel.contentView, -1);
+        next = (id)PageButton(layoutPanel.contentView, -2);
         // A layout-only render can keep all Engine IDs unchanged. The detached
         // button must still be rejected, just like detached candidate buttons.
         MSIMECandidateButton *oldPageButton = next;

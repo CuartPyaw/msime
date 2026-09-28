@@ -539,6 +539,30 @@ static NSDictionary *MSIMERenderedHighlightedCandidateIdentity(NSPanel *panel) {
     return nil;
 }
 
+// Translation replies may replace the view while leaving every actionable field unchanged.
+// Comparing the rest of the view also protects preedit, paging and candidate menu actions.
+static BOOL MSIMEOnlyCandidateTranslationsChanged(NSDictionary *before, NSDictionary *after) {
+    if (![before isKindOfClass:NSDictionary.class] || ![after isKindOfClass:NSDictionary.class]) return NO;
+    NSArray *oldCandidates = before[@"candidates"], *newCandidates = after[@"candidates"];
+    if (![oldCandidates isKindOfClass:NSArray.class] || ![newCandidates isKindOfClass:NSArray.class] ||
+        oldCandidates.count == 0 || oldCandidates.count != newCandidates.count) return NO;
+    NSMutableDictionary *oldView = [before mutableCopy], *newView = [after mutableCopy];
+    [oldView removeObjectForKey:@"candidates"];
+    [newView removeObjectForKey:@"candidates"];
+    if (![oldView isEqual:newView]) return NO;
+    BOOL changed = NO;
+    for (NSUInteger index = 0; index < oldCandidates.count; ++index) {
+        NSDictionary *oldCandidate = oldCandidates[index], *newCandidate = newCandidates[index];
+        if (![oldCandidate isKindOfClass:NSDictionary.class] || ![newCandidate isKindOfClass:NSDictionary.class]) return NO;
+        changed |= ![CandidateTranslation(oldCandidate) isEqual:CandidateTranslation(newCandidate)];
+        NSMutableDictionary *oldFields = [oldCandidate mutableCopy], *newFields = [newCandidate mutableCopy];
+        [oldFields removeObjectForKey:@"translation"];
+        [newFields removeObjectForKey:@"translation"];
+        if (![oldFields isEqual:newFields]) return NO;
+    }
+    return changed;
+}
+
 static BOOL MSIMESmartPunctuationKey(unichar character) {
     return character == ',' || character == '.' || character == ':';
 }
@@ -789,6 +813,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     MSIMEPanelTextCompletion _desktopEmojiCompletion;
     double _desktopEmojiDeadline;
     NSDictionary *_view;
+    NSDictionary *_renderedCandidateView;
     // Bumped by every apply:. Writing marked text is a synchronous call into the client, and IMK services the next key inside it, so an apply: can finish after a newer one that ran nested in it.
     uint64_t _applySequence;
     // Bumped when a gloss arrival replaces the view, which can also happen inside an apply:'s marked-text write.
@@ -5228,12 +5253,14 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
 - (void)renderCandidates {
     const bool timed = msime_macos_diagnostic_enabled();
     const uint64_t buildStarted = timed ? clock_gettime_nsec_np(CLOCK_UPTIME_RAW) : 0;
+    NSDictionary *previousRenderedView = _renderedCandidateView;
     _candidateMenuToken = [NSObject new];
     [self updateKeymapPanel];
-    if (_appearance.englishMode) { [self resetCandidateAnchor]; [self hideCandidatePanel:"english_mode"]; return; }
+    if (_appearance.englishMode) { _renderedCandidateView = nil; [self resetCandidateAnchor]; [self hideCandidatePanel:"english_mode"]; return; }
     NSArray *candidates = MSIMEReorderedPinnedCandidates(_view[@"candidates"], MSIMECandidatePinCode(_view));
     if (![candidates isKindOfClass:NSArray.class] || candidates.count == 0) {
         _armedGlossColumn = 0;
+        _renderedCandidateView = nil;
         [self resetCandidateAnchor];
         [self hideCandidatePanel:"empty"];
         return;
@@ -5245,13 +5272,13 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
     NSRect reportedCursor = NSZeroRect;
     [(id<IMKTextInput>)_activeClient attributesForCharacterIndex:0 lineHeightRectangle:&reportedCursor];
     NSRect cursor = [self candidateCaretForRendering:reportedCursor];
-    if (!MSIMEValidCaret(cursor)) { [self hideCandidatePanel:"invalid_caret"]; return; }
+    if (!MSIMEValidCaret(cursor)) { _renderedCandidateView = nil; [self hideCandidatePanel:"invalid_caret"]; return; }
     NSScreen *screen = nil;
     for (NSScreen *candidate in NSScreen.screens) {
         if (NSPointInRect(NSMakePoint(NSMinX(cursor), NSMidY(cursor)), candidate.frame)) { screen = candidate; break; }
     }
     screen = screen ?: NSScreen.mainScreen;
-    if (!screen) { [self hideCandidatePanel:"no_screen"]; return; }
+    if (!screen) { _renderedCandidateView = nil; [self hideCandidatePanel:"no_screen"]; return; }
     NSRect visible = screen.visibleFrame;
     [self ensureAppearance];
     NSAppearance *candidateAppearance = [_appearance candidateAppearanceOverride];
@@ -5305,6 +5332,66 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
     _panel.backgroundColor = NSColor.clearColor;
     const CGFloat decorationHeight = skin.decorationTopDip;
     const CGFloat height = pageGeometry.rowsHeight + 2 * inset + (paging && vertical ? 26 : 0) + decorationHeight + preeditHeight;
+
+    // Gloss replies keep the candidate IDs and all panel structure stable. Repaint those rows in
+    // place when their geometry is unchanged; a page or layout change still takes the full rebuild
+    // below, which deliberately detaches every old button.
+    if (MSIMEOnlyCandidateTranslationsChanged(previousRenderedView, _view) &&
+        [_panel.contentView isKindOfClass:MSIMECandidateChromeView.class] &&
+        NSEqualSizes(_panel.frame.size, NSMakeSize(width, height))) {
+        MSIMECandidateChromeView *content = (id)_panel.contentView;
+        BOOL reusable = YES;
+        for (NSUInteger index = 0; index < candidates.count && reusable; ++index) {
+            MSIMECandidateButton *button = nil;
+            for (NSView *subview in content.subviews)
+                if ([subview isKindOfClass:MSIMECandidateButton.class] && subview.tag == (NSInteger)index) {
+                    if (button) { reusable = NO; break; }
+                    button = (id)subview;
+                }
+            if (!button) { reusable = NO; break; }
+            NSDictionary *candidate = candidates[index];
+            const msime::mac::CandidateRowLayout &row = pageGeometry.rows[index];
+            NSString *display = pageGeometry.displays[index];
+            NSString *title = [NSString stringWithFormat:@"%lu  %@", (unsigned long)(index + 1), pageGeometry.texts[index]];
+            if (![button.candidateID isEqual:candidate[@"id"]] || ![button.title isEqual:title] ||
+                ![button.annotation isEqual:pageGeometry.annotations[index]] ||
+                button.candidateHighlighted != [candidate[@"highlighted"] boolValue] ||
+                !NSEqualRects(button.frame, NSMakeRect(inset + row.x, height - inset - decorationHeight - preeditHeight - row.y - row.height,
+                                                       row.width, row.height))) {
+                reusable = NO;
+                break;
+            }
+            button.menu = [self menuForCandidate:candidate];
+            button.frame = NSMakeRect(inset + row.x, height - inset - decorationHeight - preeditHeight - row.y - row.height,
+                                      row.width, row.height);
+            button.toolTip = CandidateTranslation(candidate).length ? [display stringByAppendingFormat:@"\n%@", CandidateTranslation(candidate)] : display;
+            button.translation = CandidateTranslation(candidate);
+            button.armedGlossColumn = _armedGlossColumn;
+            button.translationFont = glossFont;
+            button.itemLayout = row.item;
+            button.hasItemLayout = YES;
+            button.contentLeft = pageGeometry.contentLeft;
+            button.translationBelow = button.translation.length ? row.item.translation.below : !vertical;
+            button.needsDisplay = YES;
+        }
+        if (reusable) {
+            for (NSView *subview in content.subviews)
+                if ([subview isKindOfClass:MSIMECandidateButton.class] && subview.tag < 0) {
+                    MSIMECandidateButton *button = (id)subview;
+                    button.candidateID = _view;
+                    button.enabled = button.tag == -1 ? page > 0 : page + 1 < pageCount;
+                }
+            content.needsDisplay = YES;
+            _renderedCandidateView = [_view copy];
+            [self refreshCandidateSkin];
+            const NSSize panelSize = _panel.frame.size;
+            _tallestVerticalCandidateHeight = MSIMETallestCandidateHeight(_tallestVerticalCandidateHeight, panelSize.height, vertical, _panel.isVisible);
+            [_panel setFrameOrigin:MSIMECandidateOrigin(cursor, panelSize, visible, vertical ? _tallestVerticalCandidateHeight : 0)];
+            [self claimCandidatePanel];
+            [_panel orderFrontRegardless];
+            return;
+        }
+    }
     [_panel setContentSize:NSMakeSize(width, height)];
     MSIMECandidateChromeView *content = [[MSIMECandidateChromeView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
     NSUInteger slot = 0;
@@ -5384,6 +5471,7 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
         [content addSubview:decoration];
     }
     _panel.contentView = content;
+    _renderedCandidateView = [_view copy];
     content.appearanceTarget = self;
     content.appearanceAction = @selector(refreshCandidateSkin);
     [self refreshCandidateSkin];
