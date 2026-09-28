@@ -94,15 +94,31 @@ use msime_input_runtime::UnixSocketProvider;
 use msime_input_runtime::{HandwritingPoint, HandwritingQuery};
 use serde_json::Value;
 use std::collections::HashMap;
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "android", test))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "android",
+    test
+))]
 use std::fs;
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "android", test))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "android",
+    test
+))]
 use std::io::Read;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "android"))]
 use std::io::Write;
 #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
 use std::os::unix::fs::FileTypeExt;
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "android", target_os = "ios", test))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "android",
+    target_os = "ios",
+    test
+))]
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -957,10 +973,20 @@ impl RuntimeOptionsState {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "android", test))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "android",
+    test
+))]
 const RUNTIME_OPTIONS_READ_LIMIT: u64 = 2 << 20;
 
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "android", test))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "android",
+    test
+))]
 fn read_runtime_options_bytes(path: &Path) -> Result<Vec<u8>, std::io::Error> {
     let file = fs::File::open(path)?;
     let mut bytes = Vec::new();
