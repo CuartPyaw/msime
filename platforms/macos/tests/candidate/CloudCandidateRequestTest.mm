@@ -10,12 +10,20 @@ static BOOL TranslationMode = NO;
 static BOOL TencentMode = NO;
 static NSData *TencentPayload;
 static NSString *TencentAuthorization;
+static BOOL RedirectMode = NO;
+static NSMutableArray<NSString *> *LoadedURLs;
 @interface SyntheticCloudProtocol : NSURLProtocol
 @end
 @implementation SyntheticCloudProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request { (void)request; return YES; }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
 - (void)startLoading {
+    @synchronized(SyntheticCloudProtocol.class) { [LoadedURLs addObject:self.request.URL.absoluteString]; }
+    if (RedirectMode) {
+        NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL statusCode:302 HTTPVersion:@"HTTP/1.1" headerFields:@{@"Location":@"https://untrusted.invalid/"}];
+        [self.client URLProtocol:self wasRedirectedToRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://untrusted.invalid/"]] redirectResponse:response];
+        return;
+    }
     if (TencentMode) {
         assert([self.request.URL.absoluteString isEqual:@"https://tmt.tencentcloudapi.com"]);
         assert([self.request.HTTPMethod isEqual:@"POST"]);
@@ -167,10 +175,58 @@ static void TestTencentTransport() {
     [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
     TencentMode = NO; TencentPayload = nil; TencentAuthorization = nil;
 }
+// A batch runs its requests as tasks in one session that has no delegate; each request's per-task delegate must still enforce its own status, body limit and redirect refusal, and cancelling one must leave the session usable for the next.
+static void TestSharedSessionTransport() {
+    NSDictionary *descriptor = @{@"url":@"https://translation.invalid/api", @"method":@"POST", @"headers":@{@"Content-Type":@"application/json", @"Authorization":@"Bearer synthetic"},
+        @"body":@{@"text":@"hello", @"source_lang":@"EN", @"target_lang":@"ZH"}, @"timeout_ms":@2500, @"max_response_bytes":@1048576};
+    NSURLSessionConfiguration *configuration = NSURLSessionConfiguration.ephemeralSessionConfiguration;
+    configuration.protocolClasses = @[SyntheticCloudProtocol.class];
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration delegate:nil delegateQueue:NSOperationQueue.mainQueue];
+    TranslationMode = YES;
+    LoadedURLs = [NSMutableArray array];
+    for (NSArray<NSNumber *> *reply in @[@[@200, @8], @[@503, @8], @[@200, @1048577], @[@201, @8]]) {
+        ResponseStatus = reply[0].integerValue; ResponseBytes = reply[1].unsignedIntegerValue;
+        __block NSUInteger calls = 0;
+        __block NSData *received = nil;
+        MSIMECloudCandidateRequest *request = [[MSIMECloudCandidateRequest alloc] initWithTranslationDescriptor:descriptor configuration:configuration completion:^(NSData *body) {
+            assert(NSThread.isMainThread); ++calls; received = body;
+        }];
+        [request startInSession:session];
+        assert(![request valueForKey:@"session"]);
+        Wait(^BOOL { return calls > 0; });
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+        assert(calls == 1 && (received != nil) == (ResponseStatus < 300 && ResponseBytes <= 1048576));
+        if (received) assert(received.length == ResponseBytes);
+    }
+    ResponseStatus = 200; ResponseBytes = 8;
+    RedirectMode = YES;
+    __block NSUInteger redirects = 0;
+    MSIMECloudCandidateRequest *redirected = [[MSIMECloudCandidateRequest alloc] initWithTranslationDescriptor:descriptor configuration:configuration completion:^(NSData *body) { assert(!body); ++redirects; }];
+    [redirected startInSession:session];
+    Wait(^BOOL { return redirects > 0; });
+    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    assert(redirects == 1);
+    @synchronized(SyntheticCloudProtocol.class) { assert(![LoadedURLs containsObject:@"https://untrusted.invalid/"]); }
+    RedirectMode = NO;
+    MSIMECloudCandidateRequest *cancelled = [[MSIMECloudCandidateRequest alloc] initWithTranslationDescriptor:descriptor configuration:configuration completion:^(NSData *body) { (void)body; assert(false && "cancelled translation must not complete"); }];
+    [cancelled startInSession:session];
+    [cancelled cancel];
+    __block BOOL after = NO;
+    MSIMECloudCandidateRequest *next = [[MSIMECloudCandidateRequest alloc] initWithTranslationDescriptor:descriptor configuration:configuration completion:^(NSData *body) { assert(body.length == 8); after = YES; }];
+    [next startInSession:session];
+    Wait(^BOOL { return after; });
+    __block BOOL rejected = NO;
+    MSIMECloudCandidateRequest *invalid = [[MSIMECloudCandidateRequest alloc] initWithTranslationDescriptor:@{} configuration:configuration completion:^(NSData *body) { assert(!body); rejected = YES; }];
+    [invalid startInSession:session];
+    assert(rejected);
+    [session invalidateAndCancel];
+    TranslationMode = NO; LoadedURLs = nil;
+}
 int main() {
     @autoreleasepool {
         TestTranslationTransport();
         TestTencentTransport();
+        TestSharedSessionTransport();
         for (NSNumber *bytes in @[@8, @262144, @262145]) {
             for (NSNumber *status in @[@200, @503]) {
                 ResponseBytes = bytes.unsignedIntegerValue;

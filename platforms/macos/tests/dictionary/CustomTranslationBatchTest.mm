@@ -15,6 +15,7 @@
 @end
 @implementation SyntheticTranslationRequest
 - (void)start { assert(!_started); _started = YES; }
+- (void)startInSession:(NSURLSession *)session { assert(session); [self start]; }
 // Keep the reply deliberately, to simulate an already-enqueued late callback.
 - (void)cancel { _cancelled = YES; }
 @end
@@ -57,7 +58,7 @@ static SyntheticTranslationBatch *Batch(NSArray *items, void (^completion)(NSArr
     return [[SyntheticTranslationBatch alloc] initWithItems:items configuration:NSURLSessionConfiguration.ephemeralSessionConfiguration completion:completion];
 }
 static void AssertReleased(MSIMECustomTranslationBatch *batch) {
-    for (NSString *key in @[@"items", @"request", @"timer", @"configuration", @"results", @"completion", @"onReply"])
+    for (NSString *key in @[@"items", @"request", @"session", @"timer", @"configuration", @"results", @"completion", @"onReply"])
         assert(![batch valueForKey:key]);
 }
 static void TestSequentialResults() {

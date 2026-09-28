@@ -8,6 +8,7 @@
     void (^_completion)(NSArray<NSDictionary *> *);
     NSMutableArray<NSDictionary *> *_results;
     MSIMECloudCandidateRequest *_request;
+    NSURLSession *_session;
     NSTimer *_timer;
     NSTimeInterval _deadline;
     NSUInteger _nextIndex;
@@ -129,6 +130,20 @@
     return [[MSIMECloudCandidateRequest alloc] initWithTranslationDescriptor:descriptor
         configuration:_configuration completion:completion];
 }
+// One session per NiuTrans or custom batch, so the second word onwards reuses the first word's connection instead of paying another TCP and TLS handshake out of the six-second budget. It carries the same hardening as a request's own session, and no delegate: each task reports to its own request.
+- (NSURLSession *)transportSession {
+    if (_session || !_configuration) return _session;
+    NSURLSessionConfiguration *configuration = [_configuration copy];
+    configuration.URLCache = nil;
+    configuration.HTTPCookieStorage = nil;
+    configuration.URLCredentialStorage = nil;
+    configuration.HTTPShouldSetCookies = NO;
+    configuration.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    configuration.timeoutIntervalForRequest = 2.5;
+    configuration.timeoutIntervalForResource = 2.5;
+    _session = [NSURLSession sessionWithConfiguration:configuration delegate:nil delegateQueue:NSOperationQueue.mainQueue];
+    return _session;
+}
 - (void)start {
     NSAssert(NSThread.isMainThread, @"Translation batch must run on main thread");
     if (_started || !_completion) return;
@@ -207,7 +222,9 @@
     } else {
         _request = [self requestForDescriptor:item[@"request"] completion:reply];
     }
-    [_request start];
+    // NiuTrans and custom send one request per word within the 2.5-second budget the shared session enforces. Tencent sends one request per language group, and an AI request needs its own 8-second budget, so both keep a session of their own.
+    if (!_tencent && !_ai) [_request startInSession:[self transportSession]];
+    else [_request start];
 }
 - (void)finish {
     void (^completion)(NSArray<NSDictionary *> *) = _completion;
@@ -231,6 +248,8 @@
     _timer = nil;
     [_request cancel];
     _request = nil;
+    [_session invalidateAndCancel];
+    _session = nil;
     _items = nil;
     _configuration = nil;
     _results = nil;
@@ -238,5 +257,6 @@
 - (void)dealloc {
     [_timer invalidate];
     [_request cancel];
+    [_session invalidateAndCancel];
 }
 @end

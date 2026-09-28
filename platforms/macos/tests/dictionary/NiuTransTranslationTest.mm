@@ -8,13 +8,19 @@ static NSData *Response(NSString *text) {
 }
 static NSData *ExpectedPayload;
 static NSUInteger TransportCalls;
+// Requests after this many are held open, so a test can end the batch while one is in flight.
+static NSUInteger AnsweredCalls = NSUIntegerMax;
+static NSUInteger StoppedCalls;
+static NSMutableArray<NSURLSessionTask *> *Tasks;
 @interface NiuTransProtocol : NSURLProtocol
 @end
-@implementation NiuTransProtocol
+@implementation NiuTransProtocol {
+    BOOL _held;
+}
 + (BOOL)canInitWithRequest:(NSURLRequest *)request { (void)request; return YES; }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
 - (void)startLoading {
-    ++TransportCalls;
+    @synchronized(NiuTransProtocol.class) { ++TransportCalls; if (self.task) [Tasks addObject:self.task]; }
     assert([self.request.URL.absoluteString isEqual:@"https://api.niutrans.com/v2/text/translate"]);
     assert([self.request.HTTPMethod isEqual:@"POST"] && !self.request.HTTPShouldHandleCookies);
     assert([[self.request valueForHTTPHeaderField:@"Content-Type"] isEqual:@"application/x-www-form-urlencoded; charset=utf-8"]);
@@ -26,13 +32,17 @@ static NSUInteger TransportCalls;
         while ((count = [stream read:buffer maxLength:sizeof(buffer)]) > 0) [bytes appendBytes:buffer length:(NSUInteger)count];
         [stream close]; assert(count == 0); body = bytes;
     }
-    assert([body isEqual:ExpectedPayload]);
+    // A batch signs each item with its own timestamp, so the batch cases leave the payload unchecked.
+    assert(!ExpectedPayload || [body isEqual:ExpectedPayload]);
+    @synchronized(NiuTransProtocol.class) { _held = TransportCalls > AnsweredCalls; }
+    if (_held) return;
     NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{}];
     [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
     [self.client URLProtocol:self didLoadData:Response(@"synthetic gloss")];
     [self.client URLProtocolDidFinishLoading:self];
 }
-- (void)stopLoading {}
+// Loading also stops after a finished reply; only a held request stopping means it was cancelled.
+- (void)stopLoading { @synchronized(NiuTransProtocol.class) { if (_held) ++StoppedCalls; } }
 @end
 
 @interface NiuTransFakeRequest : MSIMECloudCandidateRequest
@@ -41,6 +51,7 @@ static NSUInteger TransportCalls;
 @end
 @implementation NiuTransFakeRequest
 - (void)start {}
+- (void)startInSession:(NSURLSession *)session { assert(session); }
 - (void)cancel { self.cancelled = YES; }
 @end
 @interface NiuTransFakeBatch : MSIMECustomTranslationBatch
@@ -58,6 +69,65 @@ static NSUInteger TransportCalls;
     [self.requests addObject:request]; [self.descriptors addObject:descriptor]; return request;
 }
 @end
+@interface NiuTransClockBatch : MSIMECustomTranslationBatch
+@property NSTimeInterval now;
+@end
+@implementation NiuTransClockBatch
+- (NSTimeInterval)currentTime { return self.now; }
+@end
+
+static void Spin(BOOL (^done)(void)) {
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    while (!done() && deadline.timeIntervalSinceNow > 0) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+}
+static NSUInteger Calls() { @synchronized(NiuTransProtocol.class) { return TransportCalls; } }
+static NSUInteger Stops() { @synchronized(NiuTransProtocol.class) { return StoppedCalls; } }
+
+// Real transport through the batch: every word's task comes from the one session the batch owns, and that session goes away with the batch whichever way it ends.
+static void TestBatchReusesOneSession(NSDictionary *config, NSURLSessionConfiguration *configuration) {
+    ExpectedPayload = nil;
+    NSArray *items = @[@{@"text":@"一", @"key":@"一", @"source_language":@"zh", @"target_language":@"en"},
+        @{@"text":@"二", @"key":@"二", @"source_language":@"zh", @"target_language":@"en"},
+        @{@"text":@"三", @"key":@"三", @"source_language":@"zh", @"target_language":@"en"}];
+    Tasks = [NSMutableArray array]; TransportCalls = 0; StoppedCalls = 0; AnsweredCalls = NSUIntegerMax;
+    __block NSUInteger calls = 0;
+    NiuTransClockBatch *batch = [[NiuTransClockBatch alloc] initWithNiuTransItems:items config:config configuration:configuration completion:^(NSArray *results) {
+        assert(++calls == 1 && results.count == 3);
+    }];
+    [batch start];
+    NSURLSession *session = [batch valueForKey:@"session"];
+    assert(session && !session.delegate);
+    NSURLSessionConfiguration *effective = session.configuration;
+    assert(!effective.URLCache && !effective.URLCredentialStorage && !effective.HTTPCookieStorage && !effective.HTTPShouldSetCookies);
+    assert(effective.timeoutIntervalForRequest == 2.5 && effective.timeoutIntervalForResource == 2.5);
+    // The session has no delegate, so three glosses arriving means each request's own task delegate received its task's events.
+    Spin(^BOOL { return calls > 0; });
+    assert(calls == 1 && Calls() == 3 && ![batch valueForKey:@"session"]);
+    // Task identifiers are unique only within a session and start again in a fresh one, so three different identifiers mean one session carried all three words.
+    assert([[NSSet setWithArray:[Tasks valueForKey:@"taskIdentifier"]] count] == 3);
+
+    for (NSString *ending in @[@"cancel", @"deadline"]) {
+        Tasks = [NSMutableArray array]; TransportCalls = 0; StoppedCalls = 0; AnsweredCalls = 1;
+        __block NSUInteger finished = 0;
+        BOOL deadline = [ending isEqual:@"deadline"];
+        NiuTransClockBatch *held = [[NiuTransClockBatch alloc] initWithNiuTransItems:items config:config configuration:configuration completion:^(NSArray *results) {
+            assert(deadline && ++finished == 1 && results.count == 1);
+        }];
+        NSMutableArray *answered = [NSMutableArray array];
+        held.onReply = ^(NSArray *results, NSArray *texts) { (void)results; [answered addObjectsFromArray:texts]; };
+        held.now = 10; [held start];
+        Spin(^BOOL { return Calls() == 2; });
+        assert(Calls() == 2 && [answered isEqual:@[@"一"]]);
+        if (deadline) { held.now = 16; [(NSTimer *)[held valueForKey:@"timer"] fire]; }
+        else [held cancel];
+        assert(![held valueForKey:@"session"] && finished == (deadline ? 1u : 0u));
+        // The held task is cancelled with the session, and nothing further is sent or reported.
+        Spin(^BOOL { return Stops() == 1; });
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        assert(Stops() == 1 && Calls() == 2 && finished == (deadline ? 1u : 0u) && [answered isEqual:@[@"一"]]);
+    }
+    Tasks = nil; AnsweredCalls = NSUIntegerMax;
+}
 
 int main() {
     @autoreleasepool {
@@ -129,5 +199,6 @@ int main() {
         [invalid start]; assert(invalidDone && !invalid.requests.count);
         // A request that cannot be built will not improve by asking again, so it counts as answered.
         assert(([unsendable isEqual:@[@"HELLO", @"世界"]]));
+        TestBatchReusesOneSession(config, configuration);
     }
 }

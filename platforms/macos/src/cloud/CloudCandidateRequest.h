@@ -8,6 +8,8 @@
 - (instancetype)initWithURL:(NSURL *)url configuration:(NSURLSessionConfiguration *)configuration
                  completion:(void (^)(NSData *body))completion;
 - (void)start;
+/// Translation descriptors only: runs as one task in a session the caller owns and configured, so consecutive requests can reuse its connection. Cancelling cancels only this task.
+- (void)startInSession:(NSURLSession *)session;
 /// Consume the shared custom-translation descriptor. HTTP(S) only; no redirects.
 - (instancetype)initWithTranslationDescriptor:(NSDictionary *)descriptor configuration:(NSURLSessionConfiguration *)configuration
                                    completion:(void (^)(NSData *body))completion;

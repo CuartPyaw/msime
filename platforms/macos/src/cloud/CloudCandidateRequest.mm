@@ -6,6 +6,7 @@
     NSURL *_url;
     NSURLSessionConfiguration *_configuration;
     NSURLSession *_session;
+    NSURLSessionDataTask *_task;
     NSMutableData *_body;
     void (^_completion)(NSData *);
     BOOL _started;
@@ -157,11 +158,25 @@
     _configuration.timeoutIntervalForResource = _timeout;
     _body = [NSMutableData data];
     _session = [NSURLSession sessionWithConfiguration:_configuration delegate:self delegateQueue:NSOperationQueue.mainQueue];
-    NSURLSessionDataTask *task = _translationRequest ? [_session dataTaskWithRequest:_translationRequest] : [_session dataTaskWithURL:_url];
-    [task resume];
+    _task = _translationRequest ? [_session dataTaskWithRequest:_translationRequest] : [_session dataTaskWithURL:_url];
+    [_task resume];
+}
+- (void)startInSession:(NSURLSession *)session {
+    NSAssert(NSThread.isMainThread, @"Cloud transport must run on main thread");
+    if (_started || !_completion) return;
+    _started = YES;
+    // Only a translation descriptor has passed validation; the owner of a shared session configured it, so this request neither owns nor invalidates it.
+    if (!_translationRequest || !session) { [self finish:nil]; return; }
+    _body = [NSMutableData data];
+    _task = [session dataTaskWithRequest:_translationRequest];
+    // A per-task delegate keeps the status, body-limit and redirect checks on this request even though the session is shared and has no delegate of its own.
+    _task.delegate = self;
+    [_task resume];
 }
 - (void)cancel {
     _completion = nil;
+    [_task cancel];
+    _task = nil;
     [_session invalidateAndCancel];
     _session = nil;
     _body = nil;
