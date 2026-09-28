@@ -9,8 +9,9 @@ use crate::platform::mobile::mobile_account_helpers::{
     account_profile as shared_account_profile, account_rename as shared_account_rename,
     account_request_code as shared_account_request_code, account_status as shared_account_status,
     call, clear_snapshot_previews, clear_snapshot_previews_after, cloud_dictionary_account_request,
-    parse_snapshot_token, snapshot_command_error, snapshot_response_without_account,
-    valid_mobile_haptic_strength, PendingSnapshot, SnapshotMetadata,
+    parse_snapshot_token, replace_pending_snapshot, snapshot_command_error,
+    snapshot_response_without_account, valid_mobile_haptic_strength, validate_pending_snapshot,
+    PendingSnapshot, SnapshotMetadata,
 };
 #[cfg(target_os = "ios")]
 use crate::shared::account_dto::{
@@ -368,22 +369,15 @@ async fn dictionary_snapshot_preview(
     })
     .await
     .map_err(|_| snapshot_command_error())??;
-    let old = {
-        let mut pending = previews.lock().map_err(|_| snapshot_command_error())?;
-        let old = pending
-            .drain()
-            .map(|(_, item)| item.path)
-            .collect::<Vec<_>>();
-        pending.insert(
-            token.clone(),
-            PendingSnapshot {
-                account_id,
-                path,
-                metadata: metadata.clone(),
-            },
-        );
-        old
-    };
+    let old = replace_pending_snapshot(
+        &previews,
+        token.clone(),
+        PendingSnapshot {
+            account_id,
+            path,
+            metadata: metadata.clone(),
+        },
+    )?;
     for path in old {
         let _ = fs::remove_file(path);
     }
@@ -414,20 +408,7 @@ async fn dictionary_snapshot_enqueue(
     let path = pending.path.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let result = (|| {
-            let profile = session.profile().map_err(account_command_error)?;
-            if profile.user.id != pending.account_id {
-                return Err(crate::CommandError {
-                    code: "snapshot_conflict",
-                });
-            }
-            let changes = session
-                .dictionary_changes(pending.metadata.cloud_revision, 1)
-                .map_err(account_command_error)?;
-            if !changes.changes.is_empty() {
-                return Err(crate::CommandError {
-                    code: "snapshot_conflict",
-                });
-            }
+            validate_pending_snapshot(&session, &pending).map_err(account_command_error)?;
             let state = snapshot_bridge(serde_json::json!({ "operation": "state" }))?;
             let expected = state
                 .get("localVersion")

@@ -7,8 +7,9 @@ use crate::platform::mobile::mobile_account_helpers::{
     account_preferences_schema as shared_account_preferences_schema,
     account_profile as shared_account_profile, account_rename as shared_account_rename,
     account_request_code as shared_account_request_code, account_status as shared_account_status,
-    call, clear_snapshot_previews_after, cloud_dictionary_account_request, parse_snapshot_token,
-    snapshot_command_error, snapshot_response_without_account, valid_mobile_haptic_strength,
+    call, clear_snapshot_previews, clear_snapshot_previews_after, cloud_dictionary_account_request,
+    parse_snapshot_token, replace_pending_snapshot, snapshot_command_error,
+    snapshot_response_without_account, valid_mobile_haptic_strength, validate_pending_snapshot,
     PendingSnapshot, SnapshotMetadata,
 };
 use crate::platform::mobile::mobile_account_preferences::{
@@ -680,22 +681,15 @@ async fn dictionary_snapshot_preview(
     .await
     .map_err(|_| snapshot_command_error())?
     .map_err(account_command_error)?;
-    let old = {
-        let mut pending = previews.lock().map_err(|_| snapshot_command_error())?;
-        let old = pending
-            .drain()
-            .map(|(_, item)| item.path)
-            .collect::<Vec<_>>();
-        pending.insert(
-            token.clone(),
-            PendingSnapshot {
-                account_id,
-                path,
-                metadata: metadata.clone(),
-            },
-        );
-        old
-    };
+    let old = replace_pending_snapshot(
+        &previews,
+        token.clone(),
+        PendingSnapshot {
+            account_id,
+            path,
+            metadata: metadata.clone(),
+        },
+    )?;
     for path in old {
         let _ = fs::remove_file(path);
     }
@@ -726,14 +720,7 @@ async fn dictionary_snapshot_enqueue(
     let result = tauri::async_runtime::spawn_blocking(move || {
         let path = pending.path.clone();
         let result = (|| {
-            let profile = session.profile()?;
-            if profile.user.id != pending.account_id {
-                return Err(AccountError::Conflict);
-            }
-            let changes = session.dictionary_changes(pending.metadata.cloud_revision, 1)?;
-            if !changes.changes.is_empty() {
-                return Err(AccountError::Conflict);
-            }
+            validate_pending_snapshot(&session, &pending)?;
             let state = platform
                 .run_mobile_plugin::<Value>("snapshotState", ())
                 .map_err(|_| AccountError::Unavailable)?;
@@ -883,16 +870,7 @@ async fn dictionary_snapshot_cancel(
     .await
     .map_err(|_| snapshot_command_error())?
     .map_err(account_command_error)?;
-    let old = {
-        let mut pending = previews.lock().map_err(|_| snapshot_command_error())?;
-        pending
-            .drain()
-            .map(|(_, item)| item.path)
-            .collect::<Vec<_>>()
-    };
-    for path in old {
-        let _ = fs::remove_file(path);
-    }
+    clear_snapshot_previews(&previews);
     let result = tauri::async_runtime::spawn_blocking(move || {
         platform
             .run_mobile_plugin::<Value>("cancelSnapshot", CancelSnapshotRequest { account_id })
@@ -1430,26 +1408,31 @@ fn integer_setting(
     }
 }
 
+fn supports_schema_field(
+    schema: &AccountPreferenceSchema,
+    key: &str,
+    expected: &str,
+) -> Result<bool, AccountError> {
+    match schema.fields.get(key) {
+        None => Ok(false),
+        Some(field)
+            if field.value_type == expected
+                || ((expected == "number" || expected == "integer")
+                    && matches!(field.value_type.as_str(), "integer" | "number")) =>
+        {
+            Ok(true)
+        }
+        Some(_) => Err(AccountError::Invalid),
+    }
+}
+
 fn apply_frequency_preferences(
     preferences: &mut Preferences,
     values: &BTreeMap<String, AccountPreferenceValue>,
     schema: &AccountPreferenceSchema,
 ) -> Result<(), AccountError> {
-    let supports = |key: &str, expected: &str| -> Result<bool, AccountError> {
-        match schema.fields.get(key) {
-            None => Ok(false),
-            Some(field)
-                if field.value_type == expected
-                    || ((expected == "number" || expected == "integer")
-                        && matches!(field.value_type.as_str(), "integer" | "number")) =>
-            {
-                Ok(true)
-            }
-            Some(_) => Err(AccountError::Invalid),
-        }
-    };
     if let Some(value) = string_setting(values, "input.frequency_mode")? {
-        if supports("input.frequency_mode", "string")? {
+        if supports_schema_field(schema, "input.frequency_mode", "string")? {
             preferences.frequency.mode = match value.as_str() {
                 "disabled" => FrequencyMode::Disabled,
                 "pin" => FrequencyMode::Pin,
@@ -1461,13 +1444,13 @@ fn apply_frequency_preferences(
         }
     }
     if let Some(value) = integer_setting(values, "input.frequency_trigger_count")? {
-        if supports("input.frequency_trigger_count", "integer")? {
+        if supports_schema_field(schema, "input.frequency_trigger_count", "integer")? {
             preferences.frequency.trigger_count =
                 u8::try_from(value).map_err(|_| AccountError::Invalid)?;
         }
     }
     if let Some(value) = integer_setting(values, "input.frequency_linear_step")? {
-        if supports("input.frequency_linear_step", "integer")? {
+        if supports_schema_field(schema, "input.frequency_linear_step", "integer")? {
             preferences.frequency.linear_step =
                 u8::try_from(value).map_err(|_| AccountError::Invalid)?;
         }
@@ -1493,21 +1476,8 @@ fn apply_local_account_preferences(
     }
     let mut preferences = snapshot.preferences.clone();
     let values = &cloud.settings;
-    let supports = |key: &str, expected: &str| -> Result<bool, AccountError> {
-        match schema.fields.get(key) {
-            None => Ok(false),
-            Some(field)
-                if field.value_type == expected
-                    || ((expected == "number" || expected == "integer")
-                        && matches!(field.value_type.as_str(), "integer" | "number")) =>
-            {
-                Ok(true)
-            }
-            Some(_) => Err(AccountError::Invalid),
-        }
-    };
     if let Some(value) = string_setting(values, "input.schema")? {
-        if supports("input.schema", "string")? {
+        if supports_schema_field(schema, "input.schema", "string")? {
             preferences.scheme = match value.as_str() {
                 "quanpin" => InputScheme::Quanpin,
                 "shuangpin" => InputScheme::Shuangpin,
@@ -1518,7 +1488,7 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = string_setting(values, "input.character_set")? {
-        if supports("input.character_set", "string")? {
+        if supports_schema_field(schema, "input.character_set", "string")? {
             preferences.traditional_chinese_output = match value.as_str() {
                 "traditional" => true,
                 "simplified" => false,
@@ -1527,7 +1497,7 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = string_setting(values, "input.shuangpin_schema")? {
-        if supports("input.shuangpin_schema", "string")? {
+        if supports_schema_field(schema, "input.shuangpin_schema", "string")? {
             preferences.shuangpin_profile = match value.as_str() {
                 "xiaohe" => ShuangpinProfile::Xiaohe,
                 "ziranma" => ShuangpinProfile::Ziranma,
@@ -1538,33 +1508,33 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = bool_setting(values, "input.learning")? {
-        if supports("input.learning", "boolean")? {
+        if supports_schema_field(schema, "input.learning", "boolean")? {
             preferences.learning = value;
         }
     }
     apply_frequency_preferences(&mut preferences, values, schema)?;
     if let Some(value) = bool_setting(values, "input.chinese_punctuation")? {
-        if supports("input.chinese_punctuation", "boolean")? {
+        if supports_schema_field(schema, "input.chinese_punctuation", "boolean")? {
             preferences.chinese_punctuation = value;
         }
     }
     if let Some(value) = bool_setting(values, "input.smart_punctuation")? {
-        if supports("input.smart_punctuation", "boolean")? {
+        if supports_schema_field(schema, "input.smart_punctuation", "boolean")? {
             preferences.smart_punctuation = value;
         }
     }
     if let Some(value) = bool_setting(values, "input.paired_punctuation")? {
-        if supports("input.paired_punctuation", "boolean")? {
+        if supports_schema_field(schema, "input.paired_punctuation", "boolean")? {
             preferences.paired_punctuation = value;
         }
     }
     if let Some(value) = bool_setting(values, "input.wubi_code_hint")? {
-        if supports("input.wubi_code_hint", "boolean")? {
+        if supports_schema_field(schema, "input.wubi_code_hint", "boolean")? {
             preferences.wubi_code_hint = Some(value);
         }
     }
     if let Some(value) = string_setting(values, "platform.android.keyboard_layout")? {
-        if supports("platform.android.keyboard_layout", "string")? {
+        if supports_schema_field(schema, "platform.android.keyboard_layout", "string")? {
             preferences.touch_keyboard_layout = match value.as_str() {
                 "twenty_six_key" => TouchKeyboardLayout::TwentySixKey,
                 "nine_key" => TouchKeyboardLayout::NineKey,
@@ -1574,7 +1544,7 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = string_setting(values, "platform.android.keyboard_skin")? {
-        if supports("platform.android.keyboard_skin", "string")? {
+        if supports_schema_field(schema, "platform.android.keyboard_skin", "string")? {
             preferences.touch_keyboard_skin = match value.as_str() {
                 "forest" => TouchKeyboardSkin::Forest,
                 "ocean" => TouchKeyboardSkin::Ocean,
@@ -1590,13 +1560,13 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = string_setting(values, "platform.android.custom_keyboard_skin")? {
-        if supports("platform.android.custom_keyboard_skin", "string")? {
+        if supports_schema_field(schema, "platform.android.custom_keyboard_skin", "string")? {
             preferences.custom_touch_keyboard_skin =
                 serde_json::from_str(&value).map_err(|_| AccountError::Invalid)?;
         }
     }
     if let Some(value) = string_setting(values, "platform.android.theme")? {
-        if supports("platform.android.theme", "string")? {
+        if supports_schema_field(schema, "platform.android.theme", "string")? {
             preferences.theme = match value.as_str() {
                 "dark" => ThemeMode::Dark,
                 "light" => ThemeMode::Light,
@@ -1606,7 +1576,7 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = string_setting(values, "platform.android.candidate_skin")? {
-        if supports("platform.android.candidate_skin", "string")? {
+        if supports_schema_field(schema, "platform.android.candidate_skin", "string")? {
             if value.is_empty() || value.len() > 128 || value.chars().any(char::is_control) {
                 return Err(AccountError::Invalid);
             }
@@ -1614,25 +1584,37 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = integer_setting(values, "platform.android.touch_key_spacing_tenths")? {
-        if supports("platform.android.touch_key_spacing_tenths", "integer")? {
+        if supports_schema_field(
+            schema,
+            "platform.android.touch_key_spacing_tenths",
+            "integer",
+        )? {
             preferences.touch_key_spacing_tenths =
                 u8::try_from(value).map_err(|_| AccountError::Invalid)?;
         }
     }
     if let Some(value) = integer_setting(values, "platform.android.touch_row_spacing_tenths")? {
-        if supports("platform.android.touch_row_spacing_tenths", "integer")? {
+        if supports_schema_field(
+            schema,
+            "platform.android.touch_row_spacing_tenths",
+            "integer",
+        )? {
             preferences.touch_row_spacing_tenths =
                 u8::try_from(value).map_err(|_| AccountError::Invalid)?;
         }
     }
     if let Some(value) = integer_setting(values, "platform.android.keyboard_height_adjustment")? {
-        if supports("platform.android.keyboard_height_adjustment", "integer")? {
+        if supports_schema_field(
+            schema,
+            "platform.android.keyboard_height_adjustment",
+            "integer",
+        )? {
             preferences.touch_keyboard_height_adjustment =
                 i8::try_from(value).map_err(|_| AccountError::Invalid)?;
         }
     }
     if let Some(value) = bool_setting(values, "platform.android.voice_shortcut")? {
-        if supports("platform.android.voice_shortcut", "boolean")? {
+        if supports_schema_field(schema, "platform.android.voice_shortcut", "boolean")? {
             preferences.touch_voice_shortcut = value;
         }
     }
@@ -1655,7 +1637,7 @@ fn apply_local_account_preferences(
         None
     };
     if let Some(value) = bool_setting(values, "platform.android.sound_enabled")? {
-        if supports("platform.android.sound_enabled", "boolean")? {
+        if supports_schema_field(schema, "platform.android.sound_enabled", "boolean")? {
             feedback_values
                 .as_mut()
                 .ok_or(AccountError::Storage)?
@@ -1663,7 +1645,7 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = bool_setting(values, "platform.android.haptics_enabled")? {
-        if supports("platform.android.haptics_enabled", "boolean")? {
+        if supports_schema_field(schema, "platform.android.haptics_enabled", "boolean")? {
             feedback_values
                 .as_mut()
                 .ok_or(AccountError::Storage)?
@@ -1671,7 +1653,7 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = string_setting(values, "platform.android.haptic_strength")? {
-        if supports("platform.android.haptic_strength", "string")? {
+        if supports_schema_field(schema, "platform.android.haptic_strength", "string")? {
             if !valid_mobile_haptic_strength(&value) {
                 return Err(AccountError::Invalid);
             }

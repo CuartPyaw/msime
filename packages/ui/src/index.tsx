@@ -70,6 +70,7 @@ import { DoubaoStreamEndpointSection } from "./settings/doubao-stream-endpoint-s
 import { DoubaoOptionsSection } from "./settings/doubao-options-section";
 import { DoubaoResourceIdSection } from "./settings/doubao-resource-id-section";
 import { VoiceRecordingBehaviorSection } from "./settings/voice-recording-behavior-section";
+import { FeedbackSettingsSection } from "./settings/feedback-settings-section";
 import { HandwritingSettingsSection } from "./settings/handwriting-settings-section";
 import { VoiceModelMirrorSection } from "./settings/voice-model-mirror-section";
 import {
@@ -79,6 +80,13 @@ import {
 import { ProviderPresetSection, type ProviderPreset } from "./settings/provider-preset-section";
 import { CredentialStatusMessage } from "./settings/credential-status-message";
 import { AiCredentialSection } from "./settings/ai-credential-section";
+import { AiPromptSettingsSection } from "./settings/ai-prompt-settings-section";
+import { AiTestToolsSection } from "./settings/ai-test-tools-section";
+import { AiModelCatalogSection } from "./settings/ai-model-catalog-section";
+import {
+  AiBasicSettingsSection,
+  type AiProviderOption,
+} from "./settings/ai-basic-settings-section";
 import { NiuTransSection } from "./settings/niutrans-section";
 import { CustomTranslationSection } from "./settings/custom-translation-section";
 import { CustomTranslationsSection } from "./settings/custom-translations-section";
@@ -104,13 +112,7 @@ import {
   ASR_PROVIDER_DEFAULTS,
   POLISH_PROVIDER_DEFAULTS,
 } from "./voice/voice-providers";
-import {
-  POLISH_PRESET_IDS,
-  POLISH_PRESET_NAMES,
-  isPolishCustomSlot,
-  normalizePolishSlot,
-  polishPresetPrompt,
-} from "./voice/polish-presets";
+import { PolishPromptSection } from "./settings/polish-prompt-section";
 import { SkinToolbarPreview } from "./skin/skin-toolbar-preview";
 import { ScreenKeyboardPreview } from "./keyboard/screen-keyboard-preview";
 import type { TouchKeyboardSkin } from "./keyboard/screen-keyboard-preview";
@@ -455,6 +457,11 @@ export {
   PolishCredentialFieldsSection,
   type PolishCredentialFieldsSectionProps,
 } from "./settings/polish-credential-fields-section";
+export {
+  PolishPromptSection,
+  type PolishCustomPromptValues,
+  type PolishPromptSectionProps,
+} from "./settings/polish-prompt-section";
 export {
   VoiceStreamPreeditSection,
   type VoiceStreamPreeditSectionProps,
@@ -3961,18 +3968,6 @@ export function SettingsPage({
       />
     );
   };
-  // Which prompt slot the 润色方案 select is on, and the text that slot means.
-  // A preset resolves to its shipped prompt; a custom slot to whatever the user
-  // stored in it. Selecting a preset used to change an id with nothing behind
-  // it, leaving the textarea showing something unrelated.
-  const polishSlot = normalizePolishSlot(voiceInput.polish_prompt_id);
-  const polishSlotField = (slot: string): string | undefined =>
-    isPolishCustomSlot(slot) ? `polish_prompt_${normalizePolishSlot(slot)}` : undefined;
-  const polishPromptFor = (slot: string, current: VoiceInputPreferences): string => {
-    const field = polishSlotField(slot);
-    if (!field) return polishPresetPrompt(slot);
-    return ((current as Record<string, unknown>)[field] as string) ?? "";
-  };
   const inputModeHUD = draft?.input_mode_hud ?? true;
   const floatingToolbar = { ...defaultFloatingToolbar, ...draft?.floating_toolbar };
   const themeMode = draft?.theme ?? "system";
@@ -6915,63 +6910,27 @@ export function SettingsPage({
                             onTokenChange={(polish_token) => updateVoice({ polish_token })}
                           />
                         )}
-                        <label className="section-header">
-                          <span className="section-title">润色方案</span>
-                          <select
-                            aria-label="润色方案"
-                            value={polishSlot}
-                            onChange={(event) =>
-                              updateVoice({
-                                polish_prompt_id: event.target.value,
-                                polish_prompt: polishPromptFor(event.target.value, voiceInput),
-                              })
-                            }
-                          >
-                            {POLISH_PRESET_IDS.map((id) => (
-                              <option key={id} value={id}>
-                                {POLISH_PRESET_NAMES[id]}
-                              </option>
-                            ))}
-                            <option value="custom_1">自定义一</option>
-                            <option value="custom_2">自定义二</option>
-                            <option value="custom_3">自定义三</option>
-                          </select>
-                        </label>
-                        <label className="section-header polish-prompt-row">
-                          <span className="section-title">
-                            润色提示词
-                            <small>
-                              {isPolishCustomSlot(polishSlot)
-                                ? "这一段会保存到所选的自定义方案"
-                                : "内置方案的完整提示词，可以就地修改"}
-                            </small>
-                          </span>
-                          <textarea
-                            aria-label="润色提示词"
-                            value={voiceInput.polish_prompt ?? ""}
-                            onChange={(event) =>
-                              updateVoice({
-                                polish_prompt: event.target.value,
-                                ...(polishSlotField(polishSlot)
-                                  ? { [polishSlotField(polishSlot) as string]: event.target.value }
-                                  : {}),
-                              })
-                            }
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          className="secondary"
-                          disabled={
-                            (voiceInput.polish_prompt ?? "") ===
-                            polishPromptFor(polishSlot, voiceInput)
+                        <PolishPromptSection
+                          promptId={voiceInput.polish_prompt_id}
+                          prompt={voiceInput.polish_prompt ?? ""}
+                          customPrompts={{
+                            custom_1: voiceInput.polish_prompt_custom_1,
+                            custom_2: voiceInput.polish_prompt_custom_2,
+                            custom_3: voiceInput.polish_prompt_custom_3,
+                          }}
+                          onSelectPrompt={(polish_prompt_id, polish_prompt) =>
+                            updateVoice({ polish_prompt_id, polish_prompt })
                           }
-                          onClick={() =>
-                            updateVoice({ polish_prompt: polishPromptFor(polishSlot, voiceInput) })
+                          onPromptChange={(polish_prompt, customSlot) =>
+                            updateVoice({
+                              polish_prompt,
+                              ...(customSlot
+                                ? { [`polish_prompt_${customSlot}`]: polish_prompt }
+                                : {}),
+                            })
                           }
-                        >
-                          恢复默认
-                        </button>
+                          onRestore={(polish_prompt) => updateVoice({ polish_prompt })}
+                        />
                         {linuxPlatform &&
                           client.providerCredentials &&
                           (() => {
@@ -7119,70 +7078,30 @@ export function SettingsPage({
                     )}
                   </fieldset>
                   <fieldset disabled={busy} hidden={page !== "ai"} aria-label="AI 辅助">
-                    <div className="section">
-                      <label className="section-header">
-                        <span className="section-title">
-                          启用 AI 辅助
-                          <small>
-                            {iosPlatform
-                              ? "为键盘 AI 联想、回复与润色提供共享配置"
-                              : androidPlatform
-                                ? "为拼音联想和 Android 选中文字润色提供共享配置"
-                                : "为拼音联想提供共享配置"}
-                          </small>
-                        </span>
-                        <input
-                          aria-label="启用 AI 辅助"
-                          className="toggle"
-                          type="checkbox"
-                          checked={ai.enabled}
-                          onChange={(event) => updateAi({ enabled: event.target.checked })}
-                        />
-                      </label>
-                    </div>
-                    <div className="section">
-                      <label className="section-header">
-                        <span className="section-title">服务提供商</span>
-                        <select
-                          aria-label="AI 服务提供商"
-                          value={ai.provider}
-                          onChange={(event) => updateAi(aiProviderUpdate(event.target.value, ai))}
-                        >
-                          {AI_PROVIDER_OPTIONS.map((option) => (
-                            <option key={option.id} value={option.id}>
-                              {option.title}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    {providerPresetControls(
-                      "AI ",
-                      AI_PROVIDER_OPTIONS.find((option) => option.id === ai.provider),
-                      ai.model,
-                      (model) => updateAi({ model }),
-                    )}
-                    <div className="section">
-                      <label className="section-header">
-                        <span className="section-title">模型</span>
-                        <input
-                          aria-label="AI 模型"
-                          value={ai.model}
-                          onChange={(event) => updateAi({ model: event.target.value })}
-                        />
-                      </label>
-                    </div>
-                    <div className="section">
-                      <label className="section-header">
-                        <span className="section-title">接口地址</span>
-                        <input
-                          aria-label="AI 接口地址"
-                          type="url"
-                          value={ai.endpoint}
-                          onChange={(event) => updateAi({ endpoint: event.target.value })}
-                        />
-                      </label>
-                    </div>
+                    <AiBasicSettingsSection
+                      enabled={ai.enabled}
+                      enabledDescription={
+                        iosPlatform
+                          ? "为键盘 AI 联想、回复与润色提供共享配置"
+                          : androidPlatform
+                            ? "为拼音联想和 Android 选中文字润色提供共享配置"
+                            : "为拼音联想提供共享配置"
+                      }
+                      provider={ai.provider}
+                      providerOptions={AI_PROVIDER_OPTIONS as readonly AiProviderOption[]}
+                      model={ai.model}
+                      endpoint={ai.endpoint}
+                      providerPreset={providerPresetControls(
+                        "AI ",
+                        AI_PROVIDER_OPTIONS.find((option) => option.id === ai.provider),
+                        ai.model,
+                        (model) => updateAi({ model }),
+                      )}
+                      onEnabledChange={(enabled) => updateAi({ enabled })}
+                      onProviderChange={(provider) => updateAi(aiProviderUpdate(provider, ai))}
+                      onModelChange={(model) => updateAi({ model })}
+                      onEndpointChange={(endpoint) => updateAi({ endpoint })}
+                    />
                     {linuxPlatform && client.providerCredentials ? (
                       <AiCredentialSection
                         endpoint={ai.endpoint}
@@ -7269,44 +7188,15 @@ export function SettingsPage({
                         !ai.enabled || !aiOrigin || !ai.model.trim() || !aiToken.trim(),
                       )}
                     {client.aiAssistant && (
-                      <div className="section">
-                        <div className="section-header">
-                          <span className="section-title">
-                            服务模型
-                            <small>
-                              从当前服务的模型目录读取；服务不支持时可继续手动填写模型。
-                            </small>
-                          </span>
-                          <button
-                            type="button"
-                            className="secondary"
-                            disabled={aiModelsBusy || !aiOrigin}
-                            onClick={() => void fetchAiModels()}
-                          >
-                            {aiModelsBusy ? "获取中…" : "获取模型列表"}
-                          </button>
-                        </div>
-                        {aiModels && aiModels.length > 0 && (
-                          <label className="section-header">
-                            <span className="section-title">已获取模型</span>
-                            <select
-                              aria-label="已获取的 AI 模型"
-                              value={aiModels.includes(ai.model) ? ai.model : ""}
-                              onChange={(event) => {
-                                if (event.target.value) updateAi({ model: event.target.value });
-                              }}
-                            >
-                              <option value="">选择模型…</option>
-                              {aiModels.map((model) => (
-                                <option key={model} value={model}>
-                                  {model}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        )}
-                        {aiModelsStatus && <p role="status">{aiModelsStatus}</p>}
-                      </div>
+                      <AiModelCatalogSection
+                        busy={aiModelsBusy}
+                        origin={aiOrigin ?? ""}
+                        models={aiModels ?? undefined}
+                        selectedModel={ai.model}
+                        status={aiModelsStatus}
+                        onFetch={() => void fetchAiModels()}
+                        onSelect={(model) => updateAi({ model })}
+                      />
                     )}
                     <div className="section">
                       <label className="section-header">
@@ -7328,98 +7218,31 @@ export function SettingsPage({
                         />
                       </label>
                     </div>
-                    <div className="section">
-                      <label className="section-header">
-                        <span className="section-title">
-                          AI 联想提示词方案
-                          <small>使用选中的独立槽位；槽位留空时使用兼容提示词</small>
-                        </span>
-                        <select
-                          aria-label="AI 联想提示词方案"
-                          value={
-                            ai.prompt_id === "custom" ? "custom_1" : ai.prompt_id || "custom_1"
-                          }
-                          onChange={(event) => updateAi({ prompt_id: event.target.value })}
-                        >
-                          <option value="custom_1">自定义一</option>
-                          <option value="custom_2">自定义二</option>
-                          <option value="custom_3">自定义三</option>
-                        </select>
-                      </label>
-                    </div>
-                    <div className="section">
-                      <label className="section-title">
-                        兼容提示词<small>旧版提示词，所选自定义槽位留空时使用</small>
-                      </label>
-                      <textarea
-                        aria-label="AI 润色提示词"
-                        placeholder="留空时使用内置的联想提示词"
-                        value={ai.prompt ?? defaultAiAssistant.prompt}
-                        onChange={(event) => updateAi({ prompt: event.target.value })}
-                      />
-                    </div>
-                    <div className="section">
-                      <label className="section-title">
-                        自定义提示词一<small>发送给 AI 联想服务的额外提示词</small>
-                      </label>
-                      <textarea
-                        aria-label="自定义提示词一"
-                        value={ai.prompt_custom_1}
-                        onChange={(event) => updateAi({ prompt_custom_1: event.target.value })}
-                      />
-                    </div>
-                    <div className="section">
-                      <label className="section-title">自定义提示词二</label>
-                      <textarea
-                        aria-label="自定义提示词二"
-                        value={ai.prompt_custom_2}
-                        onChange={(event) => updateAi({ prompt_custom_2: event.target.value })}
-                      />
-                    </div>
-                    <div className="section">
-                      <label className="section-title">自定义提示词三</label>
-                      <textarea
-                        aria-label="自定义提示词三"
-                        value={ai.prompt_custom_3}
-                        onChange={(event) => updateAi({ prompt_custom_3: event.target.value })}
-                      />
-                    </div>
+                    <AiPromptSettingsSection
+                      promptId={ai.prompt_id}
+                      prompt={ai.prompt}
+                      promptCustom1={ai.prompt_custom_1 ?? ""}
+                      promptCustom2={ai.prompt_custom_2 ?? ""}
+                      promptCustom3={ai.prompt_custom_3 ?? ""}
+                      fallbackPrompt={defaultAiAssistant.prompt ?? ""}
+                      onPromptIdChange={(prompt_id) => updateAi({ prompt_id })}
+                      onPromptChange={(prompt) => updateAi({ prompt })}
+                      onPromptCustom1Change={(prompt_custom_1) => updateAi({ prompt_custom_1 })}
+                      onPromptCustom2Change={(prompt_custom_2) => updateAi({ prompt_custom_2 })}
+                      onPromptCustom3Change={(prompt_custom_3) => updateAi({ prompt_custom_3 })}
+                    />
                     {client.aiAssistant && (
-                      <div className="section ai-test-tools">
-                        <div className="section-title">
-                          AI 润色测试
-                          <small>仅在点击发送时请求当前配置；测试文字不会写入日志。</small>
-                        </div>
-                        <textarea
-                          aria-label="AI 测试输入"
-                          placeholder="输入一段待润色文字"
-                          value={aiTestInput}
-                          onChange={(event) => setAiTestInput(event.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="secondary"
-                          disabled={aiTestBusy || !aiTestInput.trim()}
-                          onClick={() => void testAi()}
-                        >
-                          {aiTestBusy ? "发送中…" : "发送并润色"}
-                        </button>
-                        {aiTestStatus && <p role="status">{aiTestStatus}</p>}
-                        {aiTestOutput && (
-                          <div className="ai-test-result">
-                            <div>{aiTestOutput}</div>
-                            {client.copyText && (
-                              <button
-                                type="button"
-                                className="secondary"
-                                onClick={() => void client.copyText!(aiTestOutput)}
-                              >
-                                复制结果
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                      <AiTestToolsSection
+                        input={aiTestInput}
+                        busy={aiTestBusy}
+                        status={aiTestStatus}
+                        output={aiTestOutput}
+                        onInputChange={setAiTestInput}
+                        onTest={() => void testAi()}
+                        onCopyOutput={
+                          client.copyText ? () => void client.copyText!(aiTestOutput) : undefined
+                        }
+                      />
                     )}
                     {client.mcpServerStatus && (
                       <McpConnectSection
@@ -7430,131 +7253,45 @@ export function SettingsPage({
                     )}
                   </fieldset>
                   <fieldset disabled={busy} hidden={page !== "feedback"} aria-label="反馈">
-                    <div className={`section ${doc.hero}`}>
-                      <div className={doc.eyebrow}>反馈与交流</div>
-                      <div className={doc.heroTitle}>告诉我们你的想法</div>
-                      <p>遇到问题或有功能建议时，可以通过以下渠道提交和交流。</p>
-                    </div>
-                    <div className="section" aria-label="问题报告">
-                      <div className="section-title">
-                        提交可复现的问题
-                        <small>报告只在你点击按钮时生成，不会读取或上传输入历史。</small>
-                      </div>
-                      <label className="section-header">
-                        <span className="section-title">类型</span>
-                        <select
-                          aria-label="反馈类型"
-                          value={feedbackKind}
-                          onChange={(event) => setFeedbackKind(event.target.value)}
-                        >
-                          <option>功能异常</option>
-                          <option>候选词不对</option>
-                          <option>功能建议</option>
-                          <option>其他</option>
-                        </select>
-                      </label>
-                      <label className="section-title">
-                        描述
-                        <textarea
-                          aria-label="反馈描述"
-                          maxLength={4000}
-                          value={feedbackDetail}
-                          onChange={(event) => setFeedbackDetail(event.target.value)}
-                          placeholder="发生了什么？如果和打字有关，写出输入方案、编码和期望结果。"
-                          rows={6}
-                        />
-                      </label>
-                      <div className={doc.note}>
-                        <strong>会一起附上的信息</strong>
-                        <span className="block break-anywhere text-xs text-secondary">
-                          {supportDiagnostics}
-                        </span>
-                      </div>
-                      <div className={settings.serviceRow}>
-                        {client.copyText && (
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={() =>
-                              void client.copyText!(feedbackReport).then(() => {
-                                setFeedbackReportCopied(true);
-                                window.setTimeout(() => setFeedbackReportCopied(false), 1600);
-                              })
-                            }
-                          >
-                            {feedbackReportCopied ? "已复制报告" : "复制报告"}
-                          </button>
-                        )}
-                        {client.openExternalUrl && (
-                          <button type="button" className="secondary" onClick={submitFeedback}>
-                            在 GitHub 提交
-                          </button>
-                        )}
-                      </div>
-                      <small>
-                        提交会打开 GitHub
-                        并预填报告；网址长度有限，过长描述会被截断，完整内容请先复制。
-                      </small>
-                    </div>
-                    <div className={doc.feedbackList}>
-                      <div className={`section ${doc.feedbackCard}`}>
-                        <div className={doc.feedbackIcon}>GH</div>
-                        <div className={doc.feedbackBody}>
-                          <div className={doc.feedbackTitle}>GitHub Issues</div>
-                          <p>适合提交可复现的问题、功能建议和开发讨论。</p>
-                          <code>{platformIssuesUrl.replace("https://", "")}</code>
-                        </div>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => void openExternalUrl(platformIssuesUrl)}
-                        >
-                          查看 Issues
-                        </button>
-                      </div>
-                      <div className={`section ${doc.feedbackCard}`}>
-                        <div className={doc.feedbackIcon}>QQ</div>
-                        <div className={doc.feedbackBody}>
-                          <div className={doc.feedbackTitle}>QQ 交流群</div>
-                          <p>适合中文用户进行日常交流、测试反馈和使用讨论。</p>
-                          <code>群号：829919142</code>
-                        </div>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => {
-                            if (!client.copyText) return;
-                            void client.copyText("829919142").then(() => {
-                              setFeedbackCopied(true);
-                              window.setTimeout(() => setFeedbackCopied(false), 1600);
-                            });
-                          }}
-                        >
-                          {feedbackCopied ? "已复制" : "复制群号"}
-                        </button>
-                      </div>
-                      <div className={`section ${doc.feedbackCard}`}>
-                        <div className={doc.feedbackIcon}>TG</div>
-                        <div className={doc.feedbackBody}>
-                          <div className={doc.feedbackTitle}>Telegram 群组</div>
-                          <p>面向国际用户和开发者的即时讨论频道。</p>
-                          <code>t.me/msimegroup</code>
-                        </div>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => void openExternalUrl("https://t.me/msimegroup")}
-                        >
-                          打开群组
-                        </button>
-                      </div>
-                    </div>
-                    <div className={`section ${doc.note}`}>
-                      <strong>提交问题时建议附上</strong>
-                      <span>
-                        系统版本、输入方案、复现步骤、相关截图，以及 Debug 输出中的关键日志。
-                      </span>
-                    </div>
+                    <FeedbackSettingsSection
+                      hero={doc.hero}
+                      eyebrow={doc.eyebrow}
+                      heroTitle={doc.heroTitle}
+                      note={doc.note}
+                      feedbackList={doc.feedbackList}
+                      feedbackCard={doc.feedbackCard}
+                      feedbackIcon={doc.feedbackIcon}
+                      feedbackBody={doc.feedbackBody}
+                      feedbackTitle={doc.feedbackTitle}
+                      serviceRow={settings.serviceRow}
+                      kind={feedbackKind}
+                      detail={feedbackDetail}
+                      reportCopied={feedbackReportCopied}
+                      feedbackCopied={feedbackCopied}
+                      supportDiagnostics={supportDiagnostics}
+                      issuesUrl={platformIssuesUrl}
+                      copyText={client.copyText}
+                      openExternalUrl={client.openExternalUrl}
+                      onKindChange={setFeedbackKind}
+                      onDetailChange={setFeedbackDetail}
+                      onCopyReport={() => {
+                        if (!client.copyText) return;
+                        void client.copyText(feedbackReport).then(() => {
+                          setFeedbackReportCopied(true);
+                          window.setTimeout(() => setFeedbackReportCopied(false), 1600);
+                        });
+                      }}
+                      onSubmitFeedback={submitFeedback}
+                      onOpenIssues={() => void openExternalUrl(platformIssuesUrl)}
+                      onCopyGroup={() => {
+                        if (!client.copyText) return;
+                        void client.copyText("829919142").then(() => {
+                          setFeedbackCopied(true);
+                          window.setTimeout(() => setFeedbackCopied(false), 1600);
+                        });
+                      }}
+                      onOpenTelegram={() => void openExternalUrl("https://t.me/msimegroup")}
+                    />
                   </fieldset>
                   {!validCandidateFonts(draft) && (
                     <p role="alert">
