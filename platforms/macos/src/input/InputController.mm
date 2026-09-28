@@ -900,6 +900,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     NSDictionary *_accountGlossRequest;
     NSArray<NSDictionary *> *_accountGlossResults;
     uint64_t _accountGlossEpoch;
+    // The account is asked only once typing has been idle for 500 ms, as Windows' cloud worker waits kIdleDelay after the latest job (cloud_translation.cpp): each keystroke replaces the pending request instead of sending one.
+    NSTimer *_accountGlossTimer;
     // Each word this controller sent to the account for an English gloss, mapped to the preferences directory of the page that sent it: every controller hears every reply, so only the one that asked saves it, and the reply often lands after that page has moved on.
     NSMutableDictionary<NSString *, NSString *> *_accountEnglishQueries;
     NSDictionary *_onDeviceGlossRequest;
@@ -1695,6 +1697,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
 
 - (void)cancelAccountGloss {
     ++_accountGlossEpoch;
+    [_accountGlossTimer invalidate];
+    _accountGlossTimer = nil;
     _accountGlossRequest = nil;
     _accountGlossResults = nil;
     _accountGlossSignature = nil;
@@ -1767,12 +1771,32 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     for (NSString *text in pending) if (![unique containsObject:text]) [unique addObject:text];
     NSString *primary = targets.firstObject ?: @"";
     NSString *secondary = targets.count > 1 ? targets[1] : @"";
-    if ([targets containsObject:@"en"] && _preferencesDirectory.isAbsolutePath) {
-        // Words a newer page displaced never reply, so the map is bounded rather than drained.
-        if (!_accountEnglishQueries || _accountEnglishQueries.count > 64) _accountEnglishQueries = [NSMutableDictionary dictionary];
-        for (NSString *text in unique) _accountEnglishQueries[text] = [_preferencesDirectory copy];
-    }
-    [self fetchAccountGlosses:unique primary:primary secondary:secondary generation:[request[@"generation"] unsignedLongLongValue]];
+    // Cached answers were applied above without waiting; only the network request waits for the idle delay. A newer page cancels this timer through cancelAccountGloss, so the fire-time checks only guard a timer that was already running its block.
+    uint64_t epoch = _accountGlossEpoch;
+    MSIMEClientSession *session = _session;
+    id client = _activeClient;
+    NSDictionary *pendingRequest = _accountGlossRequest;
+    __weak MSIMEInputController *weakSelf = self;
+    _accountGlossTimer = [self customTranslationTimerWithBlock:^(NSTimer *timer) {
+        MSIMEInputController *owner = weakSelf;
+        if (!owner || owner->_accountGlossEpoch != epoch || owner->_accountGlossTimer != timer) return;
+        [timer invalidate]; owner->_accountGlossTimer = nil;
+        if (owner->_session != session || owner->_activeClient != client ||
+            ![[owner currentAccountGlossRequest] isEqual:pendingRequest]) {
+            // Nothing went out, so the same page synced again later must ask rather than match this request and return early.
+            owner->_accountGlossRequest = nil;
+            owner->_accountGlossSignature = nil;
+            return;
+        }
+        // Recorded when the words actually go out, so a request the user typed past never marks its words as this controller's to save.
+        if ([targets containsObject:@"en"] && owner->_preferencesDirectory.isAbsolutePath) {
+            // Words a newer page displaced never reply, so the map is bounded rather than drained.
+            if (!owner->_accountEnglishQueries || owner->_accountEnglishQueries.count > 64)
+                owner->_accountEnglishQueries = [NSMutableDictionary dictionary];
+            for (NSString *text in unique) owner->_accountEnglishQueries[text] = [owner->_preferencesDirectory copy];
+        }
+        [owner fetchAccountGlosses:unique primary:primary secondary:secondary generation:[pendingRequest[@"generation"] unsignedLongLongValue]];
+    }];
 }
 
 - (void)fetchAccountGlosses:(NSArray<NSString *> *)words primary:(NSString *)primary secondary:(NSString *)secondary

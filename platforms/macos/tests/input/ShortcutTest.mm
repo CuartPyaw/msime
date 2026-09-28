@@ -5070,6 +5070,78 @@ static void TestAccountGlossLateReplyAndNegatives() {
     [[MSIMETranslationCache sharedCache] clear];
 }
 
+// The account is asked once typing has been idle for 500 ms, as Windows' cloud worker waits kIdleDelay after the latest job (cloud_translation.cpp): a page the user types past cancels its pending request, so fast typing costs one request rather than one per keystroke, while a cached answer still shows at once.
+static void TestAccountGlossIdleDelay() {
+    [[MSIMETranslationCache sharedCache] clear];
+    NSString *suite = [@"msime.account-gloss-idle." stringByAppendingString:NSUUID.UUID.UUIDString];
+    MSIMEAppearancePreferences *prefs =
+        [[MSIMEAppearancePreferences alloc] initWithDefaults:[[NSUserDefaults alloc] initWithSuiteName:suite]];
+    CustomTranslationController *controller = [CustomTranslationController alloc];
+    controller.useRealDelay = YES;
+    controller.batches = [NSMutableArray array];
+    controller.accountFetches = [NSMutableArray array];
+    AccountGlossSession *session = [AccountGlossSession new];
+    [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
+    [controller setValue:prefs forKey:@"appearance"];
+    [controller setValue:session forKey:@"session"];
+    void (^show)(NSUInteger, NSArray<NSString *> *) = ^(NSUInteger generation, NSArray<NSString *> *texts) {
+        NSMutableArray *candidates = [NSMutableArray array];
+        for (NSString *text in texts) [candidates addObject:@{@"text":text, @"online_gloss":@YES}];
+        session.generation = generation;
+        session.candidates = candidates;
+        [controller synchronizeAccountGloss:[controller currentAccountGlossRequest]];
+    };
+
+    // Scheduling sends nothing, and syncing the same page again keeps the timer rather than restarting it. The upper bound is the contract; the lower bound only says the timer has not fired, for the reason TestCustomTranslationIdleDelay gives.
+    show(1, @[@"测试"]);
+    NSTimer *first = [controller valueForKey:@"accountGlossTimer"];
+    assert(first.valid && first.fireDate.timeIntervalSinceNow > 0 && first.fireDate.timeIntervalSinceNow <= 0.5);
+    [controller synchronizeAccountGloss:[controller currentAccountGlossRequest]];
+    assert(first == [controller valueForKey:@"accountGlossTimer"] && controller.accountFetches.count == 0);
+    // The next page cancels the first page's timer; firing the old one sends nothing.
+    show(2, @[@"你好"]);
+    NSTimer *second = [controller valueForKey:@"accountGlossTimer"];
+    assert(!first.valid && second.valid && second != first);
+    [first fire];
+    assert(controller.accountFetches.count == 0);
+    // Only the page the user stopped on goes out, once.
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    while (!controller.accountFetches.count && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    assert(controller.accountFetches.count == 1 && ([controller.accountFetches[0] isEqual:@[@[@"你好"], @"en", @"", @2]]));
+    assert(!second.valid && ![controller valueForKey:@"accountGlossTimer"]);
+
+    // A page whose words are all cached shows them at once and schedules nothing.
+    [controller accountCandidateTranslationsDidArrive:[NSNotification notificationWithName:@"MSIMEBackendCandidateTranslationsDidArrive"
+        object:nil userInfo:@{@"generation":@2, @"target":@"en", @"translations":@{@"你好":@"hello"}}]];
+    show(3, @[@"你好"]);
+    assert(![controller valueForKey:@"accountGlossTimer"] && controller.accountFetches.count == 1);
+    NSArray *results = [controller valueForKey:@"accountGlossResults"];
+    assert(results.count == 1 && [results[0][@"translation"] isEqual:@"hello"]);
+
+    // A timer whose page lost focus or was cancelled before it fired sends nothing.
+    show(4, @[@"再见"]);
+    NSTimer *unfocused = [controller valueForKey:@"accountGlossTimer"];
+    assert(unfocused.valid);
+    [controller setValue:@YES forKey:@"focusPending"];
+    [unfocused fire];
+    assert(controller.accountFetches.count == 1 && ![controller valueForKey:@"accountGlossTimer"]);
+    [controller setValue:@NO forKey:@"focusPending"];
+    // Once focus returns, the same page is asked again rather than taken as already sent.
+    [controller synchronizeAccountGloss:[controller currentAccountGlossRequest]];
+    NSTimer *refocused = [controller valueForKey:@"accountGlossTimer"];
+    assert(refocused.valid && refocused != unfocused);
+    [refocused fire];
+    assert(controller.accountFetches.count == 2 && ([controller.accountFetches[1] isEqual:@[@[@"再见"], @"en", @"", @4]]));
+    show(5, @[@"再见"]);
+    NSTimer *cancelled = [controller valueForKey:@"accountGlossTimer"];
+    [controller cancelCandidateTranslations];
+    [cancelled fire];
+    assert(!cancelled.valid && controller.accountFetches.count == 2);
+    [[NSUserDefaults new] removePersistentDomainForName:suite];
+    [[MSIMETranslationCache sharedCache] clear];
+}
+
 // The account is asked only after the local dictionaries have answered, and only for words they left empty, as Windows hands only the dictionary misses to RequestMisses (event_listener.cpp ApplyCandidateTranslations). A word the English dictionary answers costs no account quota when English is the only target, but it still goes out while another target lacks a local answer, because one word list serves every target.
 static void TestAccountGlossWaitsForDictionary() {
     [[MSIMETranslationCache sharedCache] clear];
@@ -5961,6 +6033,7 @@ int main(int argc, char **argv) {
             TestAccountGlossRequiresExplicitChoice();
             TestAccountGlossCacheIsSharedAcrossControllers();
             TestAccountGlossLateReplyAndNegatives();
+            TestAccountGlossIdleDelay();
             TestAccountGlossPersistsOnArrival();
             TestAccountGlossWaitsForDictionary();
             TestOfflineTargetGlosses();
@@ -5998,6 +6071,7 @@ int main(int argc, char **argv) {
         TestAccountGlossRequiresExplicitChoice();
         TestAccountGlossCacheIsSharedAcrossControllers();
         TestAccountGlossLateReplyAndNegatives();
+        TestAccountGlossIdleDelay();
         TestAccountGlossWaitsForDictionary();
         TestOfflineTargetGlosses();
         TestOnDeviceGlosses();
