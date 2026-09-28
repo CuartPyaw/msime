@@ -896,6 +896,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     NSArray<NSDictionary *> *_accountGlossResults;
     uint64_t _accountGlossEpoch;
     NSDictionary *_onDeviceGlossRequest;
+    // Each English word this controller sent to the on-device model, mapped to the English gloss request of the page that sent it: that request carries the Engine source and directory persisting needs, and the reply often lands after the page has moved on.
+    NSMutableDictionary<NSString *, NSDictionary *> *_onDeviceEnglishQueries;
     uint64_t _customEpoch;
     MSIMECustomTranslationBatch *_aiBatch;
     NSTimer *_aiTimer;
@@ -1818,22 +1820,35 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     NSDictionary *request = [self currentOnDeviceGlossRequest];
     if (!request) { [self cancelOnDeviceGloss]; return; }
     if ([_onDeviceGlossRequest isEqual:request]) return;
+    // The on-device model spends about half a second on each word, one word at a time, so a word the packaged English dictionary already answers is not worth its place in that line. The dictionary lookup takes milliseconds; wait for it, as the user's own services do, and its completion comes back here.
+    NSDictionary *gloss = [self currentGlossRequest];
+    if (gloss && (![_glossRequest isEqual:gloss] || !_glossResults)) return;
+    NSMutableSet<NSString *> *dictionaryAnswered = [NSMutableSet set];
+    for (NSDictionary *result in gloss ? _glossResults : @[])
+        if ([result[@"text"] isKindOfClass:NSString.class] && [result[@"translation"] isKindOfClass:NSString.class] &&
+            [result[@"translation"] length])
+            [dictionaryAnswered addObject:result[@"text"]];
     _onDeviceGlossRequest = request;
-    // Only what no earlier page already answered. The backend keeps one batch in flight per language and lets a newer page replace a waiting one, so typing does not queue up stale work.
-    NSMutableArray<NSString *> *words = [NSMutableArray array];
-    NSMutableArray<NSString *> *targets = [NSMutableArray array];
+    [self applyCandidateTranslationResults];
+    // Only what no earlier page or dictionary already answered, per target, in page order so the first candidate is translated first. The backend works one word at a time and a newer page takes over after the word in flight, so typing does not queue up stale work.
     for (NSString *target in request[@"target_languages"]) {
+        NSMutableArray<NSString *> *words = [NSMutableArray array];
         for (NSDictionary *candidate in request[@"candidates"]) {
             NSString *text = candidate[@"text"];
+            if ([target isEqualToString:@"en"] && [dictionaryAnswered containsObject:text]) continue;
             if ([[MSIMETranslationCache sharedCache] valueForIdentity:MSIMEOnDeviceGlossIdentity(target, text)]) continue;
             if (![words containsObject:text]) [words addObject:text];
-            if (![targets containsObject:target]) [targets addObject:target];
         }
+        // The backend takes at most 32 words, more than any page shows.
+        if (words.count > 32) [words removeObjectsInRange:NSMakeRange(32, words.count - 32)];
+        if (!words.count) continue;
+        if ([target isEqualToString:@"en"] && gloss) {
+            // Words a newer page displaced from the backend's queue never reply, so the map is bounded rather than drained.
+            if (!_onDeviceEnglishQueries || _onDeviceEnglishQueries.count > 64) _onDeviceEnglishQueries = [NSMutableDictionary dictionary];
+            for (NSString *word in words) _onDeviceEnglishQueries[word] = gloss;
+        }
+        [self fetchOnDeviceGlosses:words targets:@[target]];
     }
-    // The backend takes at most 32 words, more than any page shows.
-    if (words.count > 32) [words removeObjectsInRange:NSMakeRange(32, words.count - 32)];
-    [self applyCandidateTranslationResults];
-    if (words.count) [self fetchOnDeviceGlosses:words targets:targets];
 }
 
 - (void)onDeviceCandidateTranslationsDidArrive:(NSNotification *)notification {
@@ -1845,8 +1860,23 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
         if ([text isKindOfClass:NSString.class] && [value isKindOfClass:NSString.class])
             [[MSIMETranslationCache sharedCache] rememberTranslation:value identity:MSIMEOnDeviceGlossIdentity(target, text)];
     }
+    // Persisted whether or not the page is still on screen, as Windows persists every fetch that completes: a reply for a page the user typed past would otherwise sit in the process cache, never be asked for again, and never reach the glossary.
+    if ([target isEqualToString:@"en"]) [self persistOnDeviceGlosses:values];
     // Every controller hears the reply; only one still composing the page it asked about merges it.
-    if (_onDeviceGlossRequest && [_onDeviceGlossRequest isEqual:[self currentOnDeviceGlossRequest]]) [self applyCandidateTranslationResults];
+    if (!_onDeviceGlossRequest || ![_onDeviceGlossRequest isEqual:[self currentOnDeviceGlossRequest]]) return;
+    [self applyCandidateTranslationResults];
+}
+
+// Windows saves every English gloss it fetches to the user glossary the moment it arrives (cloud_translation.cpp PersistGloss), so the offline lookup answers that word from then on, across restarts. On-device glosses get the same treatment: the model spends about half a second per word, one at a time, and the process cache it otherwise lives in is gone when the input method restarts. Only English, because the learned glossary is the English one, and only words this controller asked about, since every controller hears every reply; each is written with the gloss request of the page that asked, which carries the source the plan needs.
+- (void)persistOnDeviceGlosses:(NSDictionary *)values {
+    for (NSString *text in values) {
+        NSDictionary *query = [text isKindOfClass:NSString.class] ? _onDeviceEnglishQueries[text] : nil;
+        if (!query) continue;
+        [_onDeviceEnglishQueries removeObjectForKey:text];
+        NSString *value = values[text];
+        if ([value isKindOfClass:NSString.class] && value.length)
+            [self persistFetchedTranslations:@[@{@"text":text, @"translation":value}] forQuery:query];
+    }
 }
 - (MSIMECustomTranslationBatch *)customBatchForItems:(NSArray<NSDictionary *> *)items completion:(void (^)(NSArray<NSDictionary *> *))completion {
     return [[MSIMECustomTranslationBatch alloc] initWithItems:items configuration:NSURLSessionConfiguration.ephemeralSessionConfiguration completion:completion];
@@ -2154,6 +2184,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
                 ![[current currentGlossRequest] isEqual:request] || (result && ![result[@"generation"] isEqual:request[@"generation"]])) return;
             current->_glossResults = [translations copy];
             [current applyCandidateTranslationResults];
+            // On-device translation waits for the dictionary so it can skip what the dictionary answered.
+            [current synchronizeOnDeviceGloss];
         });
     }];
 }
