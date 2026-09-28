@@ -133,7 +133,9 @@ mod tests {
     fn an_empty_answer_is_not_a_failed_reply() {
         assert!(!failed(br#"{"tgtText":""}"#));
         assert!(!failed(br#"{"tgtText":"hello"}"#));
-        assert!(failed(br#"{"errorCode":"13001","errorMsg":"rate limited"}"#));
+        assert!(failed(
+            br#"{"errorCode":"13001","errorMsg":"rate limited"}"#
+        ));
         assert!(failed(br#"{"errorMsg":"bad apikey"}"#));
         assert!(failed(b"not json"));
         assert!(failed(br#"[1]"#));

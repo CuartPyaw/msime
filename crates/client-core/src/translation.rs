@@ -454,7 +454,9 @@ Signature=fdaffffbe1460ecd8cbc30e296ff6f49cc3b4af10b11e099462cca023fdb2c6c"
     fn an_empty_answer_is_not_a_failed_reply() {
         assert!(!translation_response_failed(r#"{"code":200,"data":""}"#));
         assert!(!translation_response_failed(r#"{"data":"hello"}"#));
-        assert!(translation_response_failed(r#"{"code":429,"message":"rate limited"}"#));
+        assert!(translation_response_failed(
+            r#"{"code":429,"message":"rate limited"}"#
+        ));
         assert!(translation_response_failed(r#"{"code":"500"}"#));
         assert!(translation_response_failed("<html>Bad Gateway</html>"));
         assert!(translation_response_failed(r#"["data"]"#));
