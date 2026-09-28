@@ -890,6 +890,10 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     NSDictionary<NSString *, NSDictionary<NSString *, NSString *> *> *_targetGlossResults;
     MSIMECustomTranslationBatch *_customBatch;
     NSMutableArray<MSIMECustomTranslationBatch *> *_customBatches;
+    // Batches whose page went away while a paid request was in flight. They are held here until that request lands, so its answer still reaches the cache and the glossary (Windows' cloud worker caches before its staleness check, cloud_translation.cpp); a batch deallocated early would cancel it.
+    NSMutableSet<MSIMECustomTranslationBatch *> *_detachedCustomBatches;
+    // Bumped only when custom work is cancelled outright (the provider or its switch changed, or the controller went away); a reply from before that must not reach the cache, since the cache identity carries no credentials.
+    uint64_t _customHardEpoch;
     NSTimer *_customTimer;
     NSDictionary *_customQuery;
     NSDictionary *_customTranslationConfig;
@@ -1216,11 +1220,35 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
 
 - (void)cancelCustomTranslations {
     ++_customEpoch;
+    ++_customHardEpoch;
     [_customTimer invalidate];
     _customTimer = nil;
     [_customBatch cancel];
     for (MSIMECustomTranslationBatch *batch in [_customBatches copy])
         if (batch != _customBatch) [batch cancel];
+    [_customBatches removeAllObjects];
+    for (MSIMECustomTranslationBatch *batch in [_detachedCustomBatches copy]) [batch cancel];
+    [_detachedCustomBatches removeAllObjects];
+    _customBatch = nil;
+    _customQuery = nil;
+    _customResults = nil;
+}
+// The page moved on: nothing more is sent for it, but a request already paid for is left to land in the cache instead of being thrown away.
+- (void)detachCustomTranslations {
+    ++_customEpoch;
+    [_customTimer invalidate];
+    _customTimer = nil;
+    if (!_detachedCustomBatches) _detachedCustomBatches = [NSMutableSet set];
+    __weak MSIMEInputController *weakSelf = self;
+    for (MSIMECustomTranslationBatch *batch in [_customBatches copy]) {
+        __weak MSIMECustomTranslationBatch *weakBatch = batch;
+        BOOL running = [batch detachWithCompletion:^{
+            MSIMEInputController *owner = weakSelf;
+            MSIMECustomTranslationBatch *ended = weakBatch;
+            if (owner && ended) [owner->_detachedCustomBatches removeObject:ended];
+        }];
+        if (running) [_detachedCustomBatches addObject:batch];
+    }
     [_customBatches removeAllObjects];
     _customBatch = nil;
     _customQuery = nil;
@@ -1979,13 +2007,13 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
 - (void)synchronizeCustomTranslations {
     NSDictionary *query = [self currentCustomTranslationRequest];
     if (!query) {
-        [self cancelCustomTranslations];
+        [self detachCustomTranslations];
         [self synchronizeAccountGloss:[self currentAccountGlossRequest]];
         return;
     }
     [self cancelAccountGloss];
     if ([_customQuery isEqual:query]) return;
-    [self cancelCustomTranslations];
+    [self detachCustomTranslations];
     _customQuery = query;
     NSArray<NSString *> *targets = MSIMETranslationTargets(query);
     NSMutableArray<NSDictionary *> *chunks = [NSMutableArray array];
@@ -2073,6 +2101,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     if (!chunks.count) return;
     if (![[self currentCustomTranslationRequest] isEqual:query]) return;
     uint64_t epoch = _customEpoch;
+    uint64_t hardEpoch = _customHardEpoch;
     MSIMEClientSession *session = _session;
     id client = _activeClient;
     __weak MSIMEInputController *weakSelf = self;
@@ -2087,25 +2116,35 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
             NSString *target = chunk[@"target"];
             NSArray *items = chunk[@"items"];
             NSDictionary *identities = chunk[@"identities"];
+            // Each response is cached and saved as it lands, whether or not its page is still on screen, as Windows caches and runs PersistGloss before its staleness check (cloud_translation.cpp). Only the items a response answered are cached: one the deadline kept from being sent is left free to be asked again, where caching the whole chunk used to hide it for eight minutes.
+            void (^onReply)(NSArray<NSDictionary *> *, NSArray<NSString *> *) = ^(NSArray<NSDictionary *> *results, NSArray<NSString *> *answeredTexts) {
+                MSIMEInputController *latest = weakSelf;
+                if (!latest || latest->_customHardEpoch != hardEpoch) return;
+                for (NSString *text in answeredTexts) {
+                    NSString *translation = nil;
+                    for (NSDictionary *result in results)
+                        if ([result[@"text"] isEqual:text]) { translation = result[@"translation"]; break; }
+                    NSArray *identity = identities[MSIMETranslationWorkKey(target, text)];
+                    if (identity) [cache rememberTranslation:translation identity:identity];
+                }
+                // Windows saves every successful English fetch to the user gloss store (cloud_translation.cpp PersistGloss), not just the committed candidate.
+                if ([target isEqual:@"en"]) [latest persistFetchedTranslations:results forQuery:query];
+            };
             void (^completion)(NSArray<NSDictionary *> *) = ^(NSArray<NSDictionary *> *results) {
                 MSIMEInputController *latest = weakSelf;
                 if (!latest || latest->_customEpoch != epoch || latest->_session != session || latest->_activeClient != client ||
                     ![[latest currentCustomTranslationRequest] isEqual:query]) return;
                 for (NSDictionary *item in items) {
                     NSString *text = item[@"text"];
-                    NSString *workKey = MSIMETranslationWorkKey(target, text);
                     NSString *translation = nil;
                     for (NSDictionary *result in results)
                         if ([result[@"text"] isEqual:text]) { translation = result[@"translation"]; break; }
-                    [cache rememberTranslation:translation identity:identities[workKey]];
                     if (translation.length) {
                         NSMutableDictionary *byTarget = values[text];
                         if (!byTarget) { byTarget = [NSMutableDictionary dictionary]; values[text] = byTarget; }
                         byTarget[target] = translation;
                     }
                 }
-                // Windows saves every successful English fetch to the user gloss store (cloud_translation.cpp PersistGloss), not just the committed candidate.
-                if ([target isEqual:@"en"]) [latest persistFetchedTranslations:results forQuery:query];
                 latest->_customResults = [combinedResults() copy];
                 [latest applyCandidateTranslationResults];
                 latest->_customBatch = nil;
@@ -2113,6 +2152,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
             MSIMECustomTranslationBatch *batch = niuTrans ? [owner niuTransBatchForItems:items config:query[@"niutrans"] completion:completion]
                 : tencent ? [owner tencentBatchForItems:items config:query[@"tencent_tmt"] completion:completion]
                 : [owner customBatchForItems:items completion:completion];
+            batch.onReply = onReply;
             owner->_customBatch = batch;
             [owner->_customBatches addObject:batch];
             [batch start];

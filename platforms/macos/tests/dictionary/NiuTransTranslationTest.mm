@@ -106,6 +106,8 @@ int main() {
         NiuTransFakeBatch *batch = [[NiuTransFakeBatch alloc] initWithNiuTransItems:items config:config configuration:configuration completion:^(NSArray *results) {
             assert(++calls == 1 && results.count == 1 && [results[0][@"text"] isEqual:@"HELLO"]);
         }];
+        NSMutableArray *answered = [NSMutableArray array];
+        batch.onReply = ^(NSArray *results, NSArray *texts) { (void)results; [answered addObjectsFromArray:texts]; };
         config[@"app_id"] = @"mutated"; config[@"apikey"] = @"mutated";
         batch.wall = 1704067200; batch.now = 10; [batch start];
         assert(batch.requests.count == 1 && [batch.descriptors[0][@"body_utf8"] isEqual:descriptor[@"body_utf8"]]);
@@ -115,12 +117,17 @@ int main() {
         batch.now = 16; [(NSTimer *)[batch valueForKey:@"timer"] fire];
         assert(calls == 1 && batch.requests[1].cancelled && ![batch valueForKey:@"items"]);
         batch.requests[1].reply(Response(@"late")); assert(calls == 1);
+        assert([answered isEqual:@[@"HELLO"]]); // The item the deadline cut off stays unanswered.
         NiuTransFakeBatch *cancelled = [[NiuTransFakeBatch alloc] initWithNiuTransItems:items config:config configuration:configuration completion:^(NSArray *results) { (void)results; assert(false); }];
         cancelled.wall = 1704067200; [cancelled start]; [cancelled cancel];
         assert(cancelled.requests[0].cancelled && ![cancelled valueForKey:@"items"]);
         cancelled.requests[0].reply(Response(@"late"));
         __block BOOL invalidDone = NO;
         NiuTransFakeBatch *invalid = [[NiuTransFakeBatch alloc] initWithNiuTransItems:items config:@{@"enabled":@YES, @"app_id":@"", @"apikey":@""} configuration:configuration completion:^(NSArray *results) { assert(!results.count); invalidDone = YES; }];
+        NSMutableArray *unsendable = [NSMutableArray array];
+        invalid.onReply = ^(NSArray *results, NSArray *texts) { assert(!results.count); [unsendable addObjectsFromArray:texts]; };
         [invalid start]; assert(invalidDone && !invalid.requests.count);
+        // A request that cannot be built will not improve by asking again, so it counts as answered.
+        assert(([unsendable isEqual:@[@"HELLO", @"世界"]]));
     }
 }

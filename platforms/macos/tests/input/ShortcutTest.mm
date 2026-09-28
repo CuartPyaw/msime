@@ -4429,16 +4429,38 @@ static void TestCloudCandidateConsent() {
 }
 @end
 @interface ControlledTranslationBatch : MSIMECustomTranslationBatch
+// Stores the completion; reading it back returns a block that replays one response the way the real batch does: onReply for every item, then the completion, or the detach block once detached.
 @property(nonatomic, copy) void (^reply)(NSArray *);
 @property(nonatomic, copy) NSArray *items;
 @property(nonatomic, copy) NSDictionary *tencentConfig;
 @property(nonatomic, copy) NSDictionary *niuTransConfig;
 @property(nonatomic) BOOL started;
 @property(nonatomic) BOOL cancelled;
+@property(nonatomic) BOOL detached;
+@property(nonatomic) BOOL finished;
+@property(nonatomic, copy) void (^detachedCompletion)(void);
 @end
 @implementation ControlledTranslationBatch
 - (void)start { assert(!self.started); self.started = YES; }
+// Keeps onReply deliberately, to simulate a reply already enqueued when the controller cancelled.
 - (void)cancel { self.cancelled = YES; }
+- (BOOL)detachWithCompletion:(void (^)(void))completion {
+    if (!self.started || self.cancelled || self.finished) { self.cancelled = YES; return NO; }
+    self.detached = YES;
+    self.detachedCompletion = completion;
+    return YES;
+}
+- (void (^)(NSArray *))reply {
+    void (^completion)(NSArray *) = _reply;
+    __weak ControlledTranslationBatch *weakSelf = self;
+    return ^(NSArray *results) {
+        ControlledTranslationBatch *batch = weakSelf;
+        batch.finished = YES;
+        if (batch.onReply) batch.onReply(results, [batch.items valueForKey:@"text"] ?: @[]);
+        if (!batch.detached) { if (completion) completion(results); }
+        else if (batch.detachedCompletion) batch.detachedCompletion();
+    };
+}
 @end
 @interface AIShortcutSession : ShortcutSession
 @property(nonatomic, copy) NSDictionary *query;
@@ -4744,18 +4766,26 @@ static void TestLearnedGlossRuntime() {
     [reader cancelCandidateTranslations]; [reader setValue:root forKey:@"preferencesDirectory"];
     session.targetLanguage = @"fr"; session.targetLanguages = @[@"fr"];
     assert(![reader currentGlossRequest]);
-    // A stale online completion must not persist text, even if it is otherwise valid.
+    // A reply that lands after its page has moved on is still saved, as Windows persists every fetch that completes, but it does not touch the page now on screen. A reply from work cancelled outright is not saved.
     session.targetLanguage = @"en"; session.targetLanguages = @[@"en"]; session.tencent = TencentConfig();
-    session.page = @[@{@"text":@"stale", @"source":@4}];
+    session.page = @[@{@"text":@"late", @"source":@4}];
+    [writer synchronizeCandidateGloss]; WaitForGloss(writer); [writer synchronizeCustomTranslations];
+    ControlledTranslationBatch *late = writer.batches.lastObject;
+    session.generation++; session.page = @[@{@"text":@"stale", @"source":@4}];
     [writer synchronizeCandidateGloss]; WaitForGloss(writer); [writer synchronizeCustomTranslations];
     ControlledTranslationBatch *pending = writer.batches.lastObject;
-    session.generation++;
+    assert(pending != late && late.detached && !late.cancelled);
+    NSArray *visible = session.delivered;
+    late.reply(@[@{@"text":@"late", @"translation":@"迟到释义"}]);
+    assert([session.delivered isEqual:visible]);
+    [writer cancelCandidateTranslations];
+    assert(pending.cancelled);
     pending.reply(@[@{@"text":@"stale", @"translation":@"不应保存"}]);
     dispatch_sync([MSIMEInputController learnedTranslationQueue], ^{});
-    [writer cancelCandidateTranslations];
     session.tencent = nil; session.delivered = @[];
+    session.page = @[@{@"text":@"late", @"source":@4}, @{@"text":@"stale", @"source":@4}];
     [reader synchronizeCandidateGloss]; WaitForGloss(reader);
-    assert(session.delivered.count == 0);
+    assert(([session.delivered isEqual:@[@{@"text":@"late", @"translation":@"迟到释义"}]]));
     [reader cancelCandidateTranslations];
     // With French primary and English secondary, only the English row reaches the glossary.
     [[MSIMETranslationCache sharedCache] clear];
@@ -4896,6 +4926,10 @@ static void TestTencentCandidateScheduling() {
     assert(fallback.tencentConfig && fallback.items.count == 1 && [fallback.items[0][@"text"] isEqual:@"测试"]);
     fallback.reply(@[@{@"text":@"测试", @"translation":@"test"}]);
     assert(([session.delivered isEqual:@[@{@"text":@"Hello", @"translation":@"本地释义"}, @{@"text":@"测试", @"translation":@"test"}]]));
+    NSArray *(^identity)(NSDictionary *) = ^NSArray *(NSDictionary *item) {
+        return @[@"tencent", session.targetLanguage, item[@"source_language"], item[@"target_language"], item[@"key"]];
+    };
+    assert([[[MSIMETranslationCache sharedCache] valueForIdentity:identity(fallback.items[0])] isEqual:@"test"]);
     [controller cancelCandidateTranslations]; [[MSIMETranslationCache sharedCache] clear];
     session.offline = NO;
     [controller synchronizeCandidateGloss];
@@ -4906,6 +4940,8 @@ static void TestTencentCandidateScheduling() {
     [controller applySharedToolbarPreferences:@{@"tencent_tmt":disabled}];
     assert(pending.cancelled && ![controller currentCustomTranslationRequest] && session.delivered.count == 0);
     pending.reply(online); assert(session.delivered.count == 0);
+    // The provider changed while the request was in flight, and the cache identity carries no credentials: the late reply must leave neither a gloss nor a negative entry behind.
+    for (NSDictionary *item in pending.items) assert(![[MSIMETranslationCache sharedCache] valueForIdentity:identity(item)]);
     session.tencent = disabled; assert(![controller currentCustomTranslationRequest]);
     session.tencent = TencentConfig();
     [controller applySharedToolbarPreferences:@{@"tencent_tmt":session.tencent}];
@@ -5592,6 +5628,8 @@ static void TestCustomTranslationController() {
     // Candidate identity, generation, client, session, focus and mode guards all
     // reject a callback even before the next synchronization cancels transport.
     for (NSString *change in @[@"generation", @"page", @"client", @"session", @"focus", @"japanese", @"disabled"]) {
+        // The rejected reply still reaches the cache, so clear it to make the next round ask again.
+        [[MSIMETranslationCache sharedCache] clear];
         [controller cancelCandidateTranslations];
         [controller synchronizeCustomTranslations];
         ControlledTranslationBatch *batch = controller.batches.lastObject;
@@ -5728,6 +5766,30 @@ static void TestCustomTranslationCacheDelivery() {
     controller.batches[2].reply(@[@{@"text":@"missing", @"translation":@"找到"}]);
     session.targetLanguage = @"de"; session.generation++;
     [controller synchronizeCustomTranslations]; assert(controller.batches.count == 4);
+    // Typing past a page leaves its request in flight rather than cancelling it: the answer lands in the cache, not on the page now showing, and the page it was for shows it straight from the cache when it comes back.
+    ControlledTranslationBatch *left = controller.batches[3];
+    session.generation++; session.page = @[@{@"text":@"other", @"source":@4}];
+    [controller synchronizeCustomTranslations]; assert(controller.batches.count == 5);
+    assert(left.detached && !left.cancelled && [[controller valueForKey:@"detachedCustomBatches"] containsObject:left]);
+    NSArray *visible = session.delivered;
+    left.reply(@[@{@"text":@"HELLO", @"translation":@"Hallo"}, @{@"text":@"missing", @"translation":@"gefunden"}]);
+    assert([session.delivered isEqual:visible] && ![[controller valueForKey:@"detachedCustomBatches"] count]);
+    session.generation++; session.page = @[@{@"text":@"HELLO", @"source":@4}, @{@"text":@"missing", @"source":@4}];
+    [controller synchronizeCustomTranslations];
+    assert(controller.batches.count == 5 && controller.batches[4].detached);
+    assert(([session.delivered isEqual:@[@{@"text":@"HELLO", @"translation":@"Hallo"}, @{@"text":@"missing", @"translation":@"gefunden"}]]));
+    // Cancelling outright reaches detached work as well, and its late reply is not cached.
+    session.generation++; session.page = @[@{@"text":@"third", @"source":@4}];
+    [controller synchronizeCustomTranslations]; assert(controller.batches.count == 6);
+    ControlledTranslationBatch *third = controller.batches[5];
+    session.generation++; session.page = @[@{@"text":@"fourth", @"source":@4}];
+    [controller synchronizeCustomTranslations];
+    assert(third.detached && !third.cancelled);
+    [controller cancelCandidateTranslations];
+    assert(third.cancelled && controller.batches[4].cancelled && ![[controller valueForKey:@"detachedCustomBatches"] count]);
+    third.reply(@[@{@"text":@"third", @"translation":@"dritte"}]);
+    session.generation++; session.page = @[@{@"text":@"third", @"source":@4}];
+    [controller synchronizeCustomTranslations]; assert(controller.batches.count == 8);
     [controller cancelCandidateTranslations];
     [[MSIMETranslationCache sharedCache] clear];
 }
