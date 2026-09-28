@@ -46,7 +46,10 @@ pub unsafe extern "C" fn msime_client_custom_translation_plan(
         let mut results = Vec::new();
         for candidate in request.candidates {
             // Engine CandidateSource::Emoji / Kaomoji, and unknown sources.
-            if matches!(candidate.source, 6 | 7 | 10..=255) || candidate.text.chars().count() > 40 {
+            if msime_client_core::translation::is_emoji_or_kaomoji_source(candidate.source)
+                || matches!(candidate.source, 10..=255)
+                || candidate.text.chars().count() > 40
+            {
                 continue;
             }
             let (source, target, key) =

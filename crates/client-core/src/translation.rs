@@ -171,6 +171,11 @@ pub fn niutrans_auth_string(
     hex::encode(digest)
 }
 
+/// Mirrors the reference `BuildTranslationQuery`: Engine `CandidateSource::Emoji` (6) and `CandidateSource::Kaomoji` (7) are never translated, whatever their text. A kaomoji such as "(*Φ皿Φ*)" contains Han characters and would otherwise pass the Chinese text test, sending a picture to a gloss model that can only put noise under it.
+pub fn is_emoji_or_kaomoji_source(source: u8) -> bool {
+    matches!(source, 6 | 7)
+}
+
 pub fn is_cloud_translatable_english(text: &str) -> bool {
     let mut has_letter = false;
     for ch in text.chars() {

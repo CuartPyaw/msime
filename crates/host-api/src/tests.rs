@@ -5225,13 +5225,26 @@ fn translation_queries_only_clear_chinese_candidates_for_the_network() {
     // account's bounded quota to put noise under candidates that should carry no gloss. The flag gates the
     // gloss endpoint only: a user's own translator detects the direction per candidate and still sees
     // English ones, and the offline dictionary sees everything because it never leaves the machine.
+    // A kaomoji is refused by its source rather than its text: "(*Φ皿Φ*)" carries a Han character and passes
+    // the Chinese text test, yet asking about it only queues a picture behind real words and spends quota.
     for (input, text, online) in [
         (&b"U4e2d"[..], "\u{4e2d}", true),
         (&b"U0041"[..], "A", false),
         (&b"U0031"[..], "1", false),
         (&b"U1f600"[..], "\u{1f600}", false),
+        (&b"Mhx"[..], "(*\u{3a6}\u{76bf}\u{3a6}*)", false),
     ] {
         let dir = tempfile::tempdir().unwrap();
+        // Kaomoji mode stays disabled until the catalog it reads from exists.
+        let resources = dir.path().join("resources");
+        std::fs::create_dir_all(&resources).unwrap();
+        rusqlite::Connection::open(resources.join("others.db"))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE kaomoji(pinyin TEXT,jianpin TEXT,kaomoji TEXT,sort_order INTEGER);
+                 INSERT INTO kaomoji VALUES('haixiu','hx','(*\u{3a6}\u{76bf}\u{3a6}*)',10);",
+            )
+            .unwrap();
         let preferences = Preferences {
             candidate_translations: true,
             ..Preferences::default()
