@@ -118,7 +118,7 @@
 
 **已知分歧共三处，都是刻意的，都有理由：**
 
-1. **悬浮工具栏齿轮**可关闭（参考不可关）。目标的工具栏组件更多，把「设置」一并交给用户是一致的；关掉也不困人，输入菜单里仍有「水杉输入法设置…」。手写与语音按钮现在默认关（连同 Emoji 与屏幕键盘，见 `docs/windows-parity.md` 的《工具栏可选按钮改为默认关》），所以整条工具栏可以只剩下拖动柄——齿轮关掉之后能回到设置的路径只有输入菜单那一条。
+1. **悬浮工具栏齿轮**可关闭（参考不可关）。目标的工具栏组件更多，把「设置」一并交给用户是一致的；关掉也不困人，输入菜单里仍有「水杉输入法设置…」。手写与语音按钮现在默认关（连同 Emoji 与屏幕键盘，见 `docs/windows-parity.md` 的《工具栏可选按钮改为默认关》），所以整条工具栏可以只剩下兼作拖动柄的 logo——齿轮关掉之后能回到设置的路径只有输入菜单那一条。
 2. **标点模型**：参考是两个互斥的钉住标志加一个跟随态，目标是一个状态加独立的智能标点开关。目标这侧更能表达。
 3. **翻译 provider 模型**：参考是单选，目标是三家各自独立配置。目标是超集。
 
@@ -155,7 +155,7 @@
 | 学习数据清除 | `ResetMetasequoiaLearnedData` 及其标记/恢复协议 | `crates/host-api/src/dictionary.rs` 的 `Operation::Reset`，经 `DictionaryAccess::try_maintenance` 加锁后交 `msime_engine_bridge::reset_learned_data` | 有调用链；按「输入算法与词库归 Engine」下沉，宿主不再自建标记恢复协议 |
 | 软件更新 | `UpdateController.mm`（Sparkle 2.9.6） | 共享 About 页检查本仓库发行版；`core/UpdateController.mm` 仅在应用 bundle 配置 `SUFeedURL` 时启动 Sparkle，无 feed 的原生降级会说明限制并经用户确认打开固定的官方发布页；非应用进程不显示更新 UI | 有强制检查（`update-controller` 覆盖三种路由、确认、取消与打开失败） |
 | 卸载 | `Uninstaller.mm` | `crates/host-macos/native/uninstaller.mm`，`shared-uninstaller` CTest | 有强制检查 |
-| 输入菜单图标、本地化、TCC 权限 | `MetasequoiaIMEMenuIcon.tiff`、`render_menu_icon.swift`、`Info.plist` 用途字符串 | `platforms/macos/resources/MSIMEClientInputMethodMenuIcon.{svg,tiff}`、`platforms/macos/scripts/render_menu_icon.swift`（#3021）；语音识别用途字符串及其本地化（#3015、#3052）；输入源名称的本地化键与 bundle id 配对 | 有强制检查（`info-plist-icons`、`info-plist-usage`、`info-plist-names`、`bundle-contents`） |
+| 输入菜单图标、本地化、TCC 权限 | `MetasequoiaIMEMenuIcon.tiff`、`render_menu_icon.swift`、`Info.plist` 用途字符串 | `platforms/macos/resources/MSIMEClientInputMethodMenuIcon.{svg,tiff}` 与三个模式带角标的 `MSIMEClientInputMethodMenuIcon{Chinese,Japanese,English}.tiff`、`platforms/macos/scripts/render_menu_icon.swift`（#3021）；语音识别用途字符串及其本地化（#3015、#3052）；输入源名称的本地化键与 bundle id 配对 | 有强制检查（`info-plist-icons`、`info-plist-usage`、`info-plist-names`、`bundle-contents`） |
 | 账号、云剪贴板、云词典、快照、社区 | `shared/backend/*.swift` | `shared/backend/` 为来源的超集（另有 `BackendAiClient.swift`），并带 Swift 测试 | 有调用链 |
 
 ## 目标具备而来源没有的部分
@@ -194,7 +194,7 @@
 
 参考的 `MetasequoiaFloatingToolbarItemKeys()` 只有四项——中英文切换、中西文标点、全角半角、简繁输出——齿轮不在其中，并且有一条测试专门钉住「四个开关全关，齿轮还在」。目标把齿轮也做成了可开关的一项，还多出表情与屏幕键盘两项。
 
-这里不跟。目标的工具栏组件本来就比参考多，把「设置」一并交给用户控制是一致的；关掉齿轮也不会把人困住——输入菜单里的「水杉输入法设置…」照样能开设置窗口。手写和语音不再恒常存在：它们与 Emoji、屏幕键盘一起改成了默认关（见 `docs/windows-parity.md` 的《工具栏可选按钮改为默认关》），每个按钮都能关掉，工具栏可以只剩拖动柄（`FloatingToolbarPanel.mm` 在整行为空时隐藏分隔线、保留拖动柄，面板因此仍可拖动）。记在这里是因为它确实是一处已知的、刻意的行为差异，不该被上面那句「无已知缺口」盖过去。
+这里不跟。目标的工具栏组件本来就比参考多，把「设置」一并交给用户控制是一致的；关掉齿轮也不会把人困住——输入菜单里的「水杉输入法设置…」照样能开设置窗口。手写和语音不再恒常存在：它们与 Emoji、屏幕键盘一起改成了默认关（见 `docs/windows-parity.md` 的《工具栏可选按钮改为默认关》），每个按钮都能关掉，工具栏可以只剩兼作拖动柄的 logo（`FloatingToolbarPanel.mm` 在整行为空时隐藏分隔线、保留 logo，面板因此仍可拖动）。记在这里是因为它确实是一处已知的、刻意的行为差异，不该被上面那句「无已知缺口」盖过去。
 
 ## 输入源注册的读数怎么看（2026-09-20 实测）
 

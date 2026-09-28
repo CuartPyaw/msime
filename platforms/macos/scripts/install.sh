@@ -134,6 +134,9 @@ if [ -d "$destination" ]; then
 fi
 mv "$staging/$name" "$destination"
 
+# The text input system relaunches a stopped input method as soon as a client asks for it, and signing takes long enough for that to happen: the process it starts runs the previous bundle, now under the backup directory, and keeps serving the old code with nothing on screen to say so. Anything running at this point started before the new bundle arrived, so stop it once more and let the next launch come from the new one.
+pkill -f "$destination/Contents/MacOS/$executable" || true
+
 echo "installed $destination"
 
 # Installing and registering are different operations with different failure meanings, so the rollback
@@ -184,6 +187,10 @@ if pgrep -xq "System Settings"; then
 else
   rm -f "$keyboard_settings_cache"/com.apple.IntlDataCache.le*
 fi
+
+# The Ctrl+Space switcher beside the caret (CursorUIViewService) and the held-shortcut switcher (TextInputSwitcher) read the input-source list and its icons once and keep them for the life of the process, so after an install they go on showing the modes and icons of the build before it - a mode added since is missing and a changed icon is the old one. Both ignore SIGTERM, and launchd starts each again the next time it is needed.
+pkill -KILL -x CursorUIViewService || true
+pkill -KILL -x TextInputSwitcher || true
 
 # Three outcomes, and the note at the bottom is only right for one of them. Printing it for all three is
 # what this used to do: an input method that registers, enables its Chinese mode and types perfectly well
