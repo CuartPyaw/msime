@@ -5000,8 +5000,7 @@ static void TestAccountGlossCacheIsSharedAcrossControllers() {
             userInfo:@{@"generation":@1, @"target":@"en", @"translations":@{@"\u6d4b\u8bd5":@"ignored"}}]];
     assert(fetcherSession.applied == nil);
 
-    // A response for the previous candidate generation must not be accepted by a new request,
-    // even when the text itself is unchanged. The generation is the request identity here.
+    // A reply for an earlier generation still answers the same word on the current page. The cache key is language and word, as on Windows, so the generation it was asked under does not make the answer wrong.
     [[MSIMETranslationCache sharedCache] clear];
     fetcherSession.generation = 2;
     [fetcher synchronizeAccountGloss:[fetcher currentAccountGlossRequest]];
@@ -5009,11 +5008,66 @@ static void TestAccountGlossCacheIsSharedAcrossControllers() {
     [fetcher accountCandidateTranslationsDidArrive:
         [NSNotification notificationWithName:@"MSIMEBackendCandidateTranslationsDidArrive" object:nil
             userInfo:@{@"generation":@1, @"target":@"en", @"translations":@{@"\u6d4b\u8bd5":@"stale"}}]];
-    assert(fetcherSession.applied == nil);
+    assert([[[fetcher valueForKey:@"accountGlossResults"] firstObject][@"translation"] isEqual:@"stale"]);
     [fetcher accountCandidateTranslationsDidArrive:
         [NSNotification notificationWithName:@"MSIMEBackendCandidateTranslationsDidArrive" object:nil
             userInfo:@{@"generation":@2, @"target":@"en", @"translations":@{@"\u6d4b\u8bd5":@"fresh"}}]];
     assert([[[fetcher valueForKey:@"accountGlossResults"] firstObject][@"translation"] isEqual:@"fresh"]);
+}
+
+// An account reply is cached before the controller checks whether it still shows the page that asked, as Windows caches every completed fetch before its staleness check (cloud_translation.cpp), so typing past a page no longer throws its answers away. A word the account had nothing for is cached as a negative entry for eight minutes and not asked about again; a word whose request failed gets no reply at all and is asked about again.
+static void TestAccountGlossLateReplyAndNegatives() {
+    [[MSIMETranslationCache sharedCache] clear];
+    NSString *suite = [@"msime.account-gloss-late." stringByAppendingString:NSUUID.UUID.UUIDString];
+    MSIMEAppearancePreferences *prefs =
+        [[MSIMEAppearancePreferences alloc] initWithDefaults:[[NSUserDefaults alloc] initWithSuiteName:suite]];
+    CustomTranslationController *controller = [CustomTranslationController alloc];
+    controller.batches = [NSMutableArray array];
+    controller.accountFetches = [NSMutableArray array];
+    AccountGlossSession *session = [AccountGlossSession new];
+    [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
+    [controller setValue:prefs forKey:@"appearance"];
+    [controller setValue:session forKey:@"session"];
+    void (^reply)(NSUInteger, NSDictionary *) = ^(NSUInteger generation, NSDictionary *translations) {
+        [controller accountCandidateTranslationsDidArrive:[NSNotification notificationWithName:@"MSIMEBackendCandidateTranslationsDidArrive"
+            object:nil userInfo:@{@"generation":@(generation), @"target":@"en", @"translations":translations}]];
+    };
+    void (^show)(NSUInteger, NSArray<NSString *> *) = ^(NSUInteger generation, NSArray<NSString *> *texts) {
+        NSMutableArray *candidates = [NSMutableArray array];
+        for (NSString *text in texts) [candidates addObject:@{@"text":text, @"online_gloss":@YES}];
+        session.generation = generation;
+        session.candidates = candidates;
+        [controller synchronizeAccountGloss:[controller currentAccountGlossRequest]];
+    };
+
+    show(1, @[@"测试"]);
+    show(2, @[@"你好"]);
+    assert(controller.accountFetches.count == 2);
+    // The answer for the page the user typed past lands in the cache, but the current page, which does not show that word, is left alone.
+    session.applied = nil;
+    reply(1, @{@"测试":@"test"});
+    assert(([[MSIMETranslationCache sharedCache] valueForIdentity:@[@"account", @"en", @"测试"]]));
+    assert([[controller valueForKey:@"accountGlossResults"] count] == 0 && session.applied == nil);
+    // The account had nothing for 你好: remembered as a negative entry, with nothing shown.
+    reply(2, @{@"你好":@""});
+    assert(([[MSIMETranslationCache sharedCache] valueForIdentity:@[@"account", @"en", @"你好"]] == NSNull.null));
+    assert([[controller valueForKey:@"accountGlossResults"] count] == 0);
+    // A later empty answer for a word that already has a gloss does not evict it.
+    reply(1, @{@"测试":@""});
+    assert(([[[MSIMETranslationCache sharedCache] valueForIdentity:@[@"account", @"en", @"测试"]] isEqual:@"test"]));
+
+    // Backing up to a page with both words asks about neither: one is answered from the cache, the other is known to have no answer.
+    show(3, @[@"测试", @"你好"]);
+    assert(controller.accountFetches.count == 2);
+    NSArray *results = [controller valueForKey:@"accountGlossResults"];
+    assert(results.count == 1 && [results[0][@"text"] isEqual:@"测试"] && [results[0][@"translation"] isEqual:@"test"]);
+
+    // A request that failed posts no reply, so its word stays unknown and the next page asks about it again.
+    show(4, @[@"再见"]);
+    show(5, @[@"再见"]);
+    assert((controller.accountFetches.count == 4 && [controller.accountFetches[3][0] isEqual:@[@"再见"]]));
+    [[NSUserDefaults new] removePersistentDomainForName:suite];
+    [[MSIMETranslationCache sharedCache] clear];
 }
 
 // An English account gloss is saved to the user glossary when it arrives, as Windows saves a fetched English gloss (cloud_translation.cpp PersistGloss), so the next page and the next launch answer it offline. It used to wait for the commit, where the account rows, which carry no Engine source, were rejected by the plan and nothing was ever saved.
@@ -5848,6 +5902,7 @@ int main(int argc, char **argv) {
             TestAccountGlossSkipsNonChineseCandidates();
             TestAccountGlossRequiresExplicitChoice();
             TestAccountGlossCacheIsSharedAcrossControllers();
+            TestAccountGlossLateReplyAndNegatives();
             TestAccountGlossPersistsOnArrival();
             TestOfflineTargetGlosses();
             TestOnDeviceGlosses();
@@ -5883,6 +5938,7 @@ int main(int argc, char **argv) {
         TestAccountGlossSkipsNonChineseCandidates();
         TestAccountGlossRequiresExplicitChoice();
         TestAccountGlossCacheIsSharedAcrossControllers();
+        TestAccountGlossLateReplyAndNegatives();
         TestOfflineTargetGlosses();
         TestOnDeviceGlosses();
         TestOnDeviceGlossPersistence();

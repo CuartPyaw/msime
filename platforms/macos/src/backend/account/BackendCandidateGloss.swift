@@ -24,11 +24,9 @@ private enum BackendCandidateGloss {
         for code in [primary, secondary] where !code.isEmpty {
           group.addTask {
             guard let values = try? await client.translate(texts: words, target: code, token: token) else { return }
-            // Duplicate candidate text is valid. Keep the first response and reject empty or
-            // unchanged values before crossing the bridge into the input method process.
-            let table = Dictionary(zip(words, values).filter { !$0.1.isEmpty && $0.1 != $0.0 },
-                                   uniquingKeysWith: { first, _ in first })
-            guard !table.isEmpty else { return }
+            // Every word asked about gets an answer, so the input method can remember the ones the account had nothing for and stop asking about them for a while, as Windows does. An empty or unchanged value is sent as "", and a duplicate candidate keeps whichever of its answers is not empty. A request that failed (offline, rate limited) posts nothing, so the words stay unknown and are asked about again.
+            let table = Dictionary(zip(words, values).map { ($0.0, $0.1 == $0.0 ? "" : $0.1) },
+                                   uniquingKeysWith: { first, second in first.isEmpty ? second : first })
             await MainActor.run {
               NotificationCenter.default.post(name: notification, object: nil, userInfo: [
                 // Each reply names its own language, so the input method files it under that target without depending on the order in which the two requests finish, and saves only the English one to the learned glossary.

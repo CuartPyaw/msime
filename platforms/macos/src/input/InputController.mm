@@ -399,6 +399,11 @@ static NSString *MSIMEAccountGlossCached(NSString *target, NSString *text) {
     return [value isKindOfClass:NSString.class] ? value : nil;
 }
 
+// A word is known once the account answered it, with a gloss or with nothing (a negative entry that lapses after eight minutes), and a known word is not asked about again.
+static BOOL MSIMEAccountGlossKnown(NSString *target, NSString *text) {
+    return [[MSIMETranslationCache sharedCache] valueForIdentity:MSIMEAccountGlossIdentity(target, text)] != nil;
+}
+
 // On-device glosses share the process-wide cache for the same reason as account ones, under a scope of their own. A word the model had nothing useful for is cached as an empty answer, so it is not asked about again on the next keystroke.
 static NSArray<NSString *> *MSIMEOnDeviceGlossIdentity(NSString *target, NSString *text) {
     return @[@"on-device", target ?: @"", text ?: @""];
@@ -1738,7 +1743,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
             NSString *text = candidate[@"text"];
             if (![target isKindOfClass:NSString.class] || ![text isKindOfClass:NSString.class]) continue;
             [signature appendFormat:@"|%@|%@", target, text];
-            if (!MSIMEAccountGlossCached(target, text)) [pending addObject:text];
+            if (!MSIMEAccountGlossKnown(target, text)) [pending addObject:text];
         }
     }
     _accountGlossResults = [self accountGlossResultsForRequest:request];
@@ -1775,20 +1780,22 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     if (![target isKindOfClass:NSString.class] || ![values isKindOfClass:NSDictionary.class]) return;
     // Persisted before any check on the current page, as Windows persists every fetch that completes: a reply for a page the user typed past, or a candidate already committed, would otherwise never reach the glossary.
     if ([target isEqualToString:@"en"]) [self persistAccountGlosses:values];
-    if (![_accountGlossRequest isKindOfClass:NSDictionary.class]) return;
-    // The account backend can finish a request after this controller has moved on to a newer
-    // candidate generation. Do not let that late response populate the current page (or its
-    // shared cache) with data belonging to the old request.
-    NSNumber *generation = info[@"generation"];
-    if (![generation isKindOfClass:NSNumber.class] ||
-        ![generation isEqual:_accountGlossRequest[@"generation"]]) return;
+    // Cached before any check on the current page, as Windows caches every completed fetch before its staleness check (cloud_translation.cpp): the key is language and word, not generation, so an answer for a page the user typed past is still right when they back up or type the word again. Every controller hears the reply, and writing the same answer twice is harmless.
+    MSIMETranslationCache *cache = [MSIMETranslationCache sharedCache];
     for (NSString *text in values) {
         NSString *value = values[text];
-        if ([text isKindOfClass:NSString.class] && [value isKindOfClass:NSString.class] && value.length)
-            [[MSIMETranslationCache sharedCache] rememberTranslation:value
-                                                            identity:MSIMEAccountGlossIdentity(target, text)];
+        if (![text isKindOfClass:NSString.class] || ![value isKindOfClass:NSString.class]) continue;
+        NSArray *identity = MSIMEAccountGlossIdentity(target, text);
+        // An empty answer is remembered as a negative entry so the word is not asked about again for eight minutes, but it must not evict a gloss another reply already supplied for the same word.
+        if (value.length) [cache rememberTranslation:value identity:identity];
+        else if (![[cache valueForIdentity:identity] isKindOfClass:NSString.class]) [cache rememberTranslation:nil identity:identity];
     }
-    _accountGlossResults = [self accountGlossResultsForRequest:_accountGlossRequest];
+    // Only a controller still showing the page it asked about redraws. Its results are rebuilt from the cache, which now holds this reply, so a late reply for a word the current page still shows is used rather than dropped.
+    if (![_accountGlossRequest isKindOfClass:NSDictionary.class] || ![_accountGlossRequest isEqual:[self currentAccountGlossRequest]]) return;
+    // A late reply usually answers words this page does not show, and then there is nothing to redraw.
+    NSArray *results = [self accountGlossResultsForRequest:_accountGlossRequest];
+    if ([results isEqual:_accountGlossResults]) return;
+    _accountGlossResults = results;
     [self applyCandidateTranslationResults];
 }
 
