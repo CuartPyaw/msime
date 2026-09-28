@@ -177,8 +177,12 @@ private final class AccountFixture: URLProtocol, @unchecked Sendable {
     BackendCandidateGloss.fetch(words: ["再见"], primary: "en", secondary: "", generation: 5)
     try await settle(1)
     try require(started == [1, 3, 5])
+    // The input method stopping its use of the account drops the waiting page, so nothing goes out after the user opted out; the request in flight still finishes.
+    BackendCandidateGloss.fetch(words: ["谢谢"], primary: "en", secondary: "", generation: 6)
+    msimeCancelAccountCandidateGlosses()
     release.removeFirst().resume()
     try await Task.sleep(nanoseconds: 50_000_000)
+    try require(started == [1, 3, 5] && release.isEmpty)
   }
   @MainActor static func main() async throws {
     try windowAccountIsolation()

@@ -4670,6 +4670,8 @@ static void TestAiCandidateDescriptorFailureIsRetryable() {
 @property(nonatomic, strong) NSMutableArray<ControlledTranslationBatch *> *batches;
 @property(nonatomic, strong) NSMutableArray<NSArray *> *onDeviceFetches;
 @property(nonatomic, strong) NSMutableArray<NSArray *> *accountFetches;
+// Times the controller dropped the backend's waiting account page.
+@property(nonatomic) NSUInteger accountQueueCancels;
 // Packaged English dictionary answers beyond Hello's.
 @property(nonatomic, copy) NSDictionary<NSString *, NSString *> *extraEnglishGlosses;
 @property(nonatomic) BOOL useRealDelay;
@@ -4683,6 +4685,10 @@ static void TestAiCandidateDescriptorFailureIsRetryable() {
                  generation:(uint64_t)generation {
     assert(NSThread.isMainThread);
     [self.accountFetches addObject:@[words, primary, secondary, @(generation)]];
+}
+- (void)cancelQueuedAccountGlosses {
+    assert(NSThread.isMainThread);
+    self.accountQueueCancels++;
 }
 - (MSIMECustomTranslationBatch *)niuTransBatchForItems:(NSArray<NSDictionary *> *)items config:(NSDictionary *)config
                                            completion:(void (^)(NSArray<NSDictionary *> *))completion {
@@ -5175,11 +5181,19 @@ static void TestAccountGlossIdleDelay() {
     assert(refocused.valid && refocused != unfocused);
     [refocused fire];
     assert(controller.accountFetches.count == 2 && ([controller.accountFetches[1] isEqual:@[@[@"再见"], @"en", @"", @4]]));
+    // A newer page only replaces the backend's waiting page; it never drops it.
+    assert(controller.accountQueueCancels == 0);
     show(5, @[@"再见"]);
     NSTimer *cancelled = [controller valueForKey:@"accountGlossTimer"];
     [controller cancelCandidateTranslations];
     [cancelled fire];
     assert(!cancelled.valid && controller.accountFetches.count == 2);
+    // Leaving the field, or the account no longer being the user's choice, drops the page still waiting behind the request in flight, so it is not sent after the user opted out.
+    assert(controller.accountQueueCancels == 1);
+    show(6, @[@"谢谢"]);
+    session.choice = @{@"translation_account":@NO, @"provider":@"none"};
+    [controller synchronizeAccountGloss:[controller currentAccountGlossRequest]];
+    assert(controller.accountQueueCancels == 2 && ![controller valueForKey:@"accountGlossTimer"]);
     [[NSUserDefaults new] removePersistentDomainForName:suite];
     [[MSIMETranslationCache sharedCache] clear];
 }

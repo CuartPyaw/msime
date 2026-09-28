@@ -35,6 +35,11 @@ enum BackendCandidateGloss {
     pump()
   }
 
+  // Drops the waiting page, for when the input method stops using the account (the user turned it off, chose a service of their own, or left the field). The request in flight is left to finish, since its answers only fill the cache, but a page that had not gone out yet must not be sent after the user opted out.
+  static func cancelPending() {
+    pending = nil
+  }
+
   private static func pump() {
     guard inFlight == nil, let request = pending else { return }
     pending = nil
@@ -67,6 +72,12 @@ enum BackendCandidateGloss {
       }
     }
   }
+}
+
+// Called on the main thread by InputController.mm whenever it stops asking the account.
+@_cdecl("MSIMECancelAccountCandidateGlosses")
+public func msimeCancelAccountCandidateGlosses() {
+  MainActor.assumeIsolated { BackendCandidateGloss.cancelPending() }
 }
 
 // Called on the main thread by InputController.mm, from the idle timer that follows a page change.

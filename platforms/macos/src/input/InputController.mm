@@ -78,6 +78,7 @@
 extern "C" void MSIMEFetchAccountCandidateGlosses(const char *wordsJSON, const char *primaryCode,
                                                     const char *secondaryCode, unsigned long long generation)
     __attribute__((weak_import));
+extern "C" void MSIMECancelAccountCandidateGlosses(void) __attribute__((weak_import));
 extern "C" void MSIMEEnsureAnonymousAccount(void) __attribute__((weak_import));
 // Apple's on-device translation, also in the Swift backend. Null when the backend was built by a toolchain older than the macOS 26 SDK.
 extern "C" void MSIMEFetchOnDeviceCandidateGlosses(const char *wordsJSON, const char *targetsJSON) __attribute__((weak_import));
@@ -1265,7 +1266,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     // deactivation, so a controller whose client had gone away still answered every gloss broadcast -
     // IMKit keeps a controller per text input client, so that is a dozen of them merging results and
     // pushing them into sessions nobody is composing in. Its siblings are all cancelled here; so is it.
-    [self cancelAccountGloss];
+    [self stopAccountGloss];
     [self cancelOnDeviceGloss];
     // A later session can reuse the same generation number, and nothing is held now to re-apply anyway.
     _translationAppliedGeneration = nil;
@@ -1730,6 +1731,17 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     return YES;
 }
 
+// The backend keeps one account request in flight and one page waiting, shared by every controller. Only the timer is this controller's, so when it stops asking the account (turned off, a service of the user's own took over, or the field was left) the waiting page is dropped too; otherwise it would go out when the request in flight finishes, after the user opted out.
+- (void)stopAccountGloss {
+    [self cancelAccountGloss];
+    [self cancelQueuedAccountGlosses];
+}
+
+- (void)cancelQueuedAccountGlosses {
+    // weak_import, like the fetch: a process without the backend dylib binds this to null.
+    if (MSIMECancelAccountCandidateGlosses != nullptr) MSIMECancelAccountCandidateGlosses();
+}
+
 - (void)cancelAccountGloss {
     ++_accountGlossEpoch;
     [_accountGlossTimer invalidate];
@@ -1769,7 +1781,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
 }
 
 - (void)synchronizeAccountGloss:(NSDictionary *)request {
-    if (!request) { [self cancelAccountGloss]; return; }
+    if (!request) { [self stopAccountGloss]; return; }
     if ([_accountGlossRequest isEqual:request]) return;
     // The local dictionaries answer first and the account is asked only for what they left empty, as Windows hands only the misses to RequestMisses (event_listener.cpp ApplyCandidateTranslations). Each dictionary's completion calls back here, so waiting costs one local read rather than a request.
     NSDictionary *gloss = [self currentGlossRequest];
@@ -2034,7 +2046,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
         [self synchronizeAccountGloss:[self currentAccountGlossRequest]];
         return;
     }
-    [self cancelAccountGloss];
+    [self stopAccountGloss];
     if ([_customQuery isEqual:query]) return;
     [self detachCustomTranslations];
     _customQuery = query;
