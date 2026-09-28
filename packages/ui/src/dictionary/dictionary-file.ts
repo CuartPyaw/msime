@@ -168,6 +168,16 @@ export const personalDictionaryExample = JSON.stringify(
 
 export const DICTIONARY_PAGE_SIZE = 100;
 
+export type LocalDictionaryKind = "pinyin" | "wubi" | "quick_phrase" | "english";
+export type LocalDictionaryFormat = "standard" | "windows" | "rime" | "hans";
+export type DictionaryEntry = {
+  kind: LocalDictionaryKind;
+  key: string;
+  value: string;
+  weight: number;
+  source?: "user" | "bundled";
+};
+
 /// Status line for one page of results, matching the shipped pager.
 export function dictionaryPageStatus(offset: number, count: number, hasMore: boolean): string {
   if (!count) return "没有更多结果";

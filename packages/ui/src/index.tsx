@@ -21,6 +21,14 @@ import {
   DICTIONARY_PAGE_SIZE,
   dictionaryPageStatus,
   readDictionaryFile,
+  type DictionaryEntry,
+  type LocalDictionaryFormat,
+  type LocalDictionaryKind,
+} from "./dictionary/dictionary-file";
+export type {
+  DictionaryEntry,
+  LocalDictionaryFormat,
+  LocalDictionaryKind,
 } from "./dictionary/dictionary-file";
 import { describeImportResult, dictionaryKindKeyHint } from "./dictionary/dictionary-messages";
 import {
@@ -1477,16 +1485,6 @@ export type Snapshot = {
   revision: number;
   preferences: Preferences;
   candidate_skin_catalog?: ExternalSkinCatalog;
-};
-export type LocalDictionaryKind = "pinyin" | "wubi" | "quick_phrase" | "english";
-export type LocalDictionaryFormat = "standard" | "windows" | "rime" | "hans";
-export type DictionaryEntry = {
-  kind: LocalDictionaryKind;
-  key: string;
-  value: string;
-  weight: number;
-  /** Set by hosts that also list the packaged dictionary: a bundled row can only be re-weighted or deleted. */
-  source?: "user" | "bundled";
 };
 export type DictionaryFailure = { request_id: string; label: string; error: string };
 /** Mirrors the import response from `client-core::dictionary_import`. */

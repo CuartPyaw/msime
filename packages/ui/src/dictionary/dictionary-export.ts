@@ -1,11 +1,10 @@
-type DictionaryEntryForExport = {
-  kind: string;
-  key: string;
-  value: string;
-  weight: number;
-};
+import {
+  DICTIONARY_PAGE_SIZE,
+  type DictionaryEntry,
+  type LocalDictionaryKind,
+} from "./dictionary-file";
 
-const personalDictionaryExportKinds: readonly [string, string][] = [
+const personalDictionaryExportKinds: readonly [LocalDictionaryKind, string][] = [
   ["pinyin", "拼音"],
   ["wubi", "五笔"],
   ["quick_phrase", "快捷短语"],
@@ -16,7 +15,7 @@ export function personalDictionaryExportName(): string {
   return "水杉用户词库.txt";
 }
 
-export function personalDictionaryExportPayload(entries: DictionaryEntryForExport[]): {
+export function personalDictionaryExportPayload(entries: DictionaryEntry[]): {
   body: string;
   rows: number;
 } {
@@ -32,15 +31,22 @@ export function personalDictionaryExportPayload(entries: DictionaryEntryForExpor
 }
 
 export async function loadAllPersonalDictionaryEntries(dictionary: {
-  list: (...args: any[]) => Promise<{ entries: DictionaryEntryForExport[]; has_more: boolean }>;
-}): Promise<DictionaryEntryForExport[]> {
-  const entries: DictionaryEntryForExport[] = [];
+  list: (
+    offset: number,
+    limit: number,
+    kind?: LocalDictionaryKind,
+    query?: string,
+  ) => Promise<{ entries: DictionaryEntry[]; has_more: boolean }>;
+}): Promise<DictionaryEntry[]> {
+  const entries: DictionaryEntry[] = [];
   for (const [kind] of personalDictionaryExportKinds) {
     let offset = 0;
     let hasMore = true;
     while (hasMore && offset <= 1_000_000) {
       const page = await dictionary.list(offset, DICTIONARY_PAGE_SIZE, kind, "");
-      entries.push(...page.entries.filter((entry) => entry.kind === kind));
+      entries.push(
+        ...page.entries.filter((entry) => entry.kind === kind && entry.source !== "bundled"),
+      );
       if (!page.entries.length) {
         hasMore = false;
         break;
@@ -92,4 +98,3 @@ export function dictionaryExportPayload(
   if (!kept.length) return { body: "", rows: 0 };
   return { body: "\ufeff" + kept.join("\n") + "\n", rows: kept.length };
 }
-import { DICTIONARY_PAGE_SIZE } from "./dictionary-file";
