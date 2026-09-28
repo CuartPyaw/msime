@@ -148,8 +148,41 @@ private final class AccountFixture: URLProtocol, @unchecked Sendable {
     model.logout(delete: true); try await finished(model)
     try require(model.user == nil && !model.anonymous && discarded == 1 && anonymousStorage.load() == nil)
   }
+  // Three pages asked for while the first is still on the network send two requests: the first runs to the end and the third replaces the second in the waiting slot, so a slow connection never has more than one page in flight.
+  @MainActor static func candidateGlossSingleFlight() async throws {
+    let original = BackendCandidateGloss.perform
+    defer { BackendCandidateGloss.perform = original }
+    var started: [UInt64] = []
+    var release: [CheckedContinuation<Void, Never>] = []
+    BackendCandidateGloss.perform = { request in
+      started.append(request.generation)
+      await withCheckedContinuation { release.append($0) }
+    }
+    func settle(_ count: Int) async throws {
+      let deadline = Date().addingTimeInterval(5)
+      while release.count < count && Date() < deadline { try await Task.sleep(nanoseconds: 5_000_000) }
+      try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    for generation: UInt64 in 1...3 { BackendCandidateGloss.fetch(words: ["测试"], primary: "en", secondary: "ja", generation: generation) }
+    try await settle(1)
+    try require(started == [1] && release.count == 1)
+    release.removeFirst().resume()
+    try await settle(1)
+    try require(started == [1, 3] && release.count == 1)
+    release.removeFirst().resume()
+    try await Task.sleep(nanoseconds: 50_000_000)
+    try require(started == [1, 3] && release.isEmpty)
+    // The slot is free again once the last request finishes, and an empty page never takes it.
+    BackendCandidateGloss.fetch(words: [], primary: "en", secondary: "", generation: 4)
+    BackendCandidateGloss.fetch(words: ["再见"], primary: "en", secondary: "", generation: 5)
+    try await settle(1)
+    try require(started == [1, 3, 5])
+    release.removeFirst().resume()
+    try await Task.sleep(nanoseconds: 50_000_000)
+  }
   @MainActor static func main() async throws {
     try windowAccountIsolation()
+    try await candidateGlossSingleFlight()
     try await fileTransfer()
     try await anonymousAccountFallback()
     let configuration = URLSessionConfiguration.ephemeral
