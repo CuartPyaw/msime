@@ -550,4 +550,8 @@ fi
 # The JVM smokes cannot load org.json, so nothing else here can reach the one place where the
 # shared runtime's JSON nulls meet this host's reads of them.
 python3 "$repo_root/scripts/test-android-json-null-reads.py" || exit 1
+# Every other contract check that needs ripgrep is discovered by scripts/run-checks.sh, whose
+# contracts job deliberately installs nothing and therefore skips this one; this job already
+# installs rg, so it is the only place where the reader search actually runs.
+python3 "$repo_root/scripts/test-android-preference-keys.py" || exit 1
 echo "Android service Java/API and manifest/resource checks passed; no installable/native APK produced"
