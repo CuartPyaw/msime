@@ -906,6 +906,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     uint64_t _accountGlossEpoch;
     // The account is asked only once typing has been idle for 500 ms, as Windows' cloud worker waits kIdleDelay after the latest job (cloud_translation.cpp): each keystroke replaces the pending request instead of sending one.
     NSTimer *_accountGlossTimer;
+    // The view generation the held translation results were last applied to. The session drops its translations whenever the generation moves, and a page whose words did not change does not change any request either, so this is what tells synchronizeCandidateServices to put them back.
+    NSNumber *_translationAppliedGeneration;
     // Each word this controller sent to the account for an English gloss, mapped to the preferences directory of the page that sent it: every controller hears every reply, so only the one that asked saves it, and the reply often lands after that page has moved on.
     NSMutableDictionary<NSString *, NSString *> *_accountEnglishQueries;
     NSDictionary *_onDeviceGlossRequest;
@@ -1265,6 +1267,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     // pushing them into sessions nobody is composing in. Its siblings are all cancelled here; so is it.
     [self cancelAccountGloss];
     [self cancelOnDeviceGloss];
+    // A later session can reuse the same generation number, and nothing is held now to re-apply anyway.
+    _translationAppliedGeneration = nil;
 }
 
 - (NSDictionary *)highlightedCandidateForGloss {
@@ -1639,8 +1643,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
         [candidates addObject:@{@"text":candidate[@"text"], @"source":candidate[@"source"]}];
     }
     if (!candidates.count) return nil;
-    return @{@"generation":query[@"generation"], @"target_language":query[@"target_language"],
-        @"target_languages":MSIMETranslationTargets(query),
+    return @{@"target_language":query[@"target_language"], @"target_languages":MSIMETranslationTargets(query),
         (niuTrans ? @"niutrans" : custom ? @"custom_translation" : @"tencent_tmt"):config, @"candidates":[candidates copy],
         @"directory":_preferencesDirectory ?: @""};
 }
@@ -1684,7 +1687,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     }
     return results;
 }
-- (void)applyCandidateTranslationResults {
+// Returns whether the session took the results and the services were synchronized behind them.
+- (BOOL)applyCandidateTranslationResults {
     NSMutableArray *results = [NSMutableArray array];
     BOOL customCurrent = _customResults && [_customQuery isEqual:[self currentCustomTranslationRequest]];
     BOOL glossCurrent = _glossResults && [_glossRequest isEqual:[self currentGlossRequest]];
@@ -1707,12 +1711,14 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
         }
     }
     NSDictionary *view = [_session viewWithError:nil];
-    if (!view) return;
+    if (!view) return NO;
     NSDictionary *applied = [_session applyTranslations:results generation:[view[@"generation"] unsignedLongLongValue] error:nil];
-    if (![applied[@"applied"] boolValue]) return;
+    if (![applied[@"applied"] boolValue]) return NO;
     // A gloss changes what the card shows, never the composition, so only the card is redrawn. Going through apply: re-sent the marked text on every arrival, and IMK services the next key inside that synchronous setMarkedText: call - the whole keystroke, reranking included, ran nested in it, after which the outer apply: wrote the older view back over the newer one.
     NSDictionary *next = applied[@"view"];
-    if (![next isKindOfClass:NSDictionary.class]) return;
+    if (![next isKindOfClass:NSDictionary.class]) return NO;
+    // _view is next from here on, so synchronizeCandidateServices below finds this generation already applied and does not come back.
+    _translationAppliedGeneration = next[@"generation"];
     if (![next isEqual:_view]) {
         [self discardGlossSensePage];
         _view = next;
@@ -1721,6 +1727,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     }
     // What one source answered decides what the next asks for, even when it answered nothing for this page: the online fallback waits for the offline lookup.
     [self synchronizeCandidateServices];
+    return YES;
 }
 
 - (void)cancelAccountGloss {
@@ -1742,8 +1749,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     if (![query[@"translation_account"] isEqual:@YES]) return nil;
     NSArray *candidates = MSIMEOnlineGlossCandidates(query);
     return candidates.count
-        ? @{ @"generation": query[@"generation"], @"target_languages": query[@"target_languages"],
-             @"candidates": candidates } : nil;
+        ? @{ @"target_languages": query[@"target_languages"], @"candidates": candidates } : nil;
 }
 
 - (NSArray<NSDictionary *> *)accountGlossResultsForRequest:(NSDictionary *)request {
@@ -1823,7 +1829,9 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
                 owner->_accountEnglishQueries = [NSMutableDictionary dictionary];
             for (NSString *text in unique) owner->_accountEnglishQueries[text] = [owner->_preferencesDirectory copy];
         }
-        [owner fetchAccountGlosses:unique primary:primary secondary:secondary generation:[pendingRequest[@"generation"] unsignedLongLongValue]];
+        // The request carries no generation, so the one on screen when the words go out is passed along; nothing compares it since replies are cached by word.
+        [owner fetchAccountGlosses:unique primary:primary secondary:secondary
+                        generation:[[owner->_session translationQueryWithError:nil][@"generation"] unsignedLongLongValue]];
     }];
 }
 
@@ -1912,7 +1920,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
         ![view[@"generation"] isEqual:query[@"generation"]]) return nil;
     NSMutableArray *candidates = [NSMutableArray array];
     for (NSDictionary *candidate in MSIMEOnlineGlossCandidates(query)) [candidates addObject:@{@"text":candidate[@"text"]}];
-    return candidates.count ? @{@"generation":query[@"generation"], @"target_languages":targets, @"candidates":[candidates copy]} : nil;
+    return candidates.count ? @{@"target_languages":targets, @"candidates":[candidates copy]} : nil;
 }
 
 - (void)fetchOnDeviceGlosses:(NSArray<NSString *> *)words targets:(NSArray<NSString *> *)targets {
@@ -2193,8 +2201,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     for (NSDictionary *candidate in view[@"candidates"])
         if ([candidate[@"text"] isKindOfClass:NSString.class] && [candidate[@"source"] isKindOfClass:NSNumber.class])
             [candidates addObject:@{@"text":candidate[@"text"], @"source":candidate[@"source"]}];
-    return candidates.count ? @{@"generation":query[@"generation"], @"target_languages":targets,
-        @"candidates":[candidates copy],
+    return candidates.count ? @{@"target_languages":targets, @"candidates":[candidates copy],
         @"directory":_preferencesDirectory ?: @""} : nil;
 }
 - (NSDictionary *)readCandidateGloss:(NSDictionary *)request resources:(NSString *)resources {
@@ -2253,6 +2260,10 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     NSString *directory = request[@"directory"];
     if (!hasResources && !directory.isAbsolutePath) { _glossResults = @[]; return; }
     NSArray *learnedItems = [self learnedTranslationItems:request[@"candidates"] results:nil];
+    // The request leaves the generation out so a page whose content did not change compares equal; the reader still needs the one it was read for, captured here.
+    NSNumber *generation = [_session translationQueryWithError:nil][@"generation"] ?: @0;
+    NSMutableDictionary *read = [request mutableCopy];
+    read[@"generation"] = generation;
     if (!_glossQueue) { _glossQueue = [NSOperationQueue new]; _glossQueue.maxConcurrentOperationCount = 1; _glossQueue.qualityOfService = NSQualityOfServiceUtility; }
     const uint64_t epoch = _glossEpoch;
     MSIMEClientSession *session = _session;
@@ -2260,15 +2271,15 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     __weak MSIMEInputController *weakSelf = self;
     [_glossQueue addOperationWithBlock:^{
         id reader = hasResources ? weakSelf : nil; // id: handed to MSIMEReleaseControllerOnMain
-        NSDictionary *result = reader ? [reader readCandidateGloss:request resources:resources] : nil;
+        NSDictionary *result = reader ? [reader readCandidateGloss:read resources:resources] : nil;
         MSIMEReleaseControllerOnMain(&reader);
-        if (result && ![result[@"generation"] isEqual:request[@"generation"]]) return;
+        if (result && ![result[@"generation"] isEqual:generation]) return;
         NSMutableArray *translations = [result[@"translations"] mutableCopy] ?: [NSMutableArray array];
         if (directory.isAbsolutePath && learnedItems.count) {
             __block NSDictionary *learned;
             dispatch_sync([MSIMEInputController learnedTranslationQueue], ^{
                 learned = [MSIMEClientSession learnedTranslationRequest:@{@"directory":directory,
-                    @"generation":request[@"generation"], @"target_language":@"en", @"action":@"lookup", @"items":learnedItems} error:nil];
+                    @"generation":generation, @"target_language":@"en", @"action":@"lookup", @"items":learnedItems} error:nil];
             });
             for (NSDictionary *entry in learned[@"translations"]) {
                 NSUInteger index = [translations indexOfObjectPassingTest:^BOOL(NSDictionary *existing, NSUInteger position, BOOL *stop) {
@@ -2284,7 +2295,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
         dispatch_async(dispatch_get_main_queue(), ^{
             MSIMEInputController *current = weakSelf;
             if (!current || current->_glossEpoch != epoch || current->_session != session || current->_activeClient != client ||
-                ![[current currentGlossRequest] isEqual:request] || (result && ![result[@"generation"] isEqual:request[@"generation"]])) return;
+                ![[current currentGlossRequest] isEqual:request] || (result && ![result[@"generation"] isEqual:generation])) return;
             current->_glossResults = [translations copy];
             [current applyCandidateTranslationResults];
             // On-device translation and the account request wait for the dictionary so they can skip what the dictionary answered.
@@ -2319,8 +2330,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     for (NSDictionary *candidate in view[@"candidates"])
         if ([candidate[@"text"] isKindOfClass:NSString.class] && [candidate[@"source"] isKindOfClass:NSNumber.class])
             [candidates addObject:@{@"text":candidate[@"text"], @"source":candidate[@"source"]}];
-    return candidates.count ? @{@"generation":query[@"generation"], @"target_languages":targets,
-        @"offline_languages":[languages copy], @"candidates":[candidates copy]} : nil;
+    return candidates.count ? @{@"target_languages":targets, @"offline_languages":[languages copy],
+        @"candidates":[candidates copy]} : nil;
 }
 - (NSDictionary *)readTargetGloss:(NSDictionary *)request language:(NSString *)language resources:(NSString *)resources {
     return [MSIMEClientSession candidateGlossRequest:@{@"generation":request[@"generation"],
@@ -2335,6 +2346,10 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     NSString *resources = [_session.hostOptions[@"resources"] copy];
     if (![resources isKindOfClass:NSString.class] || !resources.isAbsolutePath) { _targetGlossResults = @{}; return; }
     // A queue of its own: cancelCandidateGloss drains the English queue whenever the English request changes, which would otherwise drop this read and leave the request without results.
+    // As for the English read, the generation is captured here rather than carried in the request.
+    NSNumber *generation = [_session translationQueryWithError:nil][@"generation"] ?: @0;
+    NSMutableDictionary *read = [request mutableCopy];
+    read[@"generation"] = generation;
     if (!_targetGlossQueue) { _targetGlossQueue = [NSOperationQueue new]; _targetGlossQueue.maxConcurrentOperationCount = 1; _targetGlossQueue.qualityOfService = NSQualityOfServiceUtility; }
     const uint64_t epoch = _targetGlossEpoch;
     MSIMEClientSession *session = _session;
@@ -2344,8 +2359,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
         NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, NSString *> *> *values = [NSMutableDictionary dictionary];
         id reader = weakSelf;
         for (NSString *language in request[@"offline_languages"]) {
-            NSDictionary *result = [reader readTargetGloss:request language:language resources:resources];
-            if (![result[@"generation"] isEqual:request[@"generation"]]) continue;
+            NSDictionary *result = [reader readTargetGloss:read language:language resources:resources];
+            if (![result[@"generation"] isEqual:generation]) continue;
             for (NSDictionary *entry in result[@"translations"]) {
                 NSString *text = entry[@"text"];
                 NSString *translation = entry[@"translation"];
@@ -5188,6 +5203,14 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
 
 // Everything that follows the candidates on screen. Each one returns at once when its request has not changed.
 - (void)synchronizeCandidateServices {
+    // Every refresh clears the session's translations and moves its generation, even when the page shows the same words, and the requests below no longer change with the generation, so none of them would put the glosses back. Re-apply what is held once per generation instead, as Windows re-applies its cached glosses on every redraw (event_listener.cpp ApplyCandidateTranslations); the successful apply comes back here with the generation recorded.
+    NSNumber *generation = _view[@"generation"];
+    if ([generation isKindOfClass:NSNumber.class] && ![generation isEqual:_translationAppliedGeneration] &&
+        (_glossResults.count || _targetGlossResults.count || _customResults.count || _accountGlossResults.count || _onDeviceGlossRequest)) {
+        // Recorded before the attempt, so a refused apply falls through to the synchronization below rather than retrying.
+        _translationAppliedGeneration = generation;
+        if ([self applyCandidateTranslationResults]) return;
+    }
     [self synchronizeCloudCandidates];
     [self scheduleSettledRerank];
     [self synchronizeCandidateGloss];

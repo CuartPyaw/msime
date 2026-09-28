@@ -4370,13 +4370,15 @@ static void TestCloudCandidateConsent() {
 @property(nonatomic, copy) NSString *targetLanguage;
 @property(nonatomic, copy) NSString *localMode;
 @property(nonatomic) NSUInteger scheme;
+// The generation of the same page; 0 reads as 1. A highlight move or a late cloud candidate advances it without changing the words.
+@property(nonatomic) uint64_t pageGeneration;
 @end
 @implementation GlossSession
-- (NSDictionary *)translationQueryWithError:(NSError **)error { (void)error; return self.enabled ? @{@"generation":@1, @"target_language":self.targetLanguage ?: @"en"} : nil; }
-- (NSDictionary *)viewWithError:(NSError **)error { (void)error; return @{@"generation":@1, @"scheme":@(self.scheme), @"local_mode":self.localMode ?: @"none", @"candidates":@[@{@"text":@"hello", @"source":@4}]}; }
+- (NSDictionary *)translationQueryWithError:(NSError **)error { (void)error; return self.enabled ? @{@"generation":@(self.pageGeneration ?: 1), @"target_language":self.targetLanguage ?: @"en"} : nil; }
+- (NSDictionary *)viewWithError:(NSError **)error { (void)error; return @{@"generation":@(self.pageGeneration ?: 1), @"scheme":@(self.scheme), @"local_mode":self.localMode ?: @"none", @"candidates":@[@{@"text":@"hello", @"source":@4}]}; }
 - (NSDictionary *)hostOptions { return @{@"resources":@"/synthetic"}; }
 - (NSDictionary *)applyTranslations:(NSArray *)translations generation:(uint64_t)generation error:(NSError **)error {
-    (void)error; assert(NSThread.isMainThread && generation == 1 && translations.count <= 1);
+    (void)error; assert(NSThread.isMainThread && generation == (self.pageGeneration ?: 1) && translations.count <= 1);
     if (translations.count) ++self.applications; else ++self.clears;
     return @{@"applied":@YES, @"view":[self viewWithError:nil]};
 }
@@ -4407,6 +4409,8 @@ static void TestCloudCandidateConsent() {
 @property(nonatomic, copy) NSArray *delivered;
 @property(nonatomic) uint64_t generation;
 @property(nonatomic) BOOL offline;
+// Every generation an apply reached, when set.
+@property(nonatomic, strong) NSMutableArray<NSNumber *> *appliedGenerations;
 @end
 @implementation CustomTranslationSession
 - (NSDictionary *)translationQueryWithError:(NSError **)error {
@@ -4424,6 +4428,7 @@ static void TestCloudCandidateConsent() {
 - (NSDictionary *)applyTranslations:(NSArray *)translations generation:(uint64_t)generation error:(NSError **)error {
     (void)error;
     assert(NSThread.isMainThread && generation == self.generation);
+    [self.appliedGenerations addObject:@(generation)];
     self.delivered = translations;
     return @{@"applied":@YES, @"view":[self viewWithError:nil]};
 }
@@ -4894,13 +4899,13 @@ static void TestTencentCandidateScheduling() {
         assert(controller.batches.count == before + 1 && controller.batches.lastObject.items.count == 2);
         controller.batches.lastObject.reply(online);
     }
-    for (NSString *change in @[@"generation", @"page", @"client", @"session", @"focus", @"japanese", @"disabled"]) {
+    // A generation that moved over the same words is not a rejection: that page still shows what the reply answers (TestGlossSurvivesHighlightMove).
+    for (NSString *change in @[@"page", @"client", @"session", @"focus", @"japanese", @"disabled"]) {
         [[MSIMETranslationCache sharedCache] clear];
         [controller cancelCandidateTranslations]; session.delivered = @[];
         [controller synchronizeCustomTranslations];
         ControlledTranslationBatch *pending = controller.batches.lastObject;
         NSArray *page = session.page;
-        if ([change isEqual:@"generation"]) session.generation++;
         if ([change isEqual:@"page"]) session.page = @[];
         if ([change isEqual:@"client"]) [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
         if ([change isEqual:@"session"]) [controller setValue:[CustomTranslationSession new] forKey:@"session"];
@@ -5098,9 +5103,10 @@ static void TestAccountGlossLateReplyAndNegatives() {
     NSArray *results = [controller valueForKey:@"accountGlossResults"];
     assert(results.count == 1 && [results[0][@"text"] isEqual:@"测试"] && [results[0][@"translation"] isEqual:@"test"]);
 
-    // A request that failed posts no reply, so its word stays unknown and the next page asks about it again.
+    // A request that failed posts no reply, so its word stays unknown and the next page showing it asks about it again. The page in between differs, since the same words again are the same request and ask nothing.
     show(4, @[@"再见"]);
-    show(5, @[@"再见"]);
+    show(5, @[@"测试"]);
+    show(6, @[@"再见"]);
     assert((controller.accountFetches.count == 4 && [controller.accountFetches[3][0] isEqual:@[@"再见"]]));
     [[NSUserDefaults new] removePersistentDomainForName:suite];
     [[MSIMETranslationCache sharedCache] clear];
@@ -5631,16 +5637,14 @@ static void TestCustomTranslationController() {
     assert(controller.batches.count == 2);
     ControlledTranslationBatch *second = controller.batches.lastObject;
     assert([second.items[1][@"request"][@"body"][@"target_lang"] isEqual:@"DE"]);
-    // Candidate identity, generation, client, session, focus and mode guards all
-    // reject a callback even before the next synchronization cancels transport.
-    for (NSString *change in @[@"generation", @"page", @"client", @"session", @"focus", @"japanese", @"disabled"]) {
+    // Candidate identity, client, session, focus and mode guards all reject a callback even before the next synchronization cancels transport. A generation that moved over the same words is not among them: that page still shows what the reply answers (TestGlossSurvivesHighlightMove).
+    for (NSString *change in @[@"page", @"client", @"session", @"focus", @"japanese", @"disabled"]) {
         // The rejected reply still reaches the cache, so clear it to make the next round ask again.
         [[MSIMETranslationCache sharedCache] clear];
         [controller cancelCandidateTranslations];
         [controller synchronizeCustomTranslations];
         ControlledTranslationBatch *batch = controller.batches.lastObject;
         NSArray *page = session.page;
-        if ([change isEqual:@"generation"]) session.generation++;
         if ([change isEqual:@"page"]) session.page = @[@{@"text":@"different", @"source":@0}];
         if ([change isEqual:@"client"]) [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
         if ([change isEqual:@"session"]) [controller setValue:[CustomTranslationSession new] forKey:@"session"];
@@ -5877,7 +5881,100 @@ static void TestGlossScheduling() {
     assert(session.applications == 1 && controller.lookups == 2);
     [controller synchronizeCandidateGloss];
     assert(controller.lookups == 2);
+    // A generation that moved over the same words is the same request, so the dictionary is not read again.
+    session.pageGeneration = 2;
+    [controller synchronizeCandidateGloss];
+    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+    assert(controller.lookups == 2 && [controller valueForKey:@"glossResults"]);
     [controller cancelCandidateGloss];
+}
+
+// Moving the highlight, or a cloud candidate landing late, advances the generation without changing the words on the page. Windows keys its translation signature on the words alone and does nothing then (event_listener.cpp ApplyCandidateTranslations); here the requests leave the generation out for the same reason, so nothing is cancelled, read again or queued again, and what is held is applied once to the new generation, since the session dropped it when the generation moved.
+static void TestGlossSurvivesHighlightMove() {
+    [[MSIMETranslationCache sharedCache] clear];
+    NSString *suite = [@"msime.highlight-move." stringByAppendingString:NSUUID.UUID.UUIDString];
+    MSIMEAppearancePreferences *prefs =
+        [[MSIMEAppearancePreferences alloc] initWithDefaults:[[NSUserDefaults alloc] initWithSuiteName:suite]];
+    CustomTranslationController *controller = [CustomTranslationController alloc];
+    controller.batches = [NSMutableArray array];
+    controller.onDeviceFetches = [NSMutableArray array];
+    controller.accountFetches = [NSMutableArray array];
+    controller.useRealDelay = YES;
+    CustomTranslationSession *session = [CustomTranslationSession new];
+    session.appliedGenerations = [NSMutableArray array];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
+    [controller setValue:prefs forKey:@"appearance"];
+    void (^settle)(void) = ^{
+        [controller setValue:[session viewWithError:nil] forKey:@"view"];
+        [controller synchronizeCandidateServices];
+        [(NSOperationQueue *)[controller valueForKey:@"glossQueue"] waitUntilAllOperationsAreFinished];
+        [(NSOperationQueue *)[controller valueForKey:@"targetGlossQueue"] waitUntilAllOperationsAreFinished];
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+    };
+
+    // The user's own service, with its request in flight while the dictionary's answer for Hello is on screen.
+    session.enabled = YES; session.generation = 1; session.offline = YES;
+    session.targetLanguage = @"en"; session.targetLanguages = @[@"en"];
+    session.custom = @{@"enabled":@YES, @"endpoint":@"https://translation.invalid/api", @"api_key":@""};
+    [controller applySharedToolbarPreferences:@{@"custom_translation":session.custom}];
+    session.page = @[@{@"text":@"Hello", @"source":@4}, @{@"text":@"测试", @"source":@0}];
+    settle();
+    NSTimer *customTimer = [controller valueForKey:@"customTimer"];
+    assert(customTimer.valid);
+    [customTimer fire];
+    assert(controller.batches.count == 1);
+    ControlledTranslationBatch *batch = controller.batches[0];
+    assert(batch.started && [[batch.items valueForKey:@"text"] isEqual:@[@"测试"]]);
+    NSDictionary *glossRequest = [controller valueForKey:@"glossRequest"];
+    [session.appliedGenerations removeAllObjects];
+    session.generation = 2;
+    settle();
+    assert(!batch.cancelled && !batch.detached && controller.batches.count == 1);
+    assert([controller valueForKey:@"glossRequest"] == glossRequest);
+    assert([session.appliedGenerations isEqual:@[@2]]);
+    assert(([session.delivered isEqual:@[@{@"text":@"Hello", @"translation":@"本地释义"}]]));
+    // The reply lands on the page it was asked for, now at generation 2.
+    batch.reply(@[@{@"text":@"测试", @"translation":@"test"}]);
+    assert(([session.delivered isEqual:@[@{@"text":@"Hello", @"translation":@"本地释义"}, @{@"text":@"测试", @"translation":@"test"}]]));
+    [controller cancelCandidateTranslations];
+    [controller applySharedToolbarPreferences:@{@"custom_translation":@{@"enabled":@NO, @"endpoint":@"", @"api_key":@""}}];
+    session.custom = nil;
+
+    // On-device translation: a word already queued is not queued again.
+    session.generation = 3; session.offline = NO;
+    session.page = @[@{@"text":@"测试", @"source":@0}, @{@"text":@"你好", @"source":@0}];
+    session.queryCandidates = @[@{@"text":@"测试", @"online_gloss":@YES}, @{@"text":@"你好", @"online_gloss":@YES}];
+    settle();
+    assert(controller.onDeviceFetches.count == 1 && ([controller.onDeviceFetches[0] isEqual:@[@[@"测试", @"你好"], @[@"en"]]]));
+    [controller onDeviceCandidateTranslationsDidArrive:[NSNotification notificationWithName:@"MSIMEBackendOnDeviceTranslationsDidArrive"
+        object:nil userInfo:@{@"target":@"en", @"translations":@{@"测试":@"test"}}]];
+    assert(([session.delivered isEqual:@[@{@"text":@"测试", @"translation":@"test"}]]));
+    [session.appliedGenerations removeAllObjects];
+    session.generation = 4;
+    settle();
+    assert(controller.onDeviceFetches.count == 1 && [session.appliedGenerations isEqual:@[@4]]);
+    assert(([session.delivered isEqual:@[@{@"text":@"测试", @"translation":@"test"}]]));
+    [controller cancelCandidateTranslations];
+
+    // The account: the pending idle timer is kept, not restarted, and the cached gloss is applied to the new generation.
+    [[MSIMETranslationCache sharedCache] rememberTranslation:@"hello" identity:@[@"account", @"en", @"你好"]];
+    session.account = YES; session.generation = 5;
+    settle();
+    NSTimer *accountTimer = [controller valueForKey:@"accountGlossTimer"];
+    assert(accountTimer.valid && !controller.accountFetches.count);
+    assert(([session.delivered isEqual:@[@{@"text":@"你好", @"translation":@"hello"}]]));
+    [session.appliedGenerations removeAllObjects];
+    session.generation = 6;
+    settle();
+    assert([controller valueForKey:@"accountGlossTimer"] == accountTimer && accountTimer.valid);
+    assert([session.appliedGenerations isEqual:@[@6]] && !controller.accountFetches.count);
+    assert(([session.delivered isEqual:@[@{@"text":@"你好", @"translation":@"hello"}]]));
+    [accountTimer fire];
+    assert(controller.accountFetches.count == 1 && ([controller.accountFetches[0] isEqual:@[@[@"测试"], @"en", @"", @6]]));
+    [controller cancelCandidateTranslations];
+    [[NSUserDefaults new] removePersistentDomainForName:suite];
+    [[MSIMETranslationCache sharedCache] clear];
 }
 
 @interface SettingsRouteWorkspace : NSWorkspace
@@ -6097,6 +6194,7 @@ int main(int argc, char **argv) {
         [NSApplication sharedApplication];
         if (argc == 2 && std::string(argv[1]) == "--translations") {
             TestGlossScheduling();
+            TestGlossSurvivesHighlightMove();
             TestAccountGlossSkipsNonChineseCandidates();
             TestAccountGlossRequiresExplicitChoice();
             TestAccountGlossCacheIsSharedAcrossControllers();
@@ -6135,6 +6233,7 @@ int main(int argc, char **argv) {
         TestCloudCandidatePreference();
         TestCloudCandidateConsent();
         TestGlossScheduling();
+        TestGlossSurvivesHighlightMove();
         TestAccountGlossSkipsNonChineseCandidates();
         TestAccountGlossRequiresExplicitChoice();
         TestAccountGlossCacheIsSharedAcrossControllers();
