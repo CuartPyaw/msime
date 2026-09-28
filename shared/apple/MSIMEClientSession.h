@@ -94,6 +94,9 @@ FOUNDATION_EXPORT NSNotificationName const MSIMEClientSessionDidReplaceSnapshotN
 + (nullable NSArray<NSDictionary *> *)customTranslationPlan:(NSDictionary *)request error:(NSError **)error;
 /// Parse only a successful HTTP response; nil without error means no usable translation.
 + (nullable NSString *)parseCustomTranslationResponse:(NSData *)body error:(NSError **)error;
+/// Whether a custom (DeepLX-compatible) or NiuTrans reply reports a failure - malformed, a non-200 code, errorCode/errorMsg - rather than an answer. The parsers return nil for both a failure and an answer with no text; only answers may be negative-cached.
++ (BOOL)customTranslationReplyFailed:(NSData *)body;
++ (BOOL)niuTransTranslationReplyFailed:(NSData *)body;
 /// Offline dictionary lookup; may run on a worker with copied {generation,candidates:[{text,source}]}.
 + (nullable NSDictionary *)candidateGlossRequest:(NSDictionary *)request resources:(NSString *)resources error:(NSError **)error;
 /// Apply on the originating session/thread only. A stale generation is ignored.

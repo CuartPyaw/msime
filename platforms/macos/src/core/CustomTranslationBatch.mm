@@ -164,19 +164,20 @@
     NSString *text = item[@"text"];
     NSUInteger sequence = _nextIndex;
     __weak MSIMECustomTranslationBatch *weakSelf = self;
-    // `answered` is NO only for a transport failure: nothing came back, so the items stay unanswered and the caller may ask again. A malformed body, or a request that could not even be built, is an answer that will not improve by asking again.
+    // `answered` is NO for a transport failure (nothing came back, which includes HTTP errors such as 429) and for a body in which the provider reports a failure: Tencent's Response.Error, NiuTrans' errorCode, a DeepLX code other than 200, or a malformed body. Those items stay unanswered, so the caller asks again rather than hiding the gloss for eight minutes over a rate limit or an outage. A request that could not even be built is an answer: asking again builds the same invalid request.
     void (^handle)(NSData *, BOOL) = ^(NSData *body, BOOL answered) {
         MSIMECustomTranslationBatch *strongSelf = weakSelf;
         if (!strongSelf || !strongSelf->_completion || sequence != strongSelf->_nextIndex) return;
         NSMutableArray<NSDictionary *> *results = [NSMutableArray array];
-        // A Tencent item is a whole language group, answered by its original texts; every other item is one text.
-        NSArray<NSString *> *answeredTexts = !answered ? @[] : strongSelf->_tencent ? item[@"originals"] : @[text];
         if (strongSelf->_niuTrans) {
             NSString *translation = body ? [MSIMEClientSession parseNiuTransTranslationResponse:body error:nil] : nil;
             if (translation.length) [results addObject:@{@"text":text, @"translation":translation}];
+            if (body && [MSIMEClientSession niuTransTranslationReplyFailed:body]) answered = NO;
         } else if (strongSelf->_tencent) {
             NSArray *translations = body ? [MSIMEClientSession parseTencentTranslationResponse:body
                 expectedCount:[item[@"originals"] count] error:nil] : nil;
+            // Tencent's parser already tells the two apart: an answer is an array, with NSNull where a text got nothing.
+            if (body && !translations) answered = NO;
             for (NSUInteger i = 0; i < translations.count; ++i) {
                 id gloss = translations[i];
                 if ([gloss isKindOfClass:NSString.class] && [gloss length])
@@ -191,7 +192,10 @@
         } else {
             NSString *translation = body ? [MSIMEClientSession parseCustomTranslationResponse:body error:nil] : nil;
             if (translation.length) [results addObject:@{@"text":text, @"translation":translation}];
+            if (body && [MSIMEClientSession customTranslationReplyFailed:body]) answered = NO;
         }
+        // A Tencent item is a whole language group, answered by its original texts; every other item is one text.
+        NSArray<NSString *> *answeredTexts = !answered ? @[] : strongSelf->_tencent ? item[@"originals"] : @[text];
         // The main queue may be busy when the deadline timer becomes due. A response that was already paid for still reaches onReply, so the caller can cache it, but completion keeps to what arrived in time.
         BOOL late = [strongSelf currentTime] >= strongSelf->_deadline;
         if (!late) [strongSelf->_results addObjectsFromArray:results];

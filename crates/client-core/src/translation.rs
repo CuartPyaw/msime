@@ -215,6 +215,18 @@ pub fn is_supported_endpoint(endpoint: &str) -> bool {
         && (endpoint.starts_with("https://") || endpoint.starts_with("http://"))
 }
 
+/// Whether a DeepLX-compatible reply reports a failure rather than an answer: a body that is not a JSON object, or one whose `code` is not 200. A reply that answers with no translation is still an answer, which `parse_translation_response` cannot tell apart from a failure because it returns `None` for both. Hosts negative-cache answers only, so a rate limit or an outage is asked again instead of hiding the gloss.
+pub fn translation_response_failed(response: &str) -> bool {
+    let Ok(root) = serde_json::from_str::<Value>(response) else {
+        return true;
+    };
+    if !root.is_object() {
+        return true;
+    }
+    root.get("code")
+        .is_some_and(|code| !(code.as_i64() == Some(200) || code.as_str() == Some("200")))
+}
+
 pub fn parse_translation_response(response: &str) -> Option<String> {
     let root: Value = serde_json::from_str(response).ok()?;
     if let Some(code) = root.get("code") {
@@ -436,6 +448,16 @@ Signature=fdaffffbe1460ecd8cbc30e296ff6f49cc3b4af10b11e099462cca023fdb2c6c"
         assert!(!usable_credential("<YOUR_NIUTRANS_APP_ID>"));
         assert!(!usable_credential("FAKESECRET_test"));
         assert!(!usable_credential(" \n\t"));
+    }
+
+    #[test]
+    fn an_empty_answer_is_not_a_failed_reply() {
+        assert!(!translation_response_failed(r#"{"code":200,"data":""}"#));
+        assert!(!translation_response_failed(r#"{"data":"hello"}"#));
+        assert!(translation_response_failed(r#"{"code":429,"message":"rate limited"}"#));
+        assert!(translation_response_failed(r#"{"code":"500"}"#));
+        assert!(translation_response_failed("<html>Bad Gateway</html>"));
+        assert!(translation_response_failed(r#"["data"]"#));
     }
 
     #[test]

@@ -342,6 +342,37 @@ pub unsafe extern "C" fn msime_client_parse_custom_translation_response(
     })
 }
 
+/// Whether a DeepLX-compatible reply reports a failure rather than an answer. A failed reply is asked again; only an answer, empty or not, may be negative-cached. An oversized or null buffer is a failure.
+/// # Safety
+/// `body` must reference `length` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_custom_translation_reply_failed(
+    body: *const u8,
+    length: usize,
+) -> bool {
+    if body.is_null() || length > 1048576 {
+        return true;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(body, length) };
+    std::str::from_utf8(bytes)
+        .map(msime_client_core::translation::translation_response_failed)
+        .unwrap_or(true)
+}
+
+/// Whether a NiuTrans reply reports a failure (rate limit, credentials, malformed body) rather than an answer. A failed reply is asked again; only an answer, empty or not, may be negative-cached.
+/// # Safety
+/// `body` must reference `length` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_niutrans_translation_reply_failed(
+    body: *const u8,
+    length: usize,
+) -> bool {
+    if body.is_null() {
+        return true;
+    }
+    niutrans_translation::failed(unsafe { std::slice::from_raw_parts(body, length) })
+}
+
 /// Apply asynchronous candidate translations for an exact candidate generation.
 /// The buffer is a JSON array of `{text, translation}` objects and is not retained.
 ///

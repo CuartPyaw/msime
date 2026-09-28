@@ -82,8 +82,8 @@ static void TestSequentialResults() {
     assert(batch.requests.count == 4);
     batch.requests[3].reply(Response(@"四"));
     assert(calls == 1);
-    // A transport failure answers nothing, so "two" stays free to be asked again; a malformed body is an answer.
-    assert(([replies isEqual:@[@[@[@{@"text":@"one", @"translation":@"一"}], @[@"one"]], @[@[], @[]], @[@[], @[@"three"]],
+    // Neither a transport failure nor a malformed body answers anything, so "two" and "three" stay free to be asked again.
+    assert(([replies isEqual:@[@[@[@{@"text":@"one", @"translation":@"一"}], @[@"one"]], @[@[], @[]], @[@[], @[]],
         @[@[@{@"text":@"four", @"translation":@"四"}], @[@"four"]]]]));
     [batch start]; [batch cancel];
     batch.requests[3].reply(Response(@"late"));
@@ -198,6 +198,18 @@ static void TestBoundsAndEmptyResults() {
     assert(calls == 1);
     AssertReleased(invalidTransport);
 }
+// A provider that reports a failure in a well-formed body - DeepLX's non-200 code, as a rate limit or an outage comes back - has not answered: negative-caching it would hide the gloss for eight minutes over something asking again fixes. An answer with no translation is still an answer.
+static void TestFailedRepliesAreNotAnswers() {
+    SyntheticTranslationBatch *batch = Batch(@[Item(@"one"), Item(@"two"), Item(@"three")], ^(NSArray *results) { assert(results.count == 0); });
+    NSMutableArray *answered = [NSMutableArray array];
+    batch.onReply = ^(NSArray *results, NSArray *texts) { assert(results.count == 0); [answered addObject:texts]; };
+    [batch start];
+    batch.requests[0].reply([@"{\"code\":429,\"message\":\"rate limited\"}" dataUsingEncoding:NSUTF8StringEncoding]);
+    batch.requests[1].reply([@"{\"code\":200,\"data\":\"\"}" dataUsingEncoding:NSUTF8StringEncoding]);
+    batch.requests[2].reply([@"{\"code\":\"500\"}" dataUsingEncoding:NSUTF8StringEncoding]);
+    assert(([answered isEqual:@[@[], @[@"two"], @[]]]));
+    AssertReleased(batch);
+}
 static NSDictionary *TencentItem(NSString *text, NSString *key, NSString *source, NSString *target) {
     return @{@"text":text, @"key":key, @"source_language":source, @"target_language":target};
 }
@@ -236,6 +248,18 @@ static void TestTencentGroups() {
     assert(batch.requests.count == 2);
     batch.requests[1].reply(TencentResponse(@[@"こんにちは"]));
     assert(calls == 1);
+    AssertReleased(batch);
+}
+static void TestTencentFailedRepliesAreNotAnswers() {
+    NSArray *items = @[TencentItem(@"Hello", @"hello", @"en", @"zh"), TencentItem(@"你好", @"你好", @"zh", @"en")];
+    SyntheticTranslationBatch *batch = TencentBatch(items, ^(NSArray *results) { (void)results; });
+    NSMutableArray *answered = [NSMutableArray array];
+    batch.onReply = ^(NSArray *results, NSArray *texts) { (void)results; [answered addObject:texts]; };
+    [batch start];
+    // Tencent reports a rate limit or a signature error as Response.Error in an HTTP 200 body.
+    batch.requests[0].reply([@"{\"Response\":{\"Error\":{\"Code\":\"RequestLimitExceeded\"}}}" dataUsingEncoding:NSUTF8StringEncoding]);
+    batch.requests[1].reply(TencentResponse(@[@""]));
+    assert(([answered isEqual:@[@[], @[@"你好"]]]));
     AssertReleased(batch);
 }
 static void TestTencentFailuresAndCancellation() {
@@ -380,12 +404,14 @@ static void TestAIItems() {
 int main() {
     @autoreleasepool {
         TestSequentialResults();
+        TestFailedRepliesAreNotAnswers();
         TestDeadline();
         TestCancellationAndLifetime();
         TestCopiedInput();
         TestBoundsAndEmptyResults();
         TestTencentGroups();
         TestTencentFailuresAndCancellation();
+        TestTencentFailedRepliesAreNotAnswers();
         TestDetachLetsInFlightLand();
         TestAIItems();
     }
