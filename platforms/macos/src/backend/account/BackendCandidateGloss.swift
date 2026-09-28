@@ -56,21 +56,28 @@ enum BackendCandidateGloss {
     await withTaskGroup(of: Void.self) { group in
       for code in [request.primary, request.secondary] where !code.isEmpty {
         group.addTask {
+          // A request that failed (offline, rate limited) posts nothing, so the words stay unknown and are asked about again.
           guard let values = try? await client.translate(texts: words, target: code, token: token) else { return }
-          // Every word asked about gets an answer, so the input method can remember the ones the account had nothing for and stop asking about them for a while, as Windows does. An empty or unchanged value is sent as "", and a duplicate candidate keeps whichever of its answers is not empty. A request that failed (offline, rate limited) posts nothing, so the words stay unknown and are asked about again.
-          let table = Dictionary(zip(words, values).map { ($0.0, $0.1 == $0.0 ? "" : $0.1) },
-                                 uniquingKeysWith: { first, second in first.isEmpty ? second : first })
           await MainActor.run {
-            NotificationCenter.default.post(name: notification, object: nil, userInfo: [
-              // Each reply names its own language, so the input method files it under that target without depending on the order in which the two requests finish, and saves only the English one to the learned glossary.
-              "generation": generation,
-              "target": code,
-              "translations": table,
-            ])
+            NotificationCenter.default.post(name: notification, object: nil,
+                                            userInfo: payload(words: words, values: values, code: code, generation: generation))
           }
         }
       }
     }
+  }
+
+  // The notification's userInfo for one language's reply, apart from the network so BackendAccountTests can check what the input method receives.
+  nonisolated static func payload(words: [String], values: [String], code: String, generation: UInt64) -> [String: Any] {
+    // Every word asked about gets an answer, so the input method can remember the ones the account had nothing for and stop asking about them for a while, as Windows does. An empty or unchanged value is sent as "", and a duplicate candidate keeps whichever of its answers is not empty.
+    let table = Dictionary(zip(words, values).map { ($0.0, $0.1 == $0.0 ? "" : $0.1) },
+                           uniquingKeysWith: { first, second in first.isEmpty ? second : first })
+    return [
+      // Each reply names its own language, so the input method files it under that target without depending on the order in which the two requests finish, and saves only the English one to the learned glossary.
+      "generation": generation,
+      "target": code,
+      "translations": table,
+    ]
   }
 }
 

@@ -184,8 +184,17 @@ private final class AccountFixture: URLProtocol, @unchecked Sendable {
     try await Task.sleep(nanoseconds: 50_000_000)
     try require(started == [1, 3, 5] && release.isEmpty)
   }
+  // The input method files a reply under the target it names and drops one without it, and it caches an empty answer as "the account has nothing", so every word asked about must be in the table.
+  @MainActor static func candidateGlossPayload() throws {
+    let info = BackendCandidateGloss.payload(words: ["测试", "东京", "空白", "测试", "你好", "你好"],
+                                             values: ["", "东京", "", "test", "hello", ""], code: "ja", generation: 7)
+    try require(info["target"] as? String == "ja" && info["generation"] as? UInt64 == 7)
+    // An unchanged value is sent as "", an empty one stays, and a duplicate keeps its non-empty answer whichever comes first.
+    try require(info["translations"] as? [String: String] == ["测试": "test", "东京": "", "空白": "", "你好": "hello"])
+  }
   @MainActor static func main() async throws {
     try windowAccountIsolation()
+    try candidateGlossPayload()
     try await candidateGlossSingleFlight()
     try await fileTransfer()
     try await anonymousAccountFallback()
