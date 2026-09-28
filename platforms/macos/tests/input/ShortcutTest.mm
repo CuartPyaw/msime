@@ -5465,7 +5465,8 @@ static void TestOnDeviceGlosses() {
     settle();
     assert(controller.onDeviceFetches.count == 1 && ([controller.onDeviceFetches[0] isEqual:@[@[@"你好"], @[@"fr"]]]));
     assert(([session.delivered isEqual:@[@{@"text":@"测试", @"translation":@"essai"}]]));
-    reply(@"fr", @{@"你好":@"bonjour"});
+    // Every controller hears every on-device reply, so one can carry a word this controller skipped; the target's dictionary still keeps the rows it answered.
+    reply(@"fr", @{@"测试":@"tester", @"你好":@"bonjour"});
     assert(([session.delivered isEqual:@[@{@"text":@"测试", @"translation":@"essai"}, @{@"text":@"你好", @"translation":@"bonjour"}]]));
     // A word already answered, even with nothing useful, is not asked about again.
     session.generation++; session.page = @[@{@"text":@"你好", @"source":@0}, @{@"text":@"世界", @"source":@0}];
