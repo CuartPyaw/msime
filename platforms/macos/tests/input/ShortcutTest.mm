@@ -5447,11 +5447,15 @@ static void TestOnDeviceGlosses() {
         [controller onDeviceCandidateTranslationsDidArrive:[NSNotification notificationWithName:@"MSIMEBackendOnDeviceTranslationsDidArrive"
             object:nil userInfo:@{@"target":target, @"translations":translations}]];
     };
-    // Only Chinese candidates are asked about, and the dictionary keeps the rows it answered.
+    // Nothing is asked before the target's offline dictionary has answered; its completion asks.
+    [controller synchronizeTargetGloss];
+    [controller synchronizeOnDeviceGloss];
+    assert(!controller.onDeviceFetches.count);
+    // Only Chinese candidates are asked about, and only those the target's dictionary left empty: 测试 has a French entry, so the model never spends time on it.
     settle();
-    assert(controller.onDeviceFetches.count == 1 && ([controller.onDeviceFetches[0] isEqual:@[@[@"测试", @"你好"], @[@"fr"]]]));
+    assert(controller.onDeviceFetches.count == 1 && ([controller.onDeviceFetches[0] isEqual:@[@[@"你好"], @[@"fr"]]]));
     assert(([session.delivered isEqual:@[@{@"text":@"测试", @"translation":@"essai"}]]));
-    reply(@"fr", @{@"测试":@"tester", @"你好":@"bonjour"});
+    reply(@"fr", @{@"你好":@"bonjour"});
     assert(([session.delivered isEqual:@[@{@"text":@"测试", @"translation":@"essai"}, @{@"text":@"你好", @"translation":@"bonjour"}]]));
     // A word already answered, even with nothing useful, is not asked about again.
     session.generation++; session.page = @[@{@"text":@"你好", @"source":@0}, @{@"text":@"世界", @"source":@0}];
@@ -5474,8 +5478,9 @@ static void TestOnDeviceGlosses() {
     // Each target is asked for its own words, so one target's gap does not send the word through the other's line too.
     assert(controller.onDeviceFetches.count == 4 && ([controller.onDeviceFetches[2] isEqual:@[@[@"测试"], @[@"en"]]]) &&
            ([controller.onDeviceFetches[3] isEqual:@[@[@"测试"], @[@"de"]]]));
-    reply(@"de", @{@"测试":@"Test"});
-    assert(([session.delivered isEqual:@[@{@"text":@"Hello", @"translation":@"本地释义"}, @{@"text":@"测试", @"translation":@"\nTest"}]]));
+    // A model answer over several lines is formatted to one, so it stays on the second target's row instead of opening a third.
+    reply(@"de", @{@"测试":@"Test\nfoo "});
+    assert(([session.delivered isEqual:@[@{@"text":@"Hello", @"translation":@"本地释义"}, @{@"text":@"测试", @"translation":@"\nTest foo"}]]));
     // A Chinese word the English dictionary answers keeps its place in the page but is not sent to the model for English, which spends half a second on every word it is given.
     controller.extraEnglishGlosses = @{@"你好":@"hello"};
     session.generation++; session.targetLanguages = @[@"en"];
@@ -5567,8 +5572,9 @@ static void TestOnDeviceGlossPersistence() {
     session.page = @[@{@"text":@"你好", @"source":@0}];
     session.queryCandidates = @[@{@"text":@"你好", @"online_gloss":@YES}];
     settle(writer);
-    // English first, so a German reply that reached the glossary would overwrite it.
-    reply(writer, @"en", @{@"测试":@"test"});
+    // English first, so a German reply that reached the glossary would overwrite it. The model's line break and trailing space are formatted away before the gloss is cached or saved.
+    reply(writer, @"en", @{@"测试":@"test\nfoo "});
+    assert([[[MSIMETranslationCache sharedCache] valueForIdentity:MSIMEOnDeviceGlossIdentity(@"en", @"测试")] isEqual:@"test foo"]);
     reply(writer, @"de", @{@"测试":@"Prüfung"});
     // An empty answer is not a gloss and stays in the process cache only. The glossary store rejects it too, so this records the outcome rather than isolating the length check in persistOnDeviceGlosses.
     reply(writer, @"en", @{@"再见":@""});
@@ -5579,7 +5585,7 @@ static void TestOnDeviceGlossPersistence() {
     reply(writer, @"en", @{@"你好":@"hello"});
     dispatch_sync([MSIMEInputController learnedTranslationQueue], ^{});
     // Saved under the Chinese key in the Chinese-to-English direction; the lookup only finds it there.
-    assert(([lookup()[@"translations"] isEqual:@[@{@"text":@"测试", @"translation":@"test"}, @{@"text":@"你好", @"translation":@"hello"}]]));
+    assert(([lookup()[@"translations"] isEqual:@[@{@"text":@"测试", @"translation":@"test foo"}, @{@"text":@"你好", @"translation":@"hello"}]]));
     // A fresh controller with an empty process cache, as after a restart, answers the saved word from the glossary and only asks the model about the rest.
     [writer cancelCandidateTranslations]; [[MSIMETranslationCache sharedCache] clear];
     session.page = askedPage; session.queryCandidates = askedQuery;
@@ -5587,7 +5593,7 @@ static void TestOnDeviceGlossPersistence() {
     CustomTranslationController *reader = attach();
     settle(reader);
     assert(reader.onDeviceFetches.count == 1 && ([reader.onDeviceFetches[0] isEqual:@[@[@"再见"], @[@"en"]]]));
-    assert(([session.delivered isEqual:@[@{@"text":@"测试", @"translation":@"test"}]]));
+    assert(([session.delivered isEqual:@[@{@"text":@"测试", @"translation":@"test foo"}]]));
     [reader cancelCandidateTranslations];
     [[NSUserDefaults new] removePersistentDomainForName:suite];
     NSError *error = nil;

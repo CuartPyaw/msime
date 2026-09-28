@@ -184,6 +184,13 @@ static NSDictionary *decode(char *response, NSError **error) {
     id value = decodeValue(msime_client_parse_niutrans_translation_response((const uint8_t *)body.bytes, body.length), error);
     return [value isKindOfClass:NSString.class] ? value : nil;
 }
++ (NSString *)formatTranslationGloss:(NSString *)gloss error:(NSError **)error {
+    NSData *data = [gloss isKindOfClass:NSString.class] ? [gloss dataUsingEncoding:NSUTF8StringEncoding] : nil;
+    if (!data || data.length > 65536) { setError(error, @"翻译释义格式错误或过大"); return nil; }
+    if (!data.length) return nil;
+    id value = decodeValue(msime_client_format_translation_gloss((const uint8_t *)data.bytes, data.length), error);
+    return [value isKindOfClass:NSString.class] ? value : nil;
+}
 + (NSDictionary *)aiHTTPRequest:(NSDictionary *)request error:(NSError **)error {
     if (![NSJSONSerialization isValidJSONObject:request]) { setError(error, @"AI 请求格式错误"); return nil; }
     NSData *data = [NSJSONSerialization dataWithJSONObject:request options:0 error:error];

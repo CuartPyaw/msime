@@ -1936,6 +1936,10 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
         if ([result[@"text"] isKindOfClass:NSString.class] && [result[@"translation"] isKindOfClass:NSString.class] &&
             [result[@"translation"] length])
             [dictionaryAnswered addObject:result[@"text"]];
+    // The same holds for the other targets' offline dictionaries, as Windows hands the slow path only what the local dictionaries missed (event_listener.cpp ApplyCandidateTranslations); their completion comes back here too.
+    NSDictionary *targetGloss = [self currentTargetGlossRequest];
+    if (targetGloss && (![_targetGlossRequest isEqual:targetGloss] || !_targetGlossResults)) return;
+    NSDictionary *targetAnswered = targetGloss ? _targetGlossResults : nil;
     _onDeviceGlossRequest = request;
     [self applyCandidateTranslationResults];
     // Only what no earlier page or dictionary already answered, per target, in page order so the first candidate is translated first. The backend works one word at a time and a newer page takes over after the word in flight, so typing does not queue up stale work.
@@ -1944,6 +1948,7 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
         for (NSDictionary *candidate in request[@"candidates"]) {
             NSString *text = candidate[@"text"];
             if ([target isEqualToString:@"en"] && [dictionaryAnswered containsObject:text]) continue;
+            if ([targetAnswered[text][target] isKindOfClass:NSString.class] && [targetAnswered[text][target] length]) continue;
             if ([[MSIMETranslationCache sharedCache] valueForIdentity:MSIMEOnDeviceGlossIdentity(target, text)]) continue;
             if (![words containsObject:text]) [words addObject:text];
         }
@@ -1963,11 +1968,17 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     NSString *target = notification.userInfo[@"target"];
     NSDictionary *values = notification.userInfo[@"translations"];
     if (![target isKindOfClass:NSString.class] || ![values isKindOfClass:NSDictionary.class]) return;
+    // Formatted before it is cached, shown or saved, as Windows formats every fetched gloss first (translation_gloss.cpp FormatGloss): the model can answer over several lines, and a newline kept in the gloss starts a row of its own that pushes the next target's gloss out of place. A gloss that formats to nothing, or to the word itself, is kept as an empty answer so the word is not asked about again.
+    NSMutableDictionary<NSString *, NSString *> *formatted = [NSMutableDictionary dictionary];
     for (NSString *text in values) {
         NSString *value = values[text];
-        if ([text isKindOfClass:NSString.class] && [value isKindOfClass:NSString.class])
-            [[MSIMETranslationCache sharedCache] rememberTranslation:value identity:MSIMEOnDeviceGlossIdentity(target, text)];
+        if (![text isKindOfClass:NSString.class] || ![value isKindOfClass:NSString.class]) continue;
+        NSString *gloss = [MSIMEClientSession formatTranslationGloss:value error:nil];
+        if (!gloss || [gloss isEqualToString:[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]]) gloss = @"";
+        formatted[text] = gloss;
+        [[MSIMETranslationCache sharedCache] rememberTranslation:gloss identity:MSIMEOnDeviceGlossIdentity(target, text)];
     }
+    values = formatted;
     // Persisted whether or not the page is still on screen, as Windows persists every fetch that completes: a reply for a page the user typed past would otherwise sit in the process cache, never be asked for again, and never reach the glossary.
     if ([target isEqualToString:@"en"]) [self persistOnDeviceGlosses:values];
     // Every controller hears the reply; only one still composing the page it asked about merges it.
@@ -2351,7 +2362,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
                 ![[current currentTargetGlossRequest] isEqual:request]) return;
             current->_targetGlossResults = [values copy];
             [current applyCandidateTranslationResults];
-            // The account request waits for this dictionary so it can skip what the dictionary answered.
+            // On-device translation and the account request wait for this dictionary so they can skip what it answered.
+            [current synchronizeOnDeviceGloss];
             [current synchronizeAccountGloss:[current currentAccountGlossRequest]];
         });
     }];

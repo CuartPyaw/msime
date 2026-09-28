@@ -404,6 +404,29 @@ Signature=fdaffffbe1460ecd8cbc30e296ff6f49cc3b4af10b11e099462cca023fdb2c6c"
     }
 
     #[test]
+    fn formats_multiline_translation_gloss_onto_one_line() {
+        // A host shows one row per target language, so a newline kept here would push the next target's gloss onto the wrong row.
+        assert_eq!(
+            format_translation_gloss("test\nfoo"),
+            Some("test foo".into())
+        );
+        assert_eq!(
+            format_translation_gloss("a\r\n\r\nb\n\tc"),
+            Some("a b c".into())
+        );
+    }
+
+    #[test]
+    fn formats_translation_gloss_without_trailing_whitespace() {
+        assert_eq!(
+            format_translation_gloss("test foo "),
+            Some("test foo".into())
+        );
+        assert_eq!(format_translation_gloss("test\n"), Some("test".into()));
+        assert_eq!(format_translation_gloss(" \n\t"), None);
+    }
+
+    #[test]
     fn niutrans_auth_string_is_sorted_md5_and_credentials_filter_placeholders() {
         assert_eq!(
             niutrans_auth_string("app-id", "api-key", "en", "zh", "1704067200000", "hello"),

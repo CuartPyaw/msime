@@ -4308,6 +4308,24 @@ fn learned_translation_buffers_are_bounded() {
     }
 }
 #[test]
+fn formats_host_translation_glosses_like_provider_replies() {
+    let format = |text: &[u8]| {
+        read(unsafe { msime_client_format_translation_gloss(text.as_ptr(), text.len()) })
+    };
+    assert_eq!(format(b"test\nfoo ")["value"], "test foo");
+    assert_eq!(format(b" \n")["value"], Value::Null);
+    assert_eq!(format(b"a\x07b")["value"], Value::Null);
+    assert_eq!(format(b"\xff")["ok"], false);
+    assert_eq!(
+        read(unsafe { msime_client_format_translation_gloss(std::ptr::null(), 0) })["ok"],
+        false
+    );
+    assert_eq!(
+        read(unsafe { msime_client_format_translation_gloss(b"x".as_ptr(), 65537) })["ok"],
+        false
+    );
+}
+#[test]
 fn tencent_translation_buffers_are_bounded() {
     assert_eq!(
         read(unsafe { msime_client_tencent_translation_http_request(std::ptr::null(), 0) })["ok"],
