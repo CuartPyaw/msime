@@ -1,14 +1,20 @@
 #!/bin/bash
 set -eu
-shopt -s globstar nullglob
 root=$(CDPATH= cd -- "$(dirname "$0")/../../.." && pwd)
-out=$(mktemp "${TMPDIR:-/tmp}/msime-backend-account-tests.XXXXXX")
-trap 'rm -f "$out"' EXIT
+# With an output path the harness is only built there, which is how CMake prebuilds it for ctest; without one it is built to a temporary file and run.
+if [[ $# -gt 0 ]]; then
+  out=$1
+else
+  out=$(mktemp "${TMPDIR:-/tmp}/msime-backend-account-tests.XXXXXX")
+  trap 'rm -f "$out"' EXIT
+fi
 sources=()
-for source in "$root"/shared/backend/account/*.swift "$root"/shared/backend/clients/*.swift "$root"/shared/backend/content/*.swift "$root"/shared/backend/storage/*.swift "$root"/shared/backend-ui/**/*.swift "$root"/platforms/macos/src/backend/**/*.swift; do
+# find rather than globstar: /bin/bash on macOS is 3.2, which has no globstar, so the recursive pattern silently matched nothing there.
+while IFS= read -r source; do
   if [[ ${source##*/} != Package.swift ]]; then sources+=("$source"); fi
-done
+done < <(find "$root/shared/backend/account" "$root/shared/backend/clients" "$root/shared/backend/content" "$root/shared/backend/storage" "$root/shared/backend-ui" "$root/platforms/macos/src/backend" -type f -name '*.swift' -print | sort)
 swift_target=${MSIME_SWIFT_TARGET:-$(uname -m)-apple-macosx${MACOSX_DEPLOYMENT_TARGET:-13.0}}
-xcrun swiftc -parse-as-library -emit-executable -target "$swift_target" \
+# Weak like the backend dylib (build_backend_swift.sh): Translation.framework first ships with macOS 15, and a strong link would stop the harness from loading on an older runner.
+xcrun swiftc -parse-as-library -emit-executable -target "$swift_target" -Xlinker -weak_framework -Xlinker Translation \
   -o "$out" "${sources[@]}" "$root/platforms/macos/tests/core/BackendAccountTests.swift"
-"$out"
+if [[ $# -eq 0 ]]; then "$out"; fi
