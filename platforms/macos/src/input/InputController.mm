@@ -895,6 +895,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     NSDictionary *_accountGlossRequest;
     NSArray<NSDictionary *> *_accountGlossResults;
     uint64_t _accountGlossEpoch;
+    // Each word this controller sent to the account for an English gloss, mapped to the preferences directory of the page that sent it: every controller hears every reply, so only the one that asked saves it, and the reply often lands after that page has moved on.
+    NSMutableDictionary<NSString *, NSString *> *_accountEnglishQueries;
     NSDictionary *_onDeviceGlossRequest;
     // Each English word this controller sent to the on-device model, mapped to the English gloss request of the page that sent it: that request carries the Engine source and directory persisting needs, and the reply often lands after the page has moved on.
     NSMutableDictionary<NSString *, NSDictionary *> *_onDeviceEnglishQueries;
@@ -1745,42 +1747,76 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     _accountGlossSignature = [signature copy];
     NSMutableArray *unique = [NSMutableArray array];
     for (NSString *text in pending) if (![unique containsObject:text]) [unique addObject:text];
-    NSData *payload = [NSJSONSerialization dataWithJSONObject:unique options:0 error:nil];
-    if (!payload) return;
     NSString *primary = targets.firstObject ?: @"";
     NSString *secondary = targets.count > 1 ? targets[1] : @"";
-    // weak_import: the Swift backend supplies this, and a process without the dylib binds it to null.
-    // Calling through that is a jump to address zero, which is what the settings window's three call
-    // sites have always guarded against and these two did not.
+    if ([targets containsObject:@"en"] && _preferencesDirectory.isAbsolutePath) {
+        // Words a newer page displaced never reply, so the map is bounded rather than drained.
+        if (!_accountEnglishQueries || _accountEnglishQueries.count > 64) _accountEnglishQueries = [NSMutableDictionary dictionary];
+        for (NSString *text in unique) _accountEnglishQueries[text] = [_preferencesDirectory copy];
+    }
+    [self fetchAccountGlosses:unique primary:primary secondary:secondary generation:[request[@"generation"] unsignedLongLongValue]];
+}
+
+- (void)fetchAccountGlosses:(NSArray<NSString *> *)words primary:(NSString *)primary secondary:(NSString *)secondary
+                 generation:(uint64_t)generation {
+    // weak_import: the Swift backend supplies this, and a process without the dylib binds it to null. Calling through that is a jump to address zero, which is what the settings window's three call sites have always guarded against and these two did not.
     if (MSIMEFetchAccountCandidateGlosses == nullptr) return;
+    NSData *payload = [NSJSONSerialization dataWithJSONObject:words options:0 error:nil];
+    if (!payload) return;
     MSIMEFetchAccountCandidateGlosses([[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding].UTF8String,
-                                      primary.UTF8String, secondary.UTF8String,
-                                      [request[@"generation"] unsignedLongLongValue]);
+                                      primary.UTF8String, secondary.UTF8String, generation);
 }
 
 - (void)accountCandidateTranslationsDidArrive:(NSNotification *)notification {
     NSDictionary *info = notification.userInfo;
-    if (![_accountGlossRequest isKindOfClass:NSDictionary.class] || ![info isKindOfClass:NSDictionary.class]) return;
+    if (![info isKindOfClass:NSDictionary.class]) return;
+    NSString *target = info[@"target"];
+    NSDictionary *values = info[@"translations"];
+    if (![target isKindOfClass:NSString.class] || ![values isKindOfClass:NSDictionary.class]) return;
+    // Persisted before any check on the current page, as Windows persists every fetch that completes: a reply for a page the user typed past, or a candidate already committed, would otherwise never reach the glossary.
+    if ([target isEqualToString:@"en"]) [self persistAccountGlosses:values];
+    if (![_accountGlossRequest isKindOfClass:NSDictionary.class]) return;
     // The account backend can finish a request after this controller has moved on to a newer
     // candidate generation. Do not let that late response populate the current page (or its
     // shared cache) with data belonging to the old request.
     NSNumber *generation = info[@"generation"];
     if (![generation isKindOfClass:NSNumber.class] ||
         ![generation isEqual:_accountGlossRequest[@"generation"]]) return;
-    void (^merge)(NSDictionary *, NSString *) = ^(NSDictionary *values, NSString *target) {
-        if (![values isKindOfClass:NSDictionary.class]) return;
-        for (NSString *text in values) {
-            NSString *value = values[text];
-            if ([text isKindOfClass:NSString.class] && [value isKindOfClass:NSString.class] && value.length)
-                [[MSIMETranslationCache sharedCache] rememberTranslation:value
-                                                                identity:MSIMEAccountGlossIdentity(target, text)];
-        }
-    };
-    NSArray *targets = _accountGlossRequest[@"target_languages"];
-    merge(info[@"translations"], targets.firstObject ?: @"");
-    if (targets.count > 1) merge(info[@"secondaryTranslations"], targets[1]);
+    for (NSString *text in values) {
+        NSString *value = values[text];
+        if ([text isKindOfClass:NSString.class] && [value isKindOfClass:NSString.class] && value.length)
+            [[MSIMETranslationCache sharedCache] rememberTranslation:value
+                                                            identity:MSIMEAccountGlossIdentity(target, text)];
+    }
     _accountGlossResults = [self accountGlossResultsForRequest:_accountGlossRequest];
     [self applyCandidateTranslationResults];
+}
+
+// Windows saves every English gloss it fetches to the user glossary the moment it arrives (cloud_translation.cpp PersistGloss), so the offline lookup answers that word from then on, across restarts. Account glosses used to wait for the commit, which never saved anything: the account query rows carry no Engine source, so the custom translation plan rejected them. The learned glossary needs no source, only the direction, which is always Chinese to English here because the account is only asked about Chinese candidates; it checks eligibility and formats the gloss itself.
+- (void)persistAccountGlosses:(NSDictionary *)values {
+    NSMutableDictionary<NSString *, NSMutableArray *> *batches = [NSMutableDictionary dictionary];
+    for (NSString *text in values) {
+        NSString *directory = [text isKindOfClass:NSString.class] ? _accountEnglishQueries[text] : nil;
+        if (!directory) continue;
+        [_accountEnglishQueries removeObjectForKey:text];
+        NSString *value = values[text];
+        // The store rejects a whole batch over one word longer than 40 characters or one oversized gloss, so those are left out here rather than taking their neighbours down with them.
+        if (![value isKindOfClass:NSString.class] || !value.length || [value lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > 4096 ||
+            [text lengthOfBytesUsingEncoding:NSUTF32StringEncoding] > 40 * 4) continue;
+        if (!batches[directory]) batches[directory] = [NSMutableArray array];
+        [batches[directory] addObject:@{@"text":text, @"direction":@"chinese_to_english", @"translation":value}];
+    }
+    for (NSString *directory in batches) {
+        NSArray *items = batches[directory];
+        // The store takes at most nine items per request.
+        for (NSUInteger start = 0; start < items.count; start += 9) {
+            NSDictionary *request = @{@"directory":directory, @"generation":@0, @"target_language":@"en", @"action":@"remember",
+                @"items":[items subarrayWithRange:NSMakeRange(start, MIN((NSUInteger)9, items.count - start))]};
+            dispatch_async([MSIMEInputController learnedTranslationQueue], ^{
+                [MSIMEClientSession learnedTranslationRequest:request error:nil];
+            });
+        }
+    }
 }
 
 - (void)cancelOnDeviceGloss {
@@ -2104,34 +2140,6 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
             }
     if (!candidates.count) return;
     NSArray *items = [self learnedTranslationItems:candidates results:results];
-    if (!items.count) return;
-    NSDictionary *request = @{ @"directory":[directory copy], @"generation":query[@"generation"] ?: @0,
-        @"target_language":@"en", @"action":@"remember", @"items":items};
-    dispatch_async([MSIMEInputController learnedTranslationQueue], ^{
-        [MSIMEClientSession learnedTranslationRequest:request error:nil];
-    });
-}
-- (void)persistCommittedCandidateTranslation:(NSString *)text {
-    if (![text isKindOfClass:NSString.class] || !text.length) return;
-    // Provider glosses are already saved when they are fetched; only hosted account glosses wait for the commit.
-    if (_customQuery) return;
-    NSDictionary *query = _accountGlossRequest;
-    NSArray *targets = query ? (query[@"target_languages"] ?: @[]) : @[];
-    NSString *directory = query[@"directory"] ?: _preferencesDirectory;
-    if (!directory.isAbsolutePath || ![targets containsObject:@"en"]) return;
-    NSDictionary *match = nil;
-    for (NSDictionary *entry in _accountGlossResults)
-        if ([entry[@"text"] isEqual:text] && [entry[@"translation"] isKindOfClass:NSString.class] && [entry[@"translation"] length]) {
-            match = entry;
-            break;
-        }
-    if (!match) return;
-    // The plan rejects a candidate without its Engine source, so reuse the one the query was built from rather than synthesising a bare {text:}. A synthesised candidate parses as invalid, the plan comes back empty, and nothing is ever written to the glossary.
-    NSDictionary *committed = nil;
-    for (NSDictionary *candidate in query[@"candidates"])
-        if ([candidate[@"text"] isEqual:text]) { committed = candidate; break; }
-    if (!committed) return;
-    NSArray *items = [self learnedTranslationItems:@[committed] results:@[match]];
     if (!items.count) return;
     NSDictionary *request = @{ @"directory":[directory copy], @"generation":query[@"generation"] ?: @0,
         @"target_language":@"en", @"action":@"remember", @"items":items};
@@ -4974,8 +4982,6 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         }
     }
     NSString *commitForTracking = transition[@"commit"];
-    if ([commitForTracking isKindOfClass:NSString.class] && commitForTracking.length)
-        [self persistCommittedCandidateTranslation:commitForTracking];
     if ([commitForTracking isKindOfClass:NSString.class] && commitForTracking.length)
         _armedGlossColumn = 0;
     // The Engine commits the opening mark alone; closing the pair is this host's job, the way the

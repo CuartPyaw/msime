@@ -21,7 +21,7 @@ private enum BackendCandidateGloss {
     Task {
       guard let token = try? await token() else { return }
       await withTaskGroup(of: Void.self) { group in
-        for (code, isSecondary) in [(primary, false), (secondary, true)] where !code.isEmpty {
+        for code in [primary, secondary] where !code.isEmpty {
           group.addTask {
             guard let values = try? await client.translate(texts: words, target: code, token: token) else { return }
             // Duplicate candidate text is valid. Keep the first response and reject empty or
@@ -31,8 +31,10 @@ private enum BackendCandidateGloss {
             guard !table.isEmpty else { return }
             await MainActor.run {
               NotificationCenter.default.post(name: notification, object: nil, userInfo: [
+                // Each reply names its own language, so the input method files it under that target without depending on the order in which the two requests finish, and saves only the English one to the learned glossary.
                 "generation": generation,
-                isSecondary ? "secondaryTranslations" : "translations": table,
+                "target": code,
+                "translations": table,
               ])
             }
           }

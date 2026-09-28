@@ -4642,6 +4642,7 @@ static void TestAiCandidateDescriptorFailureIsRetryable() {
 @interface CustomTranslationController : CloudShortcutController
 @property(nonatomic, strong) NSMutableArray<ControlledTranslationBatch *> *batches;
 @property(nonatomic, strong) NSMutableArray<NSArray *> *onDeviceFetches;
+@property(nonatomic, strong) NSMutableArray<NSArray *> *accountFetches;
 // Packaged English dictionary answers beyond Hello's.
 @property(nonatomic, copy) NSDictionary<NSString *, NSString *> *extraEnglishGlosses;
 @property(nonatomic) BOOL useRealDelay;
@@ -4650,6 +4651,11 @@ static void TestAiCandidateDescriptorFailureIsRetryable() {
 - (void)fetchOnDeviceGlosses:(NSArray<NSString *> *)words targets:(NSArray<NSString *> *)targets {
     assert(NSThread.isMainThread);
     [self.onDeviceFetches addObject:@[words, targets]];
+}
+- (void)fetchAccountGlosses:(NSArray<NSString *> *)words primary:(NSString *)primary secondary:(NSString *)secondary
+                 generation:(uint64_t)generation {
+    assert(NSThread.isMainThread);
+    [self.accountFetches addObject:@[words, primary, secondary, @(generation)]];
 }
 - (MSIMECustomTranslationBatch *)niuTransBatchForItems:(NSArray<NSDictionary *> *)items config:(NSDictionary *)config
                                            completion:(void (^)(NSArray<NSDictionary *> *))completion {
@@ -4966,7 +4972,7 @@ static void TestAccountGlossCacheIsSharedAcrossControllers() {
     // asked, because these controllers are built without the activation that registers the observer.
     [fetcher accountCandidateTranslationsDidArrive:
         [NSNotification notificationWithName:@"MSIMEBackendCandidateTranslationsDidArrive" object:nil
-            userInfo:@{@"generation":@1, @"translations":@{@"\u6d4b\u8bd5":@"test"}}]];
+            userInfo:@{@"generation":@1, @"target":@"en", @"translations":@{@"\u6d4b\u8bd5":@"test"}}]];
     assert([[[fetcher valueForKey:@"accountGlossResults"] valueForKey:@"translation"] containsObject:@"test"]);
 
     // A different controller, as a different text field would get, and it must not have to ask again.
@@ -4991,7 +4997,7 @@ static void TestAccountGlossCacheIsSharedAcrossControllers() {
     fetcherSession.applied = nil;
     [fetcher accountCandidateTranslationsDidArrive:
         [NSNotification notificationWithName:@"MSIMEBackendCandidateTranslationsDidArrive" object:nil
-            userInfo:@{@"generation":@1, @"translations":@{@"\u6d4b\u8bd5":@"ignored"}}]];
+            userInfo:@{@"generation":@1, @"target":@"en", @"translations":@{@"\u6d4b\u8bd5":@"ignored"}}]];
     assert(fetcherSession.applied == nil);
 
     // A response for the previous candidate generation must not be accepted by a new request,
@@ -5002,12 +5008,76 @@ static void TestAccountGlossCacheIsSharedAcrossControllers() {
     fetcherSession.applied = nil;
     [fetcher accountCandidateTranslationsDidArrive:
         [NSNotification notificationWithName:@"MSIMEBackendCandidateTranslationsDidArrive" object:nil
-            userInfo:@{@"generation":@1, @"translations":@{@"\u6d4b\u8bd5":@"stale"}}]];
+            userInfo:@{@"generation":@1, @"target":@"en", @"translations":@{@"\u6d4b\u8bd5":@"stale"}}]];
     assert(fetcherSession.applied == nil);
     [fetcher accountCandidateTranslationsDidArrive:
         [NSNotification notificationWithName:@"MSIMEBackendCandidateTranslationsDidArrive" object:nil
-            userInfo:@{@"generation":@2, @"translations":@{@"\u6d4b\u8bd5":@"fresh"}}]];
+            userInfo:@{@"generation":@2, @"target":@"en", @"translations":@{@"\u6d4b\u8bd5":@"fresh"}}]];
     assert([[[fetcher valueForKey:@"accountGlossResults"] firstObject][@"translation"] isEqual:@"fresh"]);
+}
+
+// An English account gloss is saved to the user glossary when it arrives, as Windows saves a fetched English gloss (cloud_translation.cpp PersistGloss), so the next page and the next launch answer it offline. It used to wait for the commit, where the account rows, which carry no Engine source, were rejected by the plan and nothing was ever saved.
+static void TestAccountGlossPersistsOnArrival() {
+    [[MSIMETranslationCache sharedCache] clear];
+    NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    NSString *elsewhere = [root stringByAppendingPathComponent:@"another-profile"];
+    // The glossary store writes into an existing preferences directory; it does not create one.
+    assert([NSFileManager.defaultManager createDirectoryAtPath:elsewhere withIntermediateDirectories:YES attributes:nil error:nil]);
+    NSString *suite = [@"msime.account-gloss-persist." stringByAppendingString:NSUUID.UUID.UUIDString];
+    MSIMEAppearancePreferences *prefs =
+        [[MSIMEAppearancePreferences alloc] initWithDefaults:[[NSUserDefaults alloc] initWithSuiteName:suite]];
+    CustomTranslationController *(^attach)(AccountGlossSession *, NSString *) = ^(AccountGlossSession *session, NSString *directory) {
+        CustomTranslationController *controller = [CustomTranslationController alloc];
+        controller.batches = [NSMutableArray array];
+        controller.accountFetches = [NSMutableArray array];
+        [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
+        [controller setValue:prefs forKey:@"appearance"];
+        [controller setValue:session forKey:@"session"];
+        [controller setValue:directory forKey:@"preferencesDirectory"];
+        return controller;
+    };
+    void (^reply)(CustomTranslationController *, NSUInteger, NSString *, NSDictionary *) =
+        ^(CustomTranslationController *controller, NSUInteger generation, NSString *target, NSDictionary *translations) {
+        [controller accountCandidateTranslationsDidArrive:[NSNotification notificationWithName:@"MSIMEBackendCandidateTranslationsDidArrive"
+            object:nil userInfo:@{@"generation":@(generation), @"target":target, @"translations":translations}]];
+    };
+    NSArray *(^lookup)(NSString *) = ^(NSString *directory) {
+        __block NSDictionary *found;
+        dispatch_sync([MSIMEInputController learnedTranslationQueue], ^{
+            found = [MSIMEClientSession learnedTranslationRequest:@{@"directory":directory, @"action":@"lookup", @"target_language":@"en",
+                @"generation":@1, @"items":@[@{@"text":@"测试", @"direction":@"chinese_to_english"},
+                                               @{@"text":@"再见", @"direction":@"chinese_to_english"},
+                                               @{@"text":@"你好", @"direction":@"chinese_to_english"}]} error:nil];
+        });
+        return found[@"translations"];
+    };
+    AccountGlossSession *session = [AccountGlossSession new];
+    session.candidates = @[@{@"text":@"测试", @"online_gloss":@YES}, @{@"text":@"再见", @"online_gloss":@YES}];
+    CustomTranslationController *writer = attach(session, root);
+    [writer synchronizeAccountGloss:[writer currentAccountGlossRequest]];
+    assert(writer.accountFetches.count == 1 && ([writer.accountFetches[0][0] isEqual:@[@"测试", @"再见"]]));
+    // Every controller hears every reply, so one that did not ask saves nothing, even into a directory of its own.
+    AccountGlossSession *bystanderSession = [AccountGlossSession new];
+    bystanderSession.candidates = session.candidates;
+    CustomTranslationController *bystander = attach(bystanderSession, elsewhere);
+    // The user types on before the account answers: the reply lands after the page it was asked for has gone, and is saved all the same, as Windows saves every fetch that completes.
+    session.generation = 2;
+    session.candidates = @[@{@"text":@"你好", @"online_gloss":@YES}];
+    [writer synchronizeAccountGloss:[writer currentAccountGlossRequest]];
+    reply(writer, 1, @"en", @{@"测试":@"test"});
+    reply(bystander, 1, @"en", @{@"测试":@"test"});
+    // Only the English reply is a glossary entry; a Japanese one for a word that was asked about stays in the process cache.
+    reply(writer, 1, @"ja", @{@"再见":@"さようなら"});
+    // A candidate committed before its gloss arrived is the usual case, and its gloss is saved too.
+    [writer cancelCandidateTranslations];
+    reply(writer, 2, @"en", @{@"你好":@"hello"});
+    dispatch_sync([MSIMEInputController learnedTranslationQueue], ^{});
+    assert(([lookup(root) isEqual:@[@{@"text":@"测试", @"translation":@"test"}, @{@"text":@"你好", @"translation":@"hello"}]]));
+    assert([lookup(elsewhere) count] == 0);
+    [[NSUserDefaults new] removePersistentDomainForName:suite];
+    NSError *error = nil;
+    assert([NSFileManager.defaultManager removeItemAtPath:root error:&error] && !error);
+    [[MSIMETranslationCache sharedCache] clear];
 }
 
 static void TestAccountGlossSkipsNonChineseCandidates() {
@@ -5778,6 +5848,7 @@ int main(int argc, char **argv) {
             TestAccountGlossSkipsNonChineseCandidates();
             TestAccountGlossRequiresExplicitChoice();
             TestAccountGlossCacheIsSharedAcrossControllers();
+            TestAccountGlossPersistsOnArrival();
             TestOfflineTargetGlosses();
             TestOnDeviceGlosses();
             TestOnDeviceGlossPersistence();
