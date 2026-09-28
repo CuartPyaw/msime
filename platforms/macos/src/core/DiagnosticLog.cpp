@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <mutex>
+#include <pthread.h>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -40,8 +41,12 @@ public:
       return;
     try {
       rotateIfNeeded();
+      // The thread id lets main-thread redraws and key handling be told apart from work finishing on other threads, as the Windows log does.
+      std::uint64_t thread = 0;
+      (void)pthread_threadid_np(nullptr, &thread);
       const std::string record = timestamp() + " [p" +
-                                 std::to_string(getpid()) + "] " +
+                                 std::to_string(getpid()) + ":t" +
+                                 std::to_string(thread) + "] " +
                                  sanitize(event) + "\n";
       const int fd = open(
           path_.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC | O_NOFOLLOW,
@@ -69,12 +74,21 @@ private:
   static std::string timestamp() {
     const auto now = std::chrono::system_clock::now();
     const auto seconds = std::chrono::system_clock::to_time_t(now);
+    // Milliseconds order records written within the same second, such as a key waiting behind a redraw.
+    const auto milliseconds =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch())
+            .count() %
+        1000;
     std::tm local{};
     localtime_r(&seconds, &local);
     char buffer[32]{};
     if (std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &local) == 0)
-      return "0000-00-00 00:00:00";
-    return buffer;
+      return "0000-00-00 00:00:00.000";
+    char fraction[8]{};
+    std::snprintf(fraction, sizeof(fraction), ".%03lld",
+                  static_cast<long long>(milliseconds));
+    return std::string(buffer) + fraction;
   }
 
   static std::string sanitize(std::string_view event) {

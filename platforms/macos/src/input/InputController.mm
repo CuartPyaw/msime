@@ -4392,16 +4392,21 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
 - (BOOL)handleEvent:(NSEvent *)event client:(id)sender {
     const bool timed = msime_macos_diagnostic_enabled();
     const uint64_t started = timed ? clock_gettime_nsec_np(CLOCK_UPTIME_RAW) : 0;
-    _smartPunctuationShadowWritten = NO;
-    const BOOL handled = [self handleKeyEvent:event client:sender];
+    const NSEventType type = event.type;
+    const char *label = type == NSEventTypeKeyDown ? "down" : type == NSEventTypeKeyUp ? "up" : type == NSEventTypeFlagsChanged ? "flags" : "other";
     CGEventRef nativeEvent = event.CGEvent;
     const BOOL selfPosted = nativeEvent && CGEventGetIntegerValueField(nativeEvent, kCGEventSourceUserData) == MSIMEVoiceCommitEventTag;
+    if (timed && event.timestamp > 0 && !selfPosted) {
+        // NSEvent.timestamp and systemUptime share the uptime clock, so this is how long the key waited before reaching us. It includes WindowServer and IMK delivery as well as time queued behind work on our main thread, such as a redraw, so it is an upper bound on our own queueing, unlike Windows' stage=queue which starts at the server's own enqueue.
+        const double queueMs = (NSProcessInfo.processInfo.systemUptime - event.timestamp) * 1000.0;
+        if (queueMs >= 8.0) msime_macos_diagnostic_writef("[key-latency] stage=queue type=%s elapsed_ms=%.3f", label, queueMs);
+    }
+    _smartPunctuationShadowWritten = NO;
+    const BOOL handled = [self handleKeyEvent:event client:sender];
     if (event.type == NSEventTypeKeyDown && sender && !selfPosted) [self noteKeyForSmartPunctuationShadow:event eaten:handled];
     if (!handled) [self recordPassthroughKey:event client:sender];
     const double elapsedMs = timed ? static_cast<double>(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - started) / 1e6 : 0;
     if (timed && elapsedMs >= 8.0) {
-        const NSEventType type = event.type;
-        const char *label = type == NSEventTypeKeyDown ? "down" : type == NSEventTypeKeyUp ? "up" : type == NSEventTypeFlagsChanged ? "flags" : "other";
         msime_macos_diagnostic_writef("[key-latency] stage=handle type=%s handled=%d elapsed_ms=%.3f", label, handled ? 1 : 0, elapsedMs);
     }
     return handled;
