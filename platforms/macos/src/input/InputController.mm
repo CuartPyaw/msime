@@ -1785,6 +1785,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     _accountGlossRequest = [request copy];
     NSArray *targets = request[@"target_languages"];
     NSMutableArray *pending = [NSMutableArray array];
+    // Words whose English row the local dictionaries left empty. Only their English replies are saved to the learned glossary: a word that went out for another target's missing row already has a packaged English gloss, and a learned entry overrides the packaged one, so saving the account's reply would replace the curated gloss for good.
+    NSMutableSet<NSString *> *englishPending = [NSMutableSet set];
     NSMutableString *signature = [NSMutableString string];
     for (NSString *target in targets) {
         for (NSDictionary *candidate in request[@"candidates"]) {
@@ -1794,7 +1796,9 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
             // The request carries one word list for every target, so a word goes out while any target still lacks a local answer.
             BOOL answered = [target isEqualToString:@"en"] ? [englishAnswered containsObject:text]
                 : [targetAnswered[text][target] isKindOfClass:NSString.class] && [targetAnswered[text][target] length];
-            if (!answered && !MSIMEAccountGlossKnown(target, text)) [pending addObject:text];
+            if (answered || MSIMEAccountGlossKnown(target, text)) continue;
+            [pending addObject:text];
+            if ([target isEqualToString:@"en"]) [englishPending addObject:text];
         }
     }
     _accountGlossResults = [self accountGlossResultsForRequest:request];
@@ -1823,11 +1827,11 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
             return;
         }
         // Recorded when the words actually go out, so a request the user typed past never marks its words as this controller's to save.
-        if ([targets containsObject:@"en"] && owner->_preferencesDirectory.isAbsolutePath) {
+        if (englishPending.count && owner->_preferencesDirectory.isAbsolutePath) {
             // Words a newer page displaced never reply, so the map is bounded rather than drained.
             if (!owner->_accountEnglishQueries || owner->_accountEnglishQueries.count > 64)
                 owner->_accountEnglishQueries = [NSMutableDictionary dictionary];
-            for (NSString *text in unique) owner->_accountEnglishQueries[text] = [owner->_preferencesDirectory copy];
+            for (NSString *text in englishPending) owner->_accountEnglishQueries[text] = [owner->_preferencesDirectory copy];
         }
         // The request carries no generation, so the one on screen when the words go out is passed along; nothing compares it since replies are cached by word.
         [owner fetchAccountGlosses:unique primary:primary secondary:secondary

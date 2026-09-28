@@ -5203,6 +5203,8 @@ static void TestAccountGlossWaitsForDictionary() {
     [controller setValue:session forKey:@"session"];
     [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
     [controller setValue:prefs forKey:@"appearance"];
+    // Only marks which words' English replies to save; no reply is posted here, so nothing is written.
+    [controller setValue:[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString] forKey:@"preferencesDirectory"];
     void (^settle)(void) = ^{
         [controller synchronizeCandidateGloss];
         [controller synchronizeTargetGloss];
@@ -5231,6 +5233,8 @@ static void TestAccountGlossWaitsForDictionary() {
     session.generation++; session.targetLanguages = @[@"en", @"ja"];
     settle();
     assert(controller.accountFetches.count == 2 && ([controller.accountFetches[1] isEqual:@[@[@"再见", @"你好"], @"en", @"ja", @2]]));
+    // The account's English reply for the word the English dictionary answered is not saved to the learned glossary, where it would override the packaged gloss; only the word the dictionary missed is marked to save.
+    assert([[NSSet setWithArray:[[controller valueForKey:@"accountEnglishQueries"] allKeys]] isEqual:[NSSet setWithObject:@"再见"]]);
     // Once the Japanese dictionary answers it too, it is left out, while a word that dictionary answered only in Japanese goes out for its English row.
     session.generation++; session.offlineGlossLanguages = @[@"ja"];
     session.page = @[@{@"text":@"你好", @"source":@0}, @{@"text":@"测试", @"source":@0}];
