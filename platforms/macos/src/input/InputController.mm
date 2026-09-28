@@ -1733,6 +1733,16 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
 - (void)synchronizeAccountGloss:(NSDictionary *)request {
     if (!request) { [self cancelAccountGloss]; return; }
     if ([_accountGlossRequest isEqual:request]) return;
+    // The local dictionaries answer first and the account is asked only for what they left empty, as Windows hands only the misses to RequestMisses (event_listener.cpp ApplyCandidateTranslations). Each dictionary's completion calls back here, so waiting costs one local read rather than a request.
+    NSDictionary *gloss = [self currentGlossRequest];
+    if (gloss && (![_glossRequest isEqual:gloss] || !_glossResults)) return;
+    NSDictionary *targetGloss = [self currentTargetGlossRequest];
+    if (targetGloss && (![_targetGlossRequest isEqual:targetGloss] || !_targetGlossResults)) return;
+    NSMutableSet<NSString *> *englishAnswered = [NSMutableSet set];
+    for (NSDictionary *entry in gloss ? _glossResults : @[])
+        if ([entry[@"text"] isKindOfClass:NSString.class] && [entry[@"translation"] isKindOfClass:NSString.class] &&
+            [entry[@"translation"] length]) [englishAnswered addObject:entry[@"text"]];
+    NSDictionary *targetAnswered = targetGloss ? _targetGlossResults : nil;
     [self cancelAccountGloss];
     _accountGlossRequest = [request copy];
     NSArray *targets = request[@"target_languages"];
@@ -1743,7 +1753,10 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
             NSString *text = candidate[@"text"];
             if (![target isKindOfClass:NSString.class] || ![text isKindOfClass:NSString.class]) continue;
             [signature appendFormat:@"|%@|%@", target, text];
-            if (!MSIMEAccountGlossKnown(target, text)) [pending addObject:text];
+            // The request carries one word list for every target, so a word goes out while any target still lacks a local answer.
+            BOOL answered = [target isEqualToString:@"en"] ? [englishAnswered containsObject:text]
+                : [targetAnswered[text][target] isKindOfClass:NSString.class] && [targetAnswered[text][target] length];
+            if (!answered && !MSIMEAccountGlossKnown(target, text)) [pending addObject:text];
         }
     }
     _accountGlossResults = [self accountGlossResultsForRequest:request];
@@ -2199,8 +2212,9 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
                 ![[current currentGlossRequest] isEqual:request] || (result && ![result[@"generation"] isEqual:request[@"generation"]])) return;
             current->_glossResults = [translations copy];
             [current applyCandidateTranslationResults];
-            // On-device translation waits for the dictionary so it can skip what the dictionary answered.
+            // On-device translation and the account request wait for the dictionary so they can skip what the dictionary answered.
             [current synchronizeOnDeviceGloss];
+            [current synchronizeAccountGloss:[current currentAccountGlossRequest]];
         });
     }];
 }
@@ -2273,6 +2287,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
                 ![[current currentTargetGlossRequest] isEqual:request]) return;
             current->_targetGlossResults = [values copy];
             [current applyCandidateTranslationResults];
+            // The account request waits for this dictionary so it can skip what the dictionary answered.
+            [current synchronizeAccountGloss:[current currentAccountGlossRequest]];
         });
     }];
 }

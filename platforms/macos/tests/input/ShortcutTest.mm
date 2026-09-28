@@ -5070,6 +5070,64 @@ static void TestAccountGlossLateReplyAndNegatives() {
     [[MSIMETranslationCache sharedCache] clear];
 }
 
+// The account is asked only after the local dictionaries have answered, and only for words they left empty, as Windows hands only the dictionary misses to RequestMisses (event_listener.cpp ApplyCandidateTranslations). A word the English dictionary answers costs no account quota when English is the only target, but it still goes out while another target lacks a local answer, because one word list serves every target.
+static void TestAccountGlossWaitsForDictionary() {
+    [[MSIMETranslationCache sharedCache] clear];
+    NSString *suite = [@"msime.account-gloss-wait." stringByAppendingString:NSUUID.UUID.UUIDString];
+    MSIMEAppearancePreferences *prefs =
+        [[MSIMEAppearancePreferences alloc] initWithDefaults:[[NSUserDefaults alloc] initWithSuiteName:suite]];
+    CustomTranslationController *controller = [CustomTranslationController alloc];
+    controller.batches = [NSMutableArray array];
+    controller.accountFetches = [NSMutableArray array];
+    controller.extraEnglishGlosses = @{@"你好":@"hello"};
+    CustomTranslationSession *session = [CustomTranslationSession new];
+    session.enabled = YES; session.generation = 1; session.offline = YES; session.account = YES;
+    session.targetLanguage = @"en"; session.targetLanguages = @[@"en"];
+    session.page = @[@{@"text":@"Hello", @"source":@4}, @{@"text":@"你好", @"source":@0}, @{@"text":@"再见", @"source":@0}];
+    session.queryCandidates = @[@{@"text":@"Hello", @"online_gloss":@NO}, @{@"text":@"你好", @"online_gloss":@YES},
+                                @{@"text":@"再见", @"online_gloss":@YES}];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
+    [controller setValue:prefs forKey:@"appearance"];
+    void (^settle)(void) = ^{
+        [controller synchronizeCandidateGloss];
+        [controller synchronizeTargetGloss];
+        [controller synchronizeAccountGloss:[controller currentAccountGlossRequest]];
+        [(NSOperationQueue *)[controller valueForKey:@"glossQueue"] waitUntilAllOperationsAreFinished];
+        [(NSOperationQueue *)[controller valueForKey:@"targetGlossQueue"] waitUntilAllOperationsAreFinished];
+        // Each worker ends by dispatching its completion to the main queue, so a block enqueued now runs after both.
+        __block BOOL drained = NO;
+        dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5.0];
+        while (!drained && deadline.timeIntervalSinceNow > 0)
+            [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        assert(drained);
+    };
+    // Nothing is asked while the English dictionary is still reading; its completion asks, and only for the word it could not answer.
+    [controller synchronizeCandidateGloss];
+    [controller synchronizeAccountGloss:[controller currentAccountGlossRequest]];
+    assert(controller.accountFetches.count == 0);
+    WaitForGloss(controller);
+    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    assert(controller.accountFetches.count == 1 && ([controller.accountFetches[0] isEqual:@[@[@"再见"], @"en", @"", @1]]));
+    // The same page again asks nothing more.
+    settle();
+    assert(controller.accountFetches.count == 1);
+    // With Japanese as well, the word the English dictionary answered still has an empty Japanese row, so it goes out.
+    session.generation++; session.targetLanguages = @[@"en", @"ja"];
+    settle();
+    assert(controller.accountFetches.count == 2 && ([controller.accountFetches[1] isEqual:@[@[@"再见", @"你好"], @"en", @"ja", @2]]));
+    // Once the Japanese dictionary answers it too, it is left out, while a word that dictionary answered only in Japanese goes out for its English row.
+    session.generation++; session.offlineGlossLanguages = @[@"ja"];
+    session.page = @[@{@"text":@"你好", @"source":@0}, @{@"text":@"测试", @"source":@0}];
+    session.queryCandidates = @[@{@"text":@"你好", @"online_gloss":@YES}, @{@"text":@"测试", @"online_gloss":@YES}];
+    settle();
+    assert(controller.accountFetches.count == 3 && ([controller.accountFetches[2] isEqual:@[@[@"测试"], @"en", @"ja", @3]]));
+    [controller cancelCandidateTranslations];
+    [[NSUserDefaults new] removePersistentDomainForName:suite];
+    [[MSIMETranslationCache sharedCache] clear];
+}
+
 // An English account gloss is saved to the user glossary when it arrives, as Windows saves a fetched English gloss (cloud_translation.cpp PersistGloss), so the next page and the next launch answer it offline. It used to wait for the commit, where the account rows, which carry no Engine source, were rejected by the plan and nothing was ever saved.
 static void TestAccountGlossPersistsOnArrival() {
     [[MSIMETranslationCache sharedCache] clear];
@@ -5904,6 +5962,7 @@ int main(int argc, char **argv) {
             TestAccountGlossCacheIsSharedAcrossControllers();
             TestAccountGlossLateReplyAndNegatives();
             TestAccountGlossPersistsOnArrival();
+            TestAccountGlossWaitsForDictionary();
             TestOfflineTargetGlosses();
             TestOnDeviceGlosses();
             TestOnDeviceGlossPersistence();
@@ -5939,6 +5998,7 @@ int main(int argc, char **argv) {
         TestAccountGlossRequiresExplicitChoice();
         TestAccountGlossCacheIsSharedAcrossControllers();
         TestAccountGlossLateReplyAndNegatives();
+        TestAccountGlossWaitsForDictionary();
         TestOfflineTargetGlosses();
         TestOnDeviceGlosses();
         TestOnDeviceGlossPersistence();
