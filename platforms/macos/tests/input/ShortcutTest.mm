@@ -4675,6 +4675,8 @@ static void TestAiCandidateDescriptorFailureIsRetryable() {
 // Packaged English dictionary answers beyond Hello's.
 @property(nonatomic, copy) NSDictionary<NSString *, NSString *> *extraEnglishGlosses;
 @property(nonatomic) BOOL useRealDelay;
+// A real timer that never comes due on its own, for a test that fires it by hand: asserting that a 0.5 s timer has not fired yet depends on how busy the machine is.
+@property(nonatomic) BOOL holdDelay;
 @end
 @implementation CustomTranslationController
 - (void)fetchOnDeviceGlosses:(NSArray<NSString *> *)words targets:(NSArray<NSString *> *)targets {
@@ -4696,6 +4698,11 @@ static void TestAiCandidateDescriptorFailureIsRetryable() {
     batch.niuTransConfig = config; return batch;
 }
 - (NSTimer *)customTranslationTimerWithBlock:(void (^)(NSTimer *))block {
+    if (self.holdDelay) {
+        NSTimer *timer = [NSTimer timerWithTimeInterval:3600 repeats:NO block:block];
+        [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
+        return timer;
+    }
     if (self.useRealDelay) return [super customTranslationTimerWithBlock:block];
     block(nil); return nil;
 }
@@ -5918,7 +5925,7 @@ static void TestGlossSurvivesHighlightMove() {
     controller.batches = [NSMutableArray array];
     controller.onDeviceFetches = [NSMutableArray array];
     controller.accountFetches = [NSMutableArray array];
-    controller.useRealDelay = YES;
+    controller.holdDelay = YES;
     CustomTranslationSession *session = [CustomTranslationSession new];
     session.appliedGenerations = [NSMutableArray array];
     [controller setValue:session forKey:@"session"];
