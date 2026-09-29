@@ -58,7 +58,14 @@ fn join(root: &Path, name: &str) -> PathBuf {
     root.join(name)
 }
 
-/// `join` for a name that came from outside the crate: a `..` component is refused rather than allowed to escape the root.
+/// `join` for a name that came from outside the crate: a `..` component is refused rather than allowed to escape the root (`runtime_paths.cpp:14-23`).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the only user-derived resource name, a custom helpcode schema, is still joined inside helpcode_path with its own stem check"
+    )
+)]
 pub fn join_checked(root: &Path, name: &str) -> Result<PathBuf> {
     if Path::new(name)
         .components()

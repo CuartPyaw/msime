@@ -149,16 +149,6 @@ impl PersonalNgramStore {
         self.flush_locked(&mut writer)
     }
 
-    /// Drop words removed from the dictionary from the in-memory model. The model is keyed by hashes and cannot be searched by word, so it is rebuilt from the journal on its next use; the caller has already deleted the rows there (NS:330-332 takes the same path for a stale model).
-    pub fn forget(&self, words: &[String]) {
-        if words.is_empty() {
-            return;
-        }
-        let _writer = lock(&self.writer);
-        self.invalidations.fetch_add(1, Ordering::AcqRel);
-        self.version.fetch_add(1, Ordering::AcqRel);
-    }
-
     /// Take the rows `delete_personal_ngram_word` removed out of the in-memory model without a reload (NS:319-342).
     pub fn forget_removed(&self, removed: &[PersonalTransition]) {
         if removed.is_empty() {
@@ -762,12 +752,5 @@ mod tests {
         assert_eq!(model.bigram_probability("我", "想"), 0.0);
         assert_eq!(model.confidence("想"), 0.0);
         assert!(model.confidence("他") > 0.0);
-        drop(model);
-
-        // `forget` reaches the same state by reading the file again.
-        let removed = delete_personal_ngram_word(&connection, "main", "他").unwrap();
-        assert!(!removed.is_empty());
-        store.forget(&["他".to_owned()]);
-        assert_eq!(store.model().confidence("他"), 0.0);
     }
 }

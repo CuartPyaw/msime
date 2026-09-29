@@ -152,7 +152,6 @@ mod tests {
 
     const QUANPIN_ONLY: ShuangpinProfile = ShuangpinProfile {
         kind: ShuangpinProfileKind::Xiaohe,
-        name: "xiaohe",
         initials: &[],
         zero_initials: &[],
         finals: &[],

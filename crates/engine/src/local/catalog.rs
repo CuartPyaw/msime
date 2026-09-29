@@ -116,7 +116,12 @@ pub fn read_emoji_catalog_slice(
             Ok(None) => break,
             Err(_) => return Err(read_failed()),
         };
-        // The offset fits in an i64 and at most 4096 rows follow it, so this cannot overflow a usize; the reference's i64::MAX cursor check only guarded its own arithmetic.
+        // The returned cursor is fed back as the next page's SQL OFFSET, so it must stay representable as an i64 (bridge.cpp:1087-1088).
+        if i64::try_from(result.next_offset + 1).is_err() {
+            return Err(EngineError::invalid(
+                diagnostics::INVALID_EMOJI_CATALOG_CURSOR,
+            ));
+        }
         result.next_offset += 1;
         let column = |index| {
             row.get::<_, Option<String>>(index)

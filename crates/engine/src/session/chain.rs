@@ -31,10 +31,11 @@ impl CommitChain {
         self.last_pick = None;
     }
 
-    /// Shifts `word` in as the newest context word. The C++ `advance` also stored whether composition input was left over; here the caller sets `same_composition` after the call, because this signature carries no such flag.
-    pub fn advance(&mut self, word: &str, now: Instant) {
+    /// Shifts `word` in as the newest context word and records whether composition input was left over after it, so the next word continues that composition (`commit_chain.h:39-45`).
+    pub fn advance(&mut self, word: &str, composition_left: bool, now: Instant) {
         self.earlier = self.previous.take();
         self.previous = Some(word.to_owned());
+        self.same_composition = composition_left;
         self.committed_at = Some(now);
     }
 
@@ -54,10 +55,11 @@ mod tests {
     fn advance_shifts_the_context_and_stamps_the_time() {
         let now = Instant::now();
         let mut chain = CommitChain::default();
-        chain.advance("你好", now);
-        chain.advance("世界", now + Duration::from_secs(1));
+        chain.advance("你好", false, now);
+        chain.advance("世界", true, now + Duration::from_secs(1));
         assert_eq!(chain.previous.as_deref(), Some("世界"));
         assert_eq!(chain.earlier.as_deref(), Some("你好"));
+        assert!(chain.same_composition);
         assert_eq!(chain.committed_at, Some(now + Duration::from_secs(1)));
     }
 
@@ -65,8 +67,7 @@ mod tests {
     fn reset_keeps_only_the_commit_time() {
         let now = Instant::now();
         let mut chain = CommitChain::default();
-        chain.advance("你", now);
-        chain.same_composition = true;
+        chain.advance("你", true, now);
         chain.last_pick = Some(Pick {
             canonical_pinyin: "ni".to_owned(),
             word: "你".to_owned(),
@@ -83,7 +84,7 @@ mod tests {
         let now = Instant::now();
         let mut chain = CommitChain::default();
         assert!(chain.paused(now));
-        chain.advance("你", now);
+        chain.advance("你", false, now);
         assert!(!chain.paused(now + Duration::from_secs(8)));
         assert!(chain.paused(now + Duration::from_millis(8_001)));
         // A test clock that runs backwards must not count as a pause.

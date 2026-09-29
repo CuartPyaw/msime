@@ -9,7 +9,6 @@ use crate::types::ShuangpinProfileKind;
 #[derive(Debug)]
 pub struct ShuangpinProfile {
     pub kind: ShuangpinProfileKind,
-    pub name: &'static str,
     /// Multi-letter initial to key.
     pub initials: &'static [(&'static str, &'static str)],
     /// Whole zero-initial syllable to its two-key code.
@@ -20,7 +19,6 @@ pub struct ShuangpinProfile {
 
 static XIAOHE: ShuangpinProfile = ShuangpinProfile {
     kind: ShuangpinProfileKind::Xiaohe,
-    name: "xiaohe",
     initials: &[("sh", "u"), ("ch", "i"), ("zh", "v")],
     zero_initials: &[
         ("a", "aa"),
@@ -75,7 +73,6 @@ static XIAOHE: ShuangpinProfile = ShuangpinProfile {
 
 static ZIRANMA: ShuangpinProfile = ShuangpinProfile {
     kind: ShuangpinProfileKind::Ziranma,
-    name: "ziranma",
     initials: &[("sh", "u"), ("ch", "i"), ("zh", "v")],
     zero_initials: &[
         ("a", "aa"),
@@ -130,7 +127,6 @@ static ZIRANMA: ShuangpinProfile = ShuangpinProfile {
 
 static SHOUDAO: ShuangpinProfile = ShuangpinProfile {
     kind: ShuangpinProfileKind::Shoudao,
-    name: "shoudao",
     initials: &[("sh", "e"), ("ch", "i"), ("zh", "v")],
     zero_initials: &[
         ("a", "aa"),
@@ -186,7 +182,6 @@ static SHOUDAO: ShuangpinProfile = ShuangpinProfile {
 
 static MICROSOFT: ShuangpinProfile = ShuangpinProfile {
     kind: ShuangpinProfileKind::Microsoft,
-    name: "microsoft",
     initials: &[("sh", "u"), ("ch", "i"), ("zh", "v")],
     zero_initials: &[
         ("a", "oa"),
@@ -287,7 +282,6 @@ mod tests {
         ] {
             let selected = profile(kind);
             assert_eq!(selected.kind, kind);
-            assert_eq!(selected.name, kind.name());
             assert_eq!(selected.zero_initials.len(), 12);
             assert_eq!(selected.finals.len(), 33);
         }

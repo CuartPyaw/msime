@@ -9,7 +9,6 @@ use super::journal::{
     MISSING_ROW, UNSTORABLE_ENTRY,
 };
 use super::ngram_store::{delete_personal_ngram_word, flush_journal, forget_journal_rows};
-use super::ranking::clamp_managed_weight;
 use crate::dictionary::english::ensure_english_schema;
 use crate::error::{EngineError, Result};
 use crate::types::PersonalDictionaryKind;
@@ -87,36 +86,6 @@ pub fn delete_dictionary_candidate(
     if pinyin {
         forget_journal_rows(user_db, &removed_context);
     }
-    Ok(())
-}
-
-/// Lift a wubi row one above its code's heaviest row, clamped, and journal it (J:1182-1210).
-pub fn bump_wubi_weight(main_db: &Path, user_db: &Path, code: &str, word: &str) -> Result<()> {
-    if code.is_empty() || word.is_empty() {
-        return Err(EngineError::invalid(UNSTORABLE_ENTRY));
-    }
-    ensure_user_database(user_db)?;
-    let mut connection = open_with_journal(main_db, user_db)?;
-    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    // An unknown code has no maximum; the UPDATE below then finds no row and fails, as in the reference.
-    let heaviest: Option<i64> = transaction.query_row(
-        "SELECT MAX(weight) FROM main.\"wubi86\" WHERE \"key\"=?1",
-        params![code],
-        |row| row.get(0),
-    )?;
-    let weight = clamp_managed_weight(heaviest.unwrap_or(0).saturating_add(1));
-    let updated = transaction.execute(
-        "UPDATE main.\"wubi86\" SET weight=?1 WHERE \"key\"=?2 AND \"value\"=?3",
-        params![weight, code, word],
-    )?;
-    if updated == 0 {
-        return Err(EngineError::failed(MISSING_ROW));
-    }
-    transaction.execute(
-        &format!("INSERT INTO {JOURNAL_ALIAS}.user_dictionary_operations(dictionary,key,value,operation,weight,display) VALUES(?1,?2,?3,'upsert',?4,'') ON CONFLICT(dictionary,key,value) DO UPDATE SET operation='upsert',weight=excluded.weight,display='',updated_at=unixepoch()"),
-        params![PersonalDictionaryKind::Wubi.journal_name(), code, word, weight],
-    )?;
-    transaction.commit()?;
     Ok(())
 }
 
@@ -286,39 +255,6 @@ mod tests {
         )
         .is_err());
         assert!(!dir.main_db().exists());
-    }
-
-    #[test]
-    fn wubi_bump_lifts_above_the_code_and_journals() {
-        let dir = Dir::new();
-        dir.wubi(&[
-            ("aaaa", "工", 10),
-            ("aaaa", "或", 5),
-            ("aaab", "其", 100_000_000),
-        ]);
-        let journal = dir.journal();
-        bump_wubi_weight(&dir.main_db(), &journal, "aaaa", "或").unwrap();
-        assert_eq!(
-            query_i64(&dir.main_db(), "SELECT weight FROM wubi86 WHERE value='或'"),
-            Some(11)
-        );
-        assert_eq!(
-            query_i64(&journal, "SELECT weight FROM user_dictionary_operations WHERE dictionary='wubi' AND key='aaaa' AND value='或' AND operation='upsert'"),
-            Some(11)
-        );
-        dir.wubi(&[("aaab", "某", 1)]);
-        bump_wubi_weight(&dir.main_db(), &journal, "aaab", "某").unwrap();
-        assert_eq!(
-            query_i64(&dir.main_db(), "SELECT weight FROM wubi86 WHERE value='某'"),
-            Some(100_000_000),
-            "the bump was not clamped"
-        );
-        assert!(bump_wubi_weight(&dir.main_db(), &journal, "zzzz", "工").is_err());
-        assert!(bump_wubi_weight(&dir.main_db(), &journal, "aaaa", "无").is_err());
-        assert_eq!(
-            count(&journal, "SELECT count(*) FROM user_dictionary_operations"),
-            2
-        );
     }
 
     #[test]

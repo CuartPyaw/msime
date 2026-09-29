@@ -226,6 +226,7 @@ mod tests {
         WordItem::new(pinyin, word, weight, CandidateSource::Database, canonical)
     }
 
+    /// test_pinyin.cpp:566-578.
     #[test]
     fn exact_full_key_row_stays_first() {
         let rows = table(&[
@@ -246,6 +247,7 @@ mod tests {
         assert_eq!(candidates[0].source, CandidateSource::Database);
     }
 
+    /// test_pinyin.cpp:580-596.
     #[test]
     fn lattice_goes_ahead_of_a_fallback_row() {
         let rows = table(&[
@@ -275,6 +277,7 @@ mod tests {
         assert!(candidates.iter().any(|item| item.word == "高谈刚捏子"));
     }
 
+    /// test_pinyin.cpp:614-626.
     #[test]
     fn exact_two_syllable_row_stays_ahead() {
         let rows = table(&[
@@ -303,6 +306,7 @@ mod tests {
         assert_eq!(generated.sentence_words, ["镊子"]);
     }
 
+    /// test_pinyin.cpp:628-639.
     #[test]
     fn prefix_range_row_does_not_outrank_the_sentence() {
         let rows = table(&[("gun", &[("滚", 10000)]), ("qi", &[("起", 9000)])]);
@@ -319,6 +323,7 @@ mod tests {
         assert_eq!(candidates[1].word, "滚球");
     }
 
+    /// test_pinyin.cpp:668-677.
     #[test]
     fn abbreviated_segments_produce_nothing() {
         let rows = table(&[

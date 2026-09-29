@@ -8,10 +8,7 @@ use crate::helpcode::{
 use crate::paths::RuntimePaths;
 use crate::pinyin::active_helpcode::{detect_active_helpcode_length, strip_active_helpcodes};
 use crate::pinyin::segment::{cut_pinyin_by_mode, join_segments, split_segments, CutMode};
-use crate::types::{
-    request_autocorrect_mask, CandidateSource, FuzzyPinyinOptions, QueryRequest, SchemeType,
-    SentenceAssociationOptions, WordItem,
-};
+use crate::types::{request_autocorrect_mask, CandidateSource, QueryRequest, SchemeType, WordItem};
 
 use super::QuanpinDictionary;
 
@@ -26,10 +23,6 @@ impl QuanpinEngine {
         }
     }
 
-    pub fn dictionary(&mut self) -> &mut QuanpinDictionary {
-        &mut self.dictionary
-    }
-
     /// Double helpcode: query the base and keep matches; single: query the base and reorder; otherwise query the raw input with its segmentation, mask and fuzzy options (QE:39-81). Empty for an invalid request.
     ///
     /// Without a keymap every helpcode matches nothing: a double helpcode leaves no rows and a single one leaves the order alone. The reference fell back to a process-wide default table here, which the port does not keep; the session always passes the keymap it loaded.
@@ -41,7 +34,7 @@ impl QuanpinEngine {
         if !request.valid {
             return Vec::new();
         }
-        // Each setter is a no-op when the value is unchanged, so this costs nothing per keystroke and clears the cached lists exactly once, on the keystroke where the host's answer changes.
+        // Each setter is a no-op when the value is unchanged, so this costs nothing per keystroke. The association options and the context select the series slot rather than clearing it; only a change of the sentence-alternatives answer clears the cached lists.
         self.dictionary
             .set_sentence_alternatives(request.sentence_alternatives);
         self.dictionary
@@ -135,38 +128,9 @@ impl QuanpinEngine {
         self.dictionary.knows_han_char(han)
     }
 
-    pub fn create_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        self.dictionary.create_word(pinyin, word)
-    }
-
     pub fn create_word_from_canonical_pinyin(&mut self, pinyin: &str, word: &str) -> Result<()> {
         self.dictionary
             .create_word_from_canonical_pinyin(pinyin, word)
-    }
-
-    pub fn update_weight_by_pinyin_and_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        self.dictionary
-            .update_weight_by_pinyin_and_word(pinyin, word)
-    }
-
-    pub fn delete_by_pinyin_and_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        self.dictionary.delete_by_pinyin_and_word(pinyin, word)
-    }
-
-    pub fn fuzzy_candidates(
-        &mut self,
-        segmentation: &str,
-        options: FuzzyPinyinOptions,
-    ) -> Vec<WordItem> {
-        self.dictionary.fuzzy_candidates(segmentation, options)
-    }
-
-    pub fn set_sentence_association(&mut self, options: SentenceAssociationOptions) {
-        self.dictionary.set_sentence_association(options)
-    }
-
-    pub fn set_rescoring_context(&mut self, context: &str) {
-        self.dictionary.set_rescoring_context(context)
     }
 
     pub fn reset_cache(&mut self) {

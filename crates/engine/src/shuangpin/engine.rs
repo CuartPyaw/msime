@@ -10,7 +10,6 @@ use super::query::{
 };
 use super::utils::{get_full_help_codes, is_all_complete_pinyin};
 use super::ShuangpinProfile;
-use crate::error::Result;
 use crate::helpcode::{
     filter_candidates_with_double_helpcodes, reorder_candidates_with_single_helpcode,
     HelpcodeKeymap,
@@ -18,10 +17,7 @@ use crate::helpcode::{
 use crate::paths::RuntimePaths;
 use crate::pinyin::segment::{join_segments, split_segments};
 use crate::quanpin::QuanpinDictionary;
-use crate::types::{
-    CandidateSource, FuzzyPinyinOptions, QueryRequest, SchemeType, SentenceAssociationOptions,
-    WordItem,
-};
+use crate::types::{CandidateSource, FuzzyPinyinOptions, QueryRequest, SchemeType, WordItem};
 
 /// The base the dictionary queries and the codes that filter or reorder it.
 struct HelpcodeQuery {
@@ -113,10 +109,6 @@ impl ShuangpinEngine {
             paths: paths.clone(),
             fuzzy_dictionary: None,
         }
-    }
-
-    pub fn profile(&self) -> &'static ShuangpinProfile {
-        self.profile
     }
 
     /// :122-167.
@@ -237,6 +229,9 @@ impl ShuangpinEngine {
         if !request.valid {
             return false;
         }
+        // With a reranker loaded the context is part of the cache key, so the rows must go under the context this request was queried with.
+        self.dictionary
+            .set_rescoring_context(&request.rescoring_context);
         match active_helpcode_query(request, self.profile) {
             Some(helpcode) => {
                 let double = if helpcode.help_codes.len() == 2 {
@@ -259,27 +254,6 @@ impl ShuangpinEngine {
 
     pub fn find_candidate(&self, key: &str, value: &str) -> Option<WordItem> {
         self.dictionary.find_candidate(key, value)
-    }
-
-    pub fn create_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        self.dictionary.create_word(pinyin, word)
-    }
-
-    pub fn update_weight_by_pinyin_and_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        self.dictionary
-            .update_weight_by_pinyin_and_word(pinyin, word)
-    }
-
-    pub fn delete_by_pinyin_and_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        self.dictionary.delete_by_pinyin_and_word(pinyin, word)
-    }
-
-    pub fn set_sentence_association(&mut self, options: SentenceAssociationOptions) {
-        self.dictionary.set_sentence_association(options);
-    }
-
-    pub fn set_rescoring_context(&mut self, context: &str) {
-        self.dictionary.set_rescoring_context(context);
     }
 
     pub fn reset_cache(&mut self) {

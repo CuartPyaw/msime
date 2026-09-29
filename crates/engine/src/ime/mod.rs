@@ -10,7 +10,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::assets;
-use crate::error::Result;
 use crate::helpcode::SharedKeymap;
 use crate::paths::RuntimePaths;
 use crate::pinyin::autocorrect::autocorrect_suppression_key;
@@ -36,8 +35,6 @@ pub struct CompositionState {
     pub preedit: String,
     pub request: QueryRequest,
     pub candidates: Vec<WordItem>,
-    /// The wubi code was answered only by quanpin rows.
-    pub answered_by_pinyin_fallback: bool,
 }
 
 /// One decode of a request, before it is stored as the live state.
@@ -45,7 +42,6 @@ struct Decoded {
     candidates: Vec<WordItem>,
     /// Some row matches the whole wubi code; prefix rows do not count.
     wubi_table_answered: bool,
-    answered_by_pinyin_fallback: bool,
 }
 
 pub struct ImeSession {
@@ -86,10 +82,6 @@ impl ImeSession {
         session
     }
 
-    pub fn state(&self) -> &CompositionState {
-        &self.state
-    }
-
     pub fn candidates(&self) -> &[WordItem] {
         &self.state.candidates
     }
@@ -104,15 +96,6 @@ impl ImeSession {
 
     pub fn current_scheme_type(&self) -> SchemeType {
         self.scheme.scheme_type()
-    }
-
-    /// Quanpin while the wubi code is answered by the pinyin fallback, else the current scheme.
-    pub fn candidate_scheme(&self) -> SchemeType {
-        if self.state.answered_by_pinyin_fallback {
-            SchemeType::Quanpin
-        } else {
-            self.current_scheme_type()
-        }
     }
 
     /// `scheme.handle_key` then `refresh_candidates`; `SchemeKey::Requery` only refreshes.
@@ -218,39 +201,9 @@ impl ImeSession {
         context.clone_into(&mut self.rescoring_context);
     }
 
-    /// Routed by the producing row's scheme in mixed wubi (overlays.md §3.3).
-    pub fn update_weight_by_pinyin_and_word(
-        &mut self,
-        scheme: SchemeType,
-        pinyin: &str,
-        word: &str,
-    ) -> Result<()> {
-        self.registry
-            .update_weight_by_pinyin_and_word(scheme, pinyin, word)
-    }
-
-    pub fn delete_by_pinyin_and_word(
-        &mut self,
-        scheme: SchemeType,
-        pinyin: &str,
-        word: &str,
-    ) -> Result<()> {
-        self.registry
-            .delete_by_pinyin_and_word(scheme, pinyin, word)
-    }
-
+    /// Routed by the producing row's scheme in mixed wubi (overlays.md §3.3). The provider layer only reads: the session writes pins, removals and frequency learning into user_dictionary, keyed by the selected row's scheme, and learned phrases through its own canonical-pinyin `QuanpinEngine`; `reset_cache` then makes the providers see them.
     pub fn find_candidate(&self, scheme: SchemeType, key: &str, value: &str) -> Option<WordItem> {
         self.registry.find_candidate(scheme, key, value)
-    }
-
-    /// Whether any single-character pinyin table spells `han`; online sentence learning skips characters none of them knows.
-    pub fn knows_han_char(&self, han: &str) -> bool {
-        self.registry.quanpin.knows_han_char(han)
-    }
-
-    pub fn create_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        self.registry
-            .create_word(self.current_scheme_type(), pinyin, word)
     }
 
     /// Resets the current scheme's provider, and quanpin's too while mixed wubi is on.
@@ -285,7 +238,6 @@ impl ImeSession {
     fn refresh_candidates(&mut self) {
         self.state.preedit = self.scheme.preedit();
         let request = self.prepare_request(&self.scheme);
-        self.state.answered_by_pinyin_fallback = false;
         if !request.valid {
             self.state.request = request;
             self.state.candidates.clear();
@@ -300,7 +252,6 @@ impl ImeSession {
         }
         self.state.request = request;
         self.state.candidates = decoded.candidates;
-        self.state.answered_by_pinyin_fallback = decoded.answered_by_pinyin_fallback;
     }
 
     /// The scheme's request with the session's switches, autocorrect suppression and the shuangpin double-helpcode segmentation applied.
@@ -349,7 +300,6 @@ impl ImeSession {
             return Decoded {
                 candidates,
                 wubi_table_answered: false,
-                answered_by_pinyin_fallback: false,
             };
         }
         let wubi_table_answered = wubi_table_answered(&candidates, &request.normalized_input);
@@ -357,7 +307,6 @@ impl ImeSession {
             return Decoded {
                 candidates,
                 wubi_table_answered,
-                answered_by_pinyin_fallback: false,
             };
         }
 
@@ -369,16 +318,12 @@ impl ImeSession {
             return Decoded {
                 candidates,
                 wubi_table_answered,
-                answered_by_pinyin_fallback: false,
             };
         }
         let pinyin_rows = self.registry.query(&mixed);
-        let (candidates, answered_by_pinyin_fallback) =
-            merge_pinyin_fallback(candidates, pinyin_rows);
         Decoded {
-            candidates,
+            candidates: merge_pinyin_fallback(candidates, pinyin_rows),
             wubi_table_answered,
-            answered_by_pinyin_fallback,
         }
     }
 
@@ -395,22 +340,18 @@ fn wubi_table_answered(candidates: &[WordItem], code: &str) -> bool {
     candidates.iter().any(|item| item.pinyin == code)
 }
 
-/// Wubi rows first, so wubi ranking and fixed positions keep precedence, then the quanpin rows whose word is not shown yet, in quanpin order. The flag is set when the list is non-empty and holds no wubi row.
+/// Wubi rows first, so wubi ranking and fixed positions keep precedence, then the quanpin rows whose word is not shown yet, in quanpin order. Every row keeps its producer's scheme: the session reads "answered by the pinyin fallback" and routes pins, removals and learning from those tags (overlays.md §3.3), so no list-level flag is kept here.
 fn merge_pinyin_fallback(
     mut candidates: Vec<WordItem>,
     pinyin_rows: Vec<WordItem>,
-) -> (Vec<WordItem>, bool) {
+) -> Vec<WordItem> {
     let mut seen: HashSet<String> = candidates.iter().map(|item| item.word.clone()).collect();
     candidates.extend(
         pinyin_rows
             .into_iter()
             .filter(|item| seen.insert(item.word.clone())),
     );
-    let answered_by_pinyin_fallback = !candidates.is_empty()
-        && candidates
-            .iter()
-            .all(|item| item.scheme != SchemeType::Wubi);
-    (candidates, answered_by_pinyin_fallback)
+    candidates
 }
 
 /// With a double helpcode after a complete shuangpin base, the segmentations become the base's plus `'` and the two help letters (ime_session.cpp:15-39). The detector counts in delimiter-free space, so the split is made there too; slicing raw bytes would push a pinyin letter into the base and a manual `'` into the help codes.
@@ -460,6 +401,11 @@ mod tests {
         WordItem::new(pinyin, word, 10, CandidateSource::Database, pinyin)
     }
 
+    /// The session's `answered_by_pinyin_fallback` predicate over the merged rows.
+    fn only_pinyin_rows(list: &[WordItem]) -> bool {
+        !list.is_empty() && list.iter().all(|item| item.scheme != SchemeType::Wubi)
+    }
+
     fn words(list: &[WordItem]) -> Vec<&str> {
         list.iter().map(|item| item.word.as_str()).collect()
     }
@@ -476,35 +422,35 @@ mod tests {
     #[test]
     fn a_matched_code_keeps_its_wubi_rows_first() {
         // test_wubi_mixed_input_session.cpp:121-128 fixture: wubi wq 你好; ni'hao 你好 / 拟好.
-        let (list, fallback) = merge_pinyin_fallback(
+        let list = merge_pinyin_fallback(
             vec![wubi("wq", "你好"), wubi("wqaa", "众人")],
             vec![quanpin("ni'hao", "你好"), quanpin("ni'hao", "拟好")],
         );
         assert_eq!(words(&list), vec!["你好", "众人", "拟好"]);
         assert_eq!(list[0].scheme, SchemeType::Wubi);
         assert_eq!(list[2].scheme, SchemeType::Quanpin);
-        assert!(!fallback);
+        assert!(!only_pinyin_rows(&list));
     }
 
     #[test]
     fn an_unmatched_code_is_answered_by_quanpin_alone() {
         // test_wubi_mixed_input_session.cpp:106-116: `nihao` has no wubi row, so the list equals the quanpin list.
         let pinyin = vec![quanpin("ni'hao", "你好"), quanpin("ni'hao", "拟好")];
-        let (list, fallback) = merge_pinyin_fallback(Vec::new(), pinyin.clone());
+        let list = merge_pinyin_fallback(Vec::new(), pinyin.clone());
         assert_eq!(list, pinyin);
-        assert!(fallback);
+        assert!(only_pinyin_rows(&list));
     }
 
     #[test]
     fn nothing_at_all_is_not_a_fallback_answer() {
-        let (list, fallback) = merge_pinyin_fallback(Vec::new(), Vec::new());
+        let list = merge_pinyin_fallback(Vec::new(), Vec::new());
         assert!(list.is_empty());
-        assert!(!fallback);
+        assert!(!only_pinyin_rows(&list));
     }
 
     #[test]
     fn quanpin_duplicates_among_themselves_collapse_to_the_first() {
-        let (list, fallback) = merge_pinyin_fallback(
+        let list = merge_pinyin_fallback(
             vec![wubi("nihao", "妳")],
             vec![
                 quanpin("ni'hao", "你好"),
@@ -514,6 +460,6 @@ mod tests {
         );
         assert_eq!(words(&list), vec!["妳", "你好"]);
         assert_eq!(list[1].pinyin, "ni'hao");
-        assert!(!fallback);
+        assert!(!only_pinyin_rows(&list));
     }
 }

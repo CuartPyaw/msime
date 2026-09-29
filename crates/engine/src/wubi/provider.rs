@@ -1,4 +1,4 @@
-//! The `wubi86` provider (`R/providers/wubi_candidate_provider.cpp`, with the wubi_prefix_learning overlay): exact code first, then weight, no value dedup, at most 50 rows. Learning bumps the chosen row above its code's heaviest row and journals it.
+//! The `wubi86` provider (`R/providers/wubi_candidate_provider.cpp`, with the wubi_prefix_learning overlay): exact code first, then weight, no value dedup, at most 50 rows. The provider only reads: learning and removal of a wubi row go through `session`, which journals them with the wubi kind and then resets this cache.
 
 use std::path::{Path, PathBuf};
 
@@ -6,32 +6,28 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 
 use crate::dictionary::pinyin::BUSY_TIMEOUT;
-use crate::error::Result;
-use crate::types::{CandidateSource, PersonalDictionaryKind, QueryRequest, SchemeType, WordItem};
-use crate::user_dictionary::removal::{bump_wubi_weight, delete_dictionary_candidate};
+use crate::types::{CandidateSource, QueryRequest, SchemeType, WordItem};
 
-pub const QUERY_LIMIT: usize = 50;
+const QUERY_LIMIT: i64 = 50;
 
 /// A prefix query: the typed code's own rows lead, then every longer code it prefixes by weight. The same word reached through several codes (工 at a, aaa and aaaa) is kept once per code, because ranking and removal act on the code the row arrived with.
-const QUERY_SQL: &str = "SELECT \"key\", \"value\", \"weight\" FROM wubi86 WHERE \"key\" >= ?1 AND \"key\" < ?2 ORDER BY (\"key\" = ?1) DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT 50";
+const QUERY_SQL: &str = "SELECT \"key\", \"value\", \"weight\" FROM wubi86 WHERE \"key\" >= ?1 AND \"key\" < ?2 ORDER BY (\"key\" = ?1) DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT ?3";
 
 pub struct WubiProvider {
     main_db: PathBuf,
-    user_db: PathBuf,
     connection: Option<Connection>,
 }
 
 impl WubiProvider {
     /// Opens lazily, read-only, on the first query.
-    pub fn new(main_db: &Path, user_db: &Path) -> Self {
+    pub fn new(main_db: &Path) -> Self {
         Self {
             main_db: main_db.to_path_buf(),
-            user_db: user_db.to_path_buf(),
             connection: None,
         }
     }
 
-    /// `SELECT "key","value","weight" FROM wubi86 WHERE "key" >= ?1 AND "key" < ?2 ORDER BY ("key" = ?1) DESC, "weight" DESC, "key" ASC, rowid ASC LIMIT 50`, `?2` = the code with its last letter incremented. Rows carry `scheme = Wubi`. Any SQLite failure is an empty answer, as in the reference.
+    /// `SELECT "key","value","weight" FROM wubi86 WHERE "key" >= ?1 AND "key" < ?2 ORDER BY ("key" = ?1) DESC, "weight" DESC, "key" ASC, rowid ASC LIMIT ?3`, `?2` = the code with its last letter incremented and `?3` = 50. Rows carry `scheme = Wubi`. Any SQLite failure is an empty answer, as in the reference.
     pub fn query(&mut self, request: &QueryRequest) -> Vec<WordItem> {
         if !request.valid
             || request.scheme != SchemeType::Wubi
@@ -52,27 +48,7 @@ impl WubiProvider {
         }
     }
 
-    /// `user_dictionary::bump_wubi_weight`, then closes the read connection so the next query sees the new weight.
-    pub fn update_weight(&mut self, code: &str, word: &str) -> Result<()> {
-        bump_wubi_weight(&self.main_db, &self.user_db, code, word)?;
-        self.reset_cache();
-        Ok(())
-    }
-
-    /// `user_dictionary::delete_dictionary_candidate` with the wubi kind.
-    pub fn delete(&mut self, code: &str, word: &str) -> Result<()> {
-        delete_dictionary_candidate(
-            &self.main_db,
-            &self.user_db,
-            PersonalDictionaryKind::Wubi,
-            code,
-            word,
-        )?;
-        self.reset_cache();
-        Ok(())
-    }
-
-    /// Closes the connection.
+    /// Closes the connection, so the next query sees what learning or removal wrote since.
     pub fn reset_cache(&mut self) {
         self.connection = None;
     }
@@ -112,7 +88,7 @@ fn prefix_upper_bound(code: &str) -> String {
 fn query_rows(connection: &Connection, code: &str) -> rusqlite::Result<Vec<WordItem>> {
     let mut statement = connection.prepare_cached(QUERY_SQL)?;
     let upper = prefix_upper_bound(code);
-    let mut rows = statement.query((code, upper.as_str()))?;
+    let mut rows = statement.query((code, upper.as_str(), QUERY_LIMIT))?;
     let mut candidates = Vec::new();
     while let Some(row) = rows.next()? {
         // The reference skipped rows whose key or value read back as NULL.
@@ -150,7 +126,7 @@ mod tests {
             .expect("fixture database")
             .execute_batch(sql)
             .expect("fixture SQL");
-        let provider = WubiProvider::new(&main_db, &root.path().join("msime_user.db"));
+        let provider = WubiProvider::new(&main_db);
         Fixture {
             _root: root,
             provider,
@@ -288,10 +264,7 @@ mod tests {
     #[test]
     fn missing_database_is_empty() {
         let root = tempfile::tempdir().expect("temporary directory");
-        let mut provider = WubiProvider::new(
-            &root.path().join("absent.db"),
-            &root.path().join("msime_user.db"),
-        );
+        let mut provider = WubiProvider::new(&root.path().join("absent.db"));
         assert!(provider.query(&request("a")).is_empty());
         assert!(!root.path().join("absent.db").exists());
     }

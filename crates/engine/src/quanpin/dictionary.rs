@@ -1,4 +1,4 @@
-//! `QuanpinDictionary` (`R/quanpin/quanpin_dictionary.cpp`, quanpin.md §4, §6, §7.5-§7.7, §9.9, §11, §13, §14): the query pipeline and its caches, plus the word writers learning uses.
+//! `QuanpinDictionary` (`R/quanpin/quanpin_dictionary.cpp`, quanpin.md §4, §6, §7.5-§7.7, §9.9, §11, §13, §14): the query pipeline and its caches, plus the canonical-pinyin phrase writer learning uses (pins, removals and frequency learning go through `user_dictionary` directly, see `ime::registry`).
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -26,8 +26,7 @@ use crate::pinyin::graph::{
 };
 use crate::pinyin::jianpin::QuerySource;
 use crate::pinyin::segment::{
-    cut_pinyin_by_mode, is_complete_pinyin_input, join_segments, segments_to_jianpin,
-    split_segments, CutMode,
+    cut_pinyin_by_mode, is_complete_pinyin_input, join_segments, split_segments, CutMode,
 };
 use crate::pinyin::syllables::{
     has_only_complete_pinyin_segments, normalize_umlaut_aliases, sparse_pinyin_fallback_segments,
@@ -37,9 +36,8 @@ use crate::types::{
     autocorrect_type, CandidateSource, FuzzyPinyinOptions, PersonalDictionaryKind,
     SentenceAssociationOptions, WordItem,
 };
-use crate::user_dictionary::journal::{record_pinyin_upsert_from_database, record_user_insert};
+use crate::user_dictionary::journal::record_user_insert;
 use crate::user_dictionary::ngram_store::PersonalNgramStore;
-use crate::user_dictionary::removal::delete_dictionary_candidate;
 use crate::user_dictionary::typo_profile::PersonalTypoProfile;
 
 use super::series::{
@@ -101,7 +99,6 @@ pub struct QuanpinDictionary {
     /// Every non-primary correction cut, joined; marking compares against them on every query, cached or not.
     alternative_segmentations: Vec<String>,
     current_autocorrect_types: u32,
-    current_candidates: Vec<WordItem>,
 }
 
 impl QuanpinDictionary {
@@ -139,7 +136,6 @@ impl QuanpinDictionary {
             pinyin_segmentation: String::new(),
             alternative_segmentations: Vec::new(),
             current_autocorrect_types: 0,
-            current_candidates: Vec::new(),
         };
         dictionary.reset_cache_if_database_changed();
         dictionary
@@ -165,20 +161,14 @@ impl QuanpinDictionary {
             append_unique_words(&mut result, rows);
             result.sort_by_key(|item| std::cmp::Reverse(matched_letters(&item.pinyin)));
         }
-        // Marking runs after every change, including the fuzzy merge, so the returned list and the published one agree.
+        // Marking runs after every change, including the fuzzy merge, so every row the caller sees carries its mark.
         mark_autocorrect_candidates(
             &mut result,
             raw,
             &self.pinyin_segmentation,
             &self.alternative_segmentations,
         );
-        self.current_candidates = result.clone();
         result
-    }
-
-    /// The last answer `query` produced.
-    pub fn current_candidates(&self) -> &[WordItem] {
-        &self.current_candidates
     }
 
     /// `tbl_1_<c>` rows for a one-letter code, as `WordItem(key, value, weight, Database, key)` with `pinyin = code`.
@@ -201,7 +191,7 @@ impl QuanpinDictionary {
             .collect()
     }
 
-    /// Replace the capped 24-row run with every row of the initial (QD:506-558); updates the caches and the current list.
+    /// Replace the capped 24-row run with every row of the initial (QD:506-558); updates the row and series caches.
     pub fn expand_initial_candidates(
         &mut self,
         code: &str,
@@ -243,15 +233,12 @@ impl QuanpinDictionary {
         *candidates = merged;
         self.cache.insert(code.to_string(), expanded);
         // Keyed without the `C:` prefix, as the reference writes it (QD:554): a one-letter input is never corrected, so the key is the one its query used.
-        self.series_cache.insert(
-            series_cache_key(
-                &self.pinyin_sequence,
-                &self.pinyin_segmentation,
-                self.current_autocorrect_types,
-            ),
-            candidates.clone(),
-        );
-        self.current_candidates = candidates.clone();
+        let key = self.series_slot(&series_cache_key(
+            &self.pinyin_sequence,
+            &self.pinyin_segmentation,
+            self.current_autocorrect_types,
+        ));
+        self.series_cache.insert(key, candidates.clone());
         true
     }
 
@@ -317,14 +304,12 @@ impl QuanpinDictionary {
         // The key is recomputed exactly as the query computed it, so the rows land in the slot the next refresh reads.
         let segments = self.resolve_segments(raw, segmentation);
         let resolution = self.resolution(raw, segmentation, &segments, autocorrect_types);
-        let mut list = self
-            .series_cache
-            .get(&resolution.cache_key)
-            .unwrap_or_default();
+        let key = self.series_slot(&resolution.cache_key);
+        let mut list = self.series_cache.get(&key).unwrap_or_default();
         if !replace_online_candidate_batch(&mut list, raw, words, source) {
             return false;
         }
-        self.series_cache.insert(resolution.cache_key, list);
+        self.series_cache.insert(key, list);
         true
     }
 
@@ -336,17 +321,6 @@ impl QuanpinDictionary {
 
     pub fn knows_han_char(&self, han: &str) -> bool {
         self.database.han_char_exists(han)
-    }
-
-    /// Correction cut, validate, insert at 10000, journal as a user insert, reset caches (QD:1184-1213).
-    pub fn create_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        let segments = first_correction_cut(&pinyin.replace('\'', ""))
-            .ok_or_else(|| EngineError::invalid(ENTRY_REJECTED))?;
-        let key = join_segments(&segments);
-        if !is_valid_entry(&key, &segments_to_jianpin(&segments), word) {
-            return Err(EngineError::invalid(ENTRY_REJECTED));
-        }
-        self.insert_new_word(&key, word)
     }
 
     /// Umlaut-normalised canonical key, one complete syllable per Han character, no re-cut; an existing row is OK without a journal write (QD:1215-1268).
@@ -366,52 +340,6 @@ impl QuanpinDictionary {
         self.insert_new_word(&join_segments(&segments), word)
     }
 
-    /// The compatibility weight path (QD:1275-1297).
-    pub fn update_weight_by_pinyin_and_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        let mut segments = first_correction_cut(&pinyin.replace('\'', ""))
-            .ok_or_else(|| EngineError::invalid(ENTRY_REJECTED))?;
-        // Alias spellings (nue/lue and the like have no dictionary rows) must not carry frequency data; the weight lands on the standard row.
-        normalize_umlaut_aliases(&mut segments);
-        segments.truncate(count_han_chars(word));
-        let normalized = join_segments(&segments);
-
-        // The update statement re-cuts its key and truncates again before validating (QD:1608-1635).
-        let mut key_segments = first_correction_cut(&normalized.replace('\'', ""))
-            .ok_or_else(|| EngineError::invalid(ENTRY_REJECTED))?;
-        key_segments.truncate(count_han_chars(word));
-        let key = join_segments(&key_segments);
-        if !is_valid_entry(&key, &segments_to_jianpin(&key_segments), word) {
-            return Err(EngineError::invalid(ENTRY_REJECTED));
-        }
-        if !self.database.is_open() {
-            return Err(EngineError::failed(DICTIONARY_UNAVAILABLE));
-        }
-        self.database.bump_weight(&key, word)?;
-        let journaled = record_pinyin_upsert_from_database(
-            self.database.path(),
-            &normalized,
-            word,
-            &self.paths.user(USER_JOURNAL),
-        );
-        self.reset_cache();
-        journaled
-    }
-
-    /// `user_dictionary::delete_dictionary_candidate`, then reset caches.
-    pub fn delete_by_pinyin_and_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        let segments = first_correction_cut(&pinyin.replace('\'', ""))
-            .ok_or_else(|| EngineError::invalid(ENTRY_REJECTED))?;
-        delete_dictionary_candidate(
-            self.database.path(),
-            &self.paths.user(USER_JOURNAL),
-            PersonalDictionaryKind::Pinyin,
-            &join_segments(&segments),
-            word,
-        )?;
-        self.reset_cache();
-        Ok(())
-    }
-
     /// A change clears the row and series caches.
     pub fn set_sentence_alternatives(&mut self, enabled: bool) {
         if self.sentence_alternatives == enabled {
@@ -423,7 +351,7 @@ impl QuanpinDictionary {
         self.series_cache.clear();
     }
 
-    /// Loads the enabled models from the resource bundle; a change resets the caches.
+    /// Loads the enabled models from the resource bundle. The options are part of every series slot, so a change needs no reset and switching back finds the earlier lists still cached.
     pub fn set_sentence_association(&mut self, options: SentenceAssociationOptions) {
         if self.sentence_association == options {
             return;
@@ -450,20 +378,36 @@ impl QuanpinDictionary {
                 self.rerankers.push(NeuralReranker::new(source, model));
             }
         }
-        self.reset_cache();
     }
 
-    /// A change of the trimmed context invalidates cached sentence rows that depended on it.
+    /// Keeps the part of the committed text the rerankers read; while they run it is part of every series slot (`series_slot`).
     pub fn set_rescoring_context(&mut self, context: &str) {
         // The models only ever see the last `CONTEXT_CHARACTERS`, so committed text beyond that window changes nothing.
         let trimmed = last_characters(context, CONTEXT_CHARACTERS);
-        if self.rescoring_context == trimmed {
-            return;
+        if self.rescoring_context != trimmed {
+            self.rescoring_context = trimmed.to_string();
         }
-        self.rescoring_context = trimmed.to_string();
-        // Only reranked sentence rows read the context. Scoring is synchronous, so a list cached under the current context stays valid until the context moves.
-        if !self.rerankers.is_empty() {
-            self.reset_cache();
+    }
+
+    /// The series cache slot of a resolution's key (overlays.md §1.6.2). The association switches decide which sentence rows a list carries, so they are always part of the slot. The reference bypassed the cache while a neural model ran, because its scores came from an asynchronous worker; scoring here is synchronous, so a reranked list is cached under the trimmed context it was scored with and a commit moves the next query to a fresh slot instead of clearing every list.
+    fn series_slot(&self, cache_key: &str) -> String {
+        let options = self.sentence_association;
+        let switches: String = [
+            options.word_lattice,
+            options.neural_keyboard,
+            options.neural_desktop,
+            options.show_next_on_duplicate,
+        ]
+        .into_iter()
+        .map(|on| if on { '1' } else { '0' })
+        .collect();
+        if self.rerankers.is_empty() {
+            format!("{cache_key}\u{1f}S{switches}")
+        } else {
+            format!(
+                "{cache_key}\u{1f}S{switches}\u{1f}{}",
+                self.rescoring_context
+            )
         }
     }
 
@@ -479,7 +423,6 @@ impl QuanpinDictionary {
     /// QD:320-482.
     fn query_exact(&mut self, raw: &str, segmentation: &str, types: u32) -> Vec<WordItem> {
         if raw.is_empty() {
-            self.current_candidates.clear();
             return Vec::new();
         }
         self.pinyin_sequence = raw.to_string();
@@ -506,9 +449,10 @@ impl QuanpinDictionary {
             .collect();
 
         self.drop_personal_scored_results();
-        if self.series_cache.contains(&resolution.cache_key) {
+        let slot = self.series_slot(&resolution.cache_key);
+        if self.series_cache.contains(&slot) {
             self.reset_cache_if_database_changed();
-            if let Some(cached) = self.series_cache.get(&resolution.cache_key) {
+            if let Some(cached) = self.series_cache.get(&slot) {
                 return cached;
             }
         }
@@ -553,11 +497,10 @@ impl QuanpinDictionary {
                 );
             }
         }
-        self.series_cache
-            .insert(resolution.cache_key.clone(), result.clone());
+        self.series_cache.insert(slot.clone(), result.clone());
         // Only keys long enough for the sentence lattice carry personal scores.
         if segments.len() >= 2 || resolution.corrected.len() >= 2 {
-            self.remember_personal_scored_key(resolution.cache_key);
+            self.remember_personal_scored_key(slot);
         }
         result
     }
@@ -947,17 +890,6 @@ fn first_correction_cut(pinyin: &str) -> Option<Vec<String>> {
     cut_pinyin_by_mode(pinyin, CutMode::Correction)
         .into_iter()
         .next()
-}
-
-/// `do_validate` (QD:1657-1678): a non-empty key, one jianpin letter per character, and a correction cut with one syllable per character.
-fn is_valid_entry(key: &str, jianpin: &str, word: &str) -> bool {
-    let plain = key.replace('\'', "");
-    if plain.is_empty() {
-        return false;
-    }
-    let characters = count_han_chars(word);
-    jianpin.len() == characters
-        && first_correction_cut(&plain).is_some_and(|segments| segments.len() == characters)
 }
 
 #[cfg(test)]

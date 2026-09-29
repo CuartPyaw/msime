@@ -22,7 +22,6 @@ impl JapaneseRomajiScheme {
             SchemeKey::Backspace => {
                 self.raw.pop();
             }
-            SchemeKey::Escape | SchemeKey::Return => self.reset(),
             SchemeKey::Apostrophe => self.raw.push('\''),
             // The physical minus key spells the long-vowel mark, so it is input here rather than a symbol.
             SchemeKey::Minus => self.raw.push('-'),
@@ -161,10 +160,10 @@ mod tests {
         let mut scheme = typed("kan");
         scheme.handle_key(SchemeKey::Backspace);
         assert_eq!(scheme.preedit(), "ka");
-        scheme.handle_key(SchemeKey::Escape);
+        scheme.reset();
         assert_eq!(scheme.preedit(), "");
         let mut scheme = typed("ka");
-        scheme.handle_key(SchemeKey::Return);
+        scheme.reset();
         assert_eq!(scheme.preedit(), "");
     }
 

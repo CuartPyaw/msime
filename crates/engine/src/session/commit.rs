@@ -197,8 +197,8 @@ impl InputSession {
         committed(diagnostic)
     }
 
-    /// Chain bookkeeping for text the nine-key session committed: the grid bypasses this session, so the word after it must not read the word before it as its context. The text itself only fed the dropped learning-undo ledger.
-    pub(super) fn note_external_commit(&mut self, _text: &str) {
+    /// Chain bookkeeping for a nine-key commit: the grid bypasses this session, so the word after it must not read the word before it as its context. The committed text is not needed, since it only fed the dropped learning-undo ledger.
+    pub(super) fn note_external_commit(&mut self) {
         self.reset_commit_context();
     }
 

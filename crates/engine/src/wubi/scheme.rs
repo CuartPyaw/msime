@@ -36,7 +36,6 @@ impl WubiScheme {
             SchemeKey::Backspace => {
                 self.raw.pop();
             }
-            SchemeKey::Escape | SchemeKey::Return => self.reset(),
             SchemeKey::Letter(letter) if letter.is_ascii_alphabetic() => {
                 let lower = letter.to_ascii_lowercase();
                 if is_wubi_letter(lower, self.mixed_pinyin_allowed)
@@ -155,7 +154,7 @@ mod tests {
         assert!(!scheme.has_complete_code());
 
         // Reset drops the allowance but keeps the setting-driven z.
-        scheme.handle_key(SchemeKey::Escape);
+        scheme.reset();
         assert_eq!(scheme.preedit(), "");
         typed(&mut scheme, "zhongguo");
         assert_eq!(scheme.preedit(), "zhon");
@@ -171,7 +170,7 @@ mod tests {
         scheme.handle_key(SchemeKey::Backspace);
         assert_eq!(scheme.preedit(), "");
         typed(&mut scheme, "ab");
-        scheme.handle_key(SchemeKey::Return);
+        scheme.reset();
         assert_eq!(scheme.preedit(), "");
     }
 

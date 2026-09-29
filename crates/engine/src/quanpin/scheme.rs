@@ -33,7 +33,6 @@ impl QuanpinScheme {
             SchemeKey::Backspace => {
                 self.raw.pop();
             }
-            SchemeKey::Escape | SchemeKey::Return => self.reset(),
             SchemeKey::Letter(_) | SchemeKey::Semicolon | SchemeKey::Minus | SchemeKey::Requery => {
             }
         }
@@ -140,10 +139,10 @@ mod tests {
         assert_eq!(scheme.preedit(), "Ni'");
         scheme.handle_key(SchemeKey::Backspace);
         assert_eq!(scheme.preedit(), "Ni");
-        scheme.handle_key(SchemeKey::Return);
+        scheme.reset();
         assert_eq!(scheme.preedit(), "");
         let mut scheme = typed("ab");
-        scheme.handle_key(SchemeKey::Escape);
+        scheme.reset();
         assert_eq!(scheme.preedit(), "");
         scheme.handle_key(SchemeKey::Backspace);
         assert_eq!(scheme.preedit(), "");

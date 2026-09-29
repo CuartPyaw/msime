@@ -29,12 +29,10 @@ impl HelpcodeKeymap {
         self.codes.get(character).map(String::as_str)
     }
 
-    pub fn len(&self) -> usize {
+    /// Table size, only asserted by the loader tests here and in host/tests.rs.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
         self.codes.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.codes.is_empty()
     }
 }
 
@@ -355,9 +353,12 @@ mod tests {
     fn loading_resolves_built_in_and_custom_files() {
         let resources = tempfile::tempdir().unwrap();
         // A missing built-in table is an empty table, as the unchecked C++ stream gives.
-        assert!(load_helpcode_keymap(resources.path(), "lantian")
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            load_helpcode_keymap(resources.path(), "lantian")
+                .unwrap()
+                .len(),
+            0
+        );
         assert_eq!(
             load_helpcode_keymap(resources.path(), "custom/synthetic")
                 .unwrap_err()

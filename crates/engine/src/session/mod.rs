@@ -378,8 +378,8 @@ impl Session {
 
     /// Grid commits bypass the input session, so the word after one must not read the word before it as its context (session.cpp:37-45).
     fn after_nine_key(&mut self, result: KeyResult) -> KeyResult {
-        if let Some(text) = &result.commit {
-            self.input.note_external_commit(text);
+        if result.commit.is_some() {
+            self.input.note_external_commit();
         }
         result
     }

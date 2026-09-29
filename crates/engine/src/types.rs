@@ -299,8 +299,6 @@ pub enum SchemeKey {
     /// The Japanese long vowel mark.
     Minus,
     Backspace,
-    Escape,
-    Return,
     /// Re-run the query without changing the composition.
     Requery,
 }

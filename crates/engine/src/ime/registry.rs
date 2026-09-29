@@ -1,7 +1,8 @@
 //! The providers, one per scheme family (`R/providers/provider_registry.cpp`, `pinyin_candidate_provider.cpp`): pinyin (quanpin and shuangpin engines), wubi and Japanese.
+//!
+//! The registry answers queries and lookups only. The reference also routed `create_word` / `update_weight_by_pinyin_and_word` / `delete_by_pinyin_and_word` through it; here the session writes pins, removals and frequency learning into user_dictionary itself, choosing the dictionary kind from the selected row's scheme (overlays.md §3.3), and phrases through its own canonical-pinyin `QuanpinEngine`, so a second writer path would only diverge from it.
 
 use crate::assets;
-use crate::error::Result;
 use crate::helpcode::SharedKeymap;
 use crate::japanese::JapaneseProvider;
 use crate::paths::RuntimePaths;
@@ -12,23 +13,20 @@ use crate::types::{CandidateSource, QueryRequest, SchemeType, ShuangpinProfileKi
 use crate::wubi::provider::WubiProvider;
 
 pub struct ProviderRegistry {
-    pub quanpin: QuanpinEngine,
-    pub shuangpin: ShuangpinEngine,
-    pub wubi: WubiProvider,
-    pub japanese: JapaneseProvider,
+    quanpin: QuanpinEngine,
+    shuangpin: ShuangpinEngine,
+    wubi: WubiProvider,
+    japanese: JapaneseProvider,
     keymap: Option<SharedKeymap>,
 }
 
 impl ProviderRegistry {
-    /// Wubi reads the generation's `msime.db` and journals into the user journal; the Japanese model is the immutable resource (provider_registry.cpp:4-10).
+    /// Wubi reads the generation's `msime.db`; the Japanese model is the immutable resource (provider_registry.cpp:4-10).
     pub fn new(profile_kind: ShuangpinProfileKind, paths: &RuntimePaths) -> Self {
         Self {
             quanpin: QuanpinEngine::new(paths),
             shuangpin: ShuangpinEngine::new(profile(profile_kind), paths),
-            wubi: WubiProvider::new(
-                &paths.dictionary(assets::MAIN_DICTIONARY),
-                &paths.user(assets::USER_JOURNAL),
-            ),
+            wubi: WubiProvider::new(&paths.dictionary(assets::MAIN_DICTIONARY)),
             japanese: JapaneseProvider::new(&paths.resource(assets::JAPANESE_MODEL)),
             keymap: None,
         }
@@ -74,45 +72,6 @@ impl ProviderRegistry {
             }
             SchemeType::Wubi => self.wubi.reset_cache(),
             SchemeType::JapaneseRomaji => self.japanese.reset_cache(),
-        }
-    }
-
-    /// Wubi and Japanese store no user words (`kNoMutation`).
-    pub fn create_word(&mut self, scheme: SchemeType, pinyin: &str, word: &str) -> Result<()> {
-        match scheme {
-            SchemeType::Quanpin => self.quanpin.create_word(pinyin, word),
-            SchemeType::Shuangpin => self.shuangpin.create_word(pinyin, word),
-            SchemeType::Wubi | SchemeType::JapaneseRomaji => Ok(()),
-        }
-    }
-
-    pub fn update_weight_by_pinyin_and_word(
-        &mut self,
-        scheme: SchemeType,
-        pinyin: &str,
-        word: &str,
-    ) -> Result<()> {
-        match scheme {
-            SchemeType::Quanpin => self.quanpin.update_weight_by_pinyin_and_word(pinyin, word),
-            SchemeType::Shuangpin => self
-                .shuangpin
-                .update_weight_by_pinyin_and_word(pinyin, word),
-            SchemeType::Wubi => self.wubi.update_weight(pinyin, word),
-            SchemeType::JapaneseRomaji => Ok(()),
-        }
-    }
-
-    pub fn delete_by_pinyin_and_word(
-        &mut self,
-        scheme: SchemeType,
-        pinyin: &str,
-        word: &str,
-    ) -> Result<()> {
-        match scheme {
-            SchemeType::Quanpin => self.quanpin.delete_by_pinyin_and_word(pinyin, word),
-            SchemeType::Shuangpin => self.shuangpin.delete_by_pinyin_and_word(pinyin, word),
-            SchemeType::Wubi => self.wubi.delete(pinyin, word),
-            SchemeType::JapaneseRomaji => Ok(()),
         }
     }
 

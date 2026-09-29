@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
-use crate::error::{EngineError, Result};
+use crate::error::Result;
 use crate::format::build_table_name;
 use crate::types::PersonalDictionaryKind;
 
@@ -229,16 +229,6 @@ pub fn pinyin_table(key: &str) -> Option<String> {
     build_table_name(&pinyin_segments(key))
 }
 
-/// Pinyin by key, `wubi86`, `english_words`; quick phrases have no learning table (J:384-398).
-pub fn dictionary_table_name(kind: PersonalDictionaryKind, key: &str) -> Option<String> {
-    match kind {
-        PersonalDictionaryKind::Pinyin => pinyin_table(key),
-        PersonalDictionaryKind::Wubi => Some("wubi86".to_owned()),
-        PersonalDictionaryKind::English => Some("english_words".to_owned()),
-        PersonalDictionaryKind::QuickPhrase => None,
-    }
-}
-
 /// One journal upsert on an open connection (J:104-112).
 pub(crate) fn write_upsert(
     connection: &Connection,
@@ -252,19 +242,6 @@ pub(crate) fn write_upsert(
         .prepare_cached(UPSERT_JOURNAL_SQL)?
         .execute(params![kind.journal_name(), key, value, weight, display])?;
     Ok(())
-}
-
-/// Upsert an operation row without touching `user_inserted` (J:96-112, J:535-543).
-pub fn record_upsert(
-    user_db: &Path,
-    kind: PersonalDictionaryKind,
-    key: &str,
-    value: &str,
-    weight: i64,
-    display: &str,
-) -> Result<()> {
-    let journal = open_journal(user_db)?;
-    write_upsert(&journal, kind, key, value, weight, display)
 }
 
 /// Upsert with `user_inserted = 1` (J:547-581).
@@ -284,20 +261,6 @@ pub fn record_user_insert(
         weight,
         display
     ])?;
-    Ok(())
-}
-
-/// A tombstone; `user_inserted` is preserved (J:583-596).
-pub fn record_delete(
-    user_db: &Path,
-    kind: PersonalDictionaryKind,
-    key: &str,
-    value: &str,
-) -> Result<()> {
-    let journal = open_journal(user_db)?;
-    journal
-        .prepare_cached(&tombstone_sql("main"))?
-        .execute(params![kind.journal_name(), key, value])?;
     Ok(())
 }
 
@@ -353,30 +316,6 @@ pub fn is_user_deleted(
         )
         .and_then(|mut statement| statement.exists(params![kind.journal_name(), key, value]))
         .unwrap_or(false)
-}
-
-/// Journal the dictionary's current weight of a pinyin row as an upsert (J:891-903).
-pub fn record_pinyin_upsert_from_database(
-    main_db: &Path,
-    key: &str,
-    value: &str,
-    user_db: &Path,
-) -> Result<()> {
-    let table = pinyin_table(key).ok_or_else(|| EngineError::invalid(UNSTORABLE_ENTRY))?;
-    let main = open_database(main_db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    let weight: i64 = main.query_row(
-        &format!("SELECT weight FROM \"{table}\" WHERE key=?1 AND value=?2 LIMIT 1"),
-        params![key, value],
-        |row| row.get(0),
-    )?;
-    record_upsert(
-        user_db,
-        PersonalDictionaryKind::Pinyin,
-        key,
-        value,
-        weight,
-        "",
-    )
 }
 
 /// Fixtures the learning modules' tests share: a temporary directory with a journal path and small working dictionaries in the shipped schemas.
@@ -500,6 +439,28 @@ mod tests {
     use super::test_support::{count, query_i64, Dir};
     use super::*;
 
+    fn upsert(
+        user_db: &Path,
+        kind: PersonalDictionaryKind,
+        key: &str,
+        value: &str,
+        weight: i64,
+        display: &str,
+    ) -> Result<()> {
+        let journal = open_journal(user_db)?;
+        write_upsert(&journal, kind, key, value, weight, display)
+    }
+
+    fn tombstone(user_db: &Path, kind: PersonalDictionaryKind, key: &str, value: &str) {
+        open_journal(user_db)
+            .unwrap()
+            .execute(
+                &tombstone_sql("main"),
+                params![kind.journal_name(), key, value],
+            )
+            .unwrap();
+    }
+
     #[test]
     fn table_names_follow_the_key() {
         assert_eq!(pinyin_table("ni'hao").as_deref(), Some("tbl_2_n"));
@@ -511,14 +472,6 @@ mod tests {
         assert_eq!(pinyin_table("ni''hao"), None);
         assert_eq!(pinyin_table("'ni"), None);
         assert_eq!(pinyin_table("ni'"), None);
-        assert_eq!(
-            dictionary_table_name(PersonalDictionaryKind::QuickPhrase, "a"),
-            None
-        );
-        assert_eq!(
-            dictionary_table_name(PersonalDictionaryKind::Wubi, "a").as_deref(),
-            Some("wubi86")
-        );
     }
 
     /// test_typo_correction_input_session.cpp:381-403: a journal written by the shipped engine (v3, four tables) is upgraded in place.
@@ -582,7 +535,7 @@ mod tests {
     fn ensure_drops_staircase_leftovers_only() {
         let dir = Dir::new();
         let journal = dir.journal();
-        record_upsert(
+        upsert(
             &journal,
             PersonalDictionaryKind::Pinyin,
             "xian",
@@ -591,7 +544,7 @@ mod tests {
             "",
         )
         .unwrap();
-        record_upsert(
+        upsert(
             &journal,
             PersonalDictionaryKind::Pinyin,
             "xian",
@@ -600,7 +553,7 @@ mod tests {
             "",
         )
         .unwrap();
-        record_upsert(
+        upsert(
             &journal,
             PersonalDictionaryKind::Pinyin,
             "xian",
@@ -609,7 +562,7 @@ mod tests {
             "",
         )
         .unwrap();
-        record_upsert(&journal, PersonalDictionaryKind::Wubi, "a", "工", 0, "").unwrap();
+        upsert(&journal, PersonalDictionaryKind::Wubi, "a", "工", 0, "").unwrap();
         ensure_user_database(&journal).unwrap();
         assert_eq!(
             count(
@@ -637,7 +590,7 @@ mod tests {
 
         record_user_insert(&journal, kind, "ni", "你", 10_000, "").unwrap();
         // A ranking change keeps the row the user's own.
-        record_upsert(&journal, kind, "ni", "你", 20_000, "").unwrap();
+        upsert(&journal, kind, "ni", "你", 20_000, "").unwrap();
         assert!(is_user_inserted(&journal, kind, "ni", "你"));
         assert_eq!(
             query_i64(
@@ -647,7 +600,7 @@ mod tests {
             Some(20_000)
         );
 
-        record_delete(&journal, kind, "ni", "你").unwrap();
+        tombstone(&journal, kind, "ni", "你");
         assert!(is_user_deleted(&journal, kind, "ni", "你"));
         assert!(
             is_user_inserted(&journal, kind, "ni", "你"),
@@ -661,30 +614,8 @@ mod tests {
             Some(0)
         );
         // Stored again, the tombstone is gone.
-        record_upsert(&journal, kind, "ni", "你", 5, "").unwrap();
+        upsert(&journal, kind, "ni", "你", 5, "").unwrap();
         assert!(!is_user_deleted(&journal, kind, "ni", "你"));
-    }
-
-    #[test]
-    fn upsert_from_database_copies_the_dictionary_weight() {
-        let dir = Dir::new();
-        dir.pinyin(&[("ni'hao", "你好", 77_000_000)]);
-        let journal = dir.journal();
-        record_pinyin_upsert_from_database(&dir.main_db(), "ni'hao", "你好", &journal).unwrap();
-        assert_eq!(
-            query_i64(
-                &journal,
-                "SELECT weight FROM user_dictionary_operations WHERE key='ni''hao'"
-            ),
-            Some(77_000_000)
-        );
-        assert!(
-            record_pinyin_upsert_from_database(&dir.main_db(), "ni'hao", "拟好", &journal).is_err()
-        );
-        assert!(
-            record_pinyin_upsert_from_database(&dir.main_db(), "ni''hao", "你好", &journal)
-                .is_err()
-        );
     }
 
     #[test]
@@ -710,19 +641,29 @@ mod tests {
         );
     }
 
+    /// Two opens of `path` that saw the same cache generation. The generation is process-global and other tests call `close_cached_journals` concurrently, so a pair split by a bump is retried rather than read as the cache failing to reuse.
+    fn open_twice_in_one_generation(path: &Path) -> (JournalConnection, JournalConnection) {
+        loop {
+            let generation = CACHE_GENERATION.load(Ordering::Acquire);
+            let first = open_journal(path).unwrap();
+            let second = open_journal(path).unwrap();
+            if CACHE_GENERATION.load(Ordering::Acquire) == generation {
+                return (first, second);
+            }
+        }
+    }
+
     #[test]
     fn the_cache_reuses_one_connection_per_thread_until_closed() {
         let dir = Dir::new();
         let path = dir.journal();
-        let first = open_journal(&path).unwrap();
-        let second = open_journal(&path).unwrap();
+        let (first, second) = open_twice_in_one_generation(&path);
         assert!(Rc::ptr_eq(&first.connection, &second.connection));
         drop((first, second));
         let other = Dir::new();
         let switched = open_journal(&other.journal()).unwrap();
         drop(switched);
-        let reopened = open_journal(&path).unwrap();
-        let again = open_journal(&path).unwrap();
+        let (reopened, again) = open_twice_in_one_generation(&path);
         assert!(Rc::ptr_eq(&reopened.connection, &again.connection));
         drop(again);
         CACHE_GENERATION.fetch_add(1, Ordering::AcqRel);
@@ -753,9 +694,7 @@ mod tests {
         let dir = Dir::new();
         let journal = dir.journal();
         std::fs::create_dir(&journal).unwrap();
-        assert!(
-            record_upsert(&journal, PersonalDictionaryKind::Pinyin, "ni", "你", 1, "").is_err()
-        );
+        assert!(upsert(&journal, PersonalDictionaryKind::Pinyin, "ni", "你", 1, "").is_err());
         assert!(ensure_user_database(&journal).is_err());
     }
 }

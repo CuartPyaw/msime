@@ -27,10 +27,6 @@ impl<K: Hash + Eq, V: Clone> FifoCache<K, V> {
         self.entries.peek(key)
     }
 
-    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
-        self.entries.peek_mut(key)
-    }
-
     pub fn contains(&self, key: &K) -> bool {
         self.entries.contains(key)
     }
@@ -50,14 +46,6 @@ impl<K: Hash + Eq, V: Clone> FifoCache<K, V> {
 
     pub fn clear(&mut self) {
         self.entries.clear();
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 }
 

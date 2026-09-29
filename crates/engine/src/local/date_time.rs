@@ -100,13 +100,6 @@ pub fn query_date_time_with_limit(
         .collect()
 }
 
-pub fn is_date_time_keyword(keyword: &str) -> bool {
-    matches!(
-        keyword,
-        "rq" | "riqi" | "date" | "sj" | "shijian" | "time" | "xq" | "xingqi" | "week"
-    )
-}
-
 fn weekday_index(now: &LocalDateTime) -> usize {
     now.weekday.min(6) as usize
 }
@@ -406,8 +399,10 @@ mod tests {
     /// test_local_modes.cpp:175-183.
     #[test]
     fn keywords_and_limits() {
-        assert!(!is_date_time_keyword("today"));
-        assert!(is_date_time_keyword("week"));
+        assert_words(
+            &query_date_time("week", &sample_time()),
+            &["星期日", "星期天", "Sunday", "Sun"],
+        );
         assert!(query_date_time("today", &sample_time()).is_empty());
         assert!(query_date_time("RQ", &sample_time()).is_empty());
         assert!(query_date_time("", &sample_time()).is_empty());

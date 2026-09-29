@@ -9,6 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use super::cxx_sort;
 use super::ngram::{NgramTable, SENTENCE_START};
 use super::personal::PersonalNgram;
 use super::LatticeLookup;
@@ -158,7 +159,8 @@ pub fn edge_log_prob(weight: i64, syllables: usize, options: &LatticeOptions<'_>
     }
 }
 
-/// Build the span graph over `syllables` (each span looked up once) and beam-search it, then rescore with the trigram table (WL:110-186, WL:385-485). Ties sort stably.
+/// Build the span graph over `syllables` (each span looked up once) and beam-search it, then rescore with the trigram table (WL:110-186, WL:385-485). The product decodes through `merge_lattice_candidates`, which keeps the graph for the typo pass; this is the C++ `decode_word_lattice` the reference tests drive.
+#[cfg(test)]
 pub fn decode_sentences(
     syllables: &[String],
     lookup: &mut LatticeLookup<'_>,
@@ -170,7 +172,8 @@ pub fn decode_sentences(
     decode_graph(&build_graph(syllables, lookup, options), options, None)
 }
 
-/// Decode again with the typo edges added at `typo_beam`, and accept the best path only if it uses a typo edge, differs from the literal best and outscores it (WL:490-525).
+/// Decode again with the typo edges added at `typo_beam`, and accept the best path only if it uses a typo edge, differs from the literal best and outscores it (WL:490-525). The product reaches `decode_typo_on_graph` through `merge_lattice_candidates`.
+#[cfg(test)]
 pub fn decode_typo_sentence(
     syllables: &[String],
     lookup: &mut LatticeLookup<'_>,
@@ -239,6 +242,7 @@ pub(super) fn build_graph(
     graph
 }
 
+#[derive(Clone, Copy)]
 struct Hyp<'g> {
     score: f64,
     /// Column and index of the hypothesis this one extends; `None` for the start.
@@ -248,12 +252,17 @@ struct Hyp<'g> {
     typo_edges: usize,
 }
 
-/// Keeps the best `beam` hypotheses. The C++ `partial_sort` is unstable on ties; a stable sort keeps them in insertion order, which rarely differs.
+/// The C++ comparator of both beam sorts (WL:106, WL:447).
+fn scores_higher(a: &Hyp<'_>, b: &Hyp<'_>) -> bool {
+    a.score > b.score
+}
+
+/// Keeps the best `beam` hypotheses with libc++'s `partial_sort`, whose heap selection decides which of several tied hypotheses survive and in what order (WL:101-108).
 fn keep_beam(column: &mut Vec<Hyp<'_>>, beam: usize) {
     if column.len() <= beam {
         return;
     }
-    column.sort_by(|a, b| b.score.total_cmp(&a.score));
+    cxx_sort::partial_sort(column, beam, &mut scores_higher);
     column.truncate(beam);
 }
 
@@ -352,7 +361,7 @@ pub(super) fn decode_graph(
         return Vec::new();
     }
     keep_beam(&mut last, options.beam.max(options.nbest));
-    last.sort_by(|a, b| b.score.total_cmp(&a.score));
+    cxx_sort::sort(&mut last, &mut scores_higher);
     let take = options.nbest.min(last.len());
 
     let mut paths = Vec::with_capacity(take);
@@ -531,6 +540,7 @@ pub(super) mod tests {
         assert_eq!(edge_log_prob(10, 1, &odd), edge_log_prob(10, 1, &options));
     }
 
+    /// test_pinyin.cpp:540-548, like the other fake-lookup lattice cases of `test_word_lattice` (:534-677) ported here and in merge.rs; the SQLite lookup case (:641-666) is in dictionary/pinyin.rs.
     #[test]
     fn nie_zi_prefers_the_phrase() {
         let rows = table(&[
@@ -541,6 +551,7 @@ pub(super) mod tests {
         assert_eq!(best("nie'zi", &rows, &LatticeOptions::default()), "镊子");
     }
 
+    /// test_pinyin.cpp:550-564.
     #[test]
     fn five_syllables_join_the_best_phrases() {
         let rows = table(&[
@@ -560,6 +571,7 @@ pub(super) mod tests {
         assert_eq!(paths[0].typo_edges, 0);
     }
 
+    /// test_pinyin.cpp:598-612.
     #[test]
     fn hen_la_ji_beats_the_rarer_homophone() {
         let rows = table(&[

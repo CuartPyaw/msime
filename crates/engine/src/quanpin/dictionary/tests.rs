@@ -81,8 +81,13 @@ fn autocorrect_switch_matrix() {
 
     let transposed = query(&mut dictionary, "sahng", "sa'h'n'g", TRANSPOSITION);
     assert_eq!(transposed[0].word, "上");
+    assert_eq!(transposed[0].corrected_from, "sahng");
+    // The reference test asserted 上 absent here, but that group never ran and the reference returns it: any non-zero mask adds the correction-mode alias cuts (sahng -> shang, sang) as alternative readings, and quanpin.md §3.5 keeps that quirk for parity. The type gate is on the k-best search, so no row is marked as corrected from sahng and none leads.
     let neighbor_denied = query(&mut dictionary, "sahng", "sa'h'n'g", NEIGHBOR);
-    assert!(!neighbor_denied.iter().any(is_shang));
+    assert_ne!(neighbor_denied[0].word, "上");
+    assert!(neighbor_denied
+        .iter()
+        .all(|item| item.corrected_from.is_empty()));
 
     let neighbor = query(&mut dictionary, "shabg", "sha'b'g", NEIGHBOR);
     assert_eq!(neighbor[0].word, "上");
@@ -142,9 +147,9 @@ fn autocorrect_marking() {
         .corrected_from
         .is_empty());
     assert_eq!(
-        dictionary.current_candidates(),
-        corrected.as_slice(),
-        "the published list is the returned one"
+        query(&mut dictionary, "sahng", "sa'h'n'g", BOTH),
+        corrected,
+        "a cached answer is marked as the first one was"
     );
 
     assert_eq!(
@@ -577,7 +582,6 @@ fn single_letters_are_capped_until_expanded() {
     assert!(dictionary.expand_initial_candidates("n", &mut shown));
     assert_eq!(shown.len(), 30);
     assert_eq!(shown[29].word, "n29");
-    assert_eq!(dictionary.current_candidates(), shown.as_slice());
     assert_eq!(
         query(&mut dictionary, "n", "n", NONE),
         shown,
@@ -621,7 +625,7 @@ fn journal_row(fixture: &Fixture, key: &str, value: &str) -> Option<(String, i64
 }
 
 #[test]
-fn create_word_inserts_journals_and_refreshes() {
+fn inserted_phrase_is_journaled_and_listed() {
     let fixture = phrase_fixture();
     fixture.table("ce'shi");
     let mut dictionary = QuanpinDictionary::new(&fixture.paths);
@@ -630,23 +634,27 @@ fn create_word_inserts_journals_and_refreshes() {
         "测试"
     ));
 
-    dictionary.create_word("ceshi", "测试").unwrap();
+    dictionary
+        .create_word_from_canonical_pinyin("ce'shi", "测试")
+        .unwrap();
     assert_eq!(fixture.weight("ce'shi", "测试"), Some(INSERTED_WEIGHT));
     assert_eq!(
         journal_row(&fixture, "ce'shi", "测试"),
         Some(("upsert".to_string(), INSERTED_WEIGHT, 1))
     );
-    assert!(contains(
-        &query(&mut dictionary, "ceshi", "ce'shi", NONE),
-        "测试"
-    ));
-
-    dictionary.create_word("ce'shi", "测试").unwrap();
     assert!(
-        dictionary.create_word("ceshi", "测").is_err(),
+        contains(&query(&mut dictionary, "ceshi", "ce'shi", NONE), "测试"),
+        "the insert resets the cached lists"
+    );
+    assert!(
+        dictionary
+            .create_word_from_canonical_pinyin("ce'shi", "测")
+            .is_err(),
         "one syllable per character"
     );
-    assert!(dictionary.create_word("", "测试").is_err());
+    assert!(dictionary
+        .create_word_from_canonical_pinyin("", "测试")
+        .is_err());
     let found = dictionary.find_candidate("ce'shi", "测试").unwrap();
     assert_eq!(found.weight, INSERTED_WEIGHT);
     assert_eq!(found.canonical_pinyin, "ce'shi");
@@ -685,47 +693,6 @@ fn canonical_writer_keeps_the_given_boundaries() {
 }
 
 #[test]
-fn weight_update_lifts_the_row_above_its_key() {
-    let fixture = phrase_fixture();
-    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
-    let before = query(&mut dictionary, "nihao", "ni'hao", NONE);
-    assert!(position(&before, "拟好") > position(&before, "你好"));
-    dictionary
-        .update_weight_by_pinyin_and_word("nihao", "拟好")
-        .unwrap();
-    assert_eq!(fixture.weight("ni'hao", "拟好"), Some(10_001));
-    assert_eq!(
-        query(&mut dictionary, "nihao", "ni'hao", NONE)[0].word,
-        "拟好"
-    );
-    assert!(dictionary
-        .update_weight_by_pinyin_and_word("nihao", "")
-        .is_err());
-}
-
-#[test]
-fn delete_removes_the_row_and_refreshes() {
-    let fixture = phrase_fixture();
-    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
-    assert!(contains(
-        &query(&mut dictionary, "nihao", "ni'hao", NONE),
-        "拟好"
-    ));
-    dictionary
-        .delete_by_pinyin_and_word("nihao", "拟好")
-        .unwrap();
-    assert_eq!(fixture.weight("ni'hao", "拟好"), None);
-    assert!(!contains(
-        &query(&mut dictionary, "nihao", "ni'hao", NONE),
-        "拟好"
-    ));
-    assert_eq!(
-        journal_row(&fixture, "ni'hao", "拟好").map(|row| row.0),
-        Some("delete".to_string())
-    );
-}
-
-#[test]
 fn missing_dictionary_answers_nothing() {
     let fixture = Fixture::new();
     std::fs::remove_file(fixture.database()).unwrap();
@@ -735,7 +702,9 @@ fn missing_dictionary_answers_nothing() {
         .fuzzy_candidates("ni'hao", FuzzyPinyinOptions { rules: 0x7ff })
         .is_empty());
     assert!(!dictionary.knows_han_char("你"));
-    assert!(dictionary.create_word("nihao", "你好").is_err());
+    assert!(dictionary
+        .create_word_from_canonical_pinyin("ni'hao", "你好")
+        .is_err());
     assert!(
         !fixture.database().exists(),
         "a missing dictionary stays missing"
@@ -765,4 +734,53 @@ fn sentence_alternatives_toggle_rebuilds_the_lists() {
         "without alternatives only the best reading is emitted"
     );
     assert!(all > one);
+}
+
+#[test]
+fn association_switches_select_their_own_series_slot() {
+    let fixture = Fixture::new();
+    fixture
+        .insert("ping", "平", 1000)
+        .insert("ping", "瓶", 900)
+        .insert("guo", "国", 1000)
+        .insert("guo", "果", 900);
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    let lattice_on = SentenceAssociationOptions::default();
+    let lattice_off = SentenceAssociationOptions {
+        word_lattice: false,
+        ..lattice_on
+    };
+    let has_sentence = |items: &[WordItem]| items.iter().any(|item| item.sentence_association);
+
+    assert!(has_sentence(&query(
+        &mut dictionary,
+        "pingguo",
+        "ping'guo",
+        NONE
+    )));
+    assert!(dictionary.insert_online_words(
+        "pingguo",
+        "ping'guo",
+        NONE,
+        &["苹果".to_string()],
+        CandidateSource::CloudSuggestion
+    ));
+
+    dictionary.set_sentence_association(lattice_off);
+    let off = query(&mut dictionary, "pingguo", "ping'guo", NONE);
+    assert!(
+        !has_sentence(&off),
+        "the lattice switch reaches a fresh list"
+    );
+    assert!(!contains(&off, "苹果"));
+
+    // Without a model the context is not part of the slot, so a commit keeps every list.
+    dictionary.set_sentence_association(lattice_on);
+    dictionary.set_rescoring_context("我想吃");
+    let back = query(&mut dictionary, "pingguo", "ping'guo", NONE);
+    assert!(has_sentence(&back));
+    assert!(
+        contains(&back, "苹果"),
+        "switching back finds the earlier slot with its online row"
+    );
 }

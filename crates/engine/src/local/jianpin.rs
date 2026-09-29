@@ -164,28 +164,24 @@ mod tests {
 
     const XIAOHE: ShuangpinProfile = ShuangpinProfile {
         kind: ShuangpinProfileKind::Xiaohe,
-        name: "xiaohe",
         initials: &[("sh", "u"), ("ch", "i"), ("zh", "v")],
         zero_initials: &[],
         finals: &[],
     };
     const ZIRANMA: ShuangpinProfile = ShuangpinProfile {
         kind: ShuangpinProfileKind::Ziranma,
-        name: "ziranma",
         initials: &[("sh", "u"), ("ch", "i"), ("zh", "v")],
         zero_initials: &[],
         finals: &[],
     };
     const SHOUDAO: ShuangpinProfile = ShuangpinProfile {
         kind: ShuangpinProfileKind::Shoudao,
-        name: "shoudao",
         initials: &[("sh", "e"), ("ch", "i"), ("zh", "v")],
         zero_initials: &[],
         finals: &[],
     };
     const MICROSOFT: ShuangpinProfile = ShuangpinProfile {
         kind: ShuangpinProfileKind::Microsoft,
-        name: "microsoft",
         initials: &[("sh", "u"), ("ch", "i"), ("zh", "v")],
         zero_initials: &[],
         finals: &[],
@@ -285,7 +281,7 @@ mod tests {
                 jianpin_ranking_context(code, scheme, profile),
                 expected,
                 "{code} {}",
-                profile.name
+                profile.kind.name()
             );
         }
 

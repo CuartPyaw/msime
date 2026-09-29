@@ -407,8 +407,7 @@ impl InputSession {
                 word: word.to_owned(),
                 times,
             });
-            self.chain.advance(word, now);
-            self.chain.same_composition = composition_left;
+            self.chain.advance(word, composition_left, now);
         }
         self.personal_context
             .record(&transitions)

@@ -20,10 +20,6 @@ impl ShuangpinScheme {
         }
     }
 
-    pub fn profile(&self) -> &'static ShuangpinProfile {
-        self.profile
-    }
-
     pub fn reset(&mut self) {
         self.raw.clear();
     }
@@ -33,7 +29,6 @@ impl ShuangpinScheme {
             SchemeKey::Backspace => {
                 self.raw.pop();
             }
-            SchemeKey::Escape | SchemeKey::Return => self.reset(),
             // A second consecutive `'` is refused, so `''` never forms from keys; a leading one is kept (:66-74).
             SchemeKey::Apostrophe => {
                 if !self.raw.ends_with('\'') {
@@ -150,11 +145,11 @@ mod tests {
         assert_eq!(typed.preedit(), "'ni'Hc");
         typed.handle_key(SchemeKey::Backspace);
         assert_eq!(typed.preedit(), "'ni'H");
-        typed.handle_key(SchemeKey::Escape);
+        typed.reset();
         assert_eq!(typed.preedit(), "");
         typed.handle_key(SchemeKey::Backspace);
         type_text(&mut typed, "ni");
-        typed.handle_key(SchemeKey::Return);
+        typed.reset();
         assert_eq!(typed.preedit(), "");
         typed.set_raw_input("nihc", "NiHc");
         assert_eq!(typed.preedit(), "NiHc");

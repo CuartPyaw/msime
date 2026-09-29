@@ -1,16 +1,14 @@
-//! `ShuangpinDictionary` (schemes-lang.md §1.7): series generation over decoded quanpin segments, the helpcode caches (overlays.md §5.1), online rows, and the word writers. The Google sentence lines are gone; the lattice sentence goes in at `whole_sentence_insert_position` with nothing extra (overlays.md §2.2).
+//! `ShuangpinDictionary` (schemes-lang.md §1.7): series generation over decoded quanpin segments, the helpcode caches (overlays.md §5.1), and online rows. Pins, removals, frequency learning and phrases are written by the session through `user_dictionary` (see `ime::registry`), so the reference's word writers are not ported here. The Google sentence lines are gone; the lattice sentence goes in at `whole_sentence_insert_position` with nothing extra (overlays.md §2.2).
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::query::{normalize_input_with_delimiters, remove_manual_delimiters};
+use super::query::remove_manual_delimiters;
 use super::utils::{convert_seg_shuangpin_to_seg_complete_pinyin, pinyin_segmentation};
 use super::ShuangpinProfile;
 use crate::assets;
 use crate::cache::FifoCache;
-use crate::diagnostics;
-use crate::dictionary::pinyin::{PinyinDatabase, INSERTED_WEIGHT};
-use crate::error::{EngineError, Result};
+use crate::dictionary::pinyin::PinyinDatabase;
 use crate::helpcode::{
     match_single_helpcode, matches_double_helpcodes, HelpcodeKeymap, SingleHelpcodeMatch,
 };
@@ -23,17 +21,11 @@ use crate::lattice::neural::{
 use crate::lattice::ngram::NgramTable;
 use crate::paths::RuntimePaths;
 use crate::pinyin::jianpin::QuerySource;
-use crate::pinyin::segment::{
-    cut_pinyin_by_mode, is_complete_pinyin_input, join_segments, segments_to_jianpin,
-    split_segments, CutMode,
-};
-use crate::pinyin::syllables::has_only_complete_pinyin_segments;
+use crate::pinyin::segment::split_segments;
 use crate::quanpin::dictionary::{CACHE_CAPACITY, INITIAL_CANDIDATE_LIMIT};
-use crate::text::{count_han_chars, last_characters};
-use crate::types::{CandidateSource, PersonalDictionaryKind, SentenceAssociationOptions, WordItem};
-use crate::user_dictionary::journal::{record_pinyin_upsert_from_database, record_user_insert};
+use crate::text::last_characters;
+use crate::types::{CandidateSource, SentenceAssociationOptions, WordItem};
 use crate::user_dictionary::ngram_store::PersonalNgramStore;
-use crate::user_dictionary::removal::delete_dictionary_candidate;
 
 /// The reference passed `INT_MAX` as "no limit" to the row queries (SD:899, SD:543).
 const UNLIMITED_ROWS: usize = i32::MAX as usize;
@@ -42,12 +34,6 @@ const PERSONAL_SCORED_KEY_LIMIT: usize = 2 * CACHE_CAPACITY;
 
 fn double_helpcode_cache_key(pinyin: &str, help_codes: &str) -> String {
     format!("{pinyin}:{help_codes}")
-}
-
-fn first_cut(pinyin: &str) -> Option<Vec<String>> {
-    cut_pinyin_by_mode(pinyin, CutMode::Correction)
-        .into_iter()
-        .next()
 }
 
 pub struct ShuangpinDictionary {
@@ -87,6 +73,8 @@ impl ShuangpinDictionary {
             database.database_changed();
         }
         let personal = PersonalNgramStore::for_journal(&paths.user(assets::USER_JOURNAL));
+        // The model loads lazily and bumps its version when it does. Left to the first lattice merge, that load would land on a keystroke and mark the answer it just scored as stale, so the next query for the same key would drop it together with any online rows put into it.
+        drop(personal.model());
         let personal_version = personal.version();
         Self {
             profile,
@@ -107,8 +95,13 @@ impl ShuangpinDictionary {
         }
     }
 
-    fn user_journal(&self) -> std::path::PathBuf {
-        self.paths.user(assets::USER_JOURNAL)
+    /// Series and helpcode answers carry the reranked sentence rows, which depend on the committed context. The C++ bypassed these caches while a model was loaded because its rows arrived asynchronously; scoring here is synchronous, so the trimmed context joins the key instead and a commit moves to fresh entries without clearing the context-free row cache (overlays.md §1.6.2). Without a reranker no answer reads the context, so the key stays the raw input.
+    fn sentence_cache_key(&self, key: &str) -> String {
+        if self.rerankers.is_empty() {
+            key.to_string()
+        } else {
+            format!("{key}\u{1}{}", self.rescoring_context)
+        }
     }
 
     /// Only a cache hit checks `PRAGMA data_version`, before returning the cached answer (SD:1189-1212).
@@ -209,7 +202,8 @@ impl ShuangpinDictionary {
             1 => return self.query_initial(pure, INITIAL_CANDIDATE_LIMIT),
             _ => {}
         }
-        let key = if raw.is_empty() { pure } else { raw }.to_string();
+        let rows_key = if raw.is_empty() { pure } else { raw };
+        let key = self.sentence_cache_key(rows_key);
         self.drop_personal_scored_results();
         if self.series_cache.contains(&key) {
             self.reset_cache_if_database_changed();
@@ -218,7 +212,7 @@ impl ShuangpinDictionary {
             }
         }
 
-        let mut candidates = self.generate(pure, segmentation, &key);
+        let mut candidates = self.generate(pure, segmentation, rows_key);
         // Every shorter prefix group follows, longest first; phrase creation picks from them (SD:215-231).
         let mut prefix = segmentation;
         while let Some(cut) = prefix.rfind('\'') {
@@ -333,8 +327,8 @@ impl ShuangpinDictionary {
     ) -> Vec<WordItem> {
         let reversed = help_codes.len() == 1 && help_codes.as_bytes()[0].is_ascii_uppercase();
         let cache_key = match help_codes.len() {
-            1 => raw.to_string(),
-            2 => double_helpcode_cache_key(raw, help_codes),
+            1 => self.sentence_cache_key(raw),
+            2 => self.sentence_cache_key(&double_helpcode_cache_key(raw, help_codes)),
             _ => String::new(),
         };
         if !cache_key.is_empty()
@@ -419,8 +413,8 @@ impl ShuangpinDictionary {
         }
         *candidates = merged;
         if !series_key.is_empty() {
-            self.series_cache
-                .insert(series_key.to_string(), candidates.clone());
+            let key = self.sentence_cache_key(series_key);
+            self.series_cache.insert(key, candidates.clone());
         }
         true
     }
@@ -435,7 +429,7 @@ impl ShuangpinDictionary {
         if raw.is_empty() {
             return false;
         }
-        let key = raw.to_string();
+        let key = self.sentence_cache_key(raw);
         // An absent key starts an empty list: the rows show on the next query for `raw` (SD:1373-1384).
         let mut list = self.series_cache.get(&key).unwrap_or_default();
         if !replace_online_candidate_batch(&mut list, raw, words, source) {
@@ -465,10 +459,10 @@ impl ShuangpinDictionary {
             true
         };
         if !help_codes.is_empty() {
-            let key = double_helpcode_cache_key(raw, help_codes);
+            let key = self.sentence_cache_key(&double_helpcode_cache_key(raw, help_codes));
             return insert(&mut self.double_helpcode_cache, &key);
         }
-        let key = raw.to_string();
+        let key = self.sentence_cache_key(raw);
         let single = insert(&mut self.single_helpcode_cache, &key);
         let reversed = insert(&mut self.reversed_single_helpcode_cache, &key);
         single || reversed
@@ -478,133 +472,6 @@ impl ShuangpinDictionary {
         self.database
             .find_weight(key, value)
             .map(|weight| WordItem::new(key, value, weight, CandidateSource::Database, key))
-    }
-
-    /// Raw shuangpin to quanpin letters without `'` (SD:1017-1030).
-    fn normalize_to_quanpin_input(&self, pinyin: &str) -> String {
-        remove_manual_delimiters(&normalize_input_with_delimiters(pinyin, self.profile))
-    }
-
-    /// SD:1137-1158.
-    fn is_valid_word(key: &str, jianpin: &str, value: &str) -> bool {
-        let pure_key = remove_manual_delimiters(key);
-        if pure_key.is_empty() {
-            return false;
-        }
-        let han_count = count_han_chars(value);
-        if jianpin.len() != han_count {
-            return false;
-        }
-        match first_cut(&pure_key) {
-            Some(cut) => cut.len() == han_count,
-            None => pure_key.len().is_multiple_of(2) && pure_key.len() == han_count * 2,
-        }
-    }
-
-    pub fn create_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        let quanpin = normalize_input_with_delimiters(pinyin, self.profile);
-        self.create_word_from_quanpin(&quanpin, word)
-    }
-
-    /// One complete syllable per character; an existing row is OK without a journal write (SD:730-766).
-    fn create_word_from_quanpin(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        let segments = split_segments(pinyin);
-        if segments.is_empty()
-            || segments.len() != count_han_chars(word)
-            || segments
-                .iter()
-                .any(|segment| segment.is_empty() || !is_complete_pinyin_input(segment))
-        {
-            return Err(EngineError::invalid(diagnostics::PHRASE_NOT_PERSISTED));
-        }
-        let key = join_segments(&segments);
-        if !Self::is_valid_word(&key, &segments_to_jianpin(&segments), word) {
-            return Err(EngineError::invalid(diagnostics::PHRASE_NOT_PERSISTED));
-        }
-        if self.database.find_weight(&key, word).is_some() {
-            return Ok(());
-        }
-        self.database.insert_word(&key, word)?;
-        // The reference ignores the journal result (SD:761): the word is already in the working dictionary, and a failed journal write only loses it at the next generation replay.
-        let _ = record_user_insert(
-            &self.user_journal(),
-            PersonalDictionaryKind::Pinyin,
-            &key,
-            word,
-            INSERTED_WEIGHT,
-            "",
-        );
-        self.reset_cache();
-        Ok(())
-    }
-
-    /// The compatibility "one step to the top" path (SD:807-835, SD:1098-1115).
-    pub fn update_weight_by_pinyin_and_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        // Only a direct cut into complete syllables that spells the input back is quanpin already; the correction cut's greedy fallback also splits raw shuangpin such as `qbtmuo` into fragments that spell it back (SD:810-813).
-        let stripped = remove_manual_delimiters(pinyin);
-        let is_quanpin = first_cut(&stripped).is_some_and(|cut| {
-            has_only_complete_pinyin_segments(&cut)
-                && remove_manual_delimiters(&join_segments(&cut)) == stripped
-        });
-        let pinyin = if is_quanpin {
-            stripped
-        } else {
-            self.normalize_to_quanpin_input(pinyin)
-        };
-        let han_count = count_han_chars(word);
-        let Some(mut segments) = first_cut(&pinyin) else {
-            return Err(EngineError::invalid(diagnostics::PIN_NOT_PERSISTED));
-        };
-        segments.truncate(han_count);
-        let normalized = join_segments(&segments);
-
-        // The statement builder cuts the canonical key again without re-reading it as shuangpin; an invalid word built no statement, which the reference executed as a successful no-op (SD:1098-1115).
-        if let Some(mut cut) = first_cut(&remove_manual_delimiters(&normalized)) {
-            cut.truncate(han_count);
-            let key = join_segments(&cut);
-            if Self::is_valid_word(&key, &segments_to_jianpin(&cut), word) {
-                self.database.bump_weight(&key, word)?;
-            }
-        }
-        // The reference ignores the journal result (SD:830); a missing row answers false there too.
-        let _ = record_pinyin_upsert_from_database(
-            self.database.path(),
-            &normalized,
-            word,
-            &self.user_journal(),
-        );
-        self.reset_cache();
-        Ok(())
-    }
-
-    /// Chooses the direct cut or the shuangpin reading by which one gives one syllable per character (SD:837-861).
-    pub fn delete_by_pinyin_and_word(&mut self, pinyin: &str, word: &str) -> Result<()> {
-        let stripped = remove_manual_delimiters(pinyin);
-        let direct = first_cut(&stripped);
-        let shuangpin = self.normalize_to_quanpin_input(pinyin);
-        let han_count = count_han_chars(word);
-        let direct_matches = direct.as_ref().is_some_and(|cut| cut.len() == han_count);
-        let shuangpin_matches = first_cut(&shuangpin).is_some_and(|cut| cut.len() == han_count);
-        let direct_spells_input = direct
-            .as_ref()
-            .is_some_and(|cut| remove_manual_delimiters(&join_segments(cut)) == stripped);
-        let pinyin = if (!direct_matches && shuangpin_matches) || !direct_spells_input {
-            shuangpin
-        } else {
-            stripped
-        };
-        let Some(cut) = first_cut(&pinyin) else {
-            return Err(EngineError::invalid(diagnostics::REMOVAL_NOT_PERSISTED));
-        };
-        delete_dictionary_candidate(
-            self.database.path(),
-            &self.user_journal(),
-            PersonalDictionaryKind::Pinyin,
-            &join_segments(&cut),
-            word,
-        )?;
-        self.reset_cache();
-        Ok(())
     }
 
     /// A change clears only the series cache: those answers were assembled under the other setting (SD:151-158).
@@ -646,15 +513,11 @@ impl ShuangpinDictionary {
         self.reset_cache();
     }
 
-    /// Only the last 64 characters condition the models. Without a reranker no cached answer depends on the context, so a change keeps the caches then.
+    /// Only the last 64 characters condition the models, so committed text beyond that window keys the same entries. A change clears nothing: the context is part of the sentence cache keys (`sentence_cache_key`).
     pub fn set_rescoring_context(&mut self, context: &str) {
         let trimmed = last_characters(context, CONTEXT_CHARACTERS);
-        if self.rescoring_context == trimmed {
-            return;
-        }
-        self.rescoring_context = trimmed.to_string();
-        if !self.rerankers.is_empty() {
-            self.reset_cache();
+        if self.rescoring_context != trimmed {
+            self.rescoring_context = trimmed.to_string();
         }
     }
 

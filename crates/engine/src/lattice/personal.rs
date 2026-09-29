@@ -89,6 +89,7 @@ impl CountTable {
         self.0.len()
     }
 
+    #[cfg(test)]
     fn clear(&mut self) {
         self.0.clear();
     }
@@ -182,7 +183,8 @@ impl PersonalNgram {
         self.triple_totals.add(context, count);
     }
 
-    /// Takes back what `add` added (PN:208-218).
+    /// Takes back what `add` added (PN:208-218). The store removes journal rows pair by pair and triple by triple, so only the tests take back a whole transition.
+    #[cfg(test)]
     pub fn remove(&mut self, transition: &PersonalTransition) {
         if transition.word.is_empty() || transition.times == 0 {
             return;
@@ -225,6 +227,7 @@ impl PersonalNgram {
     }
 
     /// Drops every count and keeps the options.
+    #[cfg(test)]
     pub fn clear(&mut self) {
         self.pairs.clear();
         self.context_totals.clear();
@@ -240,6 +243,7 @@ impl PersonalNgram {
     }
 
     /// Sum of every pair count.
+    #[cfg(test)]
     pub fn total(&self) -> u64 {
         self.total
     }
@@ -297,11 +301,13 @@ impl PersonalNgram {
     }
 
     /// The model's confidence in `previous` as a context, ignoring any earlier word.
+    #[cfg(test)]
     pub fn confidence(&self, previous: &str) -> f64 {
         self.context(None, Some(previous)).confidence
     }
 
     /// PN:293-304 for one pair, without resolving a context first.
+    #[cfg(test)]
     pub fn bigram_probability(&self, previous: &str, word: &str) -> f64 {
         let previous_hash = key_of(previous);
         self.bigram_estimate(
@@ -313,6 +319,7 @@ impl PersonalNgram {
     }
 
     /// `probability` for an explicit (earlier, previous) context.
+    #[cfg(test)]
     pub fn trigram_probability(&self, earlier: &str, previous: &str, word: &str) -> f64 {
         self.probability(&self.context(Some(earlier), Some(previous)), word)
     }

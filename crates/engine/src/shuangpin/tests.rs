@@ -1,4 +1,4 @@
-//! Engine-level tests over throwaway dictionaries: `test_shuangpin.cpp`, the shuangpin cases of `test_input_session.cpp` and `test_runtime_isolation.cpp` that exercise the engine itself, the double-helpcode cache overlay, online rows, initial expansion and the word writers. A real-dictionary smoke test runs when `MSIME_EVAL_RESOURCES` names the dict-v2.0.1 resource directory.
+//! Engine-level tests over throwaway dictionaries: `test_shuangpin.cpp`, the shuangpin cases of `test_input_session.cpp` and `test_runtime_isolation.cpp` that exercise the engine itself, the double-helpcode cache overlay, online rows, initial expansion and the candidate lookup. A real-dictionary smoke test runs when `MSIME_EVAL_RESOURCES` names the dict-v2.0.1 resource directory.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -287,45 +287,19 @@ fn fuzzy_rows_take_the_typed_keys() {
     assert!(fuzzy[1].fuzzy);
 }
 
+/// A fixed row missing from the list is looked up by its canonical quanpin key (user_dictionary positions).
 #[test]
-fn word_writers_use_the_quanpin_key() {
+fn find_candidate_reads_the_canonical_key() {
     let fixture = Fixture::new(HELPCODE_FILTER);
-    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
-
-    engine.create_word("nihc", "妮好").expect("create");
-    assert_eq!(fixture.weight("tbl_2_n", "ni'hao", "妮好"), Some(10_000));
+    let engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let found = engine.find_candidate("ni'hao", "拟好").expect("row");
     assert_eq!(
-        engine
-            .find_candidate("ni'hao", "妮好")
-            .map(|item| item.weight),
-        Some(10_000)
+        Some(found.weight),
+        fixture.weight("tbl_2_n", "ni'hao", "拟好")
     );
-    // An existing row is fine and left alone.
-    engine.create_word("ni'hc", "你好").expect("existing");
-    assert_eq!(fixture.weight("tbl_2_n", "ni'hao", "你好"), Some(200));
-    // Three syllables for two characters.
-    assert!(engine.create_word("nihcc", "你好").is_err());
-
-    engine
-        .update_weight_by_pinyin_and_word("nihc", "拟好")
-        .expect("raw shuangpin");
-    assert_eq!(fixture.weight("tbl_2_n", "ni'hao", "拟好"), Some(10_001));
-    engine
-        .update_weight_by_pinyin_and_word("ni'hao", "你好")
-        .expect("canonical quanpin");
-    assert_eq!(fixture.weight("tbl_2_n", "ni'hao", "你好"), Some(10_002));
-    // Six characters for two syllables built no statement in the reference, which it ran as a successful no-op.
-    engine
-        .update_weight_by_pinyin_and_word("ni'hao", "GitHub")
-        .expect("invalid word is a no-op");
-    assert_eq!(fixture.weight("tbl_2_n", "ni'hao", "GitHub"), Some(70));
-
-    engine
-        .delete_by_pinyin_and_word("nihc", "拟好")
-        .expect("delete");
-    assert_eq!(fixture.weight("tbl_2_n", "ni'hao", "拟好"), None);
-    assert!(engine.find_candidate("ni'hao", "拟好").is_none());
-    assert!(!words(&engine.query(&request("nihc", false), None)).contains(&"拟好"));
+    assert_eq!(found.pinyin, "ni'hao");
+    assert_eq!(found.source, CandidateSource::Database);
+    assert!(engine.find_candidate("ni'hao", "妮好").is_none());
 }
 
 #[test]
@@ -403,4 +377,55 @@ fn real_dictionary_answers_common_readings() {
         "{:?}",
         words(&zhongguo)
     );
+}
+
+/// Without a sentence model no answer reads the committed context, so a new context keeps every cached answer, the online rows included.
+#[test]
+fn context_changes_keep_the_caches_without_a_model() {
+    let fixture = Fixture::new(HELPCODE_FILTER);
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let mut typed = request("nihc", false);
+    typed.rescoring_context = "上文".into();
+    engine.query(&typed, None);
+    assert!(engine.insert_online_words(&typed, &["甲".to_string()], CandidateSource::AiSuggestion));
+    typed.rescoring_context = "另一段上文".into();
+    assert!(words(&engine.query(&typed, None)).contains(&"甲"));
+}
+
+/// With a sentence model loaded the trimmed context joins the series key (overlays.md §1.6.2): an answer cached under one context is not read under another, and it is read again when that context comes back. Needs the keyboard model in `MSIME_EVAL_RESOURCES`.
+#[test]
+fn a_loaded_model_keys_the_series_cache_by_context() {
+    let Some(resources) = std::env::var_os("MSIME_EVAL_RESOURCES") else {
+        eprintln!("skipped: MSIME_EVAL_RESOURCES is not set");
+        return;
+    };
+    let model = PathBuf::from(resources).join(assets::NEURAL_MODEL_KEYBOARD);
+    if !model.is_file() {
+        eprintln!(
+            "skipped: {} is not in MSIME_EVAL_RESOURCES",
+            assets::NEURAL_MODEL_KEYBOARD
+        );
+        return;
+    }
+    let fixture = Fixture::new(HELPCODE_FILTER);
+    std::fs::copy(
+        &model,
+        fixture.paths.resource(assets::NEURAL_MODEL_KEYBOARD),
+    )
+    .expect("model copy");
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let mut typed = request("nihc", false);
+    typed.sentence_association = SentenceAssociationOptions {
+        neural_keyboard: true,
+        ..SentenceAssociationOptions::default()
+    };
+    typed.rescoring_context = "上文".into();
+    engine.query(&typed, None);
+    assert!(engine.insert_online_words(&typed, &["甲".to_string()], CandidateSource::AiSuggestion));
+    assert!(words(&engine.query(&typed, None)).contains(&"甲"));
+
+    typed.rescoring_context = "另一段上文".into();
+    assert!(!words(&engine.query(&typed, None)).contains(&"甲"));
+    typed.rescoring_context = "上文".into();
+    assert!(words(&engine.query(&typed, None)).contains(&"甲"));
 }
