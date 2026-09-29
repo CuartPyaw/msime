@@ -15,6 +15,7 @@ use std::process::{Command, Stdio};
 pub(crate) const INPUT_SOURCE_BUNDLE_ID: &str = "app.msime.inputmethod.MetasequoiaIME";
 pub(crate) const INPUT_SOURCE_BUNDLE_NAME: &str = "水杉输入法.app";
 const INPUT_SOURCE_EXECUTABLE: &str = "水杉输入法";
+const INITIAL_COMMAND_OUTPUT_CAPACITY: usize = 8 * 1024;
 const MAX_INFO_PLIST_BYTES: u64 = 1024 * 1024;
 const MAX_LAUNCH_SERVICES_DUMP_BYTES: usize = 8 * 1024 * 1024;
 const MAX_INPUT_SOURCE_PREFERENCES_BYTES: usize = 1024 * 1024;
@@ -50,7 +51,7 @@ fn bounded_command_output(command: &mut Command, maximum: usize) -> Option<Vec<u
         .spawn()
         .ok()?;
     let mut stdout = child.stdout.take()?;
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(maximum.min(INITIAL_COMMAND_OUTPUT_CAPACITY));
     let read = stdout
         .take((maximum.saturating_add(1)) as u64)
         .read_to_end(&mut bytes);
