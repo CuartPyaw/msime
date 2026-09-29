@@ -369,7 +369,7 @@ fn ai_status(document: &Map<String, Value>) -> Result<Vec<AiCredentialStatus>, C
     if entries.len() > MAX_AI_PROFILES {
         return Err(CredentialError::Existing);
     }
-    let mut status = Vec::new();
+    let mut status = Vec::with_capacity(entries.len());
     for (provider, entry) in &entries {
         validate_ai_entry(entry).map_err(|_| CredentialError::Existing)?;
         status.push(AiCredentialStatus {
