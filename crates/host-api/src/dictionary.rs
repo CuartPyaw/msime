@@ -613,7 +613,7 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
             // some. Aborting discarded the rows already committed and told the
             // user nothing but "check the format", leaving the dictionary
             // half-written with no way to know how far it got.
-            let mut rejected_lines: Vec<usize> = Vec::new();
+            let mut rejected_lines = Vec::with_capacity(entries.len());
             // The bridge entry carries no line number, so the parsed report is
             // what maps a refused row back to the line the user has to fix.
             // The two lists are built from the same rows in the same order.
