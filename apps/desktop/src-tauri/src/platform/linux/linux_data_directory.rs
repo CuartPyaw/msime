@@ -288,7 +288,7 @@ pub(crate) fn plan_move(
     }
 
     let mut unique = BTreeSet::new();
-    let mut rewrites = Vec::new();
+    let mut rewrites = Vec::with_capacity(locators.len());
     for locator in locators {
         if unique.insert(fs::canonicalize(locator).unwrap_or_else(|_| locator.clone())) {
             rewrites.push(rebased_locator(locator, &source, written_source, &target)?);
