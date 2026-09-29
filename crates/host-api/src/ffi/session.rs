@@ -77,6 +77,7 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
                     options,
                     applied,
                     requested: None,
+                    preferences_pending: false,
                     punctuation_override: None,
                     paired_punctuation_override: None,
                     punctuation_lock_override: None,

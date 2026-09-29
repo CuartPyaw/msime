@@ -200,6 +200,9 @@ struct HostSession {
     options: EngineOptions,
     applied: Preferences,
     requested: Option<PreferencesSnapshot>,
+    /// Whether the requested preferences still need an Engine replacement. This decision is made
+    /// when the document arrives so every keystroke does not compare the full preference tree.
+    preferences_pending: bool,
     punctuation_override: Option<bool>,
     paired_punctuation_override: Option<bool>,
     punctuation_lock_override: Option<u8>,
@@ -327,7 +330,7 @@ impl HostSession {
         let Some(snapshot) = &self.requested else {
             return Ok(());
         };
-        if snapshot.preferences == self.applied || !self.runtime.is_idle() {
+        if !self.preferences_pending || !self.runtime.is_idle() {
             return Ok(());
         }
         let mut options = self.options.clone();
@@ -423,6 +426,7 @@ impl HostSession {
             .map_err(|e| e.to_string())?;
         self.options = options;
         self.applied = snapshot.preferences.clone();
+        self.preferences_pending = false;
         self.nine_key_override = next_nine_key_override;
         Ok(())
     }
@@ -475,6 +479,7 @@ impl HostSession {
                 return Err("stale or conflicting preferences revision".into());
             }
         }
+        self.preferences_pending = snapshot.preferences != self.applied;
         self.requested = Some(snapshot);
         self.apply_pending()?;
         let snapshot = self.requested.as_ref().expect("requested snapshot exists");
