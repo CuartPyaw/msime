@@ -1,4 +1,4 @@
-import app.msime.client.AccountTokenPolicy;
+import app.msime.android.AccountTokenPolicy;
 
 /** Account responses and saved sessions must satisfy the same bearer-token contract. */
 public final class AccountTokenPolicySmoke {
@@ -19,6 +19,8 @@ public final class AccountTokenPolicySmoke {
             "short refresh token is refused");
         check(!AccountTokenPolicy.validSession("Bearer", access, refresh, 0),
             "expired response is refused");
+        check(!AccountTokenPolicy.validSession("Bearer", access, refresh, 86_400L * 30 + 1),
+            "unbounded session lifetime is refused");
         System.out.println("Android account token policy passed");
     }
 }

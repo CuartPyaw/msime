@@ -39,7 +39,7 @@
 
 | 平台 | 入口目录 | 宿主形态与集成方式 |
 | --- | --- | --- |
-| [Android](platforms/android/README.md) | `platforms/android/` | 输入法服务 `app.msime.client.MSIMEInputService` 跑在 `:ime` 独立进程，Java 宿主经 `platforms/android/native/client_jni.cpp` 调 host-api；Tauri/React 设置与输入法同包不同进程，共享私有 files/bootstrap/state；手写走 ML Kit Digital Ink |
+| [Android](platforms/android/README.md) | `platforms/android/` | 输入法服务 `app.msime.android.MSIMEInputService` 跑在 `:ime` 独立进程，Java 宿主经 `platforms/android/native/client_jni.cpp` 调 host-api；Tauri/React 设置与输入法同包不同进程，共享私有 files/bootstrap/state；手写走 ML Kit Digital Ink |
 | [iOS](platforms/ios/README.md) | `platforms/ios/` | XcodeGen 从 `project.yml` 生成的原生 App 内嵌键盘扩展 `MSIMEKeyboardExtension`，两者通过 App Group `group.app.msime.ios` 共享状态；Swift 键盘直接调 host-api，手写走 ML Kit Digital Ink |
 | [macOS](platforms/macos/README.md) | `platforms/macos/` | InputMethodKit bundle（产物名 `水杉输入法.app`，bundle id `app.msime.inputmethod.MetasequoiaIME`），Swift 后端编成 `MSIMEBackend.dylib` 随 bundle 分发，Sparkle 负责自动更新 |
 | [Linux](platforms/linux/README.md) | `platforms/linux/` | IBus 与 Fcitx5 是两个并列的系统入口，链同一份 host-api ABI；在线联想、语音、剪贴板等能力由独立 provider 进程加 systemd 用户单元承载；CPack 出 TGZ 与 DEB |
@@ -72,7 +72,7 @@ pnpm tauri dev
 
 桌面构建需要 [Tauri 平台依赖](https://tauri.app/start/prerequisites/)。`pnpm tauri build --debug --no-bundle` 构建不打包的开发二进制；面向用户的安装包由各平台自己的打包链产出——macOS 的 CMake bundle、Windows 的 `platforms/windows/installer/msime_setup.iss`、Linux 的 CPack（`-DMSIME_ENABLE_PACKAGING=ON`）、Android 的 `platforms/android/build-apk.sh`、HarmonyOS 的 `hvigorw assembleHap`、iOS 的 Xcode 工程。普通浏览器中只显示无法访问本地配置的提示，不模拟保存成功。
 
-桌面设置的应用标识和默认应用数据目录统一为 `app.msime.client`，偏好保存在其中的 `preferences.json`。macOS 首次用正式标识启动时会完成默认状态初始化并重建其中的绝对路径；也可用绝对路径环境变量 `MSIME_CLIENT_STATE_DIR` 指向隔离开发目录。macOS 原生宿主读取同一份配置并在当前组词结束后应用更新；多个设置窗口同时保存时通过 revision 检测冲突，用户须显式重新读取后决定是否覆盖。
+桌面设置的应用标识和默认应用数据目录按平台命名：macOS 是 `app.msime.macos`，Windows 是 `app.msime.windows`，Linux 是 `app.msime.linux`；三者此前共用的 `app.msime.client` 只作为旧数据的来源继续读取。偏好保存在其中的 `preferences.json`。macOS 首次用正式标识启动时会完成默认状态初始化并重建其中的绝对路径；也可用绝对路径环境变量 `MSIME_CLIENT_STATE_DIR` 指向隔离开发目录。macOS 原生宿主读取同一份配置并在当前组词结束后应用更新；多个设置窗口同时保存时通过 revision 检测冲突，用户须显式重新读取后决定是否覆盖。
 
 Android 合包构建和设备测试见 [Android 宿主](platforms/android/README.md#tauri--react-共享设置合包)。Tauri 设置与原生 `:ime` 服务同包、不同进程，共享私有 files/bootstrap/state；关闭设置窗口不结束输入法进程。iOS 的产品宿主是 `platforms/ios` 的原生 App，它嵌入原生键盘扩展并通过 App Group 共享状态；Tauri/React 在 iOS 上只作为共享功能与界面的公共组件，不作为独立 App 启动。签名与设备安装步骤见 [iOS 宿主](platforms/ios/README.md)。
 
@@ -118,6 +118,14 @@ cargo run -p msime-client-core --example install_resources -- target/resources
 ```sh
 cargo run -p msime-engine-bridge --example query_dictionary -- <上一步返回的资源目录>
 ```
+
+整句神经重排模型另有一份 `resources/neural-model.lock.json`，把键盘用的小模型和桌面落定时使用的大模型锁在同一发布版本。需要单独准备两份模型时运行：
+
+```sh
+python3 scripts/fetch_neural_model.py --out target/neural-model
+```
+
+下载只接受 HTTPS，先写入临时文件，再逐个核对锁定的长度和 SHA-256 后改名发布；已有摘要匹配的文件会跳过。macOS、Windows 和 Linux 的资源打包会优先继续接受历史的 `target/settled-model` 目录，并在它缺失时自动使用这个 `target/neural-model` 目录里的桌面模型。键盘模型仍由 `desktop-dictionary.lock.json` 的词库资源安装器校验并复制进 EngineResources，两个锁都保留作来源记录。
 
 macOS 原生 IMK bundle 的构建、隔离状态目录与安装见 [macOS 宿主](platforms/macos/README.md)。`platforms/macos/scripts/install.sh` 用 Developer ID 重签并原子替换到 `~/Library/Input Methods`，失败回滚；`platforms/macos/scripts/check_input_source.swift` 核查输入源注册结果。
 

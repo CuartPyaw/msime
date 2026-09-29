@@ -1,4 +1,4 @@
-package app.msime.client.test;
+package app.msime.android.test;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -47,8 +47,8 @@ public final class SettingsDeviceSmoke extends DeviceSmoke {
         "document.querySelector('[aria-label=\"顶部语音入口\"]')";
     private static final String RESET_KEYBOARD_SETTINGS =
         "document.querySelector('[aria-label=\"恢复屏幕键盘默认设置\"]')";
-    private static final String MIDNIGHT_SKIN =
-        "document.querySelector('[aria-label=\"屏幕键盘皮肤 霓虹夜航\"]')";
+    private static final String MY_SKIN =
+        "document.querySelector('[aria-label=\"屏幕键盘皮肤 我的皮肤\"]')";
     private static final String CUSTOM_SKIN_DESIGN_TAB =
         "Array.from(document.querySelectorAll('[role=tab]')).find(tab => "
         + "tab.textContent?.trim() === '设计')";
@@ -121,9 +121,9 @@ public final class SettingsDeviceSmoke extends DeviceSmoke {
             stage = "React keyboard skin settings";
             js("Array.from(document.querySelectorAll('button')).find(button => button.textContent?.trim() === '屏幕键盘').click(); true");
             awaitJs("!!(" + KEYBOARD_HEIGHT + ")");
-            awaitJs("!!(" + MIDNIGHT_SKIN + ")");
-            js("(" + MIDNIGHT_SKIN + ").click(); true");
-            awaitJs("(" + MIDNIGHT_SKIN + ").getAttribute('aria-checked') === 'true'");
+            // 我的皮肤 lives on the 主题 page; the keyboard page's 屏幕键盘外观 row is the way there.
+            js("document.querySelector('[aria-label=\"屏幕键盘外观\"]').click(); true");
+            awaitJs("!!(" + MY_SKIN + ") && !(" + MY_SKIN + ").closest('fieldset').hidden");
             stage = "React custom keyboard skin editor";
             js("Array.from(document.querySelectorAll('button')).find(button => button.textContent?.trim() === '设计我的皮肤').click(); true");
             awaitJs("!!(" + CUSTOM_SKIN_DESIGN_TAB + ")");
@@ -140,7 +140,7 @@ public final class SettingsDeviceSmoke extends DeviceSmoke {
             awaitJs("!Array.from(document.querySelectorAll('button')).find(button => button.textContent?.trim() === '确认保存').disabled");
             js("Array.from(document.querySelectorAll('button')).find(button => button.textContent?.trim() === '确认保存').click(); true");
             awaitJs("!!document.querySelector('[aria-label=\"应用已保存皮肤 设备验收样例\"]')");
-            awaitJs("document.querySelector('[aria-label=\"屏幕键盘皮肤 我的皮肤\"]')?.getAttribute('aria-checked') === 'true'");
+            awaitJs("(" + MY_SKIN + ")?.getAttribute('aria-checked') === 'true'");
             JSONArray createdLibrary = readSkinLibrary(skinLibrary);
             if (createdLibrary.length() != 1
                     || !"设备验收样例".equals(createdLibrary.getJSONObject(0).getString("name"))
@@ -203,6 +203,8 @@ public final class SettingsDeviceSmoke extends DeviceSmoke {
             js("(" + CUSTOM_SKIN_TEMPLATE + ").click(); true");
             js("const use=Array.from(document.querySelectorAll('button')).find(button => button.textContent?.trim() === '使用皮肤');if(use)use.click();true");
             stage = "React keyboard height setting";
+            js("Array.from(document.querySelectorAll('button')).find(button => button.textContent?.trim() === '屏幕键盘').click(); true");
+            awaitJs("!(" + KEYBOARD_HEIGHT + ").closest('fieldset').hidden");
             js("const slider=" + KEYBOARD_HEIGHT + ";"
                 + "Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(slider,'24');"
                 + "slider.dispatchEvent(new Event('input',{bubbles:true}));true");
@@ -217,9 +219,9 @@ public final class SettingsDeviceSmoke extends DeviceSmoke {
             JSONObject savedPreferences = saved.getJSONObject("preferences");
             if (savedPreferences.getInt("touch_keyboard_height_adjustment") != 24)
                 throw new AssertionError("Keyboard height did not reach shared storage");
-            if (!"custom".equals(savedPreferences.getString("touch_keyboard_skin")))
+            if (!"custom".equals(savedPreferences.getString("global_theme")))
                 throw new AssertionError("Keyboard skin did not reach shared storage");
-            JSONObject customSkin = savedPreferences.getJSONObject("custom_touch_keyboard_skin");
+            JSONObject customSkin = savedPreferences.getJSONObject("custom_theme").getJSONObject("keyboard");
             if (!"pebble".equals(customSkin.getString("keyShape"))
                     || !"raised".equals(customSkin.getString("keyMaterial"))
                     || customSkin.getInt("cornerRadius") != 18
@@ -265,11 +267,11 @@ public final class SettingsDeviceSmoke extends DeviceSmoke {
                 + ").value === '60' && (" + ROW_SPACING + ").value === '70' && !("
                 + VOICE_SHORTCUT + ").checked");
             stage = "cross-process system input uses saved preferences";
-            shell("ime disable app.msime.android/app.msime.client.MSIMEInputService");
-            shell("ime enable app.msime.android/app.msime.client.MSIMEInputService");
-            shell("ime set app.msime.android/app.msime.client.MSIMEInputService");
+            shell("ime disable app.msime.android/app.msime.android.MSIMEInputService");
+            shell("ime enable app.msime.android/app.msime.android.MSIMEInputService");
+            shell("ime set app.msime.android/app.msime.android.MSIMEInputService");
             SystemClock.sleep(1000);
-            shell("am start -W -f 0x10008000 -n app.msime.client.test/app.msime.client.test.EditorActivity");
+            shell("am start -W -f 0x10008000 -n app.msime.android.test/app.msime.android.test.EditorActivity");
             tap(field("msime-test-plain"));
             stage = "cross-process keyboard uses saved skin";
             awaitAnyNode(node -> equalsText("app.msime.android", node.getPackageName())
@@ -282,16 +284,16 @@ public final class SettingsDeviceSmoke extends DeviceSmoke {
             stage = "cross-process scheme picker uses shared visibility";
             assertSharedSchemePicker();
             stage = "scheme visibility survives IME restart";
-            shell("am start -W -n app.msime.android/app.msime.client.home.HomeActivity");
-            shell("ime disable app.msime.android/app.msime.client.MSIMEInputService");
-            shell("ime enable app.msime.android/app.msime.client.MSIMEInputService");
-            shell("ime set app.msime.android/app.msime.client.MSIMEInputService");
+            shell("am start -W -n app.msime.android/app.msime.android.home.HomeActivity");
+            shell("ime disable app.msime.android/app.msime.android.MSIMEInputService");
+            shell("ime enable app.msime.android/app.msime.android.MSIMEInputService");
+            shell("ime set app.msime.android/app.msime.android.MSIMEInputService");
             SystemClock.sleep(1000);
-            shell("am start -W -f 0x10008000 -n app.msime.client.test/app.msime.client.test.EditorActivity");
+            shell("am start -W -f 0x10008000 -n app.msime.android.test/app.msime.android.test.EditorActivity");
             tap(field("msime-test-plain"));
             assertSharedSchemePicker();
         } finally {
-            shell("am start -W -n app.msime.android/app.msime.client.home.HomeActivity");
+            shell("am start -W -n app.msime.android/app.msime.android.home.HomeActivity");
             if (original == null) Files.deleteIfExists(preferences.toPath()); else publish(preferences, original);
             if (originalSkinLibrary == null) Files.deleteIfExists(skinLibrary.toPath());
             else { skinLibrary.getParentFile().mkdirs(); publish(skinLibrary, originalSkinLibrary); }

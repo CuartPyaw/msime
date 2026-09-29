@@ -1,4 +1,4 @@
-import app.msime.client.VoicePolishPolicy;
+import app.msime.android.VoicePolishPolicy;
 
 /** When a transcript is polished, and the exact document that asks for it. */
 public final class VoicePolishPolicySmoke {
@@ -19,8 +19,11 @@ public final class VoicePolishPolicySmoke {
         check(VoicePolishPolicy.usable(endpoint, "gpt-4o-mini", "token", "整理这段话"),
             "a complete configuration is usable");
         check(!VoicePolishPolicy.usable("http://api.openai.com/v1/chat/completions",
-                "gpt-4o-mini", "token", "整理这段话"),
+            "gpt-4o-mini", "token", "整理这段话"),
             "a plaintext endpoint is refused: this host opens the connection");
+        check(!VoicePolishPolicy.usable("https:///v1/chat/completions",
+            "gpt-4o-mini", "token", "整理这段话"),
+            "an endpoint without an authority is refused");
         check(!VoicePolishPolicy.usable(endpoint, "", "token", "p")
                 && !VoicePolishPolicy.usable(endpoint, "m", "", "p")
                 && !VoicePolishPolicy.usable(endpoint, "m", "token", "")

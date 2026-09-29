@@ -24,11 +24,11 @@ QQ_GROUP = "829919142"
 TELEGRAM = "t.me/msimegroup"
 
 SURFACES = {
-    "shared settings page": "packages/ui/src/index.tsx",
+    "shared settings page": "packages/ui/src/settings/pages/feedback-page.tsx",
     "macOS": "platforms/macos/src/core/SupportWindowController.mm",
     "iOS": "platforms/ios/App/Sources/settings/HelpAndFeedbackViews.swift",
     "Android strings": "platforms/android/res/values/strings.xml",
-    "Android feedback screen": "platforms/android/java/app/msime/client/home/FeedbackActivity.java",
+    "Android feedback screen": "platforms/android/java/app/msime/android/home/FeedbackActivity.java",
 }
 
 missing = []

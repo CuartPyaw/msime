@@ -164,13 +164,12 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
             {
                 return Ok(Value::Null);
             }
-            let view = session.runtime.view();
+            let Some(candidates_view) = session.runtime.translation_candidates() else {
+                return Ok(Value::Null);
+            };
             // Windows does not request glosses for Japanese candidates. Use
             // Engine's active mode, including temporary Japanese composition.
-            if view.candidates.is_empty()
-                || view.scheme == 3
-                || view.local_mode == "temporary_japanese"
-            {
+            if candidates_view.scheme == 3 || candidates_view.local_mode == "temporary_japanese" {
                 return Ok(Value::Null);
             }
             // Whether the online gloss endpoint may be asked about each candidate,
@@ -187,7 +186,7 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
             // machine.
             //
             // Emoji and kaomoji sources never qualify, whatever their text: many kaomoji carry Han characters ("(*Φ皿Φ*)") and would otherwise queue behind real words on the serial on-device model and spend account quota, as Windows' BuildTranslationQuery already refuses.
-            let candidates = view
+            let candidates = candidates_view
                 .candidates
                 .iter()
                 .map(|candidate| {
@@ -250,7 +249,7 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
             .transpose()
             .map_err(|_| "invalid NiuTrans translation configuration")?;
             let mut query = json!({
-                "generation": view.generation,
+                "generation": candidates_view.generation,
                 "target_language": serde_json::to_value(preferences.translation_target_language)
                     .map_err(|e| e.to_string())?,
                 "target_languages": target_languages
