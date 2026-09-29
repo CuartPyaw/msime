@@ -1343,7 +1343,8 @@ impl<E: InputEngine> Runtime<E> {
         {
             return false;
         }
-        let texts: Vec<&str> = snapshot.candidates.iter().map(String::as_str).collect();
+        let mut texts = Vec::with_capacity(snapshot.candidates.len());
+        texts.extend(snapshot.candidates.iter().map(String::as_str));
         // A dictionary hit earns the model's deference because it carries corpus frequency for the
         // key the user typed. That premise fails the moment the engine offers a correction of that
         // key: the frequency then belongs to the letters that arrived rather than to the word they
