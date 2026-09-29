@@ -1,6 +1,6 @@
 /**
  * Bounded space-drag distance accumulator tied to one editor connection, ported from
- * platforms/android/java/app/msime/client/SpaceCursorMovement.java.
+ * platforms/android/java/app/msime/android/SpaceCursorMovement.java.
  *
  * The document identity matters: a drag that started against one editor must not keep moving a
  * cursor in another, so every advance re-checks it. Anything implausible cancels rather than
@@ -29,8 +29,13 @@ export class SpaceCursorMovement {
 
   /** Whole steps to move, with the leftover distance carried into the next call. */
   advance(position: number, document: object | null, pixelsPerStep: number): number {
-    if (!this.isActive() || this.document !== document || !Number.isFinite(position)
-        || !Number.isFinite(pixelsPerStep) || pixelsPerStep < 1) {
+    if (
+      !this.isActive() ||
+      this.document !== document ||
+      !Number.isFinite(position) ||
+      !Number.isFinite(pixelsPerStep) ||
+      pixelsPerStep < 1
+    ) {
       this.cancel();
       return 0;
     }

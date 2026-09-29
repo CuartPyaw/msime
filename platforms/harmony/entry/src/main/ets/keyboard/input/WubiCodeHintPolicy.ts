@@ -1,6 +1,6 @@
 /**
  * Presentation rule for the optional remaining-code hint on Wubi candidates, ported from
- * platforms/android/java/app/msime/client/WubiCodeHintPolicy.java.
+ * platforms/android/java/app/msime/android/WubiCodeHintPolicy.java.
  */
 const MAX_CODE_LENGTH: number = 64;
 
@@ -12,13 +12,28 @@ export class WubiCodeHintPolicy {
    * Fallback and local candidates are deliberately left unannotated: their code is not the one the
    * user is partway through typing.
    */
-  static hint(code: string | null, typed: string | null, enabled: boolean, scheme: number,
-              localMode: string, answeredByPinyinFallback: boolean): string {
-    if (!enabled || scheme !== WubiCodeHintPolicy.WUBI_SCHEME || answeredByPinyinFallback
-        || localMode !== 'none' || code === null || typed === null || typed.length === 0
-        || code.length > MAX_CODE_LENGTH || typed.length > MAX_CODE_LENGTH
-        || code.length <= typed.length || !code.startsWith(typed)) {
-      return '';
+  static hint(
+    code: string | null,
+    typed: string | null,
+    enabled: boolean,
+    scheme: number,
+    localMode: string,
+    answeredByPinyinFallback: boolean,
+  ): string {
+    if (
+      !enabled ||
+      scheme !== WubiCodeHintPolicy.WUBI_SCHEME ||
+      answeredByPinyinFallback ||
+      localMode !== "none" ||
+      code === null ||
+      typed === null ||
+      typed.length === 0 ||
+      code.length > MAX_CODE_LENGTH ||
+      typed.length > MAX_CODE_LENGTH ||
+      code.length <= typed.length ||
+      !code.startsWith(typed)
+    ) {
+      return "";
     }
     return code.substring(typed.length);
   }
