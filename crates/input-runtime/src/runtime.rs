@@ -954,8 +954,7 @@ impl<E: InputEngine> Runtime<E> {
         // Every commit passes through here, so this is the one place the AI
         // context has to be fed from.
         if result.has_commit {
-            let committed = result.commit.clone();
-            self.remember_commit(&committed);
+            self.remember_commit(&result.commit);
         }
         Transition {
             commit_context: result.has_commit.then(|| OutputContext {
