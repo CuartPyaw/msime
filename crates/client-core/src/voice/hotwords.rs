@@ -29,7 +29,7 @@ pub fn hotwords_from_dictionary_pages<E>(
     max_rows: usize,
     mut read_page: impl FnMut(usize, usize) -> Result<Option<DictionaryHotwordPage>, E>,
 ) -> Result<Vec<Hotword>, E> {
-    let mut rows: Vec<(String, String, i64)> = Vec::new();
+    let mut rows: Vec<(String, String, i64)> = Vec::with_capacity(max_rows);
     let mut offset = 0;
     while limit > 0 && offset < max_rows {
         let Some(page) = read_page(offset, page_size)? else {
