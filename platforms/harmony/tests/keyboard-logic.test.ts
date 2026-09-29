@@ -143,7 +143,10 @@ import {
   KeyboardFeedbackBridge,
   MobileKeyboardFeedback,
 } from "../entry/src/main/ets/keyboard/KeyboardFeedbackBridge";
-import { HapticStrength } from "../entry/src/main/ets/keyboard/KeyboardFeedback";
+import {
+  HapticStrength,
+  KeyboardFeedback,
+} from "../entry/src/main/ets/keyboard/KeyboardFeedback";
 import {
   EnglishCompletions,
   EnglishReplacement,
@@ -4436,6 +4439,20 @@ group("an unfamiliar feedback value falls back by field rather than wholesale", 
   );
 });
 
+group("an oversized feedback document is refused before parsing", () => {
+  const oversized = JSON.stringify({
+    sound: true,
+    haptics: true,
+    strength: HapticStrength.HEAVY,
+    padding: "x".repeat(4096),
+  });
+  const parsed = KeyboardFeedback.parse(oversized);
+  check(
+    parsed.sound === false && parsed.haptics === false && parsed.strength === HapticStrength.MEDIUM,
+    "feedback documents over the storage bound fall back to defaults",
+  );
+});
+
 const KEY_SHIFT: number = 2047;
 const KEY_CTRL: number = 2072;
 const KEY_SPACE: number = 2050;
@@ -8606,6 +8623,24 @@ group("AI model catalogs keep each provider's protocol and path", () => {
   check(TextPolicy.hasAuthority("wss://speech.example.test/live", "wss://"), "shares authority parsing for WSS");
   check(TextPolicy.validMultiline("line\nfeed", 32, true), "allows prompt line breaks");
   check(!TextPolicy.validMultiline("bad\u0001", 32, true), "rejects other control characters");
+  check(TextPolicy.validSecureAuthority("https://remote.example/api", true),
+    "accepts remote HTTPS endpoints");
+  check(TextPolicy.validSecureAuthority("http://127.0.0.1:8080/api", true),
+    "accepts loopback HTTP endpoints");
+  check(TextPolicy.validSecureAuthority("http://[::1]:8080/api", true),
+    "accepts IPv6 loopback HTTP endpoints");
+  check(!TextPolicy.validSecureAuthority("http://remote.example/api", true),
+    "rejects remote HTTP endpoints");
+  check(!TextPolicy.validSecureAuthority("http://localhost.example/api", true),
+    "rejects lookalike loopback hosts");
+  check(TextPolicy.validExternalUrl("https://example.test/docs?q=synthetic"),
+    "accepts HTTPS external links");
+  check(!TextPolicy.validExternalUrl("http://example.test/docs"),
+    "rejects HTTP external links");
+  check(!TextPolicy.validExternalUrl("https://user:secret@example.test/docs"),
+    "rejects credentials in external links");
+  check(!TextPolicy.validExternalUrl("https://example.test/docs next"),
+    "rejects whitespace in external links");
   check(
     AiModelCatalogPolicy.modelsUrl("https://api.everyapi.ai/v1/chat/completions") ===
       "https://api.everyapi.ai/v1/models",

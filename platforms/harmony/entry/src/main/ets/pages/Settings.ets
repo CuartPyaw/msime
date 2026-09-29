@@ -1866,8 +1866,7 @@ class SettingsBridge {
 
   private validCredentialEndpoint(value: string, allowHttp: boolean): string | null {
     const endpoint: string = value.trim();
-    const schemes: string[] = allowHttp ? ['https://', 'http://'] : ['https://'];
-    if (!TextPolicy.validAuthority(endpoint, schemes)) return null;
+    if (!TextPolicy.validSecureAuthority(endpoint, allowHttp)) return null;
     return endpoint;
   }
 
@@ -1887,7 +1886,7 @@ class SettingsBridge {
 
   private validAiEndpoint(value: string): string | null {
     const endpoint: string = value.trim();
-    if (!TextPolicy.validAuthority(endpoint, ['http://', 'https://'])) return null;
+    if (!TextPolicy.validSecureAuthority(endpoint, true)) return null;
     return endpoint;
   }
 
@@ -1903,9 +1902,8 @@ class SettingsBridge {
   }
 
   openExternalUrl(url: string): void {
-    // Only the two schemes a settings page has any business opening; anything else is not a link the
-    // page should be able to make this application follow.
-    if (!url.startsWith('https://') && !url.startsWith('http://')) {
+    // External links leave the application; keep them HTTPS-only and reject credentials/fragments.
+    if (!TextPolicy.validExternalUrl(url)) {
       KeyboardLog.error('refused to open a non-web link');
       return;
     }

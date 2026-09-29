@@ -1,26 +1,92 @@
+import { AiSettingsPanel } from "./settings/ai-settings-panel";
+import { InputSettingsPanel } from "./settings/input-settings-panel";
+import { VoiceSettingsPanel } from "./settings/voice-settings-panel";
 import { useConfirm } from "./core/confirm";
 import { errorMessage } from "./core/error-message";
-import { VoiceDevicePicker, type VoiceDeviceReader } from "./voice/voice-device-picker";
+import { clamp } from "./core/number";
+import {
+  inferredTouchKeyboardScheme,
+  selectHomeTouchKeyboardScheme,
+  updateTouchKeyboardSchemeEnabled,
+  allTouchKeyboardSchemes,
+  type TouchKeyboardSchemePreferences,
+} from "./settings/touch-keyboard-scheme-helpers";
+export {
+  type TouchKeyboardScheme,
+  type TouchKeyboardSchemePreferences,
+  inferredTouchKeyboardScheme,
+  selectHomeTouchKeyboardScheme,
+  updateTouchKeyboardSchemeEnabled,
+  allTouchKeyboardSchemes,
+} from "./settings/touch-keyboard-scheme-helpers";
+import { schemeTitle } from "./settings/label-helpers";
+import { platformCopy, type PlatformCopyContext } from "./settings/platform-copy";
+export {
+  platformCopy,
+  type PlatformCopyContext,
+  type PlatformCopy,
+} from "./settings/platform-copy";
+import { platformResourceUrls } from "./settings/platform-resource-urls";
+import {
+  initialMobileTabPages,
+  initialSettingsPage,
+  mobileHeaderlessPageIds,
+  splitMobilePages,
+  type SettingsPageId,
+} from "./settings/mobile-navigation";
+export {
+  initialMobileTabPages,
+  initialSettingsPage,
+  mobileHeaderlessPageIds,
+  type InitialSettingsPageOptions,
+} from "./settings/mobile-navigation";
+import { useSettingsNavigation } from "./settings/use-settings-navigation";
+export {
+  useSettingsNavigation,
+  type SettingsNavigationOptions,
+} from "./settings/use-settings-navigation";
+import { isLinuxDesktop } from "./settings/platform-helpers";
+import { useSettingsTheme } from "./settings/use-settings-theme";
+export { useSettingsTheme } from "./settings/use-settings-theme";
+import { useTouchKeyboardGeometryDrag } from "./settings/use-touch-keyboard-geometry-drag";
+export { useTouchKeyboardGeometryDrag } from "./settings/use-touch-keyboard-geometry-drag";
+import { useMobileKeyboardFeedback } from "./settings/use-mobile-keyboard-feedback";
+export {
+  useMobileKeyboardFeedback,
+  type UseMobileKeyboardFeedbackOptions,
+} from "./settings/use-mobile-keyboard-feedback";
+import { desktopDownloadUrl, fallbackAppVersion, logo } from "./settings/app-resources";
+export { AI_PROVIDER_OPTIONS } from "./settings/ai-provider-options";
+import { defaultVoiceInput } from "./settings/voice-input-defaults";
+import { macosSidebarGroups } from "./settings/macos-sidebar-groups";
+import { groupSidebarPages } from "./settings/sidebar-groups";
+import { mobileHiddenPageIds as getMobileHiddenPageIds } from "./settings/mobile-hidden-pages";
+import { defaultAiAssistant } from "./settings/ai-assistant-defaults";
+import { useTranslationSettings } from "./settings/use-translation-settings";
+export {
+  useTranslationSettings,
+  type UseTranslationSettingsOptions,
+} from "./settings/use-translation-settings";
+export { aiProviderUpdate } from "./settings/ai-provider-update";
+import type { VoiceDeviceReader } from "./voice/voice-device-picker";
 import {
   LocalModelManager,
   localModelInUse,
   validModelMirror,
   type LocalVoiceModelClient,
 } from "./voice/local-models";
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
-import {
-  DICTIONARY_PAGE_SIZE,
-  dictionaryPageStatus,
-  readDictionaryFile,
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type {
+  DictionaryEntry,
+  LocalDictionaryFormat,
+  LocalDictionaryKind,
 } from "./dictionary/dictionary-file";
-import { describeImportResult, dictionaryKindKeyHint } from "./dictionary/dictionary-messages";
+export type {
+  DictionaryEntry,
+  LocalDictionaryFormat,
+  LocalDictionaryKind,
+} from "./dictionary/dictionary-file";
+import { describeImportResult } from "./dictionary/dictionary-messages";
 import {
   dictionaryExportName,
   dictionaryExportPayload,
@@ -29,11 +95,7 @@ import {
   loadAllPersonalDictionaryEntries,
   dictionaryKindLabel,
 } from "./dictionary/dictionary-export";
-import {
-  dictionaryErrorMessage,
-  dictionaryKeyMatches,
-  importFailureMessage,
-} from "./dictionary/dictionary-errors";
+import { dictionaryErrorMessage } from "./dictionary/dictionary-errors";
 export { dictionaryErrorMessage } from "./dictionary/dictionary-errors";
 export {
   dictionaryExportName,
@@ -44,50 +106,63 @@ export {
   dictionaryKindLabel,
 } from "./dictionary/dictionary-export";
 export { describeImportResult, dictionaryKindKeyHint } from "./dictionary/dictionary-messages";
-import { SkinCandidatePreview } from "./skin/skin-candidate-preview";
-import { AppearanceCandidatePreview } from "./candidate/appearance-candidate-preview";
+import { AppearanceSettingsSection } from "./settings/appearance-settings-section";
 import { useCandidatePreviewTheme } from "./candidate/candidate-preview-theme";
-import { CandidateFontControls } from "./candidate/candidate-font-controls";
-import { CandidateSizingSection } from "./settings/candidate-sizing-section";
-import { CandidatePageSizeSection } from "./settings/candidate-page-size-section";
-import { CandidateLayoutSection } from "./settings/candidate-layout-section";
-import { CandidateFollowCursorSection } from "./settings/candidate-follow-cursor-section";
-import { CandidatePanelLimitSection } from "./settings/candidate-panel-limit-section";
-import { CandidateEnglishGlossSection } from "./settings/candidate-english-gloss-section";
-import { EnglishSuggestionsSection } from "./settings/english-suggestions-section";
-import { LearningSection } from "./settings/learning-section";
-import { DefaultImeModeSection, type DefaultImeMode } from "./settings/default-ime-mode-section";
-import { InputModeHudSection } from "./settings/input-mode-hud-section";
-import { ImeModeScopeSection } from "./settings/ime-mode-scope-section";
-import { TraditionalChineseOutputSection } from "./settings/traditional-chinese-output-section";
-import { CloudCandidatesSection } from "./settings/cloud-candidates-section";
+import { LearningDataSection } from "./settings/learning-data-section";
+import { DictionaryManagerHeader } from "./settings/dictionary-manager-header";
+import { DictionaryFailuresNotice } from "./settings/dictionary-failures-notice";
+import { DictionaryManagerControls } from "./settings/dictionary-manager-controls";
+import { DictionaryEntries } from "./settings/dictionary-entries";
+import { DictionaryPagination } from "./settings/dictionary-pagination";
+import { useDictionaryManager } from "./settings/use-dictionary-manager";
+export {
+  useDictionaryManager,
+  type DictionaryManagerClient,
+  type DictionaryConfirmOptions,
+  type UseDictionaryManagerOptions,
+} from "./settings/use-dictionary-manager";
+export {
+  DictionaryFailuresNotice,
+  type DictionaryFailuresNoticeProps,
+  type DictionaryFailureNotice,
+} from "./settings/dictionary-failures-notice";
+export {
+  DictionaryManagerControls,
+  type DictionaryManagerControlsProps,
+} from "./settings/dictionary-manager-controls";
+export {
+  DictionaryPagination,
+  type DictionaryPaginationProps,
+} from "./settings/dictionary-pagination";
+export {
+  DictionaryEntries,
+  type DictionaryEntriesProps,
+  type DictionaryPhraseForm,
+} from "./settings/dictionary-entries";
+import { SettingsActionsFooter } from "./settings/settings-actions-footer";
+import { AboutHeroSection } from "./settings/about-hero-section";
+import { AboutSettingsSection } from "./settings/about-settings-section";
 import { TelemetrySection } from "./settings/telemetry-section";
-import { WubiSection } from "./settings/wubi-section";
-import { InputModeSection } from "./settings/input-mode-section";
-import {
-  InputSchemeSelectorSection,
-  type InputSchemeSelectorValue,
-} from "./settings/input-scheme-selector-section";
 import { InputModeShortcutsSection } from "./settings/input-mode-shortcuts-section";
+import { ShortcutsIntroSection } from "./settings/shortcuts-intro-section";
 import { PanelShortcutsSection } from "./settings/panel-shortcuts-section";
 import { CandidateShortcutsSection } from "./settings/candidate-shortcuts-section";
 import { MaintenanceShortcutsSection } from "./settings/maintenance-shortcuts-section";
 import { InputMethodServiceSection } from "./settings/input-method-service-section";
 import { DataDirectorySection } from "./settings/data-directory-section";
 import { LicenseUninstallSection } from "./settings/license-uninstall-section";
-import { DiagnosticLogsSection } from "./settings/diagnostic-logs-section";
+import {
+  DiagnosticLogsSection,
+  diagnosticLogPreferences,
+} from "./settings/diagnostic-logs-section";
 import { HelpFeedbackSection } from "./settings/help-feedback-section";
 import { HelpSettingsPage } from "./settings/help-settings-page";
-import { ScreenKeyboardThemeSection } from "./settings/screen-keyboard-theme-section";
-import { ScreenKeyboardSkinsSection } from "./settings/screen-keyboard-skins-section";
-import { TouchKeyboardSchemesSection } from "./settings/touch-keyboard-schemes-section";
-import {
-  TouchKeyboardGeometrySection,
-  type TouchToolbarPreferences,
-} from "./settings/touch-keyboard-geometry-section";
+import { ScreenKeyboardSettingsSection } from "./settings/screen-keyboard-settings-section";
+import type { TouchToolbarPreferences } from "./settings/touch-keyboard-geometry-section";
 import { VoiceInputIntroSection } from "./settings/voice-input-intro-section";
 import { VoiceInputCoreSection } from "./settings/voice-input-core-section";
 import { VoiceModelPathSection } from "./settings/voice-model-path-section";
+import { VoiceModelPathDisclosure } from "./settings/voice-model-path-disclosure";
 import { VoiceModelSection } from "./settings/voice-model-section";
 import { VoiceEndpointSection } from "./settings/voice-endpoint-section";
 import { VoiceCredentialFieldsSection } from "./settings/voice-credential-fields-section";
@@ -95,69 +170,142 @@ import { PolishCredentialFieldsSection } from "./settings/polish-credential-fiel
 import { VoiceStreamPreeditSection } from "./settings/voice-stream-preedit-section";
 import { VoiceCommitModeSection, type VoiceCommitMode } from "./settings/voice-commit-mode-section";
 import { VoiceCaptureDevicesSection } from "./settings/voice-capture-devices-section";
+import { voiceCaptureBackendOptions } from "./settings/voice-capture-backend-options";
+import { fullwidthShortcutChord, maintenanceShortcutChord } from "./settings/platform-shortcuts";
+import { settingsDirty } from "./settings/settings-dirty";
+import { settingsPlatformContext } from "./settings/settings-platform-context";
+import { VoiceSyntheticSilenceNotice } from "./settings/voice-synthetic-silence-notice";
 import { VoiceHotkeysSection } from "./settings/voice-hotkeys-section";
+import { VoicePolishSection } from "./settings/voice-polish-section";
 import { FloatingToolbarAppearanceSection } from "./settings/floating-toolbar-appearance-section";
+import { FloatingToolbarPlatformNotice } from "./settings/floating-toolbar-platform-notice";
 import { FloatingToolbarComponentsSection } from "./settings/floating-toolbar-components-section";
+import { FloatingToolbarToggleSection } from "./settings/floating-toolbar-toggle-section";
 import { DoubaoAuthModeSection } from "./settings/doubao-auth-mode-section";
 import { DoubaoStreamEndpointSection } from "./settings/doubao-stream-endpoint-section";
 import { DoubaoOptionsSection } from "./settings/doubao-options-section";
 import { DoubaoResourceIdSection } from "./settings/doubao-resource-id-section";
 import { VoiceRecordingBehaviorSection } from "./settings/voice-recording-behavior-section";
 import { FeedbackSettingsSection } from "./settings/feedback-settings-section";
+import { FeedbackPageSection } from "./settings/feedback-page-section";
 import { HandwritingSettingsSection } from "./settings/handwriting-settings-section";
+import {
+  InputSourceStartupNotice,
+  type InputSourceStartupStatus,
+} from "./settings/input-source-startup-notice";
 import { VoiceModelMirrorSection } from "./settings/voice-model-mirror-section";
-import {
-  CredentialTestSection,
-  type CredentialTestState,
-} from "./settings/credential-test-section";
-import { ProviderPresetSection, type ProviderPreset } from "./settings/provider-preset-section";
-import { CredentialStatusMessage } from "./settings/credential-status-message";
-import { AiCredentialSection } from "./settings/ai-credential-section";
-import {
-  tencentCredentialIssue,
-  translationEndpointIssue,
-} from "./settings/translation-validation";
+import { useProviderCredentials } from "./settings/use-provider-credentials";
+import { useFeedbackReport } from "./settings/use-feedback-report";
+import { useDataDirectory } from "./settings/use-data-directory";
+import { useCustomTranslations } from "./settings/use-custom-translations";
+import { usePreferenceRecovery } from "./settings/use-preference-recovery";
+import { useSettingsPersistence } from "./settings/use-settings-persistence";
+import { useInputSourceUninstall } from "./settings/use-input-source-uninstall";
+import { useTouchKeyboardSettingsReset } from "./settings/use-touch-keyboard-settings-reset";
+import { useExternalUrl } from "./settings/use-external-url";
+import { useUpdateCheck } from "./settings/use-update-check";
+import { useOpenPanel } from "./settings/use-open-panel";
+import { useClipboardHistoryToggle } from "./settings/use-clipboard-history-toggle";
+import { useTouchKeyboardSchemeSelection } from "./settings/use-touch-keyboard-scheme-selection";
+import { useSettingsDestinationActions } from "./settings/use-settings-destination-actions";
+import { useMacosSettings } from "./settings/use-macos-settings";
+import { useWindowState } from "./settings/use-window-state";
+import { useAppVersion } from "./settings/use-app-version";
+import { supportDiagnostics } from "./settings/support-diagnostics";
+import { useMountedRef } from "./settings/use-mounted-ref";
+export {
+  useProviderCredentials,
+  type ProviderCredentialBusy,
+  type ProviderCredentialInput,
+  type ProviderCredentialMessage,
+  type ProviderCredentialsHost,
+  type UseProviderCredentialsOptions,
+} from "./settings/use-provider-credentials";
+export { useFeedbackReport, type UseFeedbackReportOptions } from "./settings/use-feedback-report";
+export {
+  useDataDirectory,
+  type DataDirectoryClient,
+  type DataDirectoryConfirmOptions,
+  type UseDataDirectoryOptions,
+} from "./settings/use-data-directory";
+export {
+  useCustomTranslations,
+  type CustomTranslationsClient,
+  type UseCustomTranslationsOptions,
+} from "./settings/use-custom-translations";
+export {
+  usePreferenceRecovery,
+  type PreferenceRecoveryConfirmOptions,
+  type UsePreferenceRecoveryOptions,
+} from "./settings/use-preference-recovery";
+export {
+  useSettingsPersistence,
+  type UseSettingsPersistenceOptions,
+} from "./settings/use-settings-persistence";
+export {
+  useInputSourceUninstall,
+  type UseInputSourceUninstallOptions,
+} from "./settings/use-input-source-uninstall";
+export {
+  useTouchKeyboardSettingsReset,
+  type TouchKeyboardSettingsResetConfirmOptions,
+  type UseTouchKeyboardSettingsResetOptions,
+} from "./settings/use-touch-keyboard-settings-reset";
+export {
+  isSafeExternalUrl,
+  useExternalUrl,
+  type UseExternalUrlOptions,
+} from "./settings/use-external-url";
+export { useUpdateCheck, type UseUpdateCheckOptions } from "./settings/use-update-check";
+export { useOpenPanel, type UseOpenPanelOptions } from "./settings/use-open-panel";
+export {
+  useClipboardHistoryToggle,
+  type UseClipboardHistoryToggleOptions,
+} from "./settings/use-clipboard-history-toggle";
+export {
+  useTouchKeyboardSchemeSelection,
+  type UseTouchKeyboardSchemeSelectionOptions,
+} from "./settings/use-touch-keyboard-scheme-selection";
+export {
+  useSettingsDestinationActions,
+  type UseSettingsDestinationActionsOptions,
+} from "./settings/use-settings-destination-actions";
+export { useMacosSettings, type UseMacosSettingsOptions } from "./settings/use-macos-settings";
+export { useWindowState, type UseWindowStateOptions } from "./settings/use-window-state";
+export { useAppVersion, type UseAppVersionOptions } from "./settings/use-app-version";
+export {
+  supportDiagnostics,
+  type SupportDiagnosticsHost,
+  type SupportDiagnosticsOptions,
+} from "./settings/support-diagnostics";
+export { useMountedRef } from "./settings/use-mounted-ref";
+import { createProviderPresetControl } from "./settings/provider-preset-control";
 export {
   tencentCredentialIssue,
   translationEndpointIssue,
 } from "./settings/translation-validation";
-import {
-  aiCredentialOrigin,
-  providerCredentialErrorMessage,
-  tencentSecretConfigured,
-} from "./settings/credential-utils";
 export {
   aiCredentialOrigin,
   providerCredentialErrorMessage,
   tencentSecretConfigured,
 } from "./settings/credential-utils";
-import { AiPromptSettingsSection } from "./settings/ai-prompt-settings-section";
-import { AiTestToolsSection } from "./settings/ai-test-tools-section";
-import { AiCandidateLimitSection } from "./settings/ai-candidate-limit-section";
-import { AiModelCatalogSection } from "./settings/ai-model-catalog-section";
-import {
-  AiBasicSettingsSection,
-  type AiProviderOption,
-} from "./settings/ai-basic-settings-section";
-import { NiuTransSection } from "./settings/niutrans-section";
-import { CustomTranslationSection } from "./settings/custom-translation-section";
-import { CustomTranslationsSection } from "./settings/custom-translations-section";
-import { TencentTranslationSection } from "./settings/tencent-translation-section";
+import { settingsCapabilities } from "./settings/settings-capabilities";
+export {
+  settingsCapabilities,
+  type SettingsCapabilitiesInput,
+} from "./settings/settings-capabilities";
+import { useAiAssistant } from "./settings/use-ai-assistant";
+export { useAiAssistant, type UseAiAssistantOptions } from "./settings/use-ai-assistant";
 import {
   VoiceCredentialSection,
   type VoiceCredentialSaveInput,
 } from "./settings/voice-credential-section";
-import {
-  MobileKeyboardFeedbackSection,
-  type MobileKeyboardFeedback,
-  type MobileKeyboardFeedbackClient,
-} from "./settings/mobile-keyboard-feedback-section";
-import { PreeditSettingsSection } from "./settings/preedit-settings-section";
+import type { MobileKeyboardFeedbackClient } from "./settings/mobile-keyboard-feedback-section";
 import { DictionaryManifestCard } from "./settings/dictionary-manifest-card";
 import { PersonalDictionaryImportCard } from "./settings/personal-dictionary-import-card";
+import { DictionarySettingsPanel } from "./settings/dictionary-settings-panel";
 import { validCandidateFonts } from "./candidate/candidate-font-family";
 import type { FontCatalogReader } from "./candidate/font-catalog";
-import { SecretInput } from "./core/secret-input";
 import {
   asrProviderUpdate,
   polishProviderUpdate,
@@ -165,10 +313,12 @@ import {
   POLISH_PROVIDER_DEFAULTS,
 } from "./voice/voice-providers";
 import { PolishPromptSection } from "./settings/polish-prompt-section";
-import { SkinToolbarPreview } from "./skin/skin-toolbar-preview";
-import { ScreenKeyboardPreview } from "./keyboard/screen-keyboard-preview";
+import { useVoiceInputSettings } from "./settings/use-voice-input-settings";
+export {
+  useVoiceInputSettings,
+  type UseVoiceInputSettingsOptions,
+} from "./settings/use-voice-input-settings";
 import type { TouchKeyboardSkin } from "./keyboard/screen-keyboard-preview";
-import { TouchKeyboardSkinEditor } from "./keyboard/touch-keyboard-skin-editor";
 import * as skin from "./keyboard/touch-skin-style";
 import {
   defaultTouchKeyboardSkinDesign,
@@ -185,54 +335,31 @@ export type {
   SavedTouchKeyboardSkin,
   TouchKeyboardSkinDesign,
 } from "./keyboard/touch-keyboard-skin-design";
-import { ExternalSkins, type SkinCatalog } from "./skin/external-skins";
+import type { SkinCatalog } from "./skin/external-skins";
 import { TypingStatisticsPage, type TypingStatisticsClient } from "./settings/typing-statistics";
 import { VocabularyReviewPage, type VocabularyReviewClient } from "./settings/vocabulary-review";
-import {
-  McpConnectSection,
-  type McpClientId,
-  type McpInstallOutcome,
-  type McpServerStatus,
-} from "./settings/mcp-connect";
+import type { McpClientId, McpInstallOutcome, McpServerStatus } from "./settings/mcp-connect";
 import {
   HelpcodeSettingsPage,
   type HelpcodePreferences,
   type HelpcodeSchema,
 } from "./settings/pages/helpcode-page";
+import { defaultFuzzyPinyin, type FuzzyPinyinPreferences } from "./settings/fuzzy-pinyin-section";
 import {
-  FuzzyPinyinSection,
-  defaultFuzzyPinyin,
-  type FuzzyPinyinPreferences,
-} from "./settings/fuzzy-pinyin-section";
-import {
-  WordCharacterSection,
+  defaultWordCharacter,
   type NavigationPreferences,
   type WordCharacterPreferences,
 } from "./settings/word-character-section";
-import { NavigationSection } from "./settings/navigation-section";
-import { PunctuationSection } from "./settings/punctuation-section";
-import {
-  MixedInputSection,
-  defaultMixedInput,
-  type MixedInputPreferences,
-} from "./settings/mixed-input-section";
-import {
-  FrequencySection,
-  defaultFrequency,
-  type FrequencyPreferences,
-} from "./settings/frequency-section";
+import { defaultNavigation } from "./settings/navigation-section";
+import { defaultMixedInput, type MixedInputPreferences } from "./settings/mixed-input-section";
+import { defaultFrequency, type FrequencyPreferences } from "./settings/frequency-section";
 import {
   LocalModesSection,
   defaultLocalModes,
   type LocalModePreferences,
 } from "./settings/local-modes-section";
+import { type SurfaceTheme, type ThemeMode } from "./settings/theme-settings-section";
 import {
-  ThemeSettingsSection,
-  type SurfaceTheme,
-  type ThemeMode,
-} from "./settings/theme-settings-section";
-import {
-  CandidateColorsSection,
   type CandidateColorKey,
   type CandidateColorPreferences,
 } from "./settings/candidate-colors-section";
@@ -240,6 +367,55 @@ import {
   ClipboardHistorySection,
   type ClipboardHistoryClient,
 } from "./settings/clipboard-history-section";
+import { WindowTitlebar } from "./settings/window-titlebar";
+export { WindowTitlebar, type WindowTitlebarProps } from "./settings/window-titlebar";
+import { windowResizeEdge } from "./settings/window-resize";
+export {
+  windowResizeEdge,
+  type WindowResizeBounds,
+  type WindowResizePoint,
+} from "./settings/window-resize";
+import { SettingsSidebar } from "./settings/settings-sidebar";
+export {
+  SettingsSidebar,
+  type SettingsSidebarItem,
+  type SettingsSidebarProps,
+} from "./settings/settings-sidebar";
+import { MobileSettingsTabs } from "./settings/mobile-settings-tabs";
+export {
+  MobileSettingsTabs,
+  type MobileSettingsTab,
+  type MobileSettingsTabsProps,
+} from "./settings/mobile-settings-tabs";
+import { SettingsPageHeader } from "./settings/settings-page-header";
+export { SettingsPageHeader, type SettingsPageHeaderProps } from "./settings/settings-page-header";
+import { SettingsStatusMessages } from "./settings/settings-status-messages";
+export {
+  SettingsStatusMessages,
+  type SettingsStatusMessagesProps,
+} from "./settings/settings-status-messages";
+import { UtilitiesSettingsSection } from "./settings/utilities-settings-section";
+export {
+  UtilitiesSettingsSection,
+  type UtilitiesSettingsSectionProps,
+} from "./settings/utilities-settings-section";
+import { ShortcutsSettingsSection } from "./settings/shortcuts-settings-section";
+export {
+  ShortcutsSettingsSection,
+  type ShortcutsSettingsSectionProps,
+} from "./settings/shortcuts-settings-section";
+import { FloatingToolbarSettingsSection } from "./settings/floating-toolbar-settings-section";
+export {
+  FloatingToolbarSettingsSection,
+  type FloatingToolbarSettingsSectionProps,
+} from "./settings/floating-toolbar-settings-section";
+import { SkinSettingsSection } from "./settings/skin-settings-section";
+export {
+  SkinSettingsSection,
+  type SkinSettingsSectionProps,
+} from "./settings/skin-settings-section";
+import { availableSettingsPages } from "./settings/available-pages";
+export { availableSettingsPages, type AvailablePageCapabilities } from "./settings/available-pages";
 import * as surface from "./keyboard/panel-surface-style";
 import * as settings from "./settings/settings-style";
 import * as doc from "./settings/document-style";
@@ -252,7 +428,7 @@ import {
 import { ChatPage, type ChatClient } from "./chat/chat-page";
 import { HomePage, MoreSettingsPage, type HomePageActions } from "./keyboard/home-page";
 import { CommunitySkinsPage, type CommunitySkinClient } from "./community/community-skins";
-import { candidateSkinPalette } from "./skin/skin-preview-palette";
+import { communityDestinationView } from "./community/community-destination";
 import {
   CommunityHomePage,
   CommunityResourcesPage,
@@ -343,6 +519,7 @@ export {
   type ClipboardHistoryClient,
   type ClipboardHistoryEntry,
 } from "./settings/clipboard-history-section";
+export { CloudPanelSessionNotice } from "./settings/cloud-panel-session-notice";
 export { FuzzyPinyinSection, type FuzzyPinyinPreferences } from "./settings/fuzzy-pinyin-section";
 export {
   WordCharacterSection,
@@ -350,6 +527,24 @@ export {
   type WordCharacterPreferences,
 } from "./settings/word-character-section";
 export { NavigationSection } from "./settings/navigation-section";
+export {
+  HandwritingPlatformNotice,
+  type HandwritingPlatform,
+  type HandwritingPlatformNoticeProps,
+} from "./settings/handwriting-platform-notice";
+export {
+  MobileInputAiNotice,
+  type MobileInputAiNoticeProps,
+} from "./settings/mobile-input-ai-notice";
+export { InputSettingsPanel, type InputSettingsPanelProps } from "./settings/input-settings-panel";
+export {
+  CandidateTranslationOptionsSection,
+  type CandidateTranslationOptionsSectionProps,
+  type TranslationLanguage,
+  type TranslationLanguageOption,
+  type TranslationSecondaryLanguage,
+  type TranslationSecondaryLanguageOption,
+} from "./settings/candidate-translation-options-section";
 export { PunctuationSection, type PunctuationPreferences } from "./settings/punctuation-section";
 export {
   MixedInputSection,
@@ -380,6 +575,19 @@ export {
   type CandidateColorPreferences,
 } from "./settings/candidate-colors-section";
 export {
+  AppearanceSettingsSection,
+  type AppearanceSettingsSectionProps,
+} from "./settings/appearance-settings-section";
+export { CandidatePaletteFallbackNotice } from "./settings/candidate-palette-fallback-notice";
+export {
+  AiLinuxProviderSection,
+  type AiLinuxProviderSectionProps,
+} from "./settings/ai-linux-provider-section";
+export {
+  BuiltInSkinsSection,
+  type BuiltInSkinsSectionProps,
+} from "./settings/built-in-skins-section";
+export {
   CandidateSizingSection,
   type CandidateSizingPreferences,
 } from "./settings/candidate-sizing-section";
@@ -394,6 +602,7 @@ export {
   type CandidatePanelLimit,
   type CandidatePanelLimitSectionProps,
 } from "./settings/candidate-panel-limit-section";
+export { CandidateFontUnsupportedNotice } from "./settings/candidate-font-unsupported-notice";
 export {
   CandidateEnglishGlossSection,
   type CandidateEnglishGlossSectionProps,
@@ -403,6 +612,24 @@ export {
   type EnglishSuggestionsSectionProps,
 } from "./settings/english-suggestions-section";
 export { LearningSection, type LearningSectionProps } from "./settings/learning-section";
+export {
+  LearningDataSection,
+  type LearningDataSectionProps,
+} from "./settings/learning-data-section";
+export {
+  DictionaryManagerHeader,
+  type DictionaryManagerHeaderProps,
+} from "./settings/dictionary-manager-header";
+export {
+  SettingsActionsFooter,
+  type SettingsActionsFooterProps,
+} from "./settings/settings-actions-footer";
+export { AboutHeroSection, type AboutHeroSectionProps } from "./settings/about-hero-section";
+export {
+  AboutSettingsSection,
+  type AboutSettingsSectionProps,
+} from "./settings/about-settings-section";
+export { SkinPlatformNotice, type SkinPlatformNoticeProps } from "./settings/skin-platform-notice";
 export {
   DefaultImeModeSection,
   type DefaultImeMode,
@@ -438,10 +665,20 @@ export {
   type InputSchemeSelectorValue,
 } from "./settings/input-scheme-selector-section";
 export {
+  InputSchemeDetailsSection,
+  type InputSchemeDetailsSectionProps,
+  type InputSchemeDetailsScheme,
+  type ShuangpinProfile,
+} from "./settings/input-scheme-details-section";
+export {
   InputModeShortcutsSection,
   type InputModeShortcutPreferences,
   type InputModeShortcutsSectionProps,
 } from "./settings/input-mode-shortcuts-section";
+export {
+  ShortcutsIntroSection,
+  type ShortcutsIntroSectionProps,
+} from "./settings/shortcuts-intro-section";
 export {
   PanelShortcutsSection,
   type PanelShortcutsSectionProps,
@@ -469,6 +706,7 @@ export {
 } from "./settings/license-uninstall-section";
 export {
   DiagnosticLogsSection,
+  diagnosticLogPreferences,
   type DiagnosticLogPreferences,
   type DiagnosticLogsSectionProps,
 } from "./settings/diagnostic-logs-section";
@@ -476,6 +714,10 @@ export {
   HelpFeedbackSection,
   type HelpFeedbackSectionProps,
 } from "./settings/help-feedback-section";
+export {
+  FeedbackPageSection,
+  type FeedbackPageSectionProps,
+} from "./settings/feedback-page-section";
 export { HelpSettingsPage, type HelpSettingsPageProps } from "./settings/help-settings-page";
 export {
   ScreenKeyboardThemeSection,
@@ -486,14 +728,23 @@ export {
   type ScreenKeyboardSkinsSectionProps,
 } from "./settings/screen-keyboard-skins-section";
 export {
+  ScreenKeyboardCommunitySection,
+  type ScreenKeyboardCommunitySectionProps,
+} from "./settings/screen-keyboard-community-section";
+export {
   TouchKeyboardSchemesSection,
   type TouchKeyboardSchemesSectionProps,
 } from "./settings/touch-keyboard-schemes-section";
+export {
+  createProviderPresetControl,
+  type ProviderPresetControlFactory,
+} from "./settings/provider-preset-control";
 export {
   TouchKeyboardGeometrySection,
   type TouchKeyboardGeometrySectionProps,
   type TouchToolbarPreferences,
 } from "./settings/touch-keyboard-geometry-section";
+export { VoiceSettingsPanel, type VoiceSettingsPanelProps } from "./settings/voice-settings-panel";
 export {
   VoiceInputIntroSection,
   type VoiceInputIntroSectionProps,
@@ -506,6 +757,10 @@ export {
   VoiceModelPathSection,
   type VoiceModelPathSectionProps,
 } from "./settings/voice-model-path-section";
+export {
+  VoiceModelPathDisclosure,
+  type VoiceModelPathDisclosureProps,
+} from "./settings/voice-model-path-disclosure";
 export { VoiceModelSection, type VoiceModelSectionProps } from "./settings/voice-model-section";
 export {
   VoiceEndpointSection,
@@ -540,6 +795,22 @@ export {
   type VoiceCaptureBackend,
 } from "./settings/voice-capture-devices-section";
 export {
+  voiceCaptureBackendOptions,
+  type VoiceCaptureBackendOptionsContext,
+} from "./settings/voice-capture-backend-options";
+export { fullwidthShortcutChord, maintenanceShortcutChord } from "./settings/platform-shortcuts";
+export {
+  platformResourceUrls,
+  type PlatformResourceUrls,
+  type PlatformResourceUrlsContext,
+} from "./settings/platform-resource-urls";
+export { settingsDirty, type SettingsDirtyOptions } from "./settings/settings-dirty";
+export {
+  settingsPlatformContext,
+  type SettingsPlatformContext,
+} from "./settings/settings-platform-context";
+export { VoiceSyntheticSilenceNotice } from "./settings/voice-synthetic-silence-notice";
+export {
   VoiceHotkeysSection,
   type VoiceHotkeysSectionProps,
   type VoiceHotkeyKey,
@@ -551,6 +822,7 @@ export {
   type FloatingToolbarFontSize,
   type FloatingToolbarScale,
 } from "./settings/floating-toolbar-appearance-section";
+export { FloatingToolbarPlatformNotice } from "./settings/floating-toolbar-platform-notice";
 export {
   FloatingToolbarComponentsSection,
   type FloatingToolbarCapability,
@@ -607,11 +879,15 @@ export {
   type CredentialStatusMessageProps,
   type CredentialStatusMessageValue,
 } from "./settings/credential-status-message";
+export { CredentialActions, type CredentialActionsProps } from "./settings/credential-actions";
+export { SettingToggle, type SettingToggleProps } from "./settings/setting-toggle";
 export {
   AiCredentialSection,
   type AiCredentialSectionProps,
   type AiCredentialStored,
 } from "./settings/ai-credential-section";
+export { AiSettingsPanel, type AiSettingsPanelProps } from "./settings/ai-settings-panel";
+export { AiApiTokenSection, type AiApiTokenSectionProps } from "./settings/ai-api-token-section";
 export { NiuTransSection, type NiuTransSectionProps } from "./settings/niutrans-section";
 export {
   CustomTranslationSection,
@@ -626,6 +902,21 @@ export {
   type TencentTranslationSectionProps,
 } from "./settings/tencent-translation-section";
 export {
+  LinuxTencentCredentialsSection,
+  type LinuxTencentCredentialsSectionProps,
+  type LinuxTencentCredentialInput,
+  type LinuxTencentCredentialStatus,
+} from "./settings/linux-tencent-credentials-section";
+export {
+  TranslationServiceSelectorSection,
+  type TranslationProvider,
+  type TranslationServiceSelectorSectionProps,
+} from "./settings/translation-service-selector-section";
+export {
+  OnDeviceTranslationNotice,
+  type OnDeviceTranslationNoticeProps,
+} from "./settings/on-device-translation-notice";
+export {
   DictionaryManifestCard,
   type DictionaryManifestCardProps,
 } from "./settings/dictionary-manifest-card";
@@ -634,6 +925,10 @@ export {
   type PersonalDictionaryImportCardProps,
   type PersonalDictionaryImportClient,
 } from "./settings/personal-dictionary-import-card";
+export {
+  DictionarySettingsPanel,
+  type DictionarySettingsPanelProps,
+} from "./settings/dictionary-settings-panel";
 export {
   MobileKeyboardFeedbackSection,
   type MobileKeyboardFeedback,
@@ -654,6 +949,13 @@ export {
   type CommunitySkinPage,
   type CommunitySkinTrial,
 } from "./community/community-skins";
+export {
+  communityDestinationView,
+  type CommunityDestination,
+  type CommunityDestinationCategory,
+  type CommunityDestinationScope,
+  type CommunityDestinationView,
+} from "./community/community-destination";
 export {
   CommunityHomePage,
   CommunityResourcesPage,
@@ -696,16 +998,7 @@ export {
   type CandidateOrientation,
   type CandidateTheme,
 } from "./candidate/candidate-themes";
-import {
-  compareVersions,
-  describeInstallerTrust,
-  parseVersion,
-  selectPlatformRelease,
-  validateManifest,
-  type GitHubRelease,
-  type UpdateManifest,
-  type ValidatedUpdate,
-} from "./settings/update-manifest";
+import { describeInstallerTrust } from "./settings/update-manifest";
 export {
   serializeWindowHostMessage,
   type WindowControl,
@@ -714,6 +1007,23 @@ export {
 } from "./keyboard/window-host";
 export { emojiDisplayName } from "./keyboard/panels";
 export type { TouchKeyboardSkin } from "./keyboard/screen-keyboard-preview";
+export { VoicePolishSection, type VoicePolishSectionProps } from "./settings/voice-polish-section";
+export {
+  FloatingToolbarToggleSection,
+  type FloatingToolbarToggleSectionProps,
+} from "./settings/floating-toolbar-toggle-section";
+export {
+  ScreenKeyboardLaunchSection,
+  type ScreenKeyboardLaunchSectionProps,
+} from "./settings/screen-keyboard-launch-section";
+export {
+  ScreenKeyboardSettingsSection,
+  type ScreenKeyboardSettingsSectionProps,
+} from "./settings/screen-keyboard-settings-section";
+export {
+  CandidatePaletteSection,
+  type CandidatePaletteSectionProps,
+} from "./settings/candidate-palette-section";
 export {
   CloudCandidatesPanel,
   CloudClipboardPanel,
@@ -778,181 +1088,7 @@ export type KeybindingPreferences = {
   toggle_character_set_ctrl_shift_f: boolean;
   toggle_fullwidth_option_shift_h: boolean;
 };
-const defaultKeybindings: KeybindingPreferences = {
-  switch_language_shift: true,
-  switch_language_ctrl: false,
-  switch_language_ctrl_alt_space: true,
-  toggle_character_set_ctrl_shift_f: true,
-  toggle_fullwidth_option_shift_h: true,
-};
-export type TouchKeyboardScheme =
-  | "quanpin"
-  | "nine_key"
-  | "xiaohe"
-  | "ziranma"
-  | "microsoft"
-  | "shoudao"
-  | "wubi"
-  | "japanese_nine_key"
-  | "japanese"
-  | "handwriting"
-  | "thoughtful_reply";
-export type TouchKeyboardSchemePreferences = {
-  enabled: TouchKeyboardScheme[];
-  selected?: TouchKeyboardScheme;
-};
-const touchKeyboardSchemeOptions: [TouchKeyboardScheme, string][] = [
-  ["quanpin", "全拼 26 键"],
-  ["nine_key", "全拼 9 键"],
-  ["xiaohe", "小鹤双拼"],
-  ["ziranma", "自然码双拼"],
-  ["microsoft", "微软双拼"],
-  ["shoudao", "首道双拼"],
-  ["wubi", "86 五笔"],
-  ["japanese_nine_key", "日语 9 键"],
-  ["japanese", "日语 26 键"],
-  ["handwriting", "手写"],
-  ["thoughtful_reply", "高情商回复"],
-];
-const allTouchKeyboardSchemes = touchKeyboardSchemeOptions.map(([scheme]) => scheme);
-
-function inferredTouchKeyboardScheme(preferences: Preferences): TouchKeyboardScheme {
-  const enabled = preferences.touch_keyboard_schemes?.enabled ?? allTouchKeyboardSchemes;
-  const selected = preferences.touch_keyboard_schemes?.selected;
-  if (selected && enabled.includes(selected)) return selected;
-  let inferred: TouchKeyboardScheme =
-    preferences.scheme === "shuangpin" ? preferences.shuangpin_profile : preferences.scheme;
-  if (preferences.touch_keyboard_layout === "handwriting" && preferences.scheme === "quanpin")
-    inferred = "handwriting";
-  else if (preferences.touch_keyboard_layout === "nine_key")
-    inferred = preferences.scheme === "japanese" ? "japanese_nine_key" : "nine_key";
-  return enabled.includes(inferred) ? inferred : (enabled[0] ?? "quanpin");
-}
-
-function selectTouchKeyboardScheme(
-  preferences: Preferences,
-  selected: TouchKeyboardScheme,
-): Preferences {
-  const touch_keyboard_schemes = {
-    enabled: preferences.touch_keyboard_schemes?.enabled ?? allTouchKeyboardSchemes,
-    selected,
-  };
-  if (["xiaohe", "ziranma", "microsoft", "shoudao"].includes(selected))
-    return {
-      ...preferences,
-      scheme: "shuangpin",
-      last_chinese_scheme: "shuangpin",
-      shuangpin_profile: selected as Preferences["shuangpin_profile"],
-      touch_keyboard_layout: "twenty_six_key",
-      touch_keyboard_schemes,
-    };
-  if (selected === "japanese" || selected === "japanese_nine_key")
-    return {
-      ...preferences,
-      scheme: "japanese",
-      last_chinese_scheme:
-        preferences.scheme === "japanese" ? preferences.last_chinese_scheme : preferences.scheme,
-      touch_keyboard_layout: selected === "japanese_nine_key" ? "nine_key" : "twenty_six_key",
-      touch_keyboard_schemes,
-    };
-  if (selected === "wubi")
-    return {
-      ...preferences,
-      scheme: "wubi",
-      last_chinese_scheme: "wubi",
-      touch_keyboard_layout: "twenty_six_key",
-      touch_keyboard_schemes,
-    };
-  return {
-    ...preferences,
-    scheme: "quanpin",
-    last_chinese_scheme: "quanpin",
-    touch_keyboard_layout:
-      selected === "nine_key"
-        ? "nine_key"
-        : selected === "handwriting"
-          ? "handwriting"
-          : "twenty_six_key",
-    touch_keyboard_schemes,
-  };
-}
-/**
- * The sidebar, in the reference window's order.
- *
- * Everything from 外观 down is the reference's own list, item for item and in its sequence, so a
- * user who knows that window finds the same page in the same place here. The pages this client has
- * and that window does not -- the account, the AI conversation, the community and the typing
- * statistics -- sit ahead of it as a block of their own rather than being interleaved, which is
- * also the group the mobile hosts promote. macOS reorders this into `macosSidebarGroups`, because
- * its own reference window groups rather than lists.
- */
-const pages = [
-  { id: "home", title: "首页", icon: new URL("./assets/msime.svg", import.meta.url).href },
-  { id: "account", title: "我的", icon: new URL("./assets/account.svg", import.meta.url).href },
-  { id: "chat", title: "AI 对话", icon: new URL("./assets/help.svg", import.meta.url).href },
-  { id: "community", title: "社区", icon: new URL("./assets/community.svg", import.meta.url).href },
-  {
-    id: "typing-statistics",
-    title: "打字统计",
-    icon: new URL("./assets/statistics.svg", import.meta.url).href,
-  },
-  {
-    id: "appearance",
-    title: "外观",
-    icon: new URL("./assets/appearance.svg", import.meta.url).href,
-  },
-  { id: "input", title: "输入", icon: new URL("./assets/input.svg", import.meta.url).href },
-  { id: "helpcode", title: "辅助码", icon: new URL("./assets/helpcode.svg", import.meta.url).href },
-  {
-    id: "shortcuts",
-    title: "快捷键",
-    icon: new URL("./assets/shortcut.svg", import.meta.url).href,
-  },
-  {
-    id: "dictionary",
-    title: "词库",
-    icon: new URL("./assets/dictionary.svg", import.meta.url).href,
-  },
-  {
-    id: "vocabulary",
-    title: "背单词",
-    icon: new URL("./assets/vocabulary.svg", import.meta.url).href,
-  },
-  { id: "skin", title: "皮肤", icon: new URL("./assets/skin.svg", import.meta.url).href },
-  {
-    id: "voice",
-    title: "语音输入",
-    icon: new URL("./assets/voice-input.svg", import.meta.url).href,
-  },
-  {
-    id: "screen-keyboard",
-    title: "屏幕键盘",
-    icon: new URL("./assets/screen-keyboard.svg", import.meta.url).href,
-  },
-  {
-    id: "handwriting",
-    title: "手写识别板",
-    icon: new URL("./assets/handwriting.svg", import.meta.url).href,
-  },
-  { id: "tools", title: "实用功能", icon: new URL("./assets/utilities.svg", import.meta.url).href },
-  { id: "ai", title: "AI 辅助", icon: new URL("./assets/ai.svg", import.meta.url).href },
-  {
-    id: "floating-toolbar",
-    title: "悬浮工具栏",
-    icon: new URL("./assets/floating-toolbar.svg", import.meta.url).href,
-  },
-  // Mobile only, and the one page that is a list of the other pages. The phone bar carries the
-  // source's four tabs, so everything else is reached the way the source reaches it: through the
-  // 键盘 tab, down one level, into a list.
-  {
-    id: "more",
-    title: "全部设置",
-    icon: new URL("./assets/utilities.svg", import.meta.url).href,
-  },
-  { id: "help", title: "帮助", icon: new URL("./assets/help.svg", import.meta.url).href },
-  { id: "about", title: "关于", icon: new URL("./assets/about.svg", import.meta.url).href },
-  { id: "feedback", title: "反馈", icon: new URL("./assets/feedback.svg", import.meta.url).href },
-] as const;
+import { defaultKeybindings } from "./settings/keybinding-defaults";
 /**
  * macOS groups its sidebar the way the reference window does: what you type with, what it looks
  * like, what it stores, then where to get help. Pages the reference has no counterpart for keep
@@ -966,35 +1102,6 @@ const pages = [
  * here may be dropped -- and orders them where the native window puts their contents: helpcode
  * beside 输入, tools before 快捷键 rather than after it, feedback beside help.
  */
-const macosSidebarGroups = [
-  ["input", "helpcode", "tools", "shortcuts", "voice"],
-  ["appearance", "skin", "floating-toolbar"],
-  ["dictionary", "account"],
-  ["help", "feedback", "about"],
-] as const satisfies readonly (readonly SettingsPageId[])[];
-const logo = new URL("./assets/msime.svg", import.meta.url).href;
-const windowIcons = {
-  minimize: new URL("./assets/minimize.svg", import.meta.url).href,
-  maximize: new URL("./assets/maximize.svg", import.meta.url).href,
-  restore: new URL("./assets/restore.svg", import.meta.url).href,
-  close: new URL("./assets/close.svg", import.meta.url).href,
-};
-const fallbackAppVersion = "0.1.0";
-const releasesPageUrl = "https://github.com/metasequoiaime/msime/releases";
-const linuxReleasesPageUrl = "https://github.com/metasequoiaime/msime/releases";
-const updateManifestUrl = "https://msime.app/update.json";
-const clientReleasesUrl = "https://api.github.com/repos/metasequoiaime/msime/releases";
-const UPDATE_CHECK_TIMEOUT_MS = 10_000;
-const licenseUrl = "https://github.com/metasequoiaime/msime/blob/develop/LICENSE";
-const privacyUrl = "https://msime.app/privacy/";
-const androidPrivacyUrl = "https://msime.app/privacy/";
-// Linux links to the data-flow document that ships with this code, as the Windows reference links its own PRIVACY.md; the Linux section of msime.app/privacy/ describes a host without an update check and with Secret Service credentials, and this one has the update check and keeps provider credentials in 0600 files.
-const linuxPrivacyUrl = "https://github.com/metasequoiaime/msime/blob/develop/PRIVACY.md";
-const linuxLicenseUrl = "https://github.com/metasequoiaime/msime/blob/develop/LICENSE";
-const linuxIssuesUrl = "https://github.com/metasequoiaime/msime/issues";
-const desktopDownloadUrl = "https://msime.app/download/";
-const handwritingSdkPrivacyUrl = "https://developers.google.com/ml-kit/terms";
-
 export type HostPlatform = "windows" | "macos" | "linux" | "android" | "ios" | "harmony";
 /** Mirrors `client-core::host_surface::HostCapabilities`. */
 export interface HostCapabilities {
@@ -1058,24 +1165,7 @@ export interface HostCapabilities {
   candidate_panel_limit?: "gnome_shell" | "fcitx_theme" | "kimpanel";
 }
 
-/** Superseded by the host-provided capabilities; used only when a host predates them. */
-function isLinuxDesktop(): boolean {
-  if (typeof navigator === "undefined") return false;
-  const userAgent = navigator.userAgent;
-  return /\bLinux\b/i.test(userAgent) && !/\bjsdom\b/i.test(userAgent);
-}
-
 export { useCandidatePreviewTheme } from "./candidate/candidate-preview-theme";
-
-function resolveSettingsTheme(theme: ThemeMode, surface: SurfaceTheme): "dark" | "light" {
-  if (surface !== "follow") return surface;
-  if (theme !== "system") return theme;
-  return typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-color-scheme: light)").matches
-    ? "light"
-    : "dark";
-}
 
 export type Preferences = {
   theme?: ThemeMode;
@@ -1315,165 +1405,6 @@ export type VoiceInputPreferences = {
   doubao_boosting_table_id?: string;
   [key: string]: unknown;
 };
-/**
- * `models` are the models the provider is known to accept and `documentation`
- * is where it explains the endpoint and how to obtain an API key, both taken
- * from the Apple `AIProviderPreset`. They are presentation only: the request
- * still sends whatever model preferences hold, and 自定义 has neither.
- */
-export const AI_PROVIDER_OPTIONS: readonly {
-  id: string;
-  title: string;
-  endpoint: string;
-  model: string;
-  models?: readonly string[];
-  documentation?: string;
-}[] = [
-  {
-    id: "everyapi",
-    title: "EveryAPI",
-    endpoint: "https://api.everyapi.ai/v1/chat/completions",
-    model: "deepseek-v4-flash",
-    models: ["deepseek-v4-flash", "deepseek-v4-pro", "claude-sonnet-5", "glm-5.3-flash"],
-    documentation: "https://everyapi.ai/models",
-  },
-  {
-    id: "openai",
-    title: "OpenAI",
-    endpoint: "https://api.openai.com/v1/chat/completions",
-    model: "gpt-4.1-mini",
-    models: ["gpt-4.1-mini"],
-    documentation: "https://developers.openai.com/api/docs/models/gpt-4.1-mini",
-  },
-  {
-    id: "anthropic",
-    title: "Anthropic · Claude",
-    endpoint: "https://api.anthropic.com/v1/chat/completions",
-    model: "claude-sonnet-4-6",
-    models: ["claude-sonnet-4-6", "claude-opus-5"],
-    documentation: "https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk",
-  },
-  {
-    id: "gemini",
-    title: "Google · Gemini",
-    endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    model: "gemini-3.8-flash",
-    models: ["gemini-3.8-flash", "gemini-2.5-flash"],
-    documentation: "https://ai.google.dev/gemini-api/docs/openai",
-  },
-  {
-    id: "deepseek",
-    title: "DeepSeek",
-    endpoint: "https://api.deepseek.com/chat/completions",
-    model: "deepseek-v4-flash",
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
-    documentation: "https://api-docs.deepseek.com/",
-  },
-  {
-    id: "qwen",
-    title: "通义千问 · 阿里云百炼",
-    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-    model: "qwen-plus",
-    models: ["qwen-plus"],
-    documentation: "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope",
-  },
-  {
-    id: "kimi",
-    title: "Kimi · 月之暗面",
-    endpoint: "https://api.moonshot.cn/v1/chat/completions",
-    model: "kimi-k2.6",
-    models: ["kimi-k2.6", "kimi-k2.5"],
-    documentation: "https://platform.kimi.com/docs/api/chat",
-  },
-  {
-    id: "zhipu",
-    title: "智谱 · GLM",
-    endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    model: "glm-4.7",
-    models: ["glm-4.7", "glm-4.7-flashx"],
-    documentation: "https://docs.bigmodel.cn/cn/guide/models/text/glm-4.7",
-  },
-  {
-    id: "siliconflow",
-    title: "硅基流动",
-    endpoint: "https://api.siliconflow.cn/v1/chat/completions",
-    model: "Qwen/Qwen3.6-27B",
-    models: ["Qwen/Qwen3.6-27B"],
-    documentation: "https://docs.siliconflow.cn/docs/userguide/capabilities/text-generation",
-  },
-  {
-    id: "groq",
-    title: "Groq",
-    endpoint: "https://api.groq.com/openai/v1/chat/completions",
-    model: "llama-3.3-70b-versatile",
-    models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
-    documentation: "https://console.groq.com/docs/quickstart",
-  },
-  {
-    id: "openrouter",
-    title: "OpenRouter",
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "openrouter/auto",
-    models: ["openrouter/auto"],
-    documentation: "https://openrouter.ai/docs/quickstart",
-  },
-  { id: "custom", title: "自定义", endpoint: "", model: "" },
-];
-/** What 「AI 润色测试」 asks the configured service to do. It is its own instruction: `ai_assistant.prompt` is the associative-candidate prompt, which demands candidate JSON and would make a polish sample come back as JSON. */
-const aiPolishTestPrompt = "请润色以下文字，保持原意，只返回修改后的文字。";
-// The prompt slots start empty as in AiAssistantPreferences::default(). The associative-candidate paths (client-core's chat_completion_http_request and the Linux online provider) treat a blank slot as the built-in DEFAULT_CANDIDATE_PROMPT, the text Windows compiles into ai_assistant.prompt. Android and the iOS keyboard mirror instead read ai_assistant.prompt as a polish instruction and use their own polish text when it is blank, which is why this default stays empty rather than holding the associative prompt.
-const defaultAiAssistant: AiAssistantPreferences = {
-  enabled: false,
-  provider: "deepseek",
-  model: "deepseek-v4-flash",
-  endpoint: "https://api.deepseek.com/chat/completions",
-  candidate_limit: 3,
-  token: "",
-  tokens: {},
-  prompt_id: "custom_1",
-  prompt: "",
-  prompt_custom_1: "",
-  prompt_custom_2: "",
-  prompt_custom_3: "",
-};
-
-/** Switch providers like the Apple settings page: preset values follow the
- * provider, while a deliberately edited custom endpoint/model are preserved. */
-export function aiProviderUpdate(
-  provider: string,
-  current: AiAssistantPreferences,
-): Partial<AiAssistantPreferences> {
-  const next =
-    AI_PROVIDER_OPTIONS.find((option) => option.id === provider) ??
-    AI_PROVIDER_OPTIONS[AI_PROVIDER_OPTIONS.length - 1];
-  const previous = AI_PROVIDER_OPTIONS.find((option) => option.id === current.provider);
-  return {
-    provider: next.id,
-    endpoint:
-      !current.endpoint.trim() || current.endpoint === previous?.endpoint
-        ? next.endpoint
-        : current.endpoint,
-    model: !current.model.trim() || current.model === previous?.model ? next.model : current.model,
-  };
-}
-// asr_provider mirrors client-core's default; the two disagreeing meant a host
-// wrote a provider no backend implements.
-const defaultVoiceInput: VoiceInputPreferences = {
-  enabled: true,
-  language: "zh-CN",
-  asr_provider: "doubao",
-  doubao_auth_mode: "api_key",
-  asr_resource_id: "volc.seedasr.sauc.duration",
-};
-
-const defaultCustomTranslation = { enabled: false, endpoint: "", api_key: "" };
-const defaultTencentTranslation = {
-  enabled: true,
-  secret_id: "",
-  secret_key: "",
-  region: "ap-guangzhou",
-};
-const defaultNiuTrans = { enabled: false, app_id: "", apikey: "" };
 export type ExternalSkinCatalog = {
   scanned: boolean;
   directory?: string;
@@ -1486,16 +1417,6 @@ export type Snapshot = {
   revision: number;
   preferences: Preferences;
   candidate_skin_catalog?: ExternalSkinCatalog;
-};
-export type LocalDictionaryKind = "pinyin" | "wubi" | "quick_phrase" | "english";
-export type LocalDictionaryFormat = "standard" | "windows" | "rime" | "hans";
-export type DictionaryEntry = {
-  kind: LocalDictionaryKind;
-  key: string;
-  value: string;
-  weight: number;
-  /** Set by hosts that also list the packaged dictionary: a bundled row can only be re-weighted or deleted. */
-  source?: "user" | "bundled";
 };
 export type DictionaryFailure = { request_id: string; label: string; error: string };
 /** Mirrors the import response from `client-core::dictionary_import`. */
@@ -1553,52 +1474,6 @@ export interface DictionaryClient {
   retry?(request_id: string): Promise<void>;
   dismissFailure?(request_id: string): Promise<void>;
 }
-const localDictionaryKinds: [LocalDictionaryKind, string][] = [
-  ["pinyin", "全拼"],
-  ["wubi", "五笔"],
-  ["english", "英文"],
-  ["quick_phrase", "快捷短语"],
-];
-
-/** The user-facing name of a local dictionary, for messages about it. */
-/** Prefer the host's reason; fall back to the generic format hint. */
-/**
- * Turn a dictionary command failure into something the user can act on.
- *
- * The host distinguishes several reasons and the desktop bridge now forwards
- * them as codes. Printing one fixed "请稍后重试" for all of them told a user
- * whose IME was simply locked by another process to retry forever.
- */
-const defaultNavigation: NavigationPreferences = {
-  minus_equal: true,
-  comma_period: true,
-  brackets: false,
-  tab: true,
-  page_up_down: true,
-  arrows: true,
-};
-const translationLanguages: [NonNullable<Preferences["translation_target_language"]>, string][] = [
-  ["en", "英语"],
-  ["fr", "法语"],
-  ["ja", "日语"],
-  ["es", "西班牙语"],
-  ["ru", "俄语"],
-  ["de", "德语"],
-  ["ko", "韩语"],
-];
-const translationSecondaryLanguages: [
-  "" | NonNullable<Preferences["translation_target_language"]>,
-  string,
-][] = [["", "不显示第二种语言"], ...translationLanguages];
-const mobileTranslationLanguages = translationLanguages.filter(([value]) => value !== "ru");
-const defaultWordCharacter: WordCharacterPreferences = { enabled: true, keys: "brackets" };
-// The last column is the description on a host whose skin reaches only the candidate window (Linux presents the toolbar as an input method menu).
-const skinOptions: [NonNullable<Preferences["candidate_skin"]>, string, string, string][] = [
-  ["fluent", "Fluent", "简洁、紧凑的默认候选窗", "简洁、紧凑的默认候选窗"],
-  ["wechat", "微信绿", "微信绿候选窗与悬浮工具栏", "微信绿候选窗"],
-  ["graphite", "石墨 Graphite", "克制、平直的候选窗与悬浮工具栏", "克制、平直的候选窗"],
-  ["willow_green", "杨柳青 Willow green", "柔和圆角与柳绿色整行高亮", "柔和圆角与柳绿色整行高亮"],
-];
 export type FloatingToolbarPreferences = {
   enabled: boolean;
   english_mode: boolean;
@@ -1613,33 +1488,12 @@ export type FloatingToolbarPreferences = {
   scale_percent: 75 | 100 | 125 | 150;
   font_size: 16 | 18 | 20 | 22 | 24 | 26 | 28;
 };
-// Mirrors FloatingToolbarPreferences::default() in crates/client-core: emoji, handwriting, voice and
-// the screen keyboard are opt-in, so a new profile gets the compact five-button toolbar and turns on
-// what it wants. Drifting from the Rust defaults here would show a switch in one state and save the
-// other.
-const defaultFloatingToolbar: FloatingToolbarPreferences = {
-  enabled: true,
-  english_mode: true,
-  fullwidth: true,
-  punctuation: true,
-  character_set: true,
-  emoji: false,
-  handwriting: false,
-  screen_keyboard: false,
-  voice: false,
-  settings: true,
-  scale_percent: 100,
-  font_size: 24,
-};
+import { defaultFloatingToolbar } from "./settings/floating-toolbar-defaults";
 /** What the macOS settings app did with the input method it carries when it started. */
-export type InputSourceStartupStatus = {
-  /** `login_required`: the input method is installed, but this login session's input source list only picks it up after the user logs in again. */
-  action: "installed" | "updated" | "up_to_date" | "login_required" | "failed";
-  /** Whether the input source is in the System Settings list; `null` when that list could not be read. */
-  enabled: boolean | null;
-  bundled_version: string | null;
-  installed_version: string | null;
-};
+export {
+  InputSourceStartupNotice,
+  type InputSourceStartupStatus,
+} from "./settings/input-source-startup-notice";
 export interface SettingsClient {
   /** What the surrounding host can do. Absent hosts fall back to user-agent detection. */
   host?: HostCapabilities;
@@ -1810,83 +1664,7 @@ export interface PreferencesRecovery {
   salvaged: boolean;
 }
 
-/** What a load or save that failed on an unreadable document says; the repair button sits beside exactly this message. */
-const unreadablePreferencesMessage = "配置文件无法读取或版本较新，原文件已保留。";
-
-/**
- * The 键盘 tab draws a keyboard, not the app.
- *
- * Its page icon is the app logo, which the source does not put in the bar either — its first tab is
- * `systemImage: "keyboard"`. Three of the four tabs would otherwise be a subject and the fourth a
- * brand.
- */
-const keyboardTabIcon = new URL("./assets/screen-keyboard.svg", import.meta.url).href;
-
-function mobileTabIcon(id: string, icon: string): string {
-  return id === "home" ? keyboardTabIcon : icon;
-}
-
-/**
- * What a tab is called, which is not always what its page is called.
- *
- * The source names these four 键盘 / 社区 / 统计 / 我的 and nothing else appears in the bar. The page
- * titles are longer because they also head the page they open.
- */
-function mobileTabTitle(id: string, title: string): string {
-  if (id === "home") return "键盘";
-  if (id === "typing-statistics") return "统计";
-  if (id === "account") return "我的";
-  return title;
-}
-
-type SettingsPageId = (typeof pages)[number]["id"];
-type MobilePrimaryPageId = Extract<
-  SettingsPageId,
-  "home" | "community" | "typing-statistics" | "account"
->;
-
-const mobilePrimaryPageIds: readonly MobilePrimaryPageId[] = [
-  "home",
-  "community",
-  "typing-statistics",
-  "account",
-];
-
-const mobileTabForPage = (page: SettingsPageId): MobilePrimaryPageId =>
-  mobilePrimaryPageIds.includes(page as MobilePrimaryPageId)
-    ? (page as MobilePrimaryPageId)
-    : "home";
-// A host can ask for the section its menu entry names. An unknown id keeps the
-// default page rather than opening an empty one.
-function requestedPage(value: string | undefined): SettingsPageId {
-  return pages.some((page) => page.id === value) ? (value as SettingsPageId) : "appearance";
-}
-
 /** What the platform calls itself, for text a person reads rather than a switch the code takes. */
-function platformOsName(platform: HostPlatform): string {
-  return platform === "macos"
-    ? "macOS"
-    : platform === "windows"
-      ? "Windows"
-      : platform === "harmony"
-        ? "HarmonyOS"
-        : platform === "ios"
-          ? "iOS"
-          : platform === "android"
-            ? "Android"
-            : "Linux";
-}
-
-function schemeTitle(scheme: Preferences["scheme"]): string {
-  return scheme === "quanpin"
-    ? "全拼"
-    : scheme === "shuangpin"
-      ? "双拼"
-      : scheme === "wubi"
-        ? "五笔"
-        : "日语";
-}
-
 /**
  * Mirrors the SecretId/Region rules in `Preferences::validate`. Saving a value
  * outside them is rejected wholesale, so the user is told here instead of
@@ -1908,177 +1686,88 @@ export function SettingsPage({
   const { confirm, confirmation } = useConfirm();
   // Hosts that report capabilities are authoritative; the user-agent probe stays
   // only so a host that predates the contract keeps its current behaviour.
-  const linuxPlatform = client.host ? client.host.platform === "linux" : isLinuxDesktop();
-  const androidPlatform = client.host?.platform === "android";
-  const iosPlatform = client.host?.platform === "ios";
-  // This repository ships the HarmonyOS host too, so its release, license and issue links follow the client-hosted set rather than the Windows ones.
-  const harmonyPlatform = client.host?.platform === "harmony";
-  const mobilePlatform =
-    client.host?.mobile_settings ?? (iosPlatform || androidPlatform || harmonyPlatform);
-  // Ctrl+Space belongs to Windows, not to us, so only that host gets the note
-  // explaining where to change it.
-  const windowsPlatform = client.host?.platform === "windows";
-  const macosPlatform = client.host?.platform === "macos";
-  // Hosts with a system recogniser of their own. Android's is what it falls back to when nothing
-  // is configured, so `system` is a real choice there rather than a value to report unavailable.
-  const nativeVoicePlatform = macosPlatform || harmonyPlatform || androidPlatform;
-  // Functional controls follow what the host declares it can do. Only the prose
-  // below still varies by platform name. A host that predates the contract keeps
-  // the previous Linux-only behaviour.
-  const host = client.host;
-  const showModeScope = host ? host.ime_mode_scope : linuxPlatform;
-  const showModeSwitchShortcuts = host ? host.mode_switch_shortcuts : linuxPlatform;
-  const showPanelShortcuts = host ? host.panel_shortcuts : linuxPlatform;
-  const showNumberRowSelection = host ? host.number_row_selection === true : linuxPlatform;
-  const showRestartInputMethod =
-    (host ? host.restart_input_method : linuxPlatform) && client.restartInputMethod;
-  const showInstallInputSource = macosPlatform && client.installInputSource;
-  const showFloatingToolbar = host ? host.floating_toolbar : true;
-  // An IBus property menu has no scale or icon size to apply, but it can
-  // expose component visibility as individual menu entries.
-  const showToolbarAppearance = host ? host.floating_toolbar_appearance : true;
-  const showToolbarComponents = host ? host.floating_toolbar_components : true;
-  const showCandidateFontControls = host ? host.candidate_font_controls : true;
-  // Linux sets the panel's font from the family and candidate size, but the composition is drawn by
-  // the focused application there, so a preedit size would be a control with nothing to change.
-  const showCandidatePreeditFont =
-    showCandidateFontControls && (host?.candidate_preedit_font ?? true);
-  // Was a list of platform names, which is how HarmonyOS came to consume the preference without
-  // anyone being able to set it. A host that predates the capability keeps the old reading.
-  const showCandidateEnglishFont =
-    host?.candidate_english_font ?? (windowsPlatform || macosPlatform || androidPlatform);
-  // iOS shows its own switch for the same surface, from the native store, so it is not here.
-  const showEnglishSuggestions = host?.english_suggestions ?? androidPlatform;
-  // Which hosts mark a helper code with Shift rather than appending it to a finished spelling.
-  // Was a platform name, which is how HarmonyOS came to run the same ported policy and show the
-  // page without the one sentence that says how to type one.
-  const showHelpcodeShiftEntry = host?.helpcode_shift_entry ?? androidPlatform;
-  // Every host's Engine honours the preference; this is about which of them draw the composition
-  // themselves, and so show the user a difference between the raw keys and the expanded pinyin.
-  const showShuangpinPreedit = host?.shuangpin_preedit ?? macosPlatform;
-  // Was hidden for every touch platform, on the reading that a phone keyboard has no width to switch. It has: every keyboard, iOS included, routes it to the runtime the same way the desktop hosts do, and reaches it from its own surfaces.
-  const showCharacterWidth = host?.character_width ?? !mobilePlatform;
-  // The host's provider holds the AI credential, so the page does not ask for a token and does not
-  // withhold the service controls for want of one. Reaching the service still works - through that
-  // provider - which is why these controls are offered rather than hidden.
-  const aiProviderCredentials = host?.ai_provider_credentials ?? linuxPlatform;
-  // A host with one way to commit a recognized result has nothing to choose between, and a select with one outcome reads as a setting being ignored. The Linux hosts commit only through IBus or Fcitx5, so the fallback for a page without host capabilities withholds it there too.
-  const showVoiceCommitMode = host?.voice_commit_mode ?? (!androidPlatform && !linuxPlatform);
-  // These read `!androidPlatform` because that host once had only the platform recogniser. It runs
-  // the configured provider now, uploads and streaming socket both, so keying on the name would
-  // leave a user unable to configure something the host honours. What it still cannot do is draw
-  // interim text, and that switch stays hidden for exactly that reason.
-  const showVoiceProviderSettings = host?.voice_provider_settings ?? !androidPlatform;
-  const showVoiceStreamPreedit = host?.voice_stream_preedit ?? !androidPlatform;
-  const showCandidateRowColors = host ? host.candidate_row_colors : true;
-  const showCandidateSelectionAppearance = host ? host.candidate_selection_appearance : true;
-  const showCandidateBorderColor = host
-    ? (host.candidate_border_color ?? host.candidate_selection_appearance)
-    : true;
-  const showCandidateFollowCursor = host ? host.candidate_follow_cursor : false;
-  // Was written as "macOS only" when macOS was the only host that drew the badge. A host that
-  // predates the capability keeps that reading rather than losing a control it does honour; one
-  // that declares it decides for itself, which is how HarmonyOS's 2in1 badge reaches the page.
-  const showInputModeHUD = host?.input_mode_hud ?? macosPlatform;
-  const showVoiceCaptureDevices =
-    !androidPlatform &&
-    (host ? host.voice_capture_devices : linuxPlatform) &&
-    client.listVoiceCaptureDevices;
-  // panel_windows is the injected projection of host_surface::is_desktop, so this follows the capability instead of listing the mobile hosts by name and missing the next one.
-  // Either the host draws desktop panels, or it says outright that it routes the chords. The
-  // second half is why this is no longer read off `panel_windows` alone: a keyboard attached to a
-  // phone sends them just as well, and the host that gained them has no desktop panels at all.
-  const showDesktopMaintenanceShortcuts =
-    (host?.maintenance_shortcuts ?? false) || !host || host.panel_windows;
-  const showFullwidthChord = host?.fullwidth_chord ?? macosPlatform;
-  const fullwidthChord = macosPlatform ? "Option+Shift+H" : "Alt+Shift+H";
-  const maintenanceChord = macosPlatform ? "Ctrl+Shift+Option" : "Ctrl+Shift+Alt";
-  // Windows is built from this repository now too, so it reads this repository's releases; msime.app/update.json describes the reference Windows product and names its repository, which the validation below rightly refuses.
-  const clientHostedPlatform =
-    windowsPlatform ||
-    linuxPlatform ||
-    androidPlatform ||
-    macosPlatform ||
-    harmonyPlatform ||
-    host?.platform === "ios";
-  const platformReleasesPageUrl = clientHostedPlatform ? linuxReleasesPageUrl : releasesPageUrl;
-  const platformLicenseUrl = clientHostedPlatform ? linuxLicenseUrl : licenseUrl;
-  const platformIssuesUrl = linuxIssuesUrl;
-  const captureBackendOptions: readonly (readonly [
-    NonNullable<VoiceInputPreferences["capture_backend"]>,
-    string,
-  ])[] = [
-    ["auto", "自动选择"],
-    ...(linuxPlatform
-      ? ([
-          ["pulse", "PulseAudio"],
-          ["pipewire", "PipeWire"],
-          ["alsa", "ALSA"],
-        ] as const)
-      : []),
-    ...(macosPlatform ? ([["macos", "CoreAudio"]] as const) : []),
-    ...(windowsPlatform ? ([["windows", "Windows Audio"]] as const) : []),
-    ...(harmonyPlatform ? ([["harmony", "HarmonyOS 音频"]] as const) : []),
-  ];
-  const platformHelpIntro = androidPlatform
-    ? "水杉输入法是一款 Android 平台的中文输入法，通过系统输入法服务接入应用。"
-    : linuxPlatform
-      ? "水杉输入法是一款 Linux 桌面环境下的中文输入法，通过 Fcitx5 或 IBus 接入 GTK、Qt 等应用。"
-      : macosPlatform
-        ? "水杉输入法是一款 macOS 平台的中文输入法，通过系统输入法组件接入应用。"
-        : harmonyPlatform
-          ? "水杉输入法是一款 HarmonyOS 平台的中文输入法，通过系统输入法服务接入应用。"
-          : iosPlatform
-            ? "水杉输入法是一款 iOS 平台的中文输入法，通过键盘扩展接入应用。"
-            : "水杉输入法是一款 Windows 平台的中文输入法。目前支持 Windows 11/Windows 10 平台。";
-  const platformQuickStart = androidPlatform
-    ? "在系统设置的“语言和输入法”或“屏幕键盘”中启用并选择水杉输入法，也可以从首次启动页打开这些入口。默认是全拼输入法。"
-    : linuxPlatform
-      ? "首次配置（首次配置页或 msime-linux-setup）完成后会把水杉输入法自动加入正在运行的 Fcitx5 或 IBus 的输入法列表，之后用输入法切换快捷键切换即可。未能自动加入时手动添加：使用 Fcitx5 时，用 fcitx5-configtool 把「水杉输入法」（英文界面显示为「MSIME」）加入当前输入法组；使用 IBus 时，执行 ibus restart 后在系统设置的输入源中添加「Metasequoia 水杉输入法」。默认是全拼输入法。"
-      : macosPlatform
-        ? "设置应用每次启动时会自动安装或更新随附的水杉输入法，并在系统设置的键盘输入法中启用它；首次安装后如提示需要重新登录，注销并重新登录一次即可。之后使用系统配置的输入法切换快捷键。默认是全拼输入法。"
-        : harmonyPlatform
-          ? mobilePlatform
-            ? "在系统设置中启用并选择水杉输入法，再从输入法键盘使用语音和触屏输入。默认是全拼输入法。"
-            : "在系统设置中启用并选择水杉输入法，再使用实体键盘、候选窗和悬浮工具栏输入。默认是全拼输入法。"
-          : iosPlatform
-            ? "在系统设置中启用水杉键盘，再从应用的输入源按钮切换使用。默认是全拼输入法。"
-            : "安装输入法后，可以使用 Win + Space 快捷键切换到水杉输入法。默认是全拼输入法。";
-  const platformNetworkDescription = androidPlatform
-    ? "语音输入会调用设备上的系统语音识别服务，识别结果回到键盘后需确认才会插入；AI 功能按需配置。日常拼音输入无需联网。"
-    : linuxPlatform
-      ? "日常拼音输入无需联网。云候选默认开启（首次配置时可以关闭，之后也可在设置里改），开启时会把正在输入的拼写发给 Google input-tools 换回一条候选；语音识别、候选词翻译和 AI 功能只在启用并配置好对应服务（凭据、自定义翻译服务，或显式选择水杉账号）后联网。这些请求由用户级的 msime-linux-online-provider 和 msime-linux-voice-provider 服务发出，输入法本身不联网。Linux 安装后的用户初始化会自动注册本机匿名水杉账号，网络失败时稍后重试；选择水杉账号才会把候选词发送到 api.msime.app。在 AI、腾讯翻译和语音页面填写的凭据只写入用户配置目录（通常是 ~/.config/msime-client）下仅本人可读的 ai-provider.json、tencent-provider.json 和 voice-provider.json，不进入共享设置；小牛翻译和自定义翻译服务的密钥则保存在共享设置中。普通账号功能只在登录后联网。"
-      : macosPlatform
-        ? "语音识别、候选词翻译和 AI 功能仅在用户配置并启用对应服务时联网；日常拼音输入无需联网。"
-        : harmonyPlatform
-          ? "豆包语音识别仅在用户配置并启用时联网；也可使用 HarmonyOS 系统语音识别。原始音频只在本次识别期间处理。"
-          : iosPlatform
-            ? "键盘扩展的日常拼音输入无需联网；账号、云同步、AI 和语音功能仅在用户启用时联网。"
-            : "语音识别和 AI 联想需要自行填入 API 和 token。云候选目前支持谷歌的云接口，请注意网络问题。";
-  const platformAboutDescription = androidPlatform
-    ? "为 Android 触屏输入体验打造的开放中文输入法。"
-    : linuxPlatform
-      ? "为 Linux 桌面输入体验打造的开放中文输入法。"
-      : macosPlatform
-        ? "为现代 macOS 桌面体验打造的开放中文输入法。"
-        : harmonyPlatform
-          ? mobilePlatform
-            ? "为 HarmonyOS 触屏输入体验打造的开放中文输入法。"
-            : "为 HarmonyOS 2-in-1 桌面输入体验打造的开放中文输入法。"
-          : iosPlatform
-            ? "为 iPhone 与 iPad 触屏输入体验打造的开放中文输入法。"
-            : "为现代 Windows 桌面体验打造的开放中文输入法。";
-  // Whether this host draws the shared panels as windows of its own — `panel_windows` is the
-  // injected projection of `host_surface::is_desktop`.
-  //
-  // The modifier-chord voice shortcuts and the voice popup bar's theme were both gated on
-  // `!androidPlatform`, so they reached every host that was not Android — including HarmonyOS and
-  // iOS, neither of which has a Ctrl, an Alt or a Win key to press or a panel window to theme. A
-  // phone was being shown `Ctrl+F9 切换语音`.
-  //
-  // Falls back to the form factor when the host answers without the flag: a partial capability
-  // record would otherwise read as "not a desktop" and hide these from Windows too.
-  const desktopPanels = host ? (host.panel_windows ?? !mobilePlatform) : true;
+  const {
+    host,
+    linux: linuxPlatform,
+    android: androidPlatform,
+    ios: iosPlatform,
+    harmony: harmonyPlatform,
+    mobile: mobilePlatform,
+    windows: windowsPlatform,
+    macos: macosPlatform,
+  } = settingsPlatformContext(client.host);
+  const {
+    nativeVoicePlatform,
+    showModeScope,
+    showModeSwitchShortcuts,
+    showPanelShortcuts,
+    showNumberRowSelection,
+    showRestartInputMethod,
+    showInstallInputSource,
+    showFloatingToolbar,
+    showToolbarAppearance,
+    showToolbarComponents,
+    showCandidateFontControls,
+    showCandidatePreeditFont,
+    showCandidateEnglishFont,
+    showEnglishSuggestions,
+    showHelpcodeShiftEntry,
+    showShuangpinPreedit,
+    showCharacterWidth,
+    aiProviderCredentials,
+    showVoiceCommitMode,
+    showVoiceProviderSettings,
+    showVoiceStreamPreedit,
+    showCandidateRowColors,
+    showCandidateSelectionAppearance,
+    showCandidateBorderColor,
+    showCandidateFollowCursor,
+    showInputModeHUD,
+    showVoiceCaptureDevices,
+    showDesktopMaintenanceShortcuts,
+    showFullwidthChord,
+    clientHostedPlatform,
+    desktopPanels,
+  } = settingsCapabilities({
+    host,
+    linux: linuxPlatform,
+    android: androidPlatform,
+    ios: iosPlatform,
+    harmony: harmonyPlatform,
+    windows: windowsPlatform,
+    macos: macosPlatform,
+    mobile: mobilePlatform,
+    canRestartInputMethod: Boolean(client.restartInputMethod),
+    canInstallInputSource: Boolean(client.installInputSource),
+    canListVoiceCaptureDevices: Boolean(client.listVoiceCaptureDevices),
+  });
+  const fullwidthChord = fullwidthShortcutChord(macosPlatform);
+  const maintenanceChord = maintenanceShortcutChord(macosPlatform);
+  const {
+    releasesPageUrl: platformReleasesPageUrl,
+    licenseUrl: platformLicenseUrl,
+    issuesUrl: platformIssuesUrl,
+    privacyUrl: platformPrivacyUrl,
+  } = platformResourceUrls({ clientHostedPlatform, linux: linuxPlatform });
+  const captureBackendOptions = voiceCaptureBackendOptions({
+    linux: linuxPlatform,
+    macos: macosPlatform,
+    windows: windowsPlatform,
+    harmony: harmonyPlatform,
+  });
+  const {
+    helpIntro: platformHelpIntro,
+    quickStart: platformQuickStart,
+    networkDescription: platformNetworkDescription,
+    aboutDescription: platformAboutDescription,
+  } = platformCopy({
+    android: androidPlatform,
+    linux: linuxPlatform,
+    macos: macosPlatform,
+    harmony: harmonyPlatform,
+    ios: iosPlatform,
+    mobile: mobilePlatform,
+  } satisfies PlatformCopyContext);
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [draft, setDraft] = useState<Preferences>();
   const [busy, setBusy] = useState(true);
@@ -2086,38 +1775,40 @@ export function SettingsPage({
   const [notice, setNotice] = useState("");
   /** The backup the last repair wrote, while its notice is showing. */
   const [recoveredBackup, setRecoveredBackup] = useState("");
-  const [removeUserDataOnUninstall, setRemoveUserDataOnUninstall] = useState(false);
-  const [uninstallConfirmation, setUninstallConfirmation] = useState(false);
-  const [uninstallBusy, setUninstallBusy] = useState(false);
-  const [uninstallResult, setUninstallResult] = useState<"success" | "error" | null>(null);
-  const [dataDirectory, setDataDirectory] = useState<{ path: string; isDefault: boolean }>();
-  const [dataDirectoryBusy, setDataDirectoryBusy] = useState(false);
-  const [dataDirectoryResult, setDataDirectoryResult] = useState("");
-  const [inputSourceStartup, setInputSourceStartup] = useState<InputSourceStartupStatus | null>(
-    null,
-  );
-  const [onDeviceDownloadable, setOnDeviceDownloadable] = useState<string[]>([]);
-  const restoredMobilePage =
-    mobilePlatform &&
-    typeof window !== "undefined" &&
-    window.history.state?.msimeSettings === true &&
-    typeof window.history.state.page === "string"
-      ? window.history.state.page
-      : undefined;
+  const {
+    busy: uninstallBusy,
+    cancelUninstall,
+    confirmUninstall,
+    confirmation: uninstallConfirmation,
+    removeUserData: removeUserDataOnUninstall,
+    requestUninstall,
+    result: uninstallResult,
+    setRemoveUserData: setRemoveUserDataOnUninstall,
+  } = useInputSourceUninstall({ uninstallInputSource: client.uninstallInputSource });
+  const {
+    inputSourceStartup,
+    onDeviceDownloadable,
+    setInputSourceStartup,
+    setSavedWubiAutoCommitUnique,
+    setShuangpinKeymap,
+    setWubiAutoCommitUnique,
+    shuangpinKeymap: macosShuangpinKeymap,
+    wubiAutoCommitUnique: macosWubiAutoCommitUnique,
+    savedWubiAutoCommitUnique: savedMacosWubiAutoCommitUnique,
+  } = useMacosSettings({ client, macos: macosPlatform, setError });
   const [page, setPage] = useState<SettingsPageId>(() =>
-    requestedPage(initialPage ?? restoredMobilePage ?? (client.home ? "home" : undefined)),
+    initialSettingsPage({
+      initialPage,
+      mobilePlatform,
+      mobileHistoryState: typeof window === "undefined" ? undefined : window.history.state,
+      hasHomePage: Boolean(client.home),
+    }),
   );
   const [accountLoginReturnPage, setAccountLoginReturnPage] = useState<SettingsPageId | null>(null);
   // Each bottom tab owns a navigation stack in the source app. This shared page has a flat route,
   // so remember the visible leaf for each tab: leaving 输入 for 社区 and returning to 键盘 must
   // restore 输入 rather than reset the first tab to 首页.
-  const mobileInitialTab = mobileTabForPage(page);
-  const mobileLastPageByTab = useRef<Record<MobilePrimaryPageId, SettingsPageId>>({
-    home: mobileInitialTab === "home" ? page : "home",
-    community: mobileInitialTab === "community" ? page : "community",
-    "typing-statistics": mobileInitialTab === "typing-statistics" ? page : "typing-statistics",
-    account: mobileInitialTab === "account" ? page : "account",
-  });
+  const mobileLastPageByTab = useRef(initialMobileTabPages(page));
   const settingsContentRef = useRef<HTMLElement>(null);
   // Every settings category shares this one scrolling surface. Reset it after
   // the new category is committed so sidebar clicks, in-page links and mobile
@@ -2125,1282 +1816,221 @@ export function SettingsPage({
   useLayoutEffect(() => {
     if (settingsContentRef.current) settingsContentRef.current.scrollTop = 0;
   }, [page]);
-  // Mobile hosts use the WebView history stack for the system back gesture. The
-  // native activity can therefore dismiss a nested page without the shared UI
-  // having to know which Android/iOS navigation API is in use.
-  useEffect(() => {
-    if (!mobilePlatform || typeof window === "undefined") return;
-    const current = window.history.state;
-    if (!current || current.msimeSettings !== true) {
-      window.history.replaceState(
-        { ...(current && typeof current === "object" ? current : {}), msimeSettings: true, page },
-        "",
-      );
-    }
-    const onPopState = (event: PopStateEvent) => {
-      const state = event.state;
-      if (state?.msimeSettings === true && typeof state.page === "string") {
-        const restored = requestedPage(state.page);
-        mobileLastPageByTab.current[mobileTabForPage(restored)] = restored;
-        setPage(restored);
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [mobilePlatform]);
   const [communityDestination, setCommunityDestination] = useState<
     AccountCommunityDestination | "all"
   >("all");
-  const [updateStatus, setUpdateStatus] = useState("");
-  const [updateBusy, setUpdateBusy] = useState(false);
-  const [availableUpdate, setAvailableUpdate] = useState<ValidatedUpdate | null>(null);
-  const [currentAppVersion, setCurrentAppVersion] = useState(fallbackAppVersion);
-  const [feedbackCopied, setFeedbackCopied] = useState(false);
-  const [feedbackKind, setFeedbackKind] = useState("功能异常");
-  const [feedbackDetail, setFeedbackDetail] = useState("");
-  const [feedbackReportCopied, setFeedbackReportCopied] = useState(false);
-  const [mobileKeyboardFeedback, setMobileKeyboardFeedback] = useState<MobileKeyboardFeedback>();
-  const [mobileKeyboardFeedbackBusy, setMobileKeyboardFeedbackBusy] = useState(false);
-  const [customTranslationsText, setCustomTranslationsText] = useState("");
-  const [customTranslationsNotice, setCustomTranslationsNotice] = useState("");
-  const [customTranslationsBusy, setCustomTranslationsBusy] = useState(false);
-  const customTranslationsReport = useMemo(
-    () => parseCustomTranslations(customTranslationsText),
-    [customTranslationsText],
-  );
-  const customTranslationsSummary = customTranslationsText.trim()
-    ? `${customTranslationsReport.entries.length} 条释义` +
-      (customTranslationsReport.skipped ? `，${customTranslationsReport.skipped} 行无法识别` : "")
-    : "还没有自定义释义。";
-  const [macosShuangpinKeymap, setMacosShuangpinKeymap] = useState<boolean>();
-  const [macosWubiAutoCommitUnique, setMacosWubiAutoCommitUnique] = useState<boolean>();
-  const [savedMacosWubiAutoCommitUnique, setSavedMacosWubiAutoCommitUnique] = useState<boolean>();
-  const [phrases, setPhrases] = useState<DictionaryEntry[]>([]);
-  const [phrasePage, setPhrasePage] = useState({ offset: 0, hasMore: false, status: "" });
-  const [phraseBusy, setPhraseBusy] = useState(false);
-  const [phraseError, setPhraseError] = useState("");
-  const [dictionaryPendingCount, setDictionaryPendingCount] = useState(0);
-  const [dictionaryFailures, setDictionaryFailures] = useState<DictionaryFailure[]>([]);
-  const [dictionarySnapshotError, setDictionarySnapshotError] = useState("");
-  const [phraseNotice, setPhraseNotice] = useState("");
-  const [phraseSearch, setPhraseSearch] = useState("");
-  const [phraseForm, setPhraseForm] = useState<{
-    key: string;
-    value: string;
-    weight: number;
-    previous: DictionaryEntry | null;
-  } | null>(null);
-  const [dictionaryKind, setDictionaryKind] = useState<LocalDictionaryKind>("quick_phrase");
-  const [dictionaryFormat, setDictionaryFormat] = useState<LocalDictionaryFormat>("standard");
-  const phraseRequestGeneration = useRef(0);
-  const phraseListRef = useRef<HTMLUListElement>(null);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      phraseRequestGeneration.current += 1;
-    };
-  }, []);
-  const [windowMaximized, setWindowMaximized] = useState(false);
+  const currentAppVersion = useAppVersion({
+    readAppVersion: client.readAppVersion,
+    fallbackVersion: fallbackAppVersion,
+  });
+  const {
+    value: mobileKeyboardFeedback,
+    busy: mobileKeyboardFeedbackBusy,
+    save: saveMobileKeyboardFeedback,
+    preview: previewMobileKeyboardHaptics,
+  } = useMobileKeyboardFeedback({
+    mobile: mobilePlatform,
+    client: client.mobileKeyboardFeedback,
+    onError: setError,
+  });
+  const {
+    text: customTranslationsText,
+    setText: setCustomTranslationsText,
+    notice: customTranslationsNotice,
+    summary: customTranslationsSummary,
+    busy: customTranslationsBusy,
+    placeholder: customTranslationsPlaceholder,
+    save: saveCustomTranslations,
+  } = useCustomTranslations({ client: client.customTranslations });
+  const {
+    phrases,
+    setPhrases,
+    phrasePage,
+    phraseBusy,
+    phraseError,
+    dictionaryPendingCount,
+    dictionaryFailures,
+    dictionarySnapshotError,
+    phraseNotice,
+    phraseSearch,
+    setPhraseSearch,
+    phraseForm,
+    setPhraseForm,
+    dictionaryKind,
+    setDictionaryKind,
+    dictionaryFormat,
+    setDictionaryFormat,
+    phraseListRef,
+    loadPhrases,
+    turnPhrasePage,
+    removePhrase,
+    savePhrase,
+    importPhrases,
+    retryDictionaryFailure,
+    dismissDictionaryFailure,
+    exportPhrases,
+    exportAllPhrases,
+    resetLearnedData,
+  } = useDictionaryManager({ client, confirm });
+  const mounted = useMountedRef();
+  const windowMaximized = useWindowState({ client, setError });
   const [skinPreviewThemes, setSkinPreviewThemes] = useState<
     Partial<Record<NonNullable<Preferences["candidate_skin"]>, "light" | "dark">>
   >({});
   const [showTouchSkinEditor, setShowTouchSkinEditor] = useState(false);
-  const touchGeometryDrag = useRef<{
-    pointerId: number;
-    x: number;
-    y: number;
-    key: number;
-    row: number;
-    axis: "key" | "row" | null;
-  } | null>(null);
-  const [aiModels, setAiModels] = useState<string[] | null>(null);
-  const [aiModelsStatus, setAiModelsStatus] = useState("");
-  const [aiModelsBusy, setAiModelsBusy] = useState(false);
-  const [aiTestInput, setAiTestInput] = useState("");
-  const [aiTestOutput, setAiTestOutput] = useState("");
-  const [aiTestStatus, setAiTestStatus] = useState("");
-  const [aiTestBusy, setAiTestBusy] = useState(false);
-  const aiRequestGeneration = useRef(0);
-  const [credentialTests, setCredentialTests] = useState<
-    Partial<
-      Record<
-        ApiCredentialTestService,
-        {
-          signature: string;
-          busy: boolean;
-          ok?: boolean;
-          message: string;
-        }
-      >
-    >
-  >({});
-  const credentialTestGeneration = useRef<Partial<Record<ApiCredentialTestService, number>>>({});
-  const [providerCredentials, setProviderCredentials] = useState<ProviderCredentialStatus>();
-  const [aiCredentialInput, setAiCredentialInput] = useState("");
-  const [tencentCredentialInput, setTencentCredentialInput] = useState<{
-    secretId: string;
-    secretKey: string;
-    region?: string;
-  }>({ secretId: "", secretKey: "" });
-  const [voiceCredentialInput, setVoiceCredentialInput] = useState<
-    Record<VoiceCredentialKind, { token: string; appKey: string; endpoint?: string }>
-  >({ asr: { token: "", appKey: "" }, polish: { token: "", appKey: "" } });
-  const [providerCredentialBusy, setProviderCredentialBusy] = useState<
-    "ai" | "tencent" | VoiceCredentialKind
-  >();
-  const [providerCredentialMessages, setProviderCredentialMessages] = useState<
-    Partial<Record<"ai" | "tencent" | VoiceCredentialKind, { ok: boolean; text: string }>>
-  >({});
-  // What a report needs first is the release and the scheme, because that is what a repro is
-  // written against. The user agent only says which web view drew this window, so it is the
-  // fallback for a host that cannot name its own OS rather than a line of its own.
-  const supportDiagnostics = [
-    `水杉 IME ${currentAppVersion}`,
-    host?.os_version
-      ? `${platformOsName(host.platform)} ${host.os_version}`
-      : `平台：${host?.platform ?? (androidPlatform ? "android" : iosPlatform ? "ios" : "desktop")}`,
-    draft ? `输入方案：${schemeTitle(draft.scheme)}` : "",
-    host?.os_version || typeof navigator === "undefined"
-      ? ""
-      : `User-Agent：${navigator.userAgent.slice(0, 256)}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-  const feedbackReport = `### 类型\n${feedbackKind}\n\n### 描述\n${feedbackDetail}\n\n### 环境\n${supportDiagnostics}\n`;
-  const submitFeedback = () => {
-    if (!client.openExternalUrl) return;
-    const body = feedbackReport.slice(0, 4000);
-    const query = new URLSearchParams({ title: feedbackKind, body });
-    void client.openExternalUrl(`${platformIssuesUrl}/new?${query.toString()}`);
-  };
-  const pendingTitlebarDrag = useRef<{ x: number; y: number; pointerId: number } | null>(null);
-  useEffect(() => {
-    const clear = () => {
-      pendingTitlebarDrag.current = null;
-    };
-    window.addEventListener("blur", clear);
-    return () => {
-      clear();
-      window.removeEventListener("blur", clear);
-    };
-  }, [client]);
+  const {
+    onPointerDown: beginTouchGeometryDrag,
+    onPointerMove: updateTouchGeometryDrag,
+    onPointerUp: endTouchGeometryDrag,
+    onPointerCancel: cancelTouchGeometryDrag,
+  } = useTouchKeyboardGeometryDrag(draft, setDraft);
+  const {
+    providerCredentials,
+    aiCredentialInput,
+    setAiCredentialInput,
+    tencentCredentialInput,
+    setTencentCredentialInput,
+    voiceCredentialInput,
+    setVoiceCredentialInput,
+    providerCredentialBusy,
+    providerCredentialMessages,
+    runProviderCredential,
+    runVoiceCredential,
+    credentialTestControl,
+  } = useProviderCredentials({ client });
+  const diagnosticsText = supportDiagnostics({
+    version: currentAppVersion,
+    host,
+    scheme: draft ? schemeTitle(draft.scheme) : undefined,
+    fallbackPlatform: androidPlatform ? "android" : iosPlatform ? "ios" : "desktop",
+    userAgent: typeof navigator === "undefined" ? undefined : navigator.userAgent,
+  });
+  const {
+    kind: feedbackKind,
+    setKind: setFeedbackKind,
+    detail: feedbackDetail,
+    setDetail: setFeedbackDetail,
+    report: feedbackReport,
+    reportCopied: feedbackReportCopied,
+    feedbackCopied,
+    copyReport,
+    submit: submitFeedback,
+    copyGroup,
+  } = useFeedbackReport({
+    supportDiagnostics: diagnosticsText,
+    issuesUrl: platformIssuesUrl,
+    copyText: client.copyText,
+    openExternalUrl: client.openExternalUrl,
+  });
+  const {
+    dataDirectory,
+    busy: dataDirectoryBusy,
+    result: dataDirectoryResult,
+    choose: chooseDataDirectory,
+  } = useDataDirectory({
+    client: client.dataDirectory,
+    enabled: macosPlatform || linuxPlatform,
+    confirm,
+  });
 
-  useEffect(() => {
-    if (!(macosPlatform || linuxPlatform) || !client.dataDirectory) return;
-    let active = true;
-    client.dataDirectory
-      .status()
-      .then((value) => {
-        if (active) setDataDirectory(value);
-      })
-      .catch(() => {
-        if (active) setDataDirectoryResult("无法读取当前数据目录。");
-      });
-    return () => {
-      active = false;
-    };
-  }, [client, macosPlatform, linuxPlatform]);
-  useEffect(() => {
-    let active = true;
-    let unsubscribe: (() => void) | undefined;
-    setWindowMaximized(false);
-    const subscribe = client.onWindowStateChanged;
-    if (subscribe) {
-      void Promise.resolve()
-        .then(() => {
-          if (!active) return;
-          return subscribe(
-            (maximized) => {
-              if (active) setWindowMaximized(maximized);
-            },
-            () => {
-              if (active) setError("无法读取窗口状态，请重试。");
-            },
-          );
-        })
-        .then((value) => {
-          if (active) unsubscribe = value;
-          else value?.();
-        })
-        .catch(() => {
-          if (active) setError("无法读取窗口状态，请重试。");
-        });
-    }
-    return () => {
-      active = false;
-      unsubscribe?.();
-    };
-  }, [client]);
-  useEffect(() => {
-    const credentials = client.providerCredentials;
-    if (!credentials) return;
-    let active = true;
-    void credentials
-      .status()
-      .then((status) => {
-        if (active) setProviderCredentials(status);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [client]);
-  useEffect(() => {
-    let active = true;
-    setCurrentAppVersion(fallbackAppVersion);
-    if (client.readAppVersion) {
-      void client
-        .readAppVersion()
-        .then((value) => {
-          const version = parseVersion(value);
-          if (active && version) setCurrentAppVersion(version.display);
-        })
-        .catch(() => undefined);
-    }
-    return () => {
-      active = false;
-    };
-  }, [client]);
+  const { draftRef, snapshotRef, reload, save } = useSettingsPersistence({
+    client,
+    mobile: mobilePlatform,
+    macos: macosPlatform,
+    mounted,
+    snapshot,
+    draft,
+    setSnapshot,
+    setDraft,
+    setBusy,
+    setError,
+    setNotice,
+    setRecoveredBackup,
+    macosShuangpinKeymap,
+    saveMacosShuangpinKeymap: client.saveMacosShuangpinKeymap,
+    macosWubiAutoCommitUnique,
+    saveMacosWubiAutoCommitUnique: client.saveMacosWubiAutoCommitUnique,
+    setSavedMacosWubiAutoCommitUnique: setSavedWubiAutoCommitUnique,
+  });
 
-  useEffect(() => {
-    const custom = client.customTranslations;
-    if (!custom) return;
-    let active = true;
-    void custom
-      .load()
-      .then((text) => {
-        if (active) setCustomTranslationsText(text);
-      })
-      .catch(() => {
-        // An unreadable overlay is not an error worth a dialog: the field stays empty and saving
-        // it would simply write a new one.
-      });
-    return () => {
-      active = false;
-    };
-  }, [client.customTranslations]);
+  const { restoreDefaults, recoverPreferences } = usePreferenceRecovery({
+    client,
+    busy,
+    snapshotRef,
+    draftRef,
+    setSnapshot,
+    setDraft,
+    setBusy,
+    setError,
+    setNotice,
+    setRecoveredBackup,
+    confirm,
+  });
 
-  async function saveCustomTranslations() {
-    const custom = client.customTranslations;
-    if (!custom || customTranslationsBusy) return;
-    if (!customTranslationsWithinBounds(customTranslationsText)) {
-      setCustomTranslationsNotice("自定义释义过大，请精简后再保存。");
-      return;
-    }
-    setCustomTranslationsBusy(true);
-    try {
-      await custom.save(customTranslationsText);
-      setCustomTranslationsNotice(
-        `已保存 ${customTranslationsReport.entries.length} 条释义，重新启动输入法后生效。`,
-      );
-    } catch (error) {
-      setCustomTranslationsNotice(errorMessage(error));
-    } finally {
-      setCustomTranslationsBusy(false);
-    }
-  }
+  const resetTouchKeyboardSettings = useTouchKeyboardSettingsReset({
+    draft,
+    setDraft,
+    setError,
+    setNotice,
+    confirm,
+  });
+  const openExternalUrl = useExternalUrl({
+    openExternalUrl: client.openExternalUrl,
+    setError,
+  });
+  const {
+    available: availableUpdate,
+    busy: updateBusy,
+    checkForUpdate,
+    status: updateStatus,
+  } = useUpdateCheck({
+    clientHostedPlatform,
+    releasePlatform: client.host?.platform ?? (linuxPlatform ? "linux" : null),
+    releasePageUrl: platformReleasesPageUrl,
+    currentAppVersion,
+  });
 
-  useEffect(() => {
-    if (!mobilePlatform || !client.mobileKeyboardFeedback) {
-      setMobileKeyboardFeedback(undefined);
-      return;
-    }
-    let active = true;
-    void client.mobileKeyboardFeedback
-      .load()
-      .then((value) => {
-        if (active) setMobileKeyboardFeedback(value);
-      })
-      .catch(() => {
-        if (active) setError("无法读取按键反馈设置，请重试。");
-      });
-    return () => {
-      active = false;
-    };
-  }, [client, mobilePlatform]);
+  const openPanel = useOpenPanel({ setError });
 
-  // The Windows installer registers the input method on every install and upgrade; on macOS the settings app does it when it starts, and this tells the user what happened and whether the source still has to be enabled in System Settings.
-  useEffect(() => {
-    if (!macosPlatform || !client.inputSourceStartup) {
-      setInputSourceStartup(null);
-      return;
-    }
-    let active = true;
-    void client.inputSourceStartup
-      .status()
-      .then((value) => {
-        if (active) setInputSourceStartup(value);
-      })
-      .catch(() => {
-        if (active) setInputSourceStartup(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [client, macosPlatform]);
-
-  // The input method records the missing pairs when it next translates, so read again whenever the window comes back - typically from System Settings after a download.
-  useEffect(() => {
-    const onDeviceTranslation = client.onDeviceTranslation;
-    if (!macosPlatform || !onDeviceTranslation || typeof window === "undefined") {
-      setOnDeviceDownloadable([]);
-      return;
-    }
-    let active = true;
-    const refresh = () =>
-      void onDeviceTranslation
-        .downloadableLanguages()
-        .then((codes) => {
-          if (active) setOnDeviceDownloadable(codes);
-        })
-        .catch(() => {
-          if (active) setOnDeviceDownloadable([]);
-        });
-    refresh();
-    window.addEventListener("focus", refresh);
-    return () => {
-      active = false;
-      window.removeEventListener("focus", refresh);
-    };
-  }, [client, macosPlatform]);
-
-  useEffect(() => {
-    if (!macosPlatform || !client.loadMacosShuangpinKeymap) {
-      setMacosShuangpinKeymap(undefined);
-      return;
-    }
-    let active = true;
-    void client
-      .loadMacosShuangpinKeymap()
-      .then((value) => {
-        if (active) setMacosShuangpinKeymap(value);
-      })
-      .catch(() => {
-        if (active) setError("无法读取双拼键位提示设置，请重试。");
-      });
-    return () => {
-      active = false;
-    };
-  }, [client, macosPlatform]);
-  useEffect(() => {
-    if (!macosPlatform || !client.loadMacosWubiAutoCommitUnique) {
-      setMacosWubiAutoCommitUnique(undefined);
-      setSavedMacosWubiAutoCommitUnique(undefined);
-      return;
-    }
-    let active = true;
-    void client
-      .loadMacosWubiAutoCommitUnique()
-      .then((value) => {
-        if (!active) return;
-        setMacosWubiAutoCommitUnique(value);
-        setSavedMacosWubiAutoCommitUnique(value);
-      })
-      .catch(() => {
-        if (active) setError("无法读取五笔自动上屏设置，请重试。");
-      });
-    return () => {
-      active = false;
-    };
-  }, [client, macosPlatform]);
-  const snapshotRef = useRef(snapshot);
-  const draftRef = useRef(draft);
-
-  useEffect(() => {
-    snapshotRef.current = snapshot;
-    draftRef.current = draft;
-  }, [snapshot, draft]);
-
-  // The refs are also written the moment a load or save resolves: the host's monitor echoes this
-  // window's own save back as a change, and it can arrive before React commits the new snapshot.
-  const adoptSnapshot = (value: Snapshot) => {
-    if (!mounted.current) return;
-    snapshotRef.current = value;
-    draftRef.current = value.preferences;
-    setSnapshot(value);
-    setDraft(value.preferences);
-  };
-  // A change that arrives while this window's save is in flight waits for it rather than being
-  // judged against the revision the save is about to replace; the revision check then drops the
-  // echo and still applies another window's later write.
-  const savingRef = useRef(false);
-  const heldChange = useRef<Snapshot>(undefined);
-  const applyPreferencesChange = (value: Snapshot) => {
-    const currentSnapshot = snapshotRef.current;
-    // Our own save echoed back, or an event older than what a reload already read.
-    if (currentSnapshot && value.revision <= currentSnapshot.revision) return;
-    const currentDraft = draftRef.current;
-    const dirty =
-      !!currentSnapshot &&
-      !!currentDraft &&
-      JSON.stringify(currentDraft) !== JSON.stringify(currentSnapshot.preferences);
-    if (dirty) {
-      setNotice("设置已被其他窗口修改。请重新读取后再保存。");
-      return;
-    }
-    adoptSnapshot(value);
-    setError("");
-    setNotice("设置已从其他窗口更新。");
-  };
-  // The subscription outlives renders; it reaches the handler through this so it never runs a stale
-  // one (the handler itself only touches refs and state setters).
-  const applyPreferencesChangeRef = useRef(applyPreferencesChange);
-  applyPreferencesChangeRef.current = applyPreferencesChange;
-
-  useEffect(() => {
-    if (!client.onPreferencesChanged) return;
-    let active = true;
-    let unsubscribe: (() => void) | undefined;
-    void client
-      .onPreferencesChanged((value) => {
-        if (!active) return;
-        if (savingRef.current) {
-          if (!heldChange.current || value.revision > heldChange.current.revision)
-            heldChange.current = value;
-          return;
-        }
-        applyPreferencesChangeRef.current(value);
-      })
-      .then((value) => {
-        if (active) unsubscribe = value;
-        else value();
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-      unsubscribe?.();
-    };
-  }, [client]);
-
-  useEffect(() => {
-    let active = true;
-    client
-      .load()
-      .then((value) => {
-        if (active) adoptSnapshot(value);
-      })
-      .catch((reason) => {
-        if (active) setError(errorMessage(reason));
-      })
-      .finally(() => {
-        if (active) setBusy(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [client]);
-
-  async function reload() {
-    if (!mounted.current) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    setRecoveredBackup("");
-    try {
-      const value = await client.load();
-      if (!mounted.current) return;
-      adoptSnapshot(value);
-    } catch (reason) {
-      if (mounted.current) setError(errorMessage(reason));
-    } finally {
-      if (mounted.current) setBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!mobilePlatform || typeof document === "undefined") return;
-    let hidden = document.hidden;
-    const onVisibilityChange = () => {
-      const nextHidden = document.hidden;
-      const resumed = hidden && !nextHidden;
-      hidden = nextHidden;
-      if (!resumed) return;
-      const currentSnapshot = snapshotRef.current;
-      const currentDraft = draftRef.current;
-      const dirty =
-        !!currentSnapshot &&
-        !!currentDraft &&
-        JSON.stringify(currentDraft) !== JSON.stringify(currentSnapshot.preferences);
-      if (dirty) {
-        setNotice("设置已被其他窗口修改。请重新读取后再保存。");
-        return;
-      }
-      void reload();
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
-  }, [client, mobilePlatform]);
-
-  async function save() {
-    if (!draft || !snapshot || !validCandidateFonts(draft)) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    setRecoveredBackup("");
-    savingRef.current = true;
-    try {
-      const value = await client.save(snapshot.revision, draft);
-      if (macosPlatform && client.saveMacosShuangpinKeymap && macosShuangpinKeymap !== undefined) {
-        await client.saveMacosShuangpinKeymap(macosShuangpinKeymap);
-      }
-      if (
-        macosPlatform &&
-        client.saveMacosWubiAutoCommitUnique &&
-        macosWubiAutoCommitUnique !== undefined
-      ) {
-        await client.saveMacosWubiAutoCommitUnique(macosWubiAutoCommitUnique);
-        if (!mounted.current) return;
-        setSavedMacosWubiAutoCommitUnique(macosWubiAutoCommitUnique);
-      }
-      if (!mounted.current) return;
-      adoptSnapshot(value);
-      setNotice("设置已保存。");
-    } catch (reason) {
-      if (mounted.current) setError(errorMessage(reason));
-    } finally {
-      if (mounted.current) setBusy(false);
-      savingRef.current = false;
-      const held = heldChange.current;
-      heldChange.current = undefined;
-      if (held) applyPreferencesChange(held);
-    }
-  }
-
-  async function saveMobileKeyboardFeedback(next: MobileKeyboardFeedback) {
-    const feedback = client.mobileKeyboardFeedback;
-    if (!feedback) return;
-    const previous = mobileKeyboardFeedback;
-    setMobileKeyboardFeedback(next);
-    setMobileKeyboardFeedbackBusy(true);
-    setError("");
-    try {
-      setMobileKeyboardFeedback(await feedback.save(next));
-    } catch {
-      if (previous) setMobileKeyboardFeedback(previous);
-      setError("无法保存按键反馈设置，请重试。");
-    } finally {
-      setMobileKeyboardFeedbackBusy(false);
-    }
-  }
-
-  async function uninstallInputSource() {
-    if (!client.uninstallInputSource || uninstallBusy) return;
-    setUninstallBusy(true);
-    setUninstallResult(null);
-    try {
-      await client.uninstallInputSource(removeUserDataOnUninstall);
-      setUninstallConfirmation(false);
-      setUninstallResult("success");
-    } catch {
-      setUninstallResult("error");
-    } finally {
-      setUninstallBusy(false);
-    }
-  }
-
-  async function chooseDataDirectory() {
-    if (!client.dataDirectory || dataDirectoryBusy) return;
-    setDataDirectoryBusy(true);
-    setDataDirectoryResult("");
-    try {
-      const target = await client.dataDirectory.pick();
-      if (!target) return;
-      const confirmed = await confirm({
-        title: "移动输入法数据？",
-        message: `词库、学习记录、皮肤、剪贴板历史和设置将移动到“${target}”。移动期间输入法会短暂退出；完成后设置窗口会关闭。`,
-        confirmLabel: "移动",
-      });
-      if (!confirmed) return;
-      const result = await client.dataDirectory.move();
-      setDataDirectory({ path: result.path, isDefault: result.isDefault });
-      const restartNote =
-        result.inputMethodRestarted === false
-          ? "输入法未能自动重启，请手动重启输入法后再继续输入。"
-          : "";
-      setDataDirectoryResult(
-        result.retainedOldData
-          ? `数据已切换到新目录；旧目录不属于水杉输入法，已为安全起见保留。${restartNote}设置窗口即将关闭。`
-          : `数据已移动。${restartNote}设置窗口即将关闭，请重新打开后继续使用。`,
-      );
-    } catch (reason) {
-      const code =
-        typeof reason === "object" && reason !== null && "code" in reason
-          ? String(reason.code)
-          : "";
-      setDataDirectoryResult(
-        code === "data_directory_picker_unavailable"
-          ? "未找到目录选择工具，请安装 zenity 或 kdialog 后重试。"
-          : code === "data_directory_not_empty"
-            ? "请选择空文件夹；现有文件不会被覆盖。"
-            : code === "data_directory_invalid"
-              ? "该位置不能作为数据目录，请选择其他空文件夹。"
-              : code === "data_directory_busy"
-                ? "输入法仍在使用数据目录，请稍后重试。"
-                : "移动失败，仍在使用原目录，原有数据未被删除。",
-      );
-    } finally {
-      setDataDirectoryBusy(false);
-    }
-  }
-
-  async function previewMobileKeyboardHaptics() {
-    const feedback = client.mobileKeyboardFeedback;
-    if (!feedback?.preview || !mobileKeyboardFeedback?.hapticsEnabled) return;
-    setError("");
-    try {
-      await feedback.preview(mobileKeyboardFeedback.hapticStrength);
-    } catch {
-      setError("无法预览按键振动，请重试。");
-    }
-  }
-
-  async function resetTouchKeyboardSettings() {
-    if (!draft) return;
-    const confirmed = await confirm({
-      title: "恢复屏幕键盘默认值",
-      message: "高度、间距、顶部语音入口和工具栏按钮都会回到默认。",
-      confirmLabel: "恢复",
-    });
-    if (!confirmed || !draft) return;
-    const next = { ...draft };
-    // Delete the optional fields instead of storing the current defaults. This keeps reset
-    // forward-compatible when a host changes its fallback values.
-    delete next.touch_key_spacing_tenths;
-    delete next.touch_row_spacing_tenths;
-    delete next.touch_keyboard_height_adjustment;
-    delete next.touch_voice_shortcut;
-    delete next.touch_toolbar;
-    setDraft(next);
-    setError("");
-    setNotice("屏幕键盘设置已恢复默认，请点击保存设置。");
-  }
-
-  function beginTouchGeometryDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!draft || (event.pointerType === "mouse" && event.button !== 0)) return;
-    touchGeometryDrag.current = {
-      pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      key: draft.touch_key_spacing_tenths ?? 60,
-      row: draft.touch_row_spacing_tenths ?? 70,
-      axis: null,
-    };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  }
-
-  function updateTouchGeometryDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = touchGeometryDrag.current;
-    if (!drag || drag.pointerId !== event.pointerId || !draft) return;
-    const dx = event.clientX - drag.x;
-    const dy = event.clientY - drag.y;
-    if (!drag.axis && Math.abs(dx) + Math.abs(dy) < 4) return;
-    drag.axis ??= Math.abs(dy) >= Math.abs(dx) ? "row" : "key";
-    const delta = drag.axis === "row" ? dy : dx;
-    const value = Math.round((drag.axis === "row" ? drag.row : drag.key) + (delta * 10) / 18);
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            ...(drag.axis === "row"
-              ? { touch_row_spacing_tenths: Math.min(100, Math.max(40, value)) }
-              : { touch_key_spacing_tenths: Math.min(60, Math.max(30, value)) }),
-          }
-        : current,
-    );
-  }
-
-  function endTouchGeometryDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = touchGeometryDrag.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    touchGeometryDrag.current = null;
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId))
-      event.currentTarget.releasePointerCapture(event.pointerId);
-  }
-
-  async function openExternalUrl(url: string) {
-    try {
-      if (client.openExternalUrl) {
-        await client.openExternalUrl(url);
-      } else {
-        const opened = window.open(url, "_blank", "noopener,noreferrer");
-        if (!opened) throw new Error("popup blocked");
-      }
-    } catch {
-      setError("无法打开外部链接，请稍后重试。");
-    }
-  }
-
-  async function checkForUpdate() {
-    setUpdateBusy(true);
-    setUpdateStatus("");
-    setAvailableUpdate(null);
-    // A stalled connection would otherwise leave the button busy indefinitely; the shipped settings page gives up after ten seconds.
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
-    try {
-      const releasePlatform = client.host?.platform ?? (linuxPlatform ? "linux" : null);
-      const endpoint =
-        clientHostedPlatform && releasePlatform
-          ? `${clientReleasesUrl}?per_page=100&t=${Date.now()}`
-          : `${updateManifestUrl}?t=${Date.now()}`;
-      const response = await fetch(endpoint, { cache: "no-store", signal: controller.signal });
-      if (!response.ok) throw new Error(`update manifest returned ${response.status}`);
-      const manifest = (await response.json()) as UpdateManifest | GitHubRelease[];
-      let update: ValidatedUpdate | null;
-      if (clientHostedPlatform && releasePlatform) {
-        if (!Array.isArray(manifest)) throw new Error("invalid release list");
-        update = selectPlatformRelease(manifest, releasePlatform, platformReleasesPageUrl);
-        if (!update) {
-          setUpdateStatus("暂无可用发行版");
-          return;
-        }
-      } else {
-        update = validateManifest(manifest as UpdateManifest, platformReleasesPageUrl);
-      }
-      const current = parseVersion(currentAppVersion);
-      if (!update || !current) throw new Error("invalid update manifest");
-      if (compareVersions(update.version, current) > 0) {
-        setAvailableUpdate(update);
-        setUpdateStatus(`发现新版本 v${update.version.display}`);
-      } else {
-        setUpdateStatus("已是最新版本");
-      }
-    } catch {
-      setUpdateStatus("检查失败，请稍后重试");
-    } finally {
-      window.clearTimeout(timeout);
-      setUpdateBusy(false);
-    }
-  }
-
-  async function openPanel(action: (() => Promise<void>) | undefined) {
-    if (!action) {
-      setError("当前宿主未接入该原生面板。");
-      return;
-    }
-    try {
-      await action();
-    } catch {
-      setError("无法打开原生面板，请稍后重试。");
-    }
-  }
-
-  const requestId = (prefix: string) =>
-    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  // One page per request: a real dictionary is far too large to pull into the
-  // page before showing anything.
-  async function loadPhrases(kind: LocalDictionaryKind = dictionaryKind, offset = 0) {
-    if (!client.dictionary || !mounted.current) return;
-    const generation = ++phraseRequestGeneration.current;
-    setPhraseBusy(true);
-    setPhraseError("");
-    setPhraseNotice("");
-    setPhrasePage((current) => ({ ...current, status: "查询中…" }));
-    try {
-      // Ask the host for this kind and code prefix. Filtering a page the host
-      // had already chosen meant a user with more than a page of pinyin words
-      // saw an empty list when they picked another dictionary, and the status
-      // line counted the filtered rows against the unfiltered page.
-      const query = phraseSearch.trim();
-      const page = await client.dictionary.list(offset, DICTIONARY_PAGE_SIZE, kind, query);
-      if (!mounted.current || generation !== phraseRequestGeneration.current) return;
-      // Older hosts and the mobile personal dictionary ignore the extra arguments, so keep filtering defensively - with the host's own rule, so nothing it matched is dropped here.
-      const entries = page.entries.filter(
-        (entry) => entry.kind === kind && dictionaryKeyMatches(kind, entry.key, query),
-      );
-      setPhrases(entries);
-      setDictionaryPendingCount(page.pending_count ?? 0);
-      setDictionaryFailures(page.failed_requests ?? []);
-      setDictionarySnapshotError(page.snapshot_error ?? "");
-      setPhrasePage({
-        offset,
-        hasMore: page.has_more && page.entries.length > 0,
-        status: dictionaryPageStatus(offset, entries.length, page.has_more),
-      });
-    } catch {
-      if (!mounted.current || generation !== phraseRequestGeneration.current) return;
-      setPhraseError("无法读取词库。");
-      setPhrasePage((current) => ({ ...current, status: "查询失败，请重试" }));
-    } finally {
-      if (mounted.current && generation === phraseRequestGeneration.current) setPhraseBusy(false);
-    }
-  }
-  function turnPhrasePage(offset: number) {
-    // The list is its own scrolling surface. A page turn must reveal the new
-    // page's first entry instead of preserving the previous page's bottom.
-    if (phraseListRef.current) phraseListRef.current.scrollTop = 0;
-    void loadPhrases(dictionaryKind, offset);
-  }
-  async function removePhrase(entry: DictionaryEntry) {
-    if (!client.dictionary || !mounted.current) return;
-    // Deletion is not undoable and the row is one click away from 编辑.
-    const confirmed = await confirm({
-      title: "删除词条",
-      message: `“${entry.value}”（${entry.key}）将被删除，此操作无法撤销。`,
-      confirmLabel: "删除",
-      danger: true,
-    });
-    if (!confirmed || !client.dictionary || !mounted.current) return;
-    setPhraseBusy(true);
-    setPhraseError("");
-    setPhraseNotice("");
-    try {
-      await client.dictionary.edit(entry, null, requestId("ui-remove"));
-      // Stay on the page the user was reading; deleting the last row on a page
-      // would otherwise leave them looking at an empty one.
-      const remaining = phrases.length - 1;
-      const offset =
-        remaining === 0 && phrasePage.offset > 0
-          ? Math.max(0, phrasePage.offset - DICTIONARY_PAGE_SIZE)
-          : phrasePage.offset;
-      await loadPhrases(dictionaryKind, offset);
-    } catch (error) {
-      if (mounted.current)
-        setPhraseError(
-          dictionaryErrorMessage(
-            error,
-            `${dictionaryKindLabel(dictionaryKind)}删除失败，请稍后重试。`,
-          ),
-        );
-    } finally {
-      if (mounted.current) setPhraseBusy(false);
-    }
-  }
-  async function savePhrase() {
-    if (!client.dictionary || !phraseForm || !mounted.current) return;
-    const bundled = phraseForm.previous?.source === "bundled" ? phraseForm.previous : null;
-    // A bundled row keeps its code and word; only the weight is the user's to change.
-    const replacement: DictionaryEntry = bundled
-      ? { ...bundled, weight: phraseForm.weight }
-      : {
-          kind: dictionaryKind,
-          key: phraseForm.key.trim(),
-          value: phraseForm.value,
-          weight: phraseForm.weight,
-        };
-    if (!replacement.key || !replacement.value) {
-      setPhraseError("编码和短语不能为空。");
-      return;
-    }
-    setPhraseBusy(true);
-    setPhraseError("");
-    setPhraseNotice("");
-    try {
-      await client.dictionary.edit(
-        phraseForm.previous,
-        replacement,
-        requestId(phraseForm.previous ? "ui-edit" : "ui-add"),
-      );
-      if (!mounted.current) return;
-      setPhraseForm(null);
-      // An edit keeps the reader where they were; only a new entry returns to
-      // the first page, where the shared runtime lists it.
-      await loadPhrases(dictionaryKind, phraseForm.previous ? phrasePage.offset : 0);
-    } catch (error) {
-      if (mounted.current)
-        setPhraseError(
-          dictionaryErrorMessage(
-            error,
-            `${dictionaryKindLabel(dictionaryKind)}保存失败，请稍后重试。`,
-            dictionaryKind,
-          ),
-        );
-    } finally {
-      if (mounted.current) setPhraseBusy(false);
-    }
-  }
-  async function importPhrases(file: File) {
-    if (!client.dictionary || !mounted.current) return;
-    setPhraseBusy(true);
-    setPhraseError("");
-    setPhraseNotice("");
-    try {
-      const text = await readDictionaryFile(file, client.dictionary.maxImportFileBytes);
-      let imported: DictionaryImportResult | null = null;
-      if (client.dictionary.import) {
-        imported = await client.dictionary.import(
-          dictionaryKind,
-          dictionaryFormat,
-          text,
-          requestId("ui-import"),
-        );
-      } else {
-        if (dictionaryFormat === "hans") throw new Error("hans format requires batch import");
-        const lines = text.split(/\r?\n/).filter(Boolean);
-        for (const line of lines) {
-          const [first, second, weight = "10000"] = line.split("\t");
-          if (!first || !second) continue;
-          const [value, key] = dictionaryFormat === "windows" ? [second, first] : [first, second];
-          const parsedWeight = Number(weight);
-          const normalizedWeight =
-            weight.trim() !== "" && Number.isSafeInteger(parsedWeight) && parsedWeight >= 0
-              ? parsedWeight
-              : 10000;
-          await client.dictionary.edit(
-            null,
-            { kind: dictionaryKind, key: key.trim(), value, weight: normalizedWeight },
-            requestId("ui-import"),
-          );
-        }
-      }
-      await loadPhrases(dictionaryKind);
-      if (!mounted.current) return;
-      // The host reports what it skipped; saying nothing reads as a clean import.
-      if (imported)
-        setPhraseNotice(describeImportResult(dictionaryKindLabel(dictionaryKind), imported));
-    } catch (error) {
-      if (mounted.current)
-        setPhraseError(importFailureMessage(dictionaryKindLabel(dictionaryKind), error));
-    } finally {
-      if (mounted.current) setPhraseBusy(false);
-    }
-  }
-  async function retryDictionaryFailure(requestId: string) {
-    if (!client.dictionary?.retry || !mounted.current) return;
-    setPhraseBusy(true);
-    setPhraseError("");
-    try {
-      await client.dictionary.retry(requestId);
-      await loadPhrases(dictionaryKind, phrasePage.offset);
-    } catch {
-      if (mounted.current) setPhraseError("词条重试失败，请稍后重试。");
-    } finally {
-      if (mounted.current) setPhraseBusy(false);
-    }
-  }
-  async function dismissDictionaryFailure(requestId: string) {
-    if (!client.dictionary?.dismissFailure || !mounted.current) return;
-    setPhraseBusy(true);
-    setPhraseError("");
-    try {
-      await client.dictionary.dismissFailure(requestId);
-      await loadPhrases(dictionaryKind, phrasePage.offset);
-    } catch {
-      if (mounted.current) setPhraseError("移除失败记录失败，请稍后重试。");
-    } finally {
-      if (mounted.current) setPhraseBusy(false);
-    }
-  }
-  /**
-   * Hand an exported dictionary to the user as a file.
-   *
-   * Resolves to the path when the host wrote the file, to null when a download link was used instead (the host reports nothing back, so there is no path to show), and to undefined when the host refused the write, in which case the error has already been shown and no success may be reported.
-   */
-  async function deliverDictionaryExport(
-    name: string,
-    body: string,
-  ): Promise<string | null | undefined> {
-    if (client.saveExport) {
-      try {
-        return await client.saveExport(name, body);
-      } catch {
-        setPhraseNotice("");
-        setPhraseError("无法写入“下载”文件夹，词库未导出。");
-        return undefined;
-      }
-    }
-    const url = URL.createObjectURL(new Blob([body], { type: "text/plain;charset=utf-8" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = name;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    return null;
-  }
-  async function exportPhrases() {
-    if (!client.dictionary) return;
-    if (dictionaryFormat === "hans") {
-      setPhraseError("汉字自动注音格式仅支持导入。");
-      return;
-    }
-    setPhraseBusy(true);
-    setPhraseError("");
-    setPhraseNotice("");
-    try {
-      let text = "";
-      if (client.dictionary.export) {
-        let offset = 0;
-        let hasMore = true;
-        while (hasMore && offset <= 1000000) {
-          const page = await client.dictionary.export(
-            dictionaryKind,
-            dictionaryFormat === "rime" ? "standard" : dictionaryFormat,
-            offset,
-            1000,
-          );
-          text += page.text;
-          const count = page.text ? page.text.trimEnd().split("\n").length : 0;
-          offset += count;
-          hasMore = page.has_more && count > 0;
-        }
-      } else {
-        text = phrases
-          .map((entry) =>
-            dictionaryFormat === "windows"
-              ? `${entry.key}\t${entry.value}\t${entry.weight}`
-              : `${entry.value}\t${entry.key}\t${entry.weight}`,
-          )
-          .join("\n");
-      }
-      const payload = dictionaryExportPayload(dictionaryKind, dictionaryFormat, text);
-      if (!payload.rows) {
-        setPhraseError("当前没有可导出的用户新增词条。");
-        return;
-      }
-      const path = await deliverDictionaryExport(
-        dictionaryExportName(dictionaryKind),
-        payload.body,
-      );
-      if (path === undefined) return;
-      setPhraseNotice(
-        path === null
-          ? `已导出 ${payload.rows} 条用户词条。`
-          : `已导出 ${payload.rows} 条用户词条到 ${path}。`,
-      );
-    } catch (error) {
-      setPhraseError(dictionaryErrorMessage(error, "词库导出失败，请稍后重试。"));
-    } finally {
-      setPhraseBusy(false);
-    }
-  }
-  async function exportAllPhrases() {
-    if (!client.dictionary) return;
-    setPhraseBusy(true);
-    setPhraseError("");
-    setPhraseNotice("正在读取全部用户词库…");
-    try {
-      const payload = personalDictionaryExportPayload(
-        await loadAllPersonalDictionaryEntries(client.dictionary),
-      );
-      if (!payload.rows) {
-        setPhraseNotice("当前没有可导出的用户词条。");
-        return;
-      }
-      const path = await deliverDictionaryExport(personalDictionaryExportName(), payload.body);
-      if (path === undefined) return;
-      setPhraseNotice(
-        path === null
-          ? `已导出全部 ${payload.rows} 条用户词条。`
-          : `已导出全部 ${payload.rows} 条用户词条到 ${path}。`,
-      );
-    } catch (error) {
-      setPhraseError(dictionaryErrorMessage(error, "全部词库导出失败，请稍后重试。"));
-    } finally {
-      setPhraseBusy(false);
-    }
-  }
-
-  /**
-   * Put every setting back to its default, as a draft.
-   *
-   * The source window writes the defaults the moment the button is clicked. Here the result goes
-   * into the draft instead and the user saves it like any other edit, because this page has an
-   * explicit save and a dirty marker -- writing behind them would be the one action on the page
-   * that does not work the way the rest of it does. It also means a misclick costs nothing.
-   */
-  async function restoreDefaults() {
-    if (!client.loadDefaultPreferences || busy) return;
-    const confirmed = await confirm({
-      title: "恢复默认设置",
-      message: "语音和翻译服务的密钥、词库和学习数据都不会改变。恢复后需要点击保存设置才会生效。",
-      confirmLabel: "恢复",
-    });
-    if (!confirmed || !client.loadDefaultPreferences || busy) return;
-    setError("");
-    setNotice("");
-    try {
-      setDraft(await client.loadDefaultPreferences());
-      setNotice("所有设置已恢复默认，请点击保存设置。");
-    } catch {
-      setError("无法读取默认设置，请重试。原有设置不会被自动重置。");
-    }
-  }
-
-  /**
-   * The Windows source repairs an unparseable config.toml by itself when the IME starts. The input method here does the same for a document that is not JSON at all, and this is the explicit path for everything else it refuses -- a newer build's fields or format, which an automatic rewrite could have destroyed. An unsaved edit survives the repair: it stays in the draft on top of the repaired revision, so saving it still works.
-   */
-  async function recoverPreferences() {
-    if (!client.recoverPreferences || busy) return;
-    const confirmed = await confirm({
-      title: "修复配置文件",
-      message:
-        "损坏的配置文件会先备份到同一目录，然后尽量保留能识别的设置和服务密钥，其余恢复默认。",
-      confirmLabel: "修复",
-    });
-    if (!confirmed || !client.recoverPreferences) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    setRecoveredBackup("");
-    try {
-      const result = await client.recoverPreferences();
-      const currentSnapshot = snapshotRef.current;
-      const currentDraft = draftRef.current;
-      const dirty =
-        !!currentSnapshot &&
-        !!currentDraft &&
-        JSON.stringify(currentDraft) !== JSON.stringify(currentSnapshot.preferences);
-      setSnapshot(result.snapshot);
-      if (!dirty) setDraft(result.snapshot.preferences);
-      if (!result.backupPath) {
-        setNotice("配置文件已可以正常读取，无需修复。");
-        return;
-      }
-      const backupName = result.backupPath.split(/[\\/]/).pop() ?? result.backupPath;
-      setRecoveredBackup(result.backupPath);
-      setNotice(
-        `配置文件已修复，原文件已备份为 ${backupName}。${
-          result.salvaged ? "" : "原有设置无法识别，已恢复默认。"
-        }${dirty ? "未保存的修改仍保留，请点击保存设置。" : ""}`,
-      );
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function resetLearnedData() {
-    if (!client.resetLearnedData || phraseBusy) return;
-    const confirmed = await confirm({
-      title: "清除学习数据",
-      message:
-        "候选词频、用户词典和拼音学习记录将永久删除，此操作无法撤销。输入方案等设置不会改变。",
-      confirmLabel: "清除",
-      danger: true,
-    });
-    if (!confirmed || !client.resetLearnedData || phraseBusy) return;
-    setPhraseBusy(true);
-    setPhraseError("");
-    setPhraseNotice("");
-    try {
-      await client.resetLearnedData();
-      setPhrases([]);
-      setPhrasePage({ offset: 0, hasMore: false, status: "已清除学习数据" });
-      setDictionaryPendingCount(0);
-      setDictionaryFailures([]);
-      setDictionarySnapshotError("");
-      setPhraseNotice("已清除所有学习数据；输入方案和设置保持不变。");
-    } catch (error) {
-      setPhraseError(
-        dictionaryErrorMessage(error, "清除学习数据失败，请关闭正在使用输入法的程序后重试。"),
-      );
-    } finally {
-      setPhraseBusy(false);
-    }
-  }
-
-  const dirty =
-    (!!draft && !!snapshot && JSON.stringify(draft) !== JSON.stringify(snapshot.preferences)) ||
-    (macosWubiAutoCommitUnique !== undefined &&
-      macosWubiAutoCommitUnique !== savedMacosWubiAutoCommitUnique);
+  const dirty = settingsDirty({
+    draft,
+    snapshot,
+    macosWubiAutoCommitUnique,
+    savedMacosWubiAutoCommitUnique,
+  });
   const ai = draft?.ai_assistant ?? defaultAiAssistant;
-  const aiOrigin = aiCredentialOrigin(ai.endpoint);
-  const aiToken = aiOrigin ? (ai.tokens?.[aiOrigin] ?? "") : "";
+  const {
+    origin: aiOrigin,
+    token: aiToken,
+    models: aiModels,
+    modelsStatus: aiModelsStatus,
+    modelsBusy: aiModelsBusy,
+    testInput: aiTestInput,
+    setTestInput: setAiTestInput,
+    testOutput: aiTestOutput,
+    testStatus: aiTestStatus,
+    testBusy: aiTestBusy,
+    updateAi,
+    updateToken: updateAiToken,
+    fetchModels: fetchAiModels,
+    test: testAi,
+  } = useAiAssistant({
+    client: client.aiAssistant,
+    ai,
+    providerCredentialAvailable: aiProviderCredentials,
+    onChange: (patch) =>
+      setDraft((current) =>
+        current
+          ? {
+              ...current,
+              ai_assistant: { ...(current.ai_assistant ?? defaultAiAssistant), ...patch },
+            }
+          : current,
+      ),
+  });
   const storedAiCredential = providerCredentials?.ai.find(
     (entry) => entry.provider === ai.provider,
   );
-  const updateAi = (patch: Partial<AiAssistantPreferences>) => {
-    aiRequestGeneration.current += 1;
-    setAiModelsBusy(false);
-    setAiTestBusy(false);
-    setAiTestOutput("");
-    setAiTestStatus("");
-    if (patch.provider !== undefined || patch.endpoint !== undefined) {
-      setAiModels(null);
-      setAiModelsStatus("");
-    }
-    // Merged into the current draft, not this render's: fetchAiModels applies its result after an
-    // await, and a render-time copy would revert whatever was typed meanwhile.
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            ai_assistant: { ...(current.ai_assistant ?? defaultAiAssistant), ...patch },
-          }
-        : current,
-    );
-  };
-  const updateAiToken = (value: string) => {
-    aiRequestGeneration.current += 1;
-    setAiModelsBusy(false);
-    setAiTestBusy(false);
-    setAiTestOutput("");
-    setAiTestStatus("");
-    if (aiOrigin) updateAi({ token: "", tokens: { ...ai.tokens, [aiOrigin]: value } });
-  };
-  const fetchAiModels = async () => {
-    if (!client.aiAssistant) return;
-    if (!aiOrigin) {
-      setAiModelsStatus("请先填写完整的 HTTPS 接口地址。");
-      return;
-    }
-    if (!aiProviderCredentials && !aiToken.trim()) {
-      setAiModelsStatus("请先填写 API Token，或使用已保存的密钥。");
-      return;
-    }
-    const generation = aiRequestGeneration.current;
-    setAiModelsBusy(true);
-    setAiModelsStatus("");
-    try {
-      const models = await client.aiAssistant.fetchModels({
-        endpoint: ai.endpoint,
-        token: aiToken,
-        provider: ai.provider,
-      });
-      if (generation !== aiRequestGeneration.current) return;
-      setAiModels(models);
-      setAiModelsStatus(`已获取 ${models.length} 个可用模型。`);
-      if (models.length && !models.includes(ai.model)) updateAi({ model: models[0] });
-    } catch (cause) {
-      setAiModelsStatus(
-        cause instanceof Error ? cause.message : "获取模型失败，请检查地址、密钥和网络。",
-      );
-    } finally {
-      if (generation === aiRequestGeneration.current) setAiModelsBusy(false);
-    }
-  };
-  const testAi = async () => {
-    if (!client.aiAssistant) return;
-    const text = aiTestInput;
-    if (!text.trim()) {
-      setAiTestStatus("请先输入待润色文字。");
-      return;
-    }
-    if (!aiOrigin || (!aiProviderCredentials && !aiToken.trim())) {
-      setAiTestStatus(
-        aiProviderCredentials
-          ? "请先填写有效的 HTTPS 接口地址。"
-          : "请先填写有效的 HTTPS 接口地址和 API Token。",
-      );
-      return;
-    }
-    const generation = ++aiRequestGeneration.current;
-    setAiTestBusy(true);
-    setAiTestStatus("");
-    setAiTestOutput("");
-    try {
-      const result = await client.aiAssistant.test({
-        endpoint: ai.endpoint,
-        model: ai.model,
-        provider: ai.provider,
-        prompt: aiPolishTestPrompt,
-        token: aiToken,
-        text,
-      });
-      if (generation !== aiRequestGeneration.current) return;
-      setAiTestOutput(result);
-      setAiTestStatus("已完成");
-    } catch (cause) {
-      setAiTestStatus(
-        cause instanceof Error ? cause.message : "AI 请求失败，请检查地址、模型、密钥和网络。",
-      );
-    } finally {
-      if (generation === aiRequestGeneration.current) setAiTestBusy(false);
-    }
-  };
   const wordCharacter = draft?.word_character ?? defaultWordCharacter;
   const keybindings = draft?.keybindings ?? defaultKeybindings;
   const frequency = draft?.frequency ?? defaultFrequency;
@@ -3409,28 +2039,11 @@ export function SettingsPage({
   const touchKeyboardSchemes = draft?.touch_keyboard_schemes ?? {
     enabled: allTouchKeyboardSchemes,
   };
-  const selectedTouchKeyboardScheme = draft ? inferredTouchKeyboardScheme(draft) : "quanpin";
-  const setTouchKeyboardSchemeEnabled = (scheme: TouchKeyboardScheme, enabled: boolean) => {
-    if (!draft) return;
-    const visible = new Set(touchKeyboardSchemes.enabled);
-    if (enabled) visible.add(scheme);
-    else visible.delete(scheme);
-    if (visible.size === 0) return;
-    const ordered = allTouchKeyboardSchemes.filter((value) => visible.has(value));
-    const selected = visible.has(selectedTouchKeyboardScheme)
-      ? selectedTouchKeyboardScheme
-      : ordered[0];
-    const next = selectTouchKeyboardScheme(draft, selected);
-    setDraft({ ...next, touch_keyboard_schemes: { enabled: ordered, selected } });
-  };
-  const selectHomeScheme = (scheme: TouchKeyboardScheme) => {
-    if (!draft) return;
-    const visible = new Set(touchKeyboardSchemes.enabled);
-    visible.add(scheme);
-    const enabled = allTouchKeyboardSchemes.filter((value) => visible.has(value));
-    const next = selectTouchKeyboardScheme(draft, scheme);
-    setDraft({ ...next, touch_keyboard_schemes: { enabled, selected: scheme } });
-  };
+  const {
+    selected: selectedTouchKeyboardScheme,
+    selectHome: selectHomeScheme,
+    setEnabled: setTouchKeyboardSchemeEnabled,
+  } = useTouchKeyboardSchemeSelection({ draft, setDraft });
   const localModes = draft?.local_modes ?? defaultLocalModes;
   // Every platform sees every mode. macOS used to hide emoji, kaomoji and temporary Japanese on the
   // grounds that its bundle shipped only msime.db and english.db, but others.db and dict_japanese.dat have
@@ -3442,256 +2055,69 @@ export function SettingsPage({
   // turns that mode off when its resource is absent, so the trigger key inserts its capital instead of
   // being swallowed.
   const clipboardHistory = iosPlatform || (draft?.clipboard_history ?? false);
-  function toggleClipboardHistory(enabled: boolean) {
-    if (!draft) return;
-    setDraft({ ...draft, clipboard_history: enabled });
-    // Clearing on opt-out keeps the local history from lingering while the
-    // draft is unsaved. Hosts may omit this capability, so the preference
-    // still changes independently when no clear hook is available.
-    if (!enabled && clipboardHistory && client.clipboard?.clear) {
-      void client.clipboard.clear().catch(() => setError("无法清空剪贴板历史，请稍后重试。"));
-    }
-  }
-  const diagnosticLog = {
-    server: draft?.diagnostic_log?.server ?? false,
-    tsf: draft?.diagnostic_log?.tsf ?? false,
-  };
-  const candidateTranslations = draft?.candidate_translations ?? true;
-  // Offline glosses are opt-in in client-core and in every native host. Keep
-  // the settings view aligned when older snapshots omit the optional field.
-  const candidateEnglishGloss = draft?.candidate_english_gloss ?? false;
-  const candidateGlossLanguagesEnabled =
-    candidateTranslations || Boolean(client.candidateEnglishGloss && candidateEnglishGloss);
-  const translationTargetLanguage = draft?.translation_target_language ?? "en";
-  const translationSecondaryLanguage = draft?.translation_secondary_language ?? "";
-  const visibleTranslationLanguages = mobilePlatform
-    ? [...mobileTranslationLanguages]
-    : translationLanguages;
-  const visibleSecondaryLanguages = mobilePlatform
-    ? [
-        ["", "不显示第二种语言"] as ["", string],
-        ...mobileTranslationLanguages,
-        ...(translationSecondaryLanguage === "ru"
-          ? [["ru", "俄语（已保存）"] as ["ru", string]]
-          : []),
-      ]
-    : translationSecondaryLanguages;
-  if (
-    mobilePlatform &&
-    translationTargetLanguage === "ru" &&
-    !visibleTranslationLanguages.some(([value]) => value === "ru")
-  ) {
-    visibleTranslationLanguages.push(["ru", "俄语（已保存）"]);
-  }
-  const voiceInput = { ...defaultVoiceInput, ...draft?.voice_input };
-  const systemVoice = nativeVoicePlatform && voiceInput.asr_provider === "system";
-  // Naming the host rather than assuming macOS. This read `harmonyPlatform ? "HarmonyOS" : "macOS"`
-  // and was correct while those were the only two; Android gained a system recogniser of its own
-  // and the card then announced itself as macOS on an Android phone.
-  const systemVoiceHostName = harmonyPlatform ? "HarmonyOS" : androidPlatform ? "Android" : "macOS";
-  // On-device Whisper. Like the system recognizer it has no service behind it, so it hides the same endpoint, token and model rows - but unlike it, the user has to say which model file to load.
-  // macOS has always run a hand-picked Whisper file; a host with a model store can run the downloadable models too.
-  const localVoiceAvailable = macosPlatform || client.localVoiceModels !== undefined;
-  const localVoice = localVoiceAvailable && voiceInput.asr_provider === "local";
-  // A Whisper file picked by hand: the whole setting on a host without a model store, and an advanced option under the model manager otherwise.
-  const serviceVoice = !systemVoice && !localVoice;
-  const harmonyUnsupportedAsr =
-    harmonyPlatform &&
-    !["doubao", "system", "openai", "siliconflow", "groq", "everyapi", "mistral"].includes(
-      String(voiceInput.asr_provider),
-    );
-  const doubaoAuthMode =
-    voiceInput.doubao_auth_mode ||
-    (voiceInput.asr_app_key && !voiceInput.asr_app_key.startsWith("<") ? "legacy" : "api_key");
-  // Functional for the same reason as updateAi: a local model download finishes into the draft
-  // minutes after the click, and the render-time copy would revert every edit made in between.
-  const updateVoice = (patch: Partial<VoiceInputPreferences>) => {
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            voice_input: { ...defaultVoiceInput, ...current.voice_input, ...patch },
-          }
-        : current,
-    );
-  };
-  const customTranslation = draft?.custom_translation ?? defaultCustomTranslation;
-  const tencentTranslation = draft?.tencent_tmt ?? defaultTencentTranslation;
-  const niutrans = draft?.niutrans ?? defaultNiuTrans;
-  const translationProvider = niutrans.enabled
-    ? "niutrans"
-    : customTranslation.enabled
-      ? "custom"
-      : tencentTranslation.enabled
-        ? "tencent"
-        : (macosPlatform || linuxPlatform) && draft?.translation_account
-          ? "account"
-          : "none";
-  // The macOS input method falls back to Apple's on-device translation when no service will answer: none chosen, or Tencent (on by default) still without its secrets. The pairs among the chosen targets that it found downloadable but not downloaded are why a sentence candidate shows no translation.
-  const onDeviceTranslationInUse =
-    macosPlatform &&
-    candidateTranslations &&
-    (translationProvider === "none" ||
-      (translationProvider === "tencent" &&
-        !(tencentTranslation.secret_id.trim() && tencentTranslation.secret_key.trim())));
-  const onDeviceMissingLanguages = onDeviceTranslationInUse
-    ? translationLanguages.filter(
-        ([code]) =>
-          (code === translationTargetLanguage || code === translationSecondaryLanguage) &&
-          onDeviceDownloadable.includes(code),
-      )
-    : [];
-  // One service at a time: the MSIME account is only ever used when chosen here, and any other choice clears it. A cleared choice is left undefined rather than false, because the saved document omits the key while it is false and an undone edit must compare equal to it again.
-  const setTranslationProvider = (
-    provider: "none" | "custom" | "tencent" | "niutrans" | "account",
-  ) => {
-    if (!draft) return;
-    setDraft({
-      ...draft,
-      custom_translation: { ...customTranslation, enabled: provider === "custom" },
-      tencent_tmt: { ...tencentTranslation, enabled: provider === "tencent" },
-      niutrans: { ...niutrans, enabled: provider === "niutrans" },
-      translation_account: provider === "account" ? true : undefined,
-    });
-  };
-  const runCredentialTest = async (
-    service: ApiCredentialTestService,
-    config: Record<string, unknown>,
-  ) => {
-    if (!client.testApiCredential) return;
-    const signature = JSON.stringify(config);
-    const generation = (credentialTestGeneration.current[service] ?? 0) + 1;
-    credentialTestGeneration.current[service] = generation;
-    setCredentialTests((current) => ({
-      ...current,
-      [service]: { signature, busy: true, message: "" },
-    }));
-    try {
-      const result = await client.testApiCredential(service, config);
-      if (credentialTestGeneration.current[service] !== generation) return;
-      setCredentialTests((current) => ({
-        ...current,
-        [service]: { signature, busy: false, ...result },
-      }));
-    } catch {
-      if (credentialTestGeneration.current[service] !== generation) return;
-      setCredentialTests((current) => ({
-        ...current,
-        [service]: {
-          signature,
-          busy: false,
-          ok: false,
-          message: "无法连接 provider，请确认服务已启动。",
-        },
-      }));
-    }
-  };
-  const runProviderCredential = async (
-    kind: "ai" | "tencent",
-    operation: (credentials: ProviderCredentialClient) => Promise<ProviderCredentialStatus>,
-    success: string,
-  ) => {
-    const credentials = client.providerCredentials;
-    if (!credentials) return;
-    setProviderCredentialBusy(kind);
-    setProviderCredentialMessages((current) => ({ ...current, [kind]: undefined }));
-    try {
-      setProviderCredentials(await operation(credentials));
-      if (kind === "ai") setAiCredentialInput("");
-      else setTencentCredentialInput({ secretId: "", secretKey: "" });
-      setProviderCredentialMessages((current) => ({
-        ...current,
-        [kind]: { ok: true, text: success },
-      }));
-    } catch (error) {
-      setProviderCredentialMessages((current) => ({
-        ...current,
-        [kind]: { ok: false, text: providerCredentialErrorMessage(error) },
-      }));
-    } finally {
-      setProviderCredentialBusy(undefined);
-    }
-  };
-  const runVoiceCredential = async (
-    kind: VoiceCredentialKind,
-    operation: (credentials: ProviderCredentialClient) => Promise<VoiceCredentialSaveResult>,
-    success: string,
-  ) => {
-    const credentials = client.providerCredentials;
-    if (!credentials) return;
-    setProviderCredentialBusy(kind);
-    setProviderCredentialMessages((current) => ({ ...current, [kind]: undefined }));
-    try {
-      const result = await operation(credentials);
-      setProviderCredentials(result.status);
-      setVoiceCredentialInput((current) => ({ ...current, [kind]: { token: "", appKey: "" } }));
-      setProviderCredentialMessages((current) => ({
-        ...current,
-        [kind]: result.serviceUpdated
-          ? { ok: true, text: success }
-          : {
-              ok: false,
-              text: `${success}但未能更新语音服务，请运行 systemctl --user enable --now msime-linux-voice.socket。`,
-            },
-      }));
-    } catch (error) {
-      setProviderCredentialMessages((current) => ({
-        ...current,
-        [kind]: { ok: false, text: providerCredentialErrorMessage(error) },
-      }));
-    } finally {
-      setProviderCredentialBusy(undefined);
-    }
-  };
-  const credentialTestControl = (
-    service: ApiCredentialTestService,
-    label: string,
-    config: Record<string, unknown>,
-    disabled = false,
-  ) => {
-    return (
-      <CredentialTestSection
-        label={label}
-        config={config}
-        state={credentialTests[service] as CredentialTestState | undefined}
-        disabled={disabled}
-        available={Boolean(client.testApiCredential)}
-        onTest={() => void runCredentialTest(service, config)}
-      />
-    );
-  };
-  /**
-   * The provider's known models and its own integration page.
-   *
-   * Apple's settings put both next to the provider row, and they are what makes
-   * a freshly picked provider usable: the endpoint is filled in automatically,
-   * but the model box is a free text field, and a user with no credential yet
-   * has nowhere to learn which models that service accepts or where its API key
-   * comes from. Selecting a preset only writes the model; 自定义模型 leaves
-   * whatever the user typed alone.
-   */
-  const providerPresetControls = (
-    label: string,
-    preset: ProviderPreset | undefined,
-    model: string,
-    onSelectModel: (model: string) => void,
-    className = "section provider-preset-section",
-  ) => {
-    return (
-      <ProviderPresetSection
-        label={label}
-        preset={preset}
-        model={model}
-        onSelectModel={onSelectModel}
-        openExternalUrl={client.openExternalUrl}
-        className={className}
-      />
-    );
-  };
+  const toggleClipboardHistory = useClipboardHistoryToggle({
+    draft,
+    enabled: clipboardHistory,
+    clear: client.clipboard?.clear,
+    setDraft,
+    setError,
+  });
+  const diagnosticLog = diagnosticLogPreferences(draft?.diagnostic_log);
+  const {
+    candidateTranslations,
+    candidateGlossLanguagesEnabled,
+    translationTargetLanguage,
+    translationSecondaryLanguage,
+    visibleTranslationLanguages,
+    visibleSecondaryLanguages,
+    customTranslation,
+    tencentTranslation,
+    niutrans,
+    translationProvider,
+    onDeviceMissingLanguages,
+    setTranslationProvider,
+  } = useTranslationSettings({
+    preferences: draft,
+    mobile: mobilePlatform,
+    macos: macosPlatform,
+    linux: linuxPlatform,
+    candidateEnglishGlossAvailable: Boolean(client.candidateEnglishGloss),
+    onDeviceDownloadable,
+    onChange: (next) => setDraft(next),
+  });
+  const {
+    voiceInput,
+    systemVoice,
+    systemVoiceHostName,
+    localVoiceAvailable,
+    localVoice,
+    serviceVoice,
+    harmonyUnsupportedAsr,
+    doubaoAuthMode,
+    updateVoice,
+  } = useVoiceInputSettings({
+    preferences: draft?.voice_input,
+    macos: macosPlatform,
+    android: androidPlatform,
+    harmony: harmonyPlatform,
+    nativeVoicePlatform,
+    localModelsAvailable: client.localVoiceModels !== undefined,
+    onChange: (patch) =>
+      setDraft((current) =>
+        current
+          ? {
+              ...current,
+              voice_input: { ...defaultVoiceInput, ...current.voice_input, ...patch },
+            }
+          : current,
+      ),
+  });
+  const providerPresetControls = createProviderPresetControl(client.openExternalUrl);
   const inputModeHUD = draft?.input_mode_hud ?? true;
   const floatingToolbar = { ...defaultFloatingToolbar, ...draft?.floating_toolbar };
   const themeMode = draft?.theme ?? "system";
   const settingsTheme = draft?.settings_theme ?? "follow";
+  useSettingsTheme(themeMode, settingsTheme);
   const candidatePreviewTheme = useCandidatePreviewTheme(themeMode, draft?.candidate_theme);
   const toolbarPreviewTheme = useCandidatePreviewTheme(themeMode, draft?.toolbar_theme);
   const keyboardPreviewTheme = useCandidatePreviewTheme(themeMode, draft?.screen_keyboard_theme);
@@ -3708,17 +2134,16 @@ export function SettingsPage({
         client.host?.platform ?? (linuxPlatform ? "linux" : null),
       )
     : null;
-  const availablePages = pages.filter(
-    (item) =>
-      (item.id !== "home" || Boolean(client.home)) &&
-      (item.id !== "typing-statistics" || Boolean(client.typingStatistics)) &&
-      (item.id !== "vocabulary" || Boolean(client.vocabularyReview)) &&
-      (item.id !== "account" || Boolean(client.account || client.appIcon)) &&
-      (item.id !== "chat" || Boolean(client.chat)) &&
-      (item.id !== "community" || Boolean(client.communitySkins || client.communityResources)) &&
-      (item.id !== "floating-toolbar" || showFloatingToolbar) &&
-      (item.id !== "more" || mobilePlatform),
-  );
+  const availablePages = availableSettingsPages({
+    home: Boolean(client.home),
+    typingStatistics: Boolean(client.typingStatistics),
+    vocabularyReview: Boolean(client.vocabularyReview),
+    account: Boolean(client.account || client.appIcon),
+    chat: Boolean(client.chat),
+    community: Boolean(client.communitySkins || client.communityResources),
+    floatingToolbar: showFloatingToolbar,
+    mobile: mobilePlatform,
+  });
   // Physical-keyboard shortcuts and a desktop floating toolbar have no phone
   // surface. HarmonyOS keeps those controls in the input-method panel on a 2-in-1,
   // but its phone panel is still a touch keyboard, so the settings entry must not
@@ -3742,147 +2167,49 @@ export function SettingsPage({
   // not route any of them rather than where the platform happens to be a phone. Any of these
   // devices can have a keyboard attached, and its owner has to be able to reach the switches the
   // host already reads; hiding the page by platform name left them unreachable on Android.
-  const mobileHiddenPageIds: readonly SettingsPageId[] = [
-    ...(showModeSwitchShortcuts || showPanelShortcuts || showDesktopMaintenanceShortcuts
-      ? []
-      : (["shortcuts"] as const)),
-    "floating-toolbar",
-    ...(showHelpcodeShiftEntry || androidPlatform || harmonyPlatform
-      ? []
-      : (["helpcode"] as const)),
-  ];
+  const mobileHiddenPageIds: readonly SettingsPageId[] = getMobileHiddenPageIds({
+    modeSwitchShortcuts: showModeSwitchShortcuts,
+    panelShortcuts: showPanelShortcuts,
+    desktopMaintenanceShortcuts: showDesktopMaintenanceShortcuts,
+    helpcodeShiftEntry: showHelpcodeShiftEntry,
+    android: androidPlatform,
+    harmony: harmonyPlatform,
+  });
   // The sidebar is the list this page duplicates, so it does not list it. A mobile host above phone width still shows the sidebar, and `selectPage` refuses the pages hidden above, so listing them there left buttons that did nothing when tapped.
   const sidebarPages = availablePages.filter(
     (item) => item.id !== "more" && !(mobilePlatform && mobileHiddenPageIds.includes(item.id)),
   );
-  const sidebarGroups = ((): (typeof availablePages)[] => {
-    if (!macosPlatform) return [sidebarPages];
-    const remaining = new Map(sidebarPages.map((item) => [item.id, item]));
-    const groups = macosSidebarGroups
-      .map((ids) =>
-        ids.flatMap((id) => {
-          const item = remaining.get(id);
-          if (!item) return [];
-          remaining.delete(id);
-          return [item];
-        }),
-      )
-      .filter((group) => group.length > 0);
-    const extra = [...remaining.values()];
-    if (extra.length > 0) groups.splice(Math.max(groups.length - 1, 0), 0, extra);
-    return groups;
-  })();
+  const sidebarGroups = groupSidebarPages(sidebarPages, macosPlatform, macosSidebarGroups);
   // Walked in tab order rather than filtered out of `availablePages`, which is in the order the
   // pages happen to be declared in — that put 我的 second, and the bar read 键盘 / 我的 / 社区 / 统计
   // against the source's 键盘 / 社区 / 统计 / 我的.
   // A page without a tab of its own was reached from inside the 键盘 tab, so that is the tab still
   // standing on. Keyed off the page alone, the bar went blank the moment anyone opened one — nothing
   // lit, and no way to read where in the app you were.
-  const mobileActiveTab: MobilePrimaryPageId = mobileTabForPage(page);
-  const untitledOnPhone: readonly SettingsPageId[] = ["home", "typing-statistics", "account"];
-  const mobilePrimaryPages = mobilePrimaryPageIds.flatMap((id) => {
-    const item = availablePages.find((page) => page.id === id);
-    return item ? [item] : [];
-  });
-  const mobileSecondaryPages = availablePages.filter(
-    (item) =>
-      item.id !== "more" &&
-      !mobilePrimaryPageIds.includes(item.id as MobilePrimaryPageId) &&
-      !mobileHiddenPageIds.includes(item.id),
+  const { primary: mobilePrimaryPages, secondary: mobileSecondaryPages } = splitMobilePages(
+    availablePages,
+    mobileHiddenPageIds,
   );
-  const selectPage = (next: SettingsPageId) => {
-    if (mobilePlatform && mobileHiddenPageIds.includes(next)) return;
-    if (next === page) return;
-    if (mobilePlatform) mobileLastPageByTab.current[mobileTabForPage(next)] = next;
-    setPage(next);
-    if (mobilePlatform && typeof window !== "undefined") {
-      const current = window.history.state;
-      const state = {
-        ...(current && typeof current === "object" ? current : {}),
-        msimeSettings: true,
-        page: next,
-      } as Record<string, unknown>;
-      delete state.panel;
-      window.history.pushState(state, "");
-    }
-    if (next === "community") setCommunityDestination("all");
-  };
-  // The request the page mounted with is already in `page`'s initializer; only later ones navigate.
-  const handledRoute = useRef(route?.nonce);
-  useEffect(() => {
-    if (!route || route.nonce === handledRoute.current) return;
-    handledRoute.current = route.nonce;
-    selectPage(requestedPage(route.page));
-  }, [route?.nonce]);
-  const selectMobileTab = (tab: SettingsPageId) => {
-    if (!mobilePrimaryPageIds.includes(tab as MobilePrimaryPageId)) return;
-    const primary = tab as MobilePrimaryPageId;
-    if (primary === "account") setAccountLoginReturnPage(null);
-    const remembered = mobileLastPageByTab.current[primary];
-    const available = availablePages.some((item) => item.id === remembered);
-    selectPage(available && !mobileHiddenPageIds.includes(remembered) ? remembered : primary);
-  };
-  const openAccountLogin = () => {
-    if (mobilePlatform) setAccountLoginReturnPage(page);
-    selectPage("account");
-  };
-  const finishAccountLogin = () => {
-    const previous = accountLoginReturnPage;
-    setAccountLoginReturnPage(null);
-    if (!previous) return;
-    mobileLastPageByTab.current[mobileTabForPage(previous)] = previous;
-    setPage(previous);
-    if (mobilePlatform && typeof window !== "undefined") window.history.back();
-  };
-  useEffect(() => {
-    const pageAvailable =
-      availablePages.some((item) => item.id === page) &&
-      (!mobilePlatform || !mobileHiddenPageIds.includes(page));
-    if (!pageAvailable) setPage(mobilePlatform && client.home ? "home" : "appearance");
-  }, [availablePages, client.home, mobilePlatform, page]);
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const apply = () => {
-      document.documentElement.dataset.theme = resolveSettingsTheme(themeMode, settingsTheme);
-    };
-    apply();
-    if (
-      themeMode !== "system" ||
-      settingsTheme !== "follow" ||
-      typeof window === "undefined" ||
-      typeof window.matchMedia !== "function"
-    )
-      return;
-    const media = window.matchMedia("(prefers-color-scheme: light)");
-    const listener = () => apply();
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", listener);
-      return () => media.removeEventListener("change", listener);
-    }
-    media.addListener(listener);
-    return () => media.removeListener(listener);
-  }, [settingsTheme, themeMode]);
-  const openLocalDesigns = () => {
-    selectPage("appearance");
-    setShowTouchSkinEditor(true);
-  };
-  const openCommunity = (destination: AccountCommunityDestination | "all") => {
-    selectPage("community");
-    setCommunityDestination(destination);
-  };
-  const initialCommunityCategory =
-    communityDestination === "published-reply" || communityDestination === "saved-reply"
-      ? "reply"
-      : communityDestination === "published-dictionary" ||
-          communityDestination === "saved-dictionary"
-        ? "dictionary"
-        : "skin";
-  const initialCommunityScope =
-    communityDestination === "published-dictionary" || communityDestination === "published-reply"
-      ? "mine"
-      : communityDestination === "saved-dictionary" || communityDestination === "saved-reply"
-        ? "saved"
-        : "";
+  const { mobileActiveTab, selectPage, selectMobileTab, openAccountLogin, finishAccountLogin } =
+    useSettingsNavigation({
+      mobilePlatform,
+      mobileHiddenPageIds,
+      availablePages,
+      page,
+      setPage,
+      mobileLastPageByTab,
+      route,
+      hasHomePage: Boolean(client.home),
+      setCommunityDestination,
+      setAccountLoginReturnPage,
+      accountLoginReturnPage,
+    });
+  const { openCommunity, openLocalDesigns } = useSettingsDestinationActions({
+    selectPage,
+    setShowTouchSkinEditor,
+    setCommunityDestination,
+  });
+  const communityView = communityDestinationView(communityDestination);
   return (
     <div
       className={settings.shell}
@@ -3891,32 +2218,9 @@ export function SettingsPage({
       // comes from. The inherited one is the Windows settings accent.
       data-mobile={mobilePlatform ? "" : undefined}
       onPointerDownCapture={(event) => {
-        pendingTitlebarDrag.current = null;
         if (!client.resizeWindow || event.button !== 0 || windowMaximized) return;
         const rect = event.currentTarget.getBoundingClientRect();
-        const edge = 8;
-        const n = event.clientY - rect.top < edge,
-          s = rect.bottom - event.clientY < edge;
-        const w = event.clientX - rect.left < edge,
-          e = rect.right - event.clientX < edge;
-        const value =
-          n && e
-            ? "ne"
-            : n && w
-              ? "nw"
-              : s && e
-                ? "se"
-                : s && w
-                  ? "sw"
-                  : n
-                    ? "n"
-                    : s
-                      ? "s"
-                      : e
-                        ? "e"
-                        : w
-                          ? "w"
-                          : null;
+        const value = windowResizeEdge(event, rect);
         if (value) {
           event.preventDefault();
           event.stopPropagation();
@@ -3928,114 +2232,14 @@ export function SettingsPage({
       {/* A phone has no window to minimise, maximise, close or drag: the OS owns the frame. The host
           still exposes the window commands on mobile because the same Tauri app binary backs both, so
           the presence of a command is not the question -- the platform is. */}
-      {!mobilePlatform && (client.windowControl || client.beginWindowDrag) && (
-        <header
-          className={settings.titlebar}
-          aria-label="窗口控制"
-          onDoubleClick={(event) => {
-            pendingTitlebarDrag.current = null;
-            if (event.button !== 0 || !client.windowControl) return;
-            const rect = event.currentTarget.parentElement!.getBoundingClientRect();
-            if (
-              !windowMaximized &&
-              client.resizeWindow &&
-              (event.clientX - rect.left < 8 ||
-                rect.right - event.clientX < 8 ||
-                event.clientY - rect.top < 8 ||
-                rect.bottom - event.clientY < 8)
-            )
-              return;
-            void client.windowControl(windowMaximized ? "restore" : "maximize");
-          }}
-          onPointerDown={(event) => {
-            if (event.button === 0 && event.detail < 2 && client.beginWindowDrag)
-              pendingTitlebarDrag.current = {
-                x: event.clientX,
-                y: event.clientY,
-                pointerId: event.pointerId,
-              };
-          }}
-          onPointerMove={(event) => {
-            const pending = pendingTitlebarDrag.current;
-            if (!pending || pending.pointerId !== event.pointerId) return;
-            if (event.buttons !== 1) {
-              pendingTitlebarDrag.current = null;
-              return;
-            }
-            if (Math.abs(event.clientX - pending.x) + Math.abs(event.clientY - pending.y) < 2)
-              return;
-            pendingTitlebarDrag.current = null;
-            // Invoke during the gesture; catch synchronous and asynchronous host failures.
-            void (async () => {
-              try {
-                await client.beginWindowDrag?.();
-              } catch {
-                setError("无法移动窗口，请重试。");
-              }
-            })();
-          }}
-          onPointerUp={() => {
-            pendingTitlebarDrag.current = null;
-          }}
-          onPointerCancel={() => {
-            pendingTitlebarDrag.current = null;
-          }}
-          onPointerLeave={() => {
-            pendingTitlebarDrag.current = null;
-          }}
-        >
-          <span className={settings.title} data-window-title="">
-            水杉 IME
-          </span>
-          {client.windowControl && (
-            <span
-              className={settings.windowControls}
-              onPointerDown={(event) => event.stopPropagation()}
-              onDoubleClick={(event) => event.stopPropagation()}
-            >
-              <button
-                type="button"
-                aria-label="最小化"
-                disabled={!client.windowControl}
-                onClick={() => void client.windowControl!("minimize")}
-              >
-                <img
-                  className={settings.windowIcon}
-                  src={windowIcons.minimize}
-                  alt=""
-                  draggable={false}
-                />
-              </button>
-              <button
-                type="button"
-                aria-label={windowMaximized ? "还原" : "最大化"}
-                disabled={!client.windowControl}
-                onClick={() => void client.windowControl!(windowMaximized ? "restore" : "maximize")}
-              >
-                <img
-                  className={settings.windowIcon}
-                  src={windowMaximized ? windowIcons.restore : windowIcons.maximize}
-                  alt=""
-                  draggable={false}
-                />
-              </button>
-              <button
-                type="button"
-                className={settings.windowClose}
-                aria-label="关闭"
-                disabled={!client.windowControl}
-                onClick={() => void client.windowControl!("close")}
-              >
-                <img
-                  className={settings.windowIcon}
-                  src={windowIcons.close}
-                  alt=""
-                  draggable={false}
-                />
-              </button>
-            </span>
-          )}
-        </header>
+      {!mobilePlatform && (
+        <WindowTitlebar
+          maximized={windowMaximized}
+          windowControl={client.windowControl}
+          beginWindowDrag={client.beginWindowDrag}
+          resizeWindow={client.resizeWindow}
+          onError={setError}
+        />
       )}
       <div
         className="flex min-h-0 min-w-0 flex-1 overflow-hidden max-phone:flex-col"
@@ -4045,63 +2249,13 @@ export function SettingsPage({
             assistive technology and keyboard focus still reach the navigation first, and the bottom
             padding clears the gesture inset. Hidden above phone width, where the sidebar serves. */}
         {mobilePlatform && (
-          <nav
-            className="hidden max-phone:order-2 max-phone:mx-3 max-phone:mb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] max-phone:grid max-phone:grid-cols-4 max-phone:gap-1 max-phone:rounded-[26px] max-phone:border max-phone:border-edge max-phone:bg-card max-phone:p-1.5 max-phone:shadow-card"
-            aria-label="主要功能"
-          >
-            {mobilePrimaryPages.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`flex min-h-[46px] min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-[20px] border-0 px-1 py-1 text-[11px] ${
-                  mobileActiveTab === item.id
-                    ? "bg-accent-soft font-semibold text-accent"
-                    : "bg-transparent text-muted"
-                }`}
-                aria-current={mobileActiveTab === item.id ? "page" : undefined}
-                onClick={() => selectMobileTab(item.id)}
-              >
-                <img
-                  src={mobileTabIcon(item.id, item.icon)}
-                  alt=""
-                  aria-hidden="true"
-                  className={`size-[22px] ${mobileActiveTab === item.id ? "opacity-100" : "opacity-60"}`}
-                />
-                {mobileTabTitle(item.id, item.title)}
-              </button>
-            ))}
-          </nav>
+          <MobileSettingsTabs
+            tabs={mobilePrimaryPages}
+            activeTab={mobileActiveTab}
+            onSelect={selectMobileTab}
+          />
         )}
-        <nav className={settings.sidebar} aria-label="设置分类">
-          <div className={settings.sidebarHeader}>
-            <img src={logo} alt="" />
-            <span>水杉 IME</span>
-          </div>
-          {sidebarGroups.map((group, index) => (
-            <div
-              key={group[0].id}
-              className={index > 0 ? `${settings.sidebarSection} mt-3.5` : settings.sidebarSection}
-              data-sidebar-section=""
-            >
-              {group.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={settings.sidebarItem(page === item.id)}
-                  aria-current={page === item.id ? "page" : undefined}
-                  aria-controls="settings-content"
-                  onClick={() => selectPage(item.id)}
-                >
-                  <span className={settings.sidebarIcon}>
-                    <img src={item.icon} alt="" />
-                  </span>
-                  {item.title}
-                </button>
-              ))}
-            </div>
-          ))}
-          <p className={settings.previewLabel}>客户端预览版</p>
-        </nav>
+        <SettingsSidebar groups={sidebarGroups} selectedPage={page} onSelectPage={selectPage} />
         <main
           ref={settingsContentRef}
           id="settings-content"
@@ -4112,119 +2266,30 @@ export function SettingsPage({
             {/* Three of the four tabs open on something that already names them — a headline, a
                 profile card, a row of figures — and the source prints no page title over any of
                 them. 社区 is the one that does. Hidden rather than dropped: it labels `main`. */}
-            <header
-              className={`mb-2 flex items-center gap-2.5 pt-0 pr-6 pb-3 pl-[0.5em] ${
-                mobilePlatform && untitledOnPhone.includes(page) ? "max-phone:sr-only" : ""
-              }`}
-            >
-              <h1 className="m-0 text-lg font-medium" id="page-title">
-                {availablePages.find((item) => item.id === page)?.title ?? "外观"}
-              </h1>
-            </header>
-            {error && (
-              <p role="alert" className="error">
-                {error}
-                {error === unreadablePreferencesMessage && client.recoverPreferences && (
-                  <>
-                    {" "}
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={busy}
-                      onClick={() => void recoverPreferences()}
-                    >
-                      修复配置文件…
-                    </button>
-                  </>
-                )}
-              </p>
-            )}
-            {notice && (
-              <p role="status" className="notice">
-                {notice}
-                {recoveredBackup && client.openPreferencesDirectory && (
-                  <>
-                    {" "}
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() =>
-                        void client
-                          .openPreferencesDirectory?.()
-                          .catch(() => setError("无法打开配置文件所在的文件夹。"))
-                      }
-                    >
-                      {macosPlatform ? "在 Finder 中显示" : "打开所在文件夹"}
-                    </button>
-                  </>
-                )}
-              </p>
-            )}
+            <SettingsPageHeader
+              title={availablePages.find((item) => item.id === page)?.title ?? "外观"}
+              hiddenOnPhone={mobilePlatform && mobileHeaderlessPageIds.includes(page)}
+            />
+            <SettingsStatusMessages
+              error={error}
+              notice={notice}
+              busy={busy}
+              recoveredBackup={recoveredBackup}
+              canRecover={Boolean(client.recoverPreferences)}
+              onRecover={() => void recoverPreferences()}
+              openPreferencesDirectory={client.openPreferencesDirectory}
+              macos={macosPlatform}
+              onError={setError}
+            />
             {inputSourceStartup &&
               (inputSourceStartup.action !== "up_to_date" ||
                 inputSourceStartup.enabled === false) && (
-                <div
-                  role={inputSourceStartup.action === "failed" ? "alert" : "status"}
-                  className={inputSourceStartup.action === "failed" ? "error" : "notice"}
-                  aria-label="水杉输入法安装状态"
-                >
-                  {inputSourceStartup.action === "installed" && (
-                    <p>
-                      水杉输入法已安装
-                      {inputSourceStartup.installed_version
-                        ? `：${inputSourceStartup.installed_version}`
-                        : ""}
-                      。
-                    </p>
-                  )}
-                  {inputSourceStartup.action === "updated" && (
-                    <p>
-                      水杉输入法已更新
-                      {inputSourceStartup.installed_version
-                        ? `到 ${inputSourceStartup.installed_version}`
-                        : ""}
-                      。
-                    </p>
-                  )}
-                  {inputSourceStartup.action === "login_required" && (
-                    <p>
-                      水杉输入法已安装到本机，但本次登录的输入法列表还看不到它。请注销并重新登录，然后在
-                      系统设置 &gt; 键盘 &gt; 输入法 中添加水杉输入法。
-                    </p>
-                  )}
-                  {inputSourceStartup.action === "failed" && (
-                    <p>
-                      水杉输入法未能自动安装或更新。请在「快捷键」页的「输入法服务」中点「安装 /
-                      更新」重试。
-                    </p>
-                  )}
-                  {inputSourceStartup.enabled === false &&
-                    inputSourceStartup.action !== "login_required" && (
-                      <p>
-                        请在 系统设置 &gt; 键盘 &gt; 输入法 中添加并启用水杉输入法。
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() =>
-                            void client.inputSourceStartup
-                              ?.openSettings()
-                              .catch(() =>
-                                setError("无法打开系统设置，请手动前往 系统设置 > 键盘 > 输入法。"),
-                              )
-                          }
-                        >
-                          打开键盘设置
-                        </button>
-                      </p>
-                    )}
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => setInputSourceStartup(null)}
-                  >
-                    知道了
-                  </button>
-                </div>
+                <InputSourceStartupNotice
+                  status={inputSourceStartup}
+                  onOpenSettings={() => client.inputSourceStartup?.openSettings()}
+                  onDismiss={() => setInputSourceStartup(null)}
+                  onError={setError}
+                />
               )}
             {busy && !draft && <p role="status">正在读取设置…</p>}
             {client.home && draft && page === "home" && (
@@ -4310,9 +2375,9 @@ export function SettingsPage({
                 skins={client.communitySkins}
                 resources={client.communityResources}
                 theme={keyboardPreviewTheme}
-                initialMine={communityDestination === "published-skins"}
-                initialCategory={initialCommunityCategory}
-                initialScope={initialCommunityScope}
+                initialMine={communityView.initialMine}
+                initialCategory={communityView.category}
+                initialScope={communityView.scope}
                 localDictionary={client.dictionary}
                 localSkinLibrary={client.customSkinLibrary}
                 mobile={mobilePlatform}
@@ -4325,7 +2390,7 @@ export function SettingsPage({
                 client={client.communitySkins}
                 theme={keyboardPreviewTheme}
                 localSkinLibrary={client.customSkinLibrary}
-                initialMine={communityDestination === "published-skins"}
+                initialMine={communityView.initialMine}
                 mobile={mobilePlatform}
                 onLogin={openAccountLogin}
               />
@@ -4333,8 +2398,8 @@ export function SettingsPage({
             {!client.communitySkins && client.communityResources && page === "community" && (
               <CommunityResourcesPage
                 client={client.communityResources}
-                kind={initialCommunityCategory === "reply" ? "reply" : "dictionary"}
-                initialScope={initialCommunityScope}
+                kind={communityView.category === "reply" ? "reply" : "dictionary"}
+                initialScope={communityView.scope}
                 mobile={mobilePlatform}
               />
             )}
@@ -4366,1402 +2431,234 @@ export function SettingsPage({
                     void save();
                   }}
                 >
-                  <fieldset disabled={busy} hidden={page !== "appearance"} aria-label="外观">
-                    <AppearanceCandidatePreview
-                      preferences={{
-                        ...draft,
-                        candidate_english_font:
-                          host?.platform === "windows"
-                            ? (draft.candidate_english_font ?? "Segoe UI")
-                            : draft.candidate_english_font,
-                      }}
-                      scan={client.scanSkinCatalog}
-                      readImage={client.readSkinImage}
-                      resolveFonts={client.resolveFontFamilies}
-                      active={page === "appearance"}
-                      revision={snapshot?.revision ?? 0}
-                      mobile={mobilePlatform}
-                    />
-                    {host?.candidate_panel_limit && (
-                      <CandidatePanelLimitSection limit={host.candidate_panel_limit} />
-                    )}
-                    {showCandidateFollowCursor && (
-                      <CandidateFollowCursorSection
-                        value={draft.candidate_follow_cursor}
-                        onChange={(candidate_follow_cursor) =>
-                          setDraft({ ...draft, candidate_follow_cursor })
-                        }
-                      />
-                    )}
-                    {showCandidateFontControls ? (
-                      <CandidateFontControls
-                        value={draft}
-                        onChange={(patch) => setDraft({ ...draft, ...patch })}
-                        readFonts={client.listFontFamilies}
-                        windows={host?.platform === "windows"}
-                        englishFont={showCandidateEnglishFont}
-                        mobile={mobilePlatform}
-                      />
-                    ) : (
-                      <div className="section">
-                        <small>当前宿主的候选面板不支持自定义字体或字号。</small>
-                      </div>
-                    )}
-                    <CandidateSizingSection
-                      preferences={draft}
-                      mobile={mobilePlatform}
-                      showFontControls={showCandidateFontControls}
-                      showPreeditFont={showCandidatePreeditFont}
-                      onChange={(patch) => setDraft({ ...draft, ...patch })}
-                    />
-                    {mobileKeyboardFeedback?.candidatePaletteFollowsDesktop === false && (
-                      <div className="section">
-                        <small>
-                          候选栏正在使用键盘皮肤的颜色，下面的候选颜色要在「皮肤」页打开「使用桌面候选皮肤」后才生效。
-                        </small>
-                      </div>
-                    )}
-                    <CandidateColorsSection
-                      preferences={draft}
-                      previewTheme={candidatePreviewTheme}
-                      showRowColors={showCandidateRowColors}
-                      showSelectionAppearance={showCandidateSelectionAppearance}
-                      showBorderColor={showCandidateBorderColor}
-                      linux={linuxPlatform}
-                      onChange={(key, value) => setDraft({ ...draft, [key]: value })}
-                    />
-                    <CandidatePageSizeSection
-                      value={draft.candidate_page_size}
-                      fixed={host?.fixed_candidate_page_size !== undefined}
-                      onChange={(candidate_page_size) =>
-                        setDraft({ ...draft, candidate_page_size })
-                      }
-                    />
-                    <ThemeSettingsSection
-                      preferences={draft}
-                      mobile={mobilePlatform}
-                      linux={linuxPlatform}
-                      floatingToolbar={showFloatingToolbar}
-                      desktopPanels={desktopPanels}
-                      onChange={(key, value) => setDraft({ ...draft, [key]: value })}
-                    />
-                    <CandidateLayoutSection
-                      value={draft.candidate_layout}
-                      fixed={host?.fixed_candidate_layout !== undefined}
-                      onChange={(candidate_layout) => setDraft({ ...draft, candidate_layout })}
-                    />
-                    <PreeditSettingsSection
-                      preferences={draft}
-                      mobile={mobilePlatform}
-                      showShuangpinPreedit={showShuangpinPreedit}
-                      inlinePreedit={mobileKeyboardFeedback?.inlinePreedit}
-                      inlinePreeditBusy={mobileKeyboardFeedbackBusy}
-                      onChange={(patch) => setDraft({ ...draft, ...patch })}
-                      onInlinePreeditChange={(inlinePreedit) =>
-                        mobileKeyboardFeedback &&
-                        void saveMobileKeyboardFeedback({
-                          ...mobileKeyboardFeedback,
-                          inlinePreedit,
-                        })
-                      }
-                    />
-                  </fieldset>
-                  <fieldset disabled={busy} hidden={page !== "dictionary"} aria-label="词库">
-                    {client.dictionaryManifest && (
-                      <DictionaryManifestCard read={client.dictionaryManifest} />
-                    )}
-                    {client.dictionary?.importPersonal && (
-                      <PersonalDictionaryImportCard
-                        dictionary={client.dictionary}
-                        platform={client.host?.platform}
-                      />
-                    )}
-                    {client.dictionary && (
-                      <div
-                        className={`section ${settings.managerHeader}`}
-                        role="region"
-                        aria-label="快捷短语管理"
-                      >
-                        <div className="section-header">
-                          <span className="section-title">
-                            本地词库管理
-                            <small>
-                              查询、新增、编辑、导入、导出和删除 Engine
-                              用户词库。导入支持标准、Windows TSV、Rime
-                              和纯汉字自动注音。标有「内置」的是随输入法附带的词条，只能调整权重或删除。
-                            </small>
-                          </span>
-                          <span>
-                            <button
-                              type="button"
-                              className="secondary"
-                              disabled={phraseBusy}
-                              onClick={() => void loadPhrases(dictionaryKind, 0)}
-                            >
-                              查询
-                            </button>{" "}
-                            <button
-                              type="button"
-                              className="secondary"
-                              disabled={phraseBusy}
-                              onClick={() =>
-                                setPhraseForm({
-                                  key: "",
-                                  value: "",
-                                  weight: 10,
-                                  previous: null,
-                                })
-                              }
-                            >
-                              新增词条
-                            </button>{" "}
-                            <button
-                              type="button"
-                              className="secondary"
-                              disabled={phraseBusy || dictionaryFormat === "hans"}
-                              onClick={() => void exportPhrases()}
-                            >
-                              导出当前类型
-                            </button>{" "}
-                            <button
-                              type="button"
-                              className="secondary"
-                              disabled={phraseBusy}
-                              onClick={() => void exportAllPhrases()}
-                            >
-                              导出全部
-                            </button>
-                            <label className="secondary">
-                              导入
-                              <input
-                                hidden
-                                type="file"
-                                accept=".txt,.tsv,.yaml,.yml,text/plain"
-                                disabled={phraseBusy}
-                                onChange={(event) => {
-                                  const file = event.target.files?.[0];
-                                  if (file) {
-                                    const name = file.name.toLowerCase();
-                                    if (name.endsWith(".yaml") || name.endsWith(".yml"))
-                                      setDictionaryFormat("rime");
-                                    void importPhrases(file);
-                                  }
-                                  event.currentTarget.value = "";
-                                }}
-                              />
-                            </label>
-                          </span>
-                        </div>
-                        {dictionaryPendingCount > 0 && (
-                          <p className="input-setting-description" role="status">
-                            {dictionaryPendingCount}{" "}
-                            项等待键盘同步。打开水杉键盘后会在空闲时逐条生效。
-                          </p>
-                        )}
-                        {dictionarySnapshotError && (
-                          <p role="alert" className="error">
-                            {dictionarySnapshotError}
-                          </p>
-                        )}
-                        {dictionaryFailures.length > 0 && (
-                          <div className={settings.failures} role="alert">
-                            <p>
-                              有 {dictionaryFailures.length}{" "}
-                              项词库请求同步失败，可以重试或移除失败记录。
-                            </p>
-                            <ul>
-                              {dictionaryFailures.map((failure) => (
-                                <li key={failure.request_id}>
-                                  <span>
-                                    <strong>{failure.label}</strong>
-                                    <small>{failure.error}</small>
-                                  </span>
-                                  <span>
-                                    <button
-                                      type="button"
-                                      className="secondary"
-                                      disabled={phraseBusy || !client.dictionary?.retry}
-                                      onClick={() =>
-                                        void retryDictionaryFailure(failure.request_id)
-                                      }
-                                    >
-                                      重试
-                                    </button>{" "}
-                                    <button
-                                      type="button"
-                                      className="secondary"
-                                      disabled={phraseBusy || !client.dictionary?.dismissFailure}
-                                      onClick={() =>
-                                        void dismissDictionaryFailure(failure.request_id)
-                                      }
-                                    >
-                                      移除记录
-                                    </button>
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        <div className={settings.managerControls}>
-                          <label>
-                            词库{" "}
-                            <select
-                              aria-label="本地词库类型"
-                              value={dictionaryKind}
-                              disabled={phraseBusy}
-                              onChange={(event) => {
-                                const kind = event.target.value as LocalDictionaryKind;
-                                setDictionaryKind(kind);
-                                if (kind !== "pinyin" && dictionaryFormat === "hans")
-                                  setDictionaryFormat("standard");
-                                setPhrases([]);
-                                void loadPhrases(kind);
-                              }}
-                            >
-                              {localDictionaryKinds.map(([kind, label]) => (
-                                <option key={kind} value={kind}>
-                                  {label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label>
-                            文件格式{" "}
-                            <select
-                              aria-label="本地词库文件格式"
-                              value={dictionaryFormat}
-                              disabled={phraseBusy}
-                              onChange={(event) =>
-                                setDictionaryFormat(event.target.value as LocalDictionaryFormat)
-                              }
-                            >
-                              <option value="standard">词在前（标准 TSV）</option>
-                              <option value="windows">编码在前（Windows TSV）</option>
-                              <option value="rime">Rime userdb / dict.yaml</option>
-                              {dictionaryKind === "pinyin" && (
-                                <option value="hans">汉字自动注音（仅导入）</option>
-                              )}
-                            </select>
-                          </label>
-                          <label>
-                            编码前缀{" "}
-                            <input
-                              value={phraseSearch}
-                              placeholder="留空查看全部"
-                              onChange={(event) => setPhraseSearch(event.target.value)}
-                            />
-                          </label>
-                        </div>
-                        {phraseError && (
-                          <p role="alert" className="error">
-                            {phraseError}
-                          </p>
-                        )}
-                        {phraseNotice && (
-                          <p role="status" className={settings.empty}>
-                            {phraseNotice}
-                          </p>
-                        )}
-                        {phraseForm && (
-                          <div className={settings.phraseForm}>
-                            <label>
-                              编码{" "}
-                              <input
-                                value={phraseForm.key}
-                                readOnly={phraseForm.previous?.source === "bundled"}
-                                onChange={(event) =>
-                                  setPhraseForm({ ...phraseForm, key: event.target.value })
-                                }
-                              />
-                              <small className={settings.keyHint}>
-                                {dictionaryKindKeyHint(dictionaryKind)}
-                              </small>
-                            </label>
-                            <label>
-                              {dictionaryKind === "quick_phrase" ? "短语" : "词条"}{" "}
-                              <input
-                                value={phraseForm.value}
-                                readOnly={phraseForm.previous?.source === "bundled"}
-                                onChange={(event) =>
-                                  setPhraseForm({ ...phraseForm, value: event.target.value })
-                                }
-                              />
-                            </label>
-                            <label>
-                              权重{" "}
-                              <input
-                                type="number"
-                                value={phraseForm.weight}
-                                onChange={(event) =>
-                                  setPhraseForm({
-                                    ...phraseForm,
-                                    weight: Number(event.target.value),
-                                  })
-                                }
-                              />
-                            </label>
-                            <button
-                              type="button"
-                              disabled={phraseBusy}
-                              onClick={() => void savePhrase()}
-                            >
-                              保存
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary"
-                              disabled={phraseBusy}
-                              onClick={() => setPhraseForm(null)}
-                            >
-                              取消
-                            </button>
-                          </div>
-                        )}
-                        {phrases.length === 0 ? (
-                          <p className={settings.empty}>
-                            点击查询后查看
-                            {localDictionaryKinds.find(([kind]) => kind === dictionaryKind)?.[1] ??
-                              "词库"}
-                            词条
-                          </p>
-                        ) : (
-                          <ul
-                            ref={phraseListRef}
-                            className={settings.phraseList}
-                            aria-label="词库查询结果"
-                          >
-                            {phrases.map((entry, index) => (
-                              <li key={`${entry.key}-${entry.value}-${index}`}>
-                                <span>
-                                  <code>{entry.key}</code>　{entry.value}　
-                                  <small>{entry.weight}</small>
-                                  {entry.source === "bundled" && (
-                                    <>
-                                      {" "}
-                                      <small className={settings.bundledBadge}>内置</small>
-                                    </>
-                                  )}
-                                </span>
-                                <span>
-                                  <button
-                                    type="button"
-                                    className="secondary"
-                                    disabled={phraseBusy}
-                                    onClick={() =>
-                                      setPhraseForm({
-                                        key: entry.key,
-                                        value: entry.value,
-                                        weight: entry.weight,
-                                        previous: entry,
-                                      })
-                                    }
-                                  >
-                                    {entry.source === "bundled" ? "调权重" : "编辑"}
-                                  </button>{" "}
-                                  <button
-                                    type="button"
-                                    className="secondary"
-                                    disabled={phraseBusy}
-                                    onClick={() => void removePhrase(entry)}
-                                  >
-                                    删除
-                                  </button>
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        <div className="flex items-center justify-center gap-4 text-xs text-secondary">
-                          <button
-                            type="button"
-                            className="secondary"
-                            disabled={phraseBusy || phrasePage.offset === 0}
-                            onClick={() =>
-                              turnPhrasePage(Math.max(0, phrasePage.offset - DICTIONARY_PAGE_SIZE))
-                            }
-                          >
-                            上一页
-                          </button>
-                          <span aria-live="polite">{phrasePage.status}</span>
-                          <button
-                            type="button"
-                            className="secondary"
-                            disabled={phraseBusy || !phrasePage.hasMore}
-                            onClick={() => turnPhrasePage(phrasePage.offset + DICTIONARY_PAGE_SIZE)}
-                          >
-                            下一页
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {macosPlatform && client.resetLearnedData && (
-                      <div className="section" role="region" aria-label="学习数据">
-                        <div className="section-header">
-                          <span className="section-title">
-                            学习数据
-                            <small>
-                              清除候选词频、用户词典和拼音学习记录；输入方案与其他设置不会改变。
-                            </small>
-                          </span>
-                          <button
-                            type="button"
-                            className="secondary danger-button"
-                            disabled={phraseBusy}
-                            onClick={() => void resetLearnedData()}
-                          >
-                            清除全部学习数据
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </fieldset>
-                  <fieldset disabled={busy} hidden={page !== "skin"} aria-label="皮肤">
-                    <div className={settings.skinIntro}>
-                      {/* A touch host draws a candidate row inside the keyboard and has no floating
-                          toolbar at all, so naming either here describes a window the reader cannot
-                          see. Same switch the helper-code labels already make. */}
-                      {mobilePlatform
-                        ? "选择候选栏使用的主题；明暗预览仅影响当前卡片，不修改设置。"
-                        : linuxPlatform
-                          ? "选择候选窗使用的主题；明暗预览仅影响当前卡片，不修改设置。"
-                          : "选择候选窗和悬浮工具栏使用的主题；明暗预览仅影响当前卡片，不修改设置。"}
-                    </div>
-                    {host?.candidate_panel_limit && (
-                      <CandidatePanelLimitSection limit={host.candidate_panel_limit} />
-                    )}
-                    {mobileKeyboardFeedback?.candidatePaletteFollowsDesktop !== undefined && (
-                      <div className="section">
-                        <label className="section-header">
-                          <span className="section-title">
-                            使用桌面候选皮肤
-                            <small>
-                              关闭时候选栏和按键一起使用键盘皮肤的颜色；打开后使用这里的候选皮肤和「外观」里的候选颜色。
-                            </small>
-                          </span>
-                          <input
-                            aria-label="使用桌面候选皮肤"
-                            className="toggle"
-                            type="checkbox"
-                            disabled={mobileKeyboardFeedbackBusy}
-                            checked={mobileKeyboardFeedback.candidatePaletteFollowsDesktop}
-                            onChange={(event) =>
-                              void saveMobileKeyboardFeedback({
-                                ...mobileKeyboardFeedback,
-                                candidatePaletteFollowsDesktop: event.target.checked,
-                              })
-                            }
-                          />
-                        </label>
-                      </div>
-                    )}
-                    {snapshot?.candidate_skin_catalog && (
-                      <div className={settings.externalMeta} role="status">
-                        外部皮肤目录：
-                        {snapshot.candidate_skin_catalog.scanned
-                          ? `已扫描（${snapshot.candidate_skin_catalog.packages.length} 个）`
-                          : "尚未扫描"}
-                        {snapshot.candidate_skin_catalog.issues?.length
-                          ? `，${snapshot.candidate_skin_catalog.issues.length} 个问题`
-                          : ""}
-                      </div>
-                    )}
-                    <div className={settings.skinGrid}>
-                      {skinOptions.map(([id, title, description, candidateOnlyDescription]) => (
-                        <article
-                          aria-label={title}
-                          className={settings.skinCard(
-                            (draft.candidate_skin ?? "willow_green") === id,
-                          )}
-                          key={id}
-                        >
-                          <div className={settings.skinCardHeader} data-skin-card-header="">
-                            <div className={settings.skinCardBody}>
-                              <span className={settings.skinCardTitle}>
-                                {title} (
-                                {(skinPreviewThemes[id] ?? candidatePreviewTheme) === "dark"
-                                  ? "Dark"
-                                  : "Light"}
-                                )
-                              </span>
-                              <span className={settings.skinCardDescription}>
-                                {linuxPlatform ? candidateOnlyDescription : description}
-                              </span>
-                            </div>
-                            <div className={settings.skinCardActions}>
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-label={title}
-                                aria-checked={(draft.candidate_skin ?? "willow_green") === id}
-                                className={settings.skinSwitch(
-                                  (draft.candidate_skin ?? "willow_green") === id,
-                                )}
-                                onClick={() => setDraft({ ...draft, candidate_skin: id })}
-                              >
-                                <span
-                                  className={settings.skinSwitchKnob(
-                                    (draft.candidate_skin ?? "willow_green") === id,
-                                  )}
-                                />
-                              </button>
-                              <button
-                                type="button"
-                                className={settings.skinPreviewSwitch}
-                                onClick={() =>
-                                  setSkinPreviewThemes((current) => ({
-                                    ...current,
-                                    [id]:
-                                      (current[id] ?? candidatePreviewTheme) === "dark"
-                                        ? "light"
-                                        : "dark",
-                                  }))
-                                }
-                              >
-                                {(skinPreviewThemes[id] ?? candidatePreviewTheme) === "dark"
-                                  ? "预览浅色"
-                                  : "预览深色"}
-                              </button>
-                            </div>
-                          </div>
-                          <div
-                            className={`${settings.skinCardPreview} skin-${id}`}
-                            data-skin-preview=""
-                            data-preview-theme={skinPreviewThemes[id] ?? candidatePreviewTheme}
-                            style={candidateSkinPalette(
-                              id,
-                              skinPreviewThemes[id] ?? candidatePreviewTheme,
-                            )}
-                            aria-hidden="true"
-                          >
-                            <div className={settings.skinPreviewStage} data-skin-stage="">
-                              <SkinCandidatePreview orientation="horizontal" />
-                            </div>
-                            <div className={settings.skinPreviewStage} data-skin-stage="">
-                              <SkinCandidatePreview orientation="vertical" />
-                            </div>
-                            {!linuxPlatform && (
-                              <div className={settings.skinPreviewStage} data-skin-stage="">
-                                <SkinToolbarPreview />
-                              </div>
-                            )}
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                    <ExternalSkins
-                      activeTheme={candidatePreviewTheme}
-                      scan={client.scanSkinCatalog}
-                      openDirectory={client.openSkinDirectory}
-                      importsSkin={host?.skin_directory_import === true}
-                      readImage={client.readSkinImage}
-                      readFont={client.readSkinFont}
-                      readToolbarCss={client.readSkinToolbarCss}
-                      selected={draft.candidate_skin ?? "willow_green"}
-                      // A host that draws one layout judges a skin by that layout, not by a setting it ignores.
-                      layout={host?.fixed_candidate_layout ?? draft.candidate_layout ?? "vertical"}
-                      onSelect={(id) => setDraft({ ...draft, candidate_skin: id })}
-                      toolbarPreview={!linuxPlatform}
-                    />
-                  </fieldset>
-                  <fieldset
+                  <AppearanceSettingsSection
+                    disabled={busy}
+                    hidden={page !== "appearance"}
+                    preferences={{
+                      ...draft,
+                      candidate_english_font:
+                        host?.platform === "windows"
+                          ? (draft.candidate_english_font ?? "Segoe UI")
+                          : draft.candidate_english_font,
+                    }}
+                    revision={snapshot?.revision ?? 0}
+                    mobile={mobilePlatform}
+                    linux={linuxPlatform}
+                    windows={host?.platform === "windows"}
+                    candidatePreviewTheme={candidatePreviewTheme}
+                    candidatePanelLimit={host?.candidate_panel_limit}
+                    showCandidateFollowCursor={showCandidateFollowCursor}
+                    showCandidateFontControls={showCandidateFontControls}
+                    showCandidateEnglishFont={showCandidateEnglishFont}
+                    showCandidatePreeditFont={showCandidatePreeditFont}
+                    showCandidateRowColors={showCandidateRowColors}
+                    showCandidateSelectionAppearance={showCandidateSelectionAppearance}
+                    showCandidateBorderColor={showCandidateBorderColor}
+                    showShuangpinPreedit={showShuangpinPreedit}
+                    fixedCandidatePageSize={host?.fixed_candidate_page_size !== undefined}
+                    fixedCandidateLayout={host?.fixed_candidate_layout !== undefined}
+                    floatingToolbar={showFloatingToolbar}
+                    desktopPanels={desktopPanels}
+                    candidatePaletteFollowsDesktop={
+                      mobileKeyboardFeedback?.candidatePaletteFollowsDesktop
+                    }
+                    inlinePreedit={mobileKeyboardFeedback?.inlinePreedit}
+                    inlinePreeditBusy={mobileKeyboardFeedbackBusy}
+                    scan={client.scanSkinCatalog}
+                    readImage={client.readSkinImage}
+                    resolveFonts={client.resolveFontFamilies}
+                    listFontFamilies={client.listFontFamilies}
+                    onPreferencesChange={(patch) => setDraft({ ...draft, ...patch })}
+                    onInlinePreeditChange={(inlinePreedit) =>
+                      mobileKeyboardFeedback &&
+                      void saveMobileKeyboardFeedback({
+                        ...mobileKeyboardFeedback,
+                        inlinePreedit,
+                      })
+                    }
+                  />
+                  <DictionarySettingsPanel
+                    disabled={busy}
+                    hidden={page !== "dictionary"}
+                    dictionary={client.dictionary}
+                    dictionaryManifest={client.dictionaryManifest}
+                    platform={client.host?.platform}
+                    macos={macosPlatform}
+                    resetLearnedData={client.resetLearnedData}
+                    phraseBusy={phraseBusy}
+                    dictionaryFormat={dictionaryFormat}
+                    setDictionaryFormat={setDictionaryFormat}
+                    onQuery={() => void loadPhrases(dictionaryKind, 0)}
+                    onAdd={() => setPhraseForm({ key: "", value: "", weight: 10, previous: null })}
+                    onExportCurrent={() => void exportPhrases()}
+                    onExportAll={() => void exportAllPhrases()}
+                    onImport={(file) => void importPhrases(file)}
+                    dictionaryPendingCount={dictionaryPendingCount}
+                    dictionaryFailures={dictionaryFailures}
+                    dictionarySnapshotError={dictionarySnapshotError}
+                    canRetry={Boolean(client.dictionary?.retry)}
+                    canDismiss={Boolean(client.dictionary?.dismissFailure)}
+                    onRetry={(requestId) => void retryDictionaryFailure(requestId)}
+                    onDismiss={(requestId) => void dismissDictionaryFailure(requestId)}
+                    dictionaryKind={dictionaryKind}
+                    phraseSearch={phraseSearch}
+                    setDictionaryKind={setDictionaryKind}
+                    setPhraseSearch={setPhraseSearch}
+                    phraseError={phraseError}
+                    phraseNotice={phraseNotice}
+                    phrases={phrases}
+                    setPhrases={setPhrases}
+                    phraseForm={phraseForm}
+                    phraseListRef={phraseListRef}
+                    setPhraseForm={setPhraseForm}
+                    onSavePhrase={() => void savePhrase()}
+                    onRemovePhrase={(entry) => void removePhrase(entry)}
+                    onLoadPhrases={(kind, offset) => void loadPhrases(kind, offset)}
+                    onTurnPage={turnPhrasePage}
+                    phrasePage={phrasePage}
+                    onResetLearnedData={() => void resetLearnedData()}
+                  />
+                  <SkinSettingsSection
+                    disabled={busy}
+                    hidden={page !== "skin"}
+                    mobile={mobilePlatform}
+                    linux={linuxPlatform}
+                    candidatePanelLimit={host?.candidate_panel_limit}
+                    mobileKeyboardFeedback={mobileKeyboardFeedback}
+                    mobileKeyboardFeedbackBusy={mobileKeyboardFeedbackBusy}
+                    onCandidatePaletteChange={(candidatePaletteFollowsDesktop) =>
+                      mobileKeyboardFeedback &&
+                      void saveMobileKeyboardFeedback({
+                        ...mobileKeyboardFeedback,
+                        candidatePaletteFollowsDesktop,
+                      })
+                    }
+                    candidateSkinCatalog={snapshot?.candidate_skin_catalog}
+                    selected={draft.candidate_skin ?? "willow_green"}
+                    previewThemes={skinPreviewThemes}
+                    defaultTheme={candidatePreviewTheme}
+                    onSelect={(id) => setDraft({ ...draft, candidate_skin: id })}
+                    onTogglePreview={(id) =>
+                      setSkinPreviewThemes((current) => ({
+                        ...current,
+                        [id]: (current[id] ?? candidatePreviewTheme) === "dark" ? "light" : "dark",
+                      }))
+                    }
+                    activeTheme={candidatePreviewTheme}
+                    scan={client.scanSkinCatalog}
+                    openDirectory={client.openSkinDirectory}
+                    importsSkin={host?.skin_directory_import === true}
+                    readImage={client.readSkinImage}
+                    readFont={client.readSkinFont}
+                    readToolbarCss={client.readSkinToolbarCss}
+                    // A host that draws one layout judges a skin by that layout, not by a setting it ignores.
+                    layout={host?.fixed_candidate_layout ?? draft.candidate_layout ?? "vertical"}
+                    toolbarPreview={!linuxPlatform}
+                  />
+                  <FloatingToolbarSettingsSection
                     disabled={busy}
                     hidden={page !== "floating-toolbar"}
-                    aria-label="悬浮工具栏"
-                  >
-                    <div className={`section ${settings.toolbarCard}`}>
-                      <label className={`section-header ${settings.toolbarSettingRow}`}>
-                        <span className="section-title">
-                          在桌面显示悬浮工具栏<small>快速访问输入法状态与常用功能</small>
-                        </span>
-                        <input
-                          aria-label="在桌面显示悬浮工具栏"
-                          className="toggle"
-                          type="checkbox"
-                          checked={floatingToolbar.enabled}
-                          onChange={(event) =>
-                            setDraft({
-                              ...draft,
-                              floating_toolbar: {
-                                ...floatingToolbar,
-                                enabled: event.target.checked,
-                              },
-                            })
+                    preferences={floatingToolbar}
+                    skin={draft.candidate_skin ?? "willow_green"}
+                    theme={toolbarPreviewTheme}
+                    onEnabledChange={(enabled) =>
+                      setDraft({
+                        ...draft,
+                        floating_toolbar: { ...floatingToolbar, enabled },
+                      })
+                    }
+                    showAppearance={showToolbarAppearance}
+                    showComponents={showToolbarComponents}
+                    capabilities={
+                      host
+                        ? {
+                            floating_toolbar_handwriting: host.floating_toolbar_handwriting,
+                            floating_toolbar_voice: host.floating_toolbar_voice,
                           }
-                        />
-                      </label>
-                      <div className={settings.toolbarPreviewArea} aria-label="悬浮工具栏预览">
-                        <div className={settings.toolbarPreviewLabel}>预览</div>
-                        <div
-                          className={`${settings.skinCardPreview} skin-${draft.candidate_skin ?? "willow_green"}`}
-                          data-skin-preview=""
-                          data-toolbar-preview=""
-                          data-preview-theme={toolbarPreviewTheme}
-                          style={candidateSkinPalette(
-                            draft.candidate_skin ?? "willow_green",
-                            toolbarPreviewTheme,
-                          )}
-                        >
-                          <SkinToolbarPreview preferences={floatingToolbar} />
-                        </div>
-                      </div>
-                    </div>
-                    {!showToolbarAppearance && (
-                      <div className="section">
-                        <small>
-                          当前宿主以输入法菜单呈现工具栏，缩放和图标尺寸不适用；组件选择仍然生效，上方开关仍然生效。
-                        </small>
-                      </div>
-                    )}
-                    {showToolbarAppearance && (
-                      <FloatingToolbarAppearanceSection
-                        scale={floatingToolbar.scale_percent}
-                        fontSize={floatingToolbar.font_size}
-                        onScaleChange={(scale_percent) =>
-                          setDraft({
-                            ...draft,
-                            floating_toolbar: { ...floatingToolbar, scale_percent },
-                          })
-                        }
-                        onFontSizeChange={(font_size) =>
-                          setDraft({
-                            ...draft,
-                            floating_toolbar: { ...floatingToolbar, font_size },
-                          })
-                        }
-                      />
-                    )}
-                    {showToolbarComponents && (
-                      <FloatingToolbarComponentsSection
-                        values={floatingToolbar}
-                        capabilities={
-                          host
-                            ? {
-                                floating_toolbar_handwriting: host.floating_toolbar_handwriting,
-                                floating_toolbar_voice: host.floating_toolbar_voice,
-                              }
-                            : undefined
-                        }
-                        onChange={(key, enabled) =>
-                          setDraft({
-                            ...draft,
-                            floating_toolbar: { ...floatingToolbar, [key]: enabled },
-                          })
-                        }
-                      />
-                    )}
-                  </fieldset>
-                  <fieldset disabled={busy} hidden={page !== "input"} aria-label="输入">
-                    {iosPlatform && (
-                      <div className="section">
-                        <div className="section-title">手写输入</div>
-                        <p>
-                          首次在键盘中使用手写时下载中文模型，需要完全访问权限。下载后可离线识别，笔迹和识别结果不会上传。Google
-                          ML Kit 会发送性能及使用统计。
-                        </p>
-                        {client.openExternalUrl && (
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={() => void openExternalUrl(handwritingSdkPrivacyUrl)}
-                          >
-                            手写 SDK 隐私说明
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    {harmonyPlatform && (
-                      <div className="section">
-                        <div className="section-title">手写输入</div>
-                        <p>
-                          手写使用系统的文字识别能力，笔迹留在本机、不上传。设备未提供该能力时手写方案会明确提示，不会改用其他识别方式。
-                        </p>
-                      </div>
-                    )}
-                    {androidPlatform && (
-                      <div className="section">
-                        <div className="section-title">Android 手写输入</div>
-                        <p>
-                          首次在 Android 键盘中切换到手写时，可能需要下载 Google ML Kit
-                          中文手写模型。模型下载完成后可离线识别；笔迹和识别结果只用于当前输入，不会上传。Google
-                          ML Kit 可能发送性能及使用统计。
-                        </p>
-                        {client.openExternalUrl && (
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={() => void openExternalUrl(handwritingSdkPrivacyUrl)}
-                          >
-                            手写 SDK 隐私说明
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    {mobilePlatform && (
-                      <div className="section input-ai-info">
-                        <div className="section-title">高情商回复</div>
-                        <p>
-                          复制对方的话，切换到高情商回复键盘，点“粘贴”后选择回复风格。支持帮你回、帮润色和换一句，点选回复插入聊天输入框。
-                        </p>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => selectPage("ai")}
-                        >
-                          配置键盘 AI
-                        </button>
-                      </div>
-                    )}
-                    {!client.touchKeyboardSchemes && (
-                      <InputModeSection
-                        scheme={draft.scheme}
-                        lastChineseScheme={draft.last_chinese_scheme}
-                        onChange={(patch) => setDraft({ ...draft, ...patch })}
-                      />
-                    )}
-                    {client.touchKeyboardSchemes && (
-                      <TouchKeyboardSchemesSection
-                        options={touchKeyboardSchemeOptions}
-                        enabled={touchKeyboardSchemes.enabled}
-                        selected={selectedTouchKeyboardScheme}
-                        onSelect={(scheme) =>
-                          setDraft(selectTouchKeyboardScheme(draft, scheme as TouchKeyboardScheme))
-                        }
-                        onToggle={(scheme, enabled) =>
-                          setTouchKeyboardSchemeEnabled(scheme as TouchKeyboardScheme, enabled)
-                        }
-                      />
-                    )}
-                    <div hidden={client.touchKeyboardSchemes || draft.scheme === "japanese"}>
-                      <InputSchemeSelectorSection
-                        value={draft.scheme === "japanese" ? "quanpin" : draft.scheme}
-                        onChange={(scheme: InputSchemeSelectorValue) =>
-                          setDraft({ ...draft, scheme, last_chinese_scheme: scheme })
-                        }
-                      />
-                    </div>
-                    <div
-                      className="section"
-                      hidden={client.touchKeyboardSchemes || draft.scheme === "japanese"}
-                    >
-                      <label className="section-header">
-                        <span className="section-title">双拼方案</span>
-                        {/* The source disables this menu unless Shuangpin is the active scheme
-                            (`_shuangpinSchemeButton.enabled = storedScheme == 1`): until then the
-                            choice changes nothing, and a live control that does nothing reads as a
-                            setting being ignored. Other hosts keep it always editable. */}
-                        <select
-                          disabled={macosPlatform && draft.scheme !== "shuangpin"}
-                          value={draft.shuangpin_profile}
-                          onChange={(event) =>
-                            setDraft({
-                              ...draft,
-                              shuangpin_profile: event.target
-                                .value as Preferences["shuangpin_profile"],
-                            })
-                          }
-                        >
-                          <option value="xiaohe">小鹤双拼</option>
-                          <option value="ziranma">自然码双拼</option>
-                          <option value="shoudao">首道双拼</option>
-                          <option value="microsoft">微软双拼</option>
-                        </select>
-                      </label>
-                    </div>
-                    {macosPlatform &&
-                      client.loadMacosShuangpinKeymap &&
-                      macosShuangpinKeymap !== undefined && (
-                        <div
-                          className="section"
-                          hidden={client.touchKeyboardSchemes || draft.scheme !== "shuangpin"}
-                        >
-                          <label className="section-header">
-                            <span className="section-title">
-                              输入时显示双拼键位提示
-                              <small>双拼输入时显示当前方案的键位图，完成上屏后自动隐藏。</small>
-                            </span>
-                            <input
-                              aria-label="输入时显示双拼键位提示"
-                              className="toggle"
-                              type="checkbox"
-                              checked={macosShuangpinKeymap}
-                              onChange={(event) => setMacosShuangpinKeymap(event.target.checked)}
-                            />
-                          </label>
-                        </div>
-                      )}
-                    <div
-                      className="section"
-                      hidden={client.touchKeyboardSchemes || draft.scheme === "japanese"}
-                    >
-                      <label className="section-header">
-                        <span className="section-title">五笔方案</span>
-                        <select value="wubi86" onChange={() => {}}>
-                          <option value="wubi86">86 五笔</option>
-                        </select>
-                      </label>
-                    </div>
-                    {((client.touchKeyboardSchemes &&
-                      touchKeyboardSchemes.enabled.includes("wubi")) ||
-                      draft.scheme === "wubi") && (
-                      <WubiSection
-                        preferences={draft}
-                        autoCommitUnique={macosPlatform ? macosWubiAutoCommitUnique : undefined}
-                        onChange={(patch) => setDraft({ ...draft, ...patch })}
-                        onAutoCommitUniqueChange={setMacosWubiAutoCommitUnique}
-                      />
-                    )}
-                    <div
-                      className="section"
-                      role="group"
-                      aria-labelledby="japanese-scheme-title"
-                      hidden={client.touchKeyboardSchemes || draft.scheme !== "japanese"}
-                    >
-                      <div className="section-title" id="japanese-scheme-title">
-                        日语方案
-                      </div>
-                      <div className="input-option-content">
-                        <label className="radio-option">
-                          <input type="radio" name="japanese-scheme" checked readOnly />
-                          <span>罗马音</span>
-                        </label>
-                      </div>
-                      <div className="input-setting-description japanese-scheme-description">
-                        直接输入罗马音，提供平假名、片假名及日语词库候选
-                      </div>
-                    </div>
-                    <NavigationSection
-                      navigation={draft.navigation ?? defaultNavigation}
-                      wordCharacter={wordCharacter}
-                      linux={linuxPlatform}
-                      onChange={({ navigation, wordCharacter: nextWordCharacter }) =>
-                        setDraft({
-                          ...draft,
-                          navigation,
-                          word_character: nextWordCharacter,
-                        })
-                      }
-                    />
-                    <div className="section">
-                      <label className="section-header">
-                        <span className="section-title">
-                          候选词翻译<small>为当前候选请求翻译结果并显示在候选行</small>
-                        </span>
-                        <input
-                          className="toggle"
-                          type="checkbox"
-                          checked={candidateTranslations}
-                          onChange={(event) =>
-                            setDraft({ ...draft, candidate_translations: event.target.checked })
-                          }
-                        />
-                      </label>
-                      <div className="input-option-divider" />
-                      <label className="section-header">
-                        <span className="section-title">目标语言</span>
-                        <select
-                          aria-label="候选词翻译目标语言"
-                          disabled={!candidateGlossLanguagesEnabled}
-                          value={translationTargetLanguage}
-                          onChange={(event) =>
-                            setDraft({
-                              ...draft,
-                              translation_target_language: event.target
-                                .value as Preferences["translation_target_language"],
-                            })
-                          }
-                        >
-                          {visibleTranslationLanguages.map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      {(androidPlatform || iosPlatform || macosPlatform || harmonyPlatform) && (
-                        <>
-                          <div className="input-option-divider" />
-                          <label className="section-header">
-                            <span className="section-title">
-                              第二种语言<small>候选词下方可同时显示第二种释义</small>
-                            </span>
-                            <select
-                              aria-label="候选词翻译第二种语言"
-                              disabled={!candidateGlossLanguagesEnabled}
-                              value={translationSecondaryLanguage}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  translation_secondary_language:
-                                    event.target.value === ""
-                                      ? null
-                                      : (event.target
-                                          .value as Preferences["translation_target_language"]),
-                                })
-                              }
-                            >
-                              {visibleSecondaryLanguages.map(([value, label]) => (
-                                <option key={value || "none"} value={value}>
-                                  {label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </>
-                      )}
-                      {androidPlatform && (
-                        <>
-                          <div className="input-option-divider" />
-                          <label className="section-header">
-                            <span className="section-title">
-                              使用水杉账号翻译候选词
-                              <small>
-                                当前页的中文候选词会发送到 api.msime.app；匿名账号在 Linux
-                                安装后的用户初始化中自动注册；不开启则不联网翻译
-                              </small>
-                            </span>
-                            <input
-                              aria-label="使用水杉账号翻译候选词"
-                              className="toggle"
-                              type="checkbox"
-                              disabled={!candidateTranslations}
-                              checked={draft.translation_account ?? false}
-                              onChange={(event) =>
-                                event.target.checked
-                                  ? setTranslationProvider("account")
-                                  : setDraft({ ...draft, translation_account: undefined })
-                              }
-                            />
-                          </label>
-                        </>
-                      )}
-                    </div>
-                    {onDeviceMissingLanguages.length > 0 && (
-                      <div role="status" className="notice" aria-label="系统翻译语言未下载">
-                        <p>
-                          整句候选暂时没有翻译：macOS 还没有下载「中文（简体）→{" "}
-                          {onDeviceMissingLanguages.map(([, label]) => label).join("、")}
-                          」翻译语言。离线词库只收词语，「现在几点了」这样的整句要靠系统在本机翻译，不联网。
-                        </p>
-                        <p>
-                          请在 系统设置 &gt; 通用 &gt; 语言与地区 &gt; 翻译语言
-                          中下载，然后回到输入框继续输入即可生效。也可以在下方选择一个在线翻译服务。
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={() =>
-                              void client.onDeviceTranslation
-                                ?.openSettings()
-                                .catch(() =>
-                                  setError(
-                                    "无法打开系统设置，请手动前往 系统设置 > 通用 > 语言与地区 > 翻译语言。",
-                                  ),
-                                )
-                            }
-                          >
-                            打开语言与地区
-                          </button>
-                        </p>
-                      </div>
-                    )}
-                    {!androidPlatform && (
-                      <>
-                        <div className="section" role="group" aria-label="候选词翻译服务">
-                          <label className="section-header">
-                            <span className="section-title">翻译服务</span>
-                            <select
-                              aria-label="候选词翻译服务"
-                              disabled={!candidateTranslations}
-                              value={translationProvider}
-                              onChange={(event) =>
-                                setTranslationProvider(
-                                  event.target.value as
-                                    | "none"
-                                    | "custom"
-                                    | "tencent"
-                                    | "niutrans"
-                                    | "account",
-                                )
-                              }
-                            >
-                              <option value="none">关闭</option>
-                              <option value="tencent">腾讯云机器翻译</option>
-                              <option value="niutrans">小牛翻译（NiuTrans）</option>
-                              <option value="custom">自定义 DeepLX 兼容服务</option>
-                              {(macosPlatform || linuxPlatform) && (
-                                <option value="account">
-                                  水杉账号（候选词发送到 api.msime.app）
-                                </option>
-                              )}
-                            </select>
-                          </label>
-                        </div>
-                        <NiuTransSection
-                          enabled={niutrans.enabled}
-                          available={candidateTranslations}
-                          appId={niutrans.app_id}
-                          apiKey={niutrans.apikey}
-                          onToggle={(enabled) =>
-                            setTranslationProvider(enabled ? "niutrans" : "none")
-                          }
-                          onAppIdChange={(app_id) =>
-                            setDraft({ ...draft, niutrans: { ...niutrans, app_id } })
-                          }
-                          onApiKeyChange={(apikey) =>
-                            setDraft({ ...draft, niutrans: { ...niutrans, apikey } })
-                          }
-                        >
-                          {credentialTestControl(
-                            "translation.niutrans",
-                            "测试 NiuTrans 配置",
-                            { app_id: niutrans.app_id, apikey: niutrans.apikey },
-                            !candidateTranslations ||
-                              !niutrans.app_id.trim() ||
-                              !niutrans.apikey.trim(),
-                          )}
-                        </NiuTransSection>
-                        {linuxPlatform ? (
-                          <div className="section" role="group" aria-label="在线翻译服务">
-                            <div className="section-title">
-                              在线翻译服务
-                              <small>由用户管理的 Linux provider 服务负责网络请求和凭据</small>
-                            </div>
-                            {client.providerCredentials ? (
-                              <>
-                                <p className="input-setting-description">
-                                  {providerCredentials?.tencentInvalid
-                                    ? "现有 tencent-provider.json 无效，provider 服务不会发出翻译请求；请修复或删除该文件。"
-                                    : providerCredentials?.tencent
-                                      ? "腾讯云凭据已保存；SecretId 和 SecretKey 留空则保留原值。"
-                                      : "凭据只写入用户配置目录的 tencent-provider.json，由 provider 服务读取，不进入共享设置。"}
-                                </p>
-                                <label className="section-header">
-                                  <span className="section-title">SecretId</span>
-                                  <input
-                                    aria-label="腾讯云 SecretId"
-                                    type="password"
-                                    autoComplete="off"
-                                    value={tencentCredentialInput.secretId}
-                                    onChange={(event) =>
-                                      setTencentCredentialInput({
-                                        ...tencentCredentialInput,
-                                        secretId: event.target.value,
-                                      })
-                                    }
-                                  />
-                                </label>
-                                <label className="section-header">
-                                  <span className="section-title">SecretKey</span>
-                                  <input
-                                    aria-label="腾讯云 SecretKey"
-                                    type="password"
-                                    autoComplete="off"
-                                    value={tencentCredentialInput.secretKey}
-                                    onChange={(event) =>
-                                      setTencentCredentialInput({
-                                        ...tencentCredentialInput,
-                                        secretKey: event.target.value,
-                                      })
-                                    }
-                                  />
-                                </label>
-                                <label className="section-header">
-                                  <span className="section-title">地域</span>
-                                  <input
-                                    aria-label="腾讯云地域"
-                                    value={
-                                      tencentCredentialInput.region ??
-                                      providerCredentials?.tencent?.region ??
-                                      "ap-guangzhou"
-                                    }
-                                    onChange={(event) =>
-                                      setTencentCredentialInput({
-                                        ...tencentCredentialInput,
-                                        region: event.target.value,
-                                      })
-                                    }
-                                  />
-                                </label>
-                                <div className={settings.serviceRow}>
-                                  <div>
-                                    <button
-                                      type="button"
-                                      className="secondary"
-                                      disabled={
-                                        providerCredentialBusy === "tencent" ||
-                                        (!providerCredentials?.tencent &&
-                                          (!tencentCredentialInput.secretId.trim() ||
-                                            !tencentCredentialInput.secretKey.trim()))
-                                      }
-                                      onClick={() =>
-                                        void runProviderCredential(
-                                          "tencent",
-                                          (credentials) =>
-                                            credentials.saveTencent({
-                                              ...(tencentCredentialInput.secretId.trim()
-                                                ? { secretId: tencentCredentialInput.secretId }
-                                                : {}),
-                                              ...(tencentCredentialInput.secretKey.trim()
-                                                ? { secretKey: tencentCredentialInput.secretKey }
-                                                : {}),
-                                              region:
-                                                tencentCredentialInput.region ??
-                                                providerCredentials?.tencent?.region ??
-                                                "ap-guangzhou",
-                                            }),
-                                          "凭据已保存，provider 服务下次请求时生效。",
-                                        )
-                                      }
-                                    >
-                                      保存凭据
-                                    </button>
-                                    {providerCredentials?.tencent && (
-                                      <button
-                                        type="button"
-                                        className="secondary"
-                                        disabled={providerCredentialBusy === "tencent"}
-                                        onClick={() =>
-                                          void runProviderCredential(
-                                            "tencent",
-                                            (credentials) => credentials.clearTencent(),
-                                            "凭据已清除。",
-                                          )
-                                        }
-                                      >
-                                        清除凭据
-                                      </button>
-                                    )}
-                                    <CredentialStatusMessage
-                                      message={providerCredentialMessages.tencent}
-                                    />
-                                  </div>
-                                </div>
-                              </>
-                            ) : (
-                              <p className="input-setting-description">
-                                候选词翻译开启后，provider 从用户配置目录的{" "}
-                                <code>tencent-provider.json</code>{" "}
-                                读取腾讯云凭据；设置页不保存不会生效的 SecretId 或 SecretKey。
-                              </p>
-                            )}
-                            {translationProvider === "tencent" &&
-                              credentialTestControl(
-                                "translation.tencent",
-                                "测试腾讯云翻译配置",
-                                {},
-                                !candidateTranslations,
-                              )}
-                          </div>
-                        ) : (
-                          <TencentTranslationSection
-                            enabled={tencentTranslation.enabled}
-                            available={candidateTranslations}
-                            secretId={tencentTranslation.secret_id}
-                            secretKey={tencentTranslation.secret_key}
-                            region={tencentTranslation.region}
-                            credentialIssue={tencentCredentialIssue(
-                              tencentTranslation.secret_id,
-                              tencentTranslation.secret_key,
-                              tencentTranslation.region,
-                            )}
-                            showMissingCredentialsWarning={
-                              !customTranslation.enabled &&
-                              !tencentSecretConfigured(tencentTranslation.secret_id) &&
-                              !tencentSecretConfigured(tencentTranslation.secret_key)
-                            }
-                            onToggle={(enabled) =>
-                              setDraft({
-                                ...draft,
-                                tencent_tmt: { ...tencentTranslation, enabled },
-                                // Turning on a service of the user's own ends the account choice, so the account never keeps receiving candidates behind a visible selection.
-                                ...(enabled ? { translation_account: undefined } : {}),
-                              })
-                            }
-                            onSecretIdChange={(secret_id) =>
-                              setDraft({
-                                ...draft,
-                                tencent_tmt: { ...tencentTranslation, secret_id },
-                              })
-                            }
-                            onSecretKeyChange={(secret_key) =>
-                              setDraft({
-                                ...draft,
-                                tencent_tmt: { ...tencentTranslation, secret_key },
-                              })
-                            }
-                            onRegionChange={(region) =>
-                              setDraft({
-                                ...draft,
-                                tencent_tmt: { ...tencentTranslation, region },
-                              })
-                            }
-                          >
-                            {(windowsPlatform || macosPlatform) &&
-                              tencentTranslation.enabled &&
-                              credentialTestControl(
-                                "translation.tencent",
-                                "测试腾讯云翻译配置",
-                                {
-                                  secret_id: tencentTranslation.secret_id,
-                                  secret_key: tencentTranslation.secret_key,
-                                  region: tencentTranslation.region,
-                                },
-                                !candidateTranslations ||
-                                  Boolean(
-                                    tencentCredentialIssue(
-                                      tencentTranslation.secret_id,
-                                      tencentTranslation.secret_key,
-                                      tencentTranslation.region,
-                                    ),
-                                  ),
-                              )}
-                          </TencentTranslationSection>
-                        )}
-                        {client.customTranslations && (
-                          <CustomTranslationsSection
-                            mobile={mobilePlatform}
-                            value={customTranslationsText}
-                            placeholder={customTranslationsExample}
-                            notice={customTranslationsNotice}
-                            summary={customTranslationsSummary}
-                            busy={customTranslationsBusy}
-                            onChange={(value) => {
-                              setCustomTranslationsText(value);
-                              setCustomTranslationsNotice("");
-                            }}
-                            onSave={() => void saveCustomTranslations()}
-                          />
-                        )}
-                        <CustomTranslationSection
-                          enabled={customTranslation.enabled}
-                          available={candidateTranslations}
-                          endpoint={customTranslation.endpoint}
-                          apiKey={customTranslation.api_key}
-                          endpointIssue={translationEndpointIssue(customTranslation.endpoint)}
-                          onToggle={(enabled) =>
-                            setDraft({
-                              ...draft,
-                              custom_translation: { ...customTranslation, enabled },
-                              // Same rule as the Tencent switch: a service of the user's own ends the account choice.
-                              ...(enabled ? { translation_account: undefined } : {}),
-                            })
-                          }
-                          onEndpointChange={(endpoint) =>
-                            setDraft({
-                              ...draft,
-                              custom_translation: { ...customTranslation, endpoint },
-                            })
-                          }
-                          onApiKeyChange={(api_key) =>
-                            setDraft({
-                              ...draft,
-                              custom_translation: { ...customTranslation, api_key },
-                            })
-                          }
-                        >
-                          {credentialTestControl(
-                            "translation.custom",
-                            "测试自定义翻译配置",
-                            {
-                              endpoint: customTranslation.endpoint,
-                              api_key: customTranslation.api_key,
-                            },
-                            !candidateTranslations ||
-                              Boolean(translationEndpointIssue(customTranslation.endpoint)),
-                          )}
-                        </CustomTranslationSection>
-                      </>
-                    )}
-                    <WordCharacterSection
-                      preferences={wordCharacter}
-                      navigation={draft.navigation ?? defaultNavigation}
-                      ios={iosPlatform}
-                      onChange={({ wordCharacter: nextWordCharacter, navigation }) =>
-                        setDraft({
-                          ...draft,
-                          word_character: nextWordCharacter,
-                          navigation,
-                        })
-                      }
-                    />
-                    {client.fuzzyPinyin && (
-                      <FuzzyPinyinSection
-                        preferences={fuzzyPinyin}
-                        onChange={(fuzzy_pinyin) => setDraft({ ...draft, fuzzy_pinyin })}
-                        confirm={confirm}
-                      />
-                    )}
-                    <LearningSection
-                      value={draft.learning}
-                      onChange={(learning) => setDraft({ ...draft, learning })}
-                    />
-                    <PunctuationSection
-                      preferences={draft}
-                      showCharacterWidth={showCharacterWidth}
-                      onChange={(patch) => setDraft({ ...draft, ...patch })}
-                    />
-                    <MixedInputSection
-                      preferences={mixedInput}
-                      onChange={(mixed_input) => setDraft({ ...draft, mixed_input })}
-                    />
-                    {/* macOS keeps this with the chords that trigger it, on the shortcut page. */}
-                    {showInputModeHUD && !macosPlatform && (
-                      <InputModeHudSection
-                        value={draft.input_mode_hud}
-                        onChange={(input_mode_hud) => setDraft({ ...draft, input_mode_hud })}
-                      />
-                    )}
-                    {client.candidateEnglishGloss && (
-                      <CandidateEnglishGlossSection
-                        value={draft.candidate_english_gloss}
-                        onChange={(candidate_english_gloss) =>
-                          setDraft({ ...draft, candidate_english_gloss })
-                        }
-                      />
-                    )}
-                    {showEnglishSuggestions && (
-                      <EnglishSuggestionsSection
-                        value={draft.english_suggestions}
-                        onChange={(english_suggestions) =>
-                          setDraft({ ...draft, english_suggestions })
-                        }
-                      />
-                    )}
-                    <DefaultImeModeSection
-                      value={draft.default_ime_mode}
-                      onChange={(default_ime_mode) => setDraft({ ...draft, default_ime_mode })}
-                    />
-                    {showModeScope && (
-                      <ImeModeScopeSection
-                        value={draft.ime_mode_scope}
-                        onChange={(ime_mode_scope) => setDraft({ ...draft, ime_mode_scope })}
-                      />
-                    )}
-                    <TraditionalChineseOutputSection
-                      value={draft.traditional_chinese_output}
-                      onChange={(traditional_chinese_output) =>
-                        setDraft({ ...draft, traditional_chinese_output })
-                      }
-                    />
-                    <CloudCandidatesSection
-                      value={draft.cloud_candidates}
-                      onChange={(cloud_candidates) => setDraft({ ...draft, cloud_candidates })}
-                    />
-                    <FrequencySection
-                      preferences={frequency}
-                      onChange={(frequency) => setDraft({ ...draft, frequency })}
-                    />
-                    {mobilePlatform && client.mobileKeyboardFeedback && mobileKeyboardFeedback && (
-                      <MobileKeyboardFeedbackSection
-                        value={mobileKeyboardFeedback}
-                        busy={mobileKeyboardFeedbackBusy}
-                        ios={iosPlatform}
-                        canPreview={Boolean(client.mobileKeyboardFeedback.preview)}
-                        onChange={(next) => void saveMobileKeyboardFeedback(next)}
-                        onPreview={() => void previewMobileKeyboardHaptics()}
-                      />
-                    )}
-                  </fieldset>
+                        : undefined
+                    }
+                    onScaleChange={(scale_percent) =>
+                      setDraft({
+                        ...draft,
+                        floating_toolbar: { ...floatingToolbar, scale_percent },
+                      })
+                    }
+                    onFontSizeChange={(font_size) =>
+                      setDraft({
+                        ...draft,
+                        floating_toolbar: { ...floatingToolbar, font_size },
+                      })
+                    }
+                    onComponentChange={(key, enabled) =>
+                      setDraft({
+                        ...draft,
+                        floating_toolbar: { ...floatingToolbar, [key]: enabled },
+                      })
+                    }
+                  />
+                  <InputSettingsPanel
+                    disabled={busy}
+                    hidden={page !== "input"}
+                    client={client}
+                    draft={draft}
+                    setDraft={setDraft}
+                    confirm={confirm}
+                    onOpenAi={() => selectPage("ai")}
+                    openExternalUrl={openExternalUrl}
+                    onError={setError}
+                    iosPlatform={iosPlatform}
+                    harmonyPlatform={harmonyPlatform}
+                    androidPlatform={androidPlatform}
+                    mobilePlatform={mobilePlatform}
+                    macosPlatform={macosPlatform}
+                    linuxPlatform={linuxPlatform}
+                    windowsPlatform={windowsPlatform}
+                    touchKeyboardSchemes={touchKeyboardSchemes}
+                    selectedTouchKeyboardScheme={selectedTouchKeyboardScheme}
+                    setTouchKeyboardSchemeEnabled={setTouchKeyboardSchemeEnabled}
+                    macosShuangpinKeymap={macosShuangpinKeymap}
+                    setShuangpinKeymap={setShuangpinKeymap}
+                    macosWubiAutoCommitUnique={macosWubiAutoCommitUnique}
+                    setWubiAutoCommitUnique={setWubiAutoCommitUnique}
+                    wordCharacter={wordCharacter}
+                    candidateTranslations={candidateTranslations}
+                    candidateGlossLanguagesEnabled={candidateGlossLanguagesEnabled}
+                    translationTargetLanguage={translationTargetLanguage}
+                    translationSecondaryLanguage={translationSecondaryLanguage}
+                    visibleTranslationLanguages={visibleTranslationLanguages}
+                    visibleSecondaryLanguages={visibleSecondaryLanguages}
+                    customTranslation={customTranslation}
+                    tencentTranslation={tencentTranslation}
+                    niutrans={niutrans}
+                    translationProvider={translationProvider}
+                    onDeviceMissingLanguages={onDeviceMissingLanguages}
+                    setTranslationProvider={setTranslationProvider}
+                    providerCredentials={providerCredentials}
+                    tencentCredentialInput={tencentCredentialInput}
+                    setTencentCredentialInput={setTencentCredentialInput}
+                    providerCredentialBusy={providerCredentialBusy}
+                    providerCredentialMessages={providerCredentialMessages}
+                    runProviderCredential={runProviderCredential}
+                    credentialTestControl={credentialTestControl}
+                    customTranslationsText={customTranslationsText}
+                    setCustomTranslationsText={setCustomTranslationsText}
+                    customTranslationsNotice={customTranslationsNotice}
+                    customTranslationsSummary={customTranslationsSummary}
+                    customTranslationsBusy={customTranslationsBusy}
+                    customTranslationsPlaceholder={customTranslationsPlaceholder}
+                    saveCustomTranslations={saveCustomTranslations}
+                    fuzzyPinyin={fuzzyPinyin}
+                    mixedInput={mixedInput}
+                    frequency={frequency}
+                    showCharacterWidth={showCharacterWidth}
+                    showInputModeHUD={showInputModeHUD}
+                    showEnglishSuggestions={showEnglishSuggestions}
+                    showModeScope={showModeScope}
+                    mobileKeyboardFeedback={mobileKeyboardFeedback}
+                    mobileKeyboardFeedbackBusy={mobileKeyboardFeedbackBusy}
+                    saveMobileKeyboardFeedback={saveMobileKeyboardFeedback}
+                    previewMobileKeyboardHaptics={previewMobileKeyboardHaptics}
+                  />
                   <HelpcodeSettingsPage
                     value={draft}
                     mobile={mobilePlatform}
@@ -5770,102 +2667,59 @@ export function SettingsPage({
                     hidden={page !== "helpcode"}
                     onChange={(patch) => setDraft({ ...draft, ...patch })}
                   />
-                  <fieldset disabled={busy} hidden={page !== "shortcuts"} aria-label="快捷键">
-                    <div className={`section ${settings.shortcutIntro}`}>
-                      {mobilePlatform
-                        ? "输入法快捷键仅在对应输入状态或候选栏显示时生效。翻页方式可在“输入”中启用或关闭。"
-                        : "输入法快捷键仅在对应输入状态或候选窗口显示时生效。翻页方式可在“输入”中启用或关闭。"}
-                    </div>
-                    <InputModeShortcutsSection
-                      keybindings={keybindings}
-                      onChange={(patch) =>
-                        setDraft({ ...draft, keybindings: { ...keybindings, ...patch } })
-                      }
-                      onInputModeHUDChange={(input_mode_hud) =>
-                        setDraft({ ...draft, input_mode_hud })
-                      }
-                      showModeSwitchShortcuts={showModeSwitchShortcuts}
-                      macos={macosPlatform}
-                      showInputModeHUD={showInputModeHUD}
-                      inputModeHUD={inputModeHUD}
-                      showFullwidthChord={showFullwidthChord}
-                      fullwidthChord={fullwidthChord}
-                      windows={windowsPlatform}
-                    />
-                    <PanelShortcutsSection
-                      visible={showPanelShortcuts}
-                      macos={macosPlatform}
-                      harmony={harmonyPlatform}
-                    />
-                    <CandidateShortcutsSection
-                      navigation={draft.navigation ?? defaultNavigation}
-                      numberRowSelection={draft.number_row_selection ?? true}
-                      showNumberRowSelection={showNumberRowSelection}
-                      mobile={mobilePlatform}
-                      onNumberRowSelectionChange={(number_row_selection) =>
-                        setDraft({ ...draft, number_row_selection })
-                      }
-                    />
-                    <MaintenanceShortcutsSection
-                      visible={showDesktopMaintenanceShortcuts}
-                      macos={macosPlatform}
-                      linux={linuxPlatform}
-                      maintenanceChord={maintenanceChord}
-                    />
-                    <InputMethodServiceSection
-                      visible={Boolean(showRestartInputMethod)}
-                      macos={macosPlatform}
-                      linux={linuxPlatform}
-                      restartInputMethod={client.restartInputMethod}
-                      installInputSource={
-                        showInstallInputSource ? client.installInputSource : undefined
-                      }
-                    />
-                  </fieldset>
-                  <fieldset disabled={busy} hidden={page !== "tools"} aria-label="实用功能">
-                    <ClipboardHistorySection
-                      client={client.clipboard}
-                      historyEnabled={clipboardHistory}
-                      persistedHistoryEnabled={snapshot?.preferences.clipboard_history ?? false}
-                      revision={snapshot?.revision}
-                      page={page}
-                      ios={iosPlatform}
-                      onToggle={toggleClipboardHistory}
-                      onError={setError}
-                    >
-                      {macosPlatform ? (
-                        <p className={settings.panelPreviewLabel}>
-                          云剪贴板和云词典需要当前输入法进程提供输入会话；请从输入法悬浮工具栏或输入法菜单打开对应面板。
-                        </p>
-                      ) : (
-                        <>
-                          {client.openCloudClipboard && (
-                            <button
-                              type="button"
-                              className="secondary"
-                              onClick={() => void openPanel(client.openCloudClipboard)}
-                            >
-                              打开云剪贴板
-                            </button>
-                          )}
-                          {client.openCloudDictionary && (
-                            <button
-                              type="button"
-                              className="secondary"
-                              onClick={() => void openPanel(client.openCloudDictionary)}
-                            >
-                              打开云词典
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </ClipboardHistorySection>
-                    <LocalModesSection
-                      preferences={localModes}
-                      ios={iosPlatform}
-                      onChange={(local_modes) => setDraft({ ...draft, local_modes })}
-                    />
-                  </fieldset>
+                  <ShortcutsSettingsSection
+                    disabled={busy}
+                    hidden={page !== "shortcuts"}
+                    mobile={mobilePlatform}
+                    keybindings={keybindings}
+                    onKeybindingsChange={(patch) =>
+                      setDraft({ ...draft, keybindings: { ...keybindings, ...patch } })
+                    }
+                    onInputModeHUDChange={(input_mode_hud) =>
+                      setDraft({ ...draft, input_mode_hud })
+                    }
+                    showModeSwitchShortcuts={showModeSwitchShortcuts}
+                    macos={macosPlatform}
+                    showInputModeHUD={showInputModeHUD}
+                    inputModeHUD={inputModeHUD}
+                    showFullwidthChord={showFullwidthChord}
+                    fullwidthChord={fullwidthChord}
+                    windows={windowsPlatform}
+                    navigation={draft.navigation ?? defaultNavigation}
+                    numberRowSelection={draft.number_row_selection ?? true}
+                    showNumberRowSelection={showNumberRowSelection}
+                    onNumberRowSelectionChange={(number_row_selection) =>
+                      setDraft({ ...draft, number_row_selection })
+                    }
+                    showPanelShortcuts={showPanelShortcuts}
+                    harmony={harmonyPlatform}
+                    showDesktopMaintenanceShortcuts={showDesktopMaintenanceShortcuts}
+                    linux={linuxPlatform}
+                    maintenanceChord={maintenanceChord}
+                    showRestartInputMethod={Boolean(showRestartInputMethod)}
+                    restartInputMethod={client.restartInputMethod}
+                    installInputSource={
+                      showInstallInputSource ? client.installInputSource : undefined
+                    }
+                  />
+                  <UtilitiesSettingsSection
+                    disabled={busy}
+                    hidden={page !== "tools"}
+                    clipboard={client.clipboard}
+                    historyEnabled={clipboardHistory}
+                    persistedHistoryEnabled={snapshot?.preferences.clipboard_history ?? false}
+                    revision={snapshot?.revision}
+                    page={page}
+                    ios={iosPlatform}
+                    macos={macosPlatform}
+                    onToggleClipboard={toggleClipboardHistory}
+                    onError={setError}
+                    openCloudClipboard={client.openCloudClipboard}
+                    openCloudDictionary={client.openCloudDictionary}
+                    onOpenPanel={openPanel}
+                    localModes={localModes}
+                    onLocalModesChange={(local_modes) => setDraft({ ...draft, local_modes })}
+                  />
                   <HelpSettingsPage
                     busy={busy}
                     hidden={page !== "help"}
@@ -5887,271 +2741,130 @@ export function SettingsPage({
                         : undefined
                     }
                   />
-                  <fieldset disabled={busy} hidden={page !== "about"} aria-label="关于">
-                    <div className={`section ${doc.hero}`}>
-                      <div className={doc.mark}>
-                        <img src={logo} alt="水杉 IME" />
-                      </div>
-                      <div>
-                        <div className={doc.eyebrow}>Metasequoia IME</div>
-                        <div className={doc.heroTitle}>水杉 IME</div>
-                        <p>{platformAboutDescription}</p>
-                      </div>
-                    </div>
-                    <div className={`section ${doc.linkList}`}>
-                      <div className={`${doc.linkRow} ${doc.versionRow}`}>
-                        <div>
-                          <div className={doc.linkTitle}>当前版本</div>
-                          <div className={doc.version}>v{currentAppVersion}</div>
-                          {updateStatus && (
-                            <p className={doc.updateStatus} role="status">
-                              {updateStatus}
-                            </p>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          className={`secondary ${doc.updateButton}`}
-                          disabled={updateBusy}
-                          onClick={() => void checkForUpdate()}
-                        >
-                          {updateBusy ? "正在检查…" : "检查更新"}
-                        </button>
-                      </div>
-                      {availableUpdate && (
-                        <div className={doc.updateResult}>
-                          <p>水杉 IME v{availableUpdate.version.display} 已发布。</p>
-                          {installerTrust?.warning && (
-                            <p className={doc.updateWarning}>{installerTrust.warning}</p>
-                          )}
-                          {installerTrust?.verify && (
-                            <>
-                              <p>
-                                下载后请核对 SHA256：<code>{installerTrust.verify.sha256}</code>
-                              </p>
-                              <p>
-                                核对命令：<code>{installerTrust.verify.command}</code>
-                              </p>
-                            </>
-                          )}
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={() => void openExternalUrl(availableUpdate.releaseUrl)}
-                          >
-                            前往下载
-                          </button>
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        className={doc.linkRow}
-                        onClick={() => void openExternalUrl(platformLicenseUrl)}
-                      >
-                        <span className={doc.linkTitle}>开源许可协议</span>
-                        <span aria-hidden="true">↗</span>
-                      </button>
-                      <button
-                        type="button"
-                        className={doc.linkRow}
-                        onClick={() =>
-                          void openExternalUrl(
-                            linuxPlatform
-                              ? linuxPrivacyUrl
-                              : clientHostedPlatform
-                                ? androidPrivacyUrl
-                                : privacyUrl,
-                          )
-                        }
-                      >
-                        <span className={doc.linkTitle}>隐私政策</span>
-                        <span aria-hidden="true">↗</span>
-                      </button>
-                    </div>
-                    <DataDirectorySection
-                      visible={Boolean((macosPlatform || linuxPlatform) && client.dataDirectory)}
-                      linux={linuxPlatform}
-                      dataDirectory={dataDirectory}
-                      busy={dataDirectoryBusy}
-                      result={dataDirectoryResult}
-                      onChoose={() => void chooseDataDirectory()}
-                    />
-                    {macosPlatform && (
-                      <LicenseUninstallSection
-                        openThirdPartyLicenses={client.openThirdPartyLicenses}
-                        uninstallInputSource={client.uninstallInputSource}
-                        removeUserData={removeUserDataOnUninstall}
-                        uninstallBusy={uninstallBusy}
-                        uninstallConfirmation={uninstallConfirmation}
-                        uninstallResult={uninstallResult}
-                        onRemoveUserDataChange={setRemoveUserDataOnUninstall}
-                        onRequestUninstall={() => {
-                          setUninstallResult(null);
-                          setUninstallConfirmation(true);
-                        }}
-                        onConfirmUninstall={() => void uninstallInputSource()}
-                        onCancelUninstall={() => setUninstallConfirmation(false)}
-                      />
+                  <AboutSettingsSection
+                    disabled={busy}
+                    hidden={page !== "about"}
+                    logo={logo}
+                    description={platformAboutDescription}
+                    currentAppVersion={currentAppVersion}
+                    updateStatus={updateStatus}
+                    updateBusy={updateBusy}
+                    availableUpdate={availableUpdate}
+                    installerTrust={installerTrust}
+                    licenseUrl={platformLicenseUrl}
+                    privacyUrl={platformPrivacyUrl}
+                    macos={macosPlatform}
+                    linux={linuxPlatform}
+                    windows={windowsPlatform || !client.host}
+                    mobile={mobilePlatform}
+                    dataDirectoryVisible={Boolean(
+                      (macosPlatform || linuxPlatform) && client.dataDirectory,
                     )}
-                    <HelpFeedbackSection
-                      visible={mobilePlatform}
-                      onHelp={() => selectPage("help")}
-                      onFeedback={() => selectPage("feedback")}
-                    />
-                    <DiagnosticLogsSection
-                      visible={!client.host || linuxPlatform || windowsPlatform || macosPlatform}
-                      linux={linuxPlatform}
-                      macos={macosPlatform}
-                      windows={windowsPlatform || !client.host}
-                      values={diagnosticLog}
-                      openDirectory={client.openDiagnosticLogDirectory}
-                      onChange={(patch) =>
-                        setDraft({ ...draft, diagnostic_log: { ...diagnosticLog, ...patch } })
-                      }
-                      onError={setError}
-                    />
-                    {/* Only the Windows Server reads this switch; the other hosts report on their own terms, described in PRIVACY.md, so offering it there would be a switch that changes nothing. */}
-                    {windowsPlatform && (
-                      <TelemetrySection
-                        value={draft.telemetry_enabled}
-                        onChange={(telemetry_enabled) => setDraft({ ...draft, telemetry_enabled })}
-                      />
-                    )}
-                  </fieldset>
-                  <fieldset
+                    dataDirectory={dataDirectory}
+                    dataDirectoryBusy={dataDirectoryBusy}
+                    dataDirectoryResult={dataDirectoryResult}
+                    onCheckForUpdate={() => void checkForUpdate()}
+                    onOpenExternalUrl={openExternalUrl}
+                    onChooseDataDirectory={() => void chooseDataDirectory()}
+                    openThirdPartyLicenses={client.openThirdPartyLicenses}
+                    uninstallInputSource={client.uninstallInputSource}
+                    removeUserData={removeUserDataOnUninstall}
+                    uninstallBusy={uninstallBusy}
+                    uninstallConfirmation={uninstallConfirmation}
+                    uninstallResult={uninstallResult}
+                    onRemoveUserDataChange={setRemoveUserDataOnUninstall}
+                    onRequestUninstall={requestUninstall}
+                    onConfirmUninstall={() => void confirmUninstall()}
+                    onCancelUninstall={cancelUninstall}
+                    diagnosticVisible={
+                      !client.host || linuxPlatform || windowsPlatform || macosPlatform
+                    }
+                    diagnosticLog={diagnosticLog}
+                    openDiagnosticLogDirectory={client.openDiagnosticLogDirectory}
+                    onDiagnosticLogChange={(patch) =>
+                      setDraft({ ...draft, diagnostic_log: { ...diagnosticLog, ...patch } })
+                    }
+                    onDiagnosticLogError={setError}
+                    telemetryEnabled={draft.telemetry_enabled}
+                    onTelemetryChange={(telemetry_enabled) =>
+                      setDraft({ ...draft, telemetry_enabled })
+                    }
+                    onHelp={() => selectPage("help")}
+                    onFeedback={() => selectPage("feedback")}
+                  />
+                  <ScreenKeyboardSettingsSection
                     disabled={busy}
                     hidden={page !== "screen-keyboard"}
-                    aria-label="屏幕键盘"
-                  >
-                    <ScreenKeyboardThemeSection
-                      mobile={mobilePlatform}
-                      value={draft.screen_keyboard_theme ?? "follow"}
-                      onChange={(screen_keyboard_theme) =>
-                        setDraft({ ...draft, screen_keyboard_theme })
+                    mobile={mobilePlatform}
+                    screenKeyboardTheme={draft.screen_keyboard_theme ?? "follow"}
+                    previewTheme={keyboardPreviewTheme}
+                    onScreenKeyboardThemeChange={(screen_keyboard_theme) =>
+                      setDraft({ ...draft, screen_keyboard_theme })
+                    }
+                    selectedSkin={touchKeyboardSkin}
+                    customDesign={customTouchKeyboardSkin}
+                    customAvailable={Boolean(client.customTouchKeyboardSkins)}
+                    editorOpen={showTouchSkinEditor}
+                    onSkinSelect={(touch_keyboard_skin) =>
+                      setDraft({ ...draft, touch_keyboard_skin })
+                    }
+                    onToggleEditor={() => setShowTouchSkinEditor((value) => !value)}
+                    communityAvailable={Boolean(mobilePlatform && client.communitySkins)}
+                    onOpenCommunity={() => openCommunity("all")}
+                    library={client.customSkinLibrary}
+                    aiSkins={client.aiSkins}
+                    communitySkins={client.communitySkins}
+                    onDesignChange={(design) =>
+                      setDraft((current) =>
+                        current ? { ...current, custom_touch_keyboard_skin: design } : current,
+                      )
+                    }
+                    onUseDesign={() =>
+                      setDraft((current) =>
+                        current ? { ...current, touch_keyboard_skin: "custom" } : current,
+                      )
+                    }
+                    onCloseEditor={() => setShowTouchSkinEditor(false)}
+                    heightAdjustment={touchKeyboardHeightAdjustment}
+                    keySpacingTenths={touchKeySpacingTenths}
+                    rowSpacingTenths={touchRowSpacingTenths}
+                    touchVoiceShortcut={draft.touch_voice_shortcut ?? false}
+                    toolbarComponents={Boolean(host?.touch_toolbar_components)}
+                    toolbar={draft.touch_toolbar}
+                    tabletFullKeys={mobileKeyboardFeedback?.tabletFullKeys}
+                    tabletFullKeysBusy={mobileKeyboardFeedbackBusy}
+                    onHeightAdjustmentChange={(touch_keyboard_height_adjustment) =>
+                      setDraft({ ...draft, touch_keyboard_height_adjustment })
+                    }
+                    onKeySpacingChange={(touch_key_spacing_tenths) =>
+                      setDraft({ ...draft, touch_key_spacing_tenths })
+                    }
+                    onRowSpacingChange={(touch_row_spacing_tenths) =>
+                      setDraft({ ...draft, touch_row_spacing_tenths })
+                    }
+                    onTouchVoiceShortcutChange={(touch_voice_shortcut) =>
+                      setDraft({ ...draft, touch_voice_shortcut })
+                    }
+                    onToolbarChange={(touch_toolbar) => setDraft({ ...draft, touch_toolbar })}
+                    onTabletFullKeysChange={(tabletFullKeys) => {
+                      if (mobileKeyboardFeedback) {
+                        void saveMobileKeyboardFeedback({
+                          ...mobileKeyboardFeedback,
+                          tabletFullKeys,
+                        });
                       }
-                    />
-                    <ScreenKeyboardSkinsSection
-                      mobile={mobilePlatform}
-                      theme={keyboardPreviewTheme}
-                      selected={touchKeyboardSkin}
-                      customDesign={customTouchKeyboardSkin}
-                      customAvailable={Boolean(client.customTouchKeyboardSkins)}
-                      editorOpen={showTouchSkinEditor}
-                      onSelect={(touch_keyboard_skin) =>
-                        setDraft({ ...draft, touch_keyboard_skin })
-                      }
-                      onToggleEditor={() => setShowTouchSkinEditor((value) => !value)}
-                    />
-                    {mobilePlatform && client.communitySkins && (
-                      <div className="section">
-                        <div className="section-header">
-                          <span className="section-title">
-                            社区皮肤<small>看看别人做的键盘皮肤，可以直接试用或保存</small>
-                          </span>
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={() => openCommunity("all")}
-                          >
-                            去社区发现皮肤
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {client.customTouchKeyboardSkins && showTouchSkinEditor && (
-                      <div className="section">
-                        <TouchKeyboardSkinEditor
-                          design={customTouchKeyboardSkin}
-                          selected={touchKeyboardSkin === "custom"}
-                          theme={keyboardPreviewTheme}
-                          disabled={busy}
-                          library={client.customSkinLibrary}
-                          aiSkins={client.aiSkins}
-                          communitySkins={client.communitySkins}
-                          onChange={(design) =>
-                            setDraft((current) =>
-                              current
-                                ? { ...current, custom_touch_keyboard_skin: design }
-                                : current,
-                            )
-                          }
-                          onUse={() =>
-                            setDraft((current) =>
-                              current ? { ...current, touch_keyboard_skin: "custom" } : current,
-                            )
-                          }
-                          onClose={() => setShowTouchSkinEditor(false)}
-                        />
-                      </div>
-                    )}
-                    <TouchKeyboardGeometrySection
-                      heightAdjustment={touchKeyboardHeightAdjustment}
-                      keySpacingTenths={touchKeySpacingTenths}
-                      rowSpacingTenths={touchRowSpacingTenths}
-                      touchVoiceShortcut={draft.touch_voice_shortcut ?? false}
-                      toolbarComponents={Boolean(host?.touch_toolbar_components)}
-                      toolbar={draft.touch_toolbar}
-                      tabletFullKeys={mobileKeyboardFeedback?.tabletFullKeys}
-                      tabletFullKeysBusy={mobileKeyboardFeedbackBusy}
-                      onHeightAdjustmentChange={(touch_keyboard_height_adjustment) =>
-                        setDraft({ ...draft, touch_keyboard_height_adjustment })
-                      }
-                      onKeySpacingChange={(touch_key_spacing_tenths) =>
-                        setDraft({ ...draft, touch_key_spacing_tenths })
-                      }
-                      onRowSpacingChange={(touch_row_spacing_tenths) =>
-                        setDraft({ ...draft, touch_row_spacing_tenths })
-                      }
-                      onTouchVoiceShortcutChange={(touch_voice_shortcut) =>
-                        setDraft({ ...draft, touch_voice_shortcut })
-                      }
-                      onToolbarChange={(touch_toolbar) => setDraft({ ...draft, touch_toolbar })}
-                      onTabletFullKeysChange={(tabletFullKeys) => {
-                        if (mobileKeyboardFeedback) {
-                          void saveMobileKeyboardFeedback({
-                            ...mobileKeyboardFeedback,
-                            tabletFullKeys,
-                          });
-                        }
-                      }}
-                      onReset={() => void resetTouchKeyboardSettings()}
-                    />
-                    <div className={`section ${settings.launchCard}`}>
-                      <div className={`section-header ${settings.launchRow}`}>
-                        <span className="section-title">
-                          打开屏幕键盘<small>使用鼠标或触控方式输入文字与快捷按键</small>
-                        </span>
-                        <button
-                          type="button"
-                          className={`secondary ${settings.openButton}`}
-                          disabled={!client.openScreenKeyboard}
-                          onClick={() => void openPanel(client.openScreenKeyboard)}
-                        >
-                          打开
-                        </button>
-                      </div>
-                      <div className={settings.panelPreview} aria-label="屏幕键盘预览">
-                        <div className={settings.panelPreviewLabel}>预览</div>
-                        <div
-                          aria-label="拖动预览调整键盘间距"
-                          onPointerDown={beginTouchGeometryDrag}
-                          onPointerMove={updateTouchGeometryDrag}
-                          onPointerUp={endTouchGeometryDrag}
-                          onPointerCancel={endTouchGeometryDrag}
-                          style={{ touchAction: "none" }}
-                        >
-                          <ScreenKeyboardPreview
-                            theme={keyboardPreviewTheme}
-                            skin={touchKeyboardSkin}
-                            customDesign={customTouchKeyboardSkin}
-                            keySpacingTenths={touchKeySpacingTenths}
-                            rowSpacingTenths={touchRowSpacingTenths}
-                            heightAdjustment={touchKeyboardHeightAdjustment}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </fieldset>
+                    }}
+                    onReset={() => void resetTouchKeyboardSettings()}
+                    openScreenKeyboard={
+                      client.openScreenKeyboard
+                        ? () => void openPanel(client.openScreenKeyboard)
+                        : undefined
+                    }
+                    onPointerDown={beginTouchGeometryDrag}
+                    onPointerMove={updateTouchGeometryDrag}
+                    onPointerUp={endTouchGeometryDrag}
+                    onPointerCancel={cancelTouchGeometryDrag}
+                  />
                   <fieldset disabled={busy} hidden={page !== "handwriting"} aria-label="手写识别板">
                     <HandwritingSettingsSection
                       ios={iosPlatform}
@@ -6164,725 +2877,123 @@ export function SettingsPage({
                       onOpenHandwriting={() => void openPanel(client.openHandwriting)}
                     />
                   </fieldset>
-                  <fieldset disabled={busy} hidden={page !== "voice"} aria-label="语音输入">
-                    <VoiceInputIntroSection
-                      localVoice={localVoice}
-                      localVoiceModelsAvailable={Boolean(client.localVoiceModels)}
-                      systemVoice={systemVoice}
-                      systemVoiceHostName={systemVoiceHostName}
-                      android={androidPlatform}
-                      ios={iosPlatform}
-                      macos={macosPlatform}
-                      harmony={harmonyPlatform}
-                      linux={linuxPlatform}
-                      showVoiceProviderSettings={showVoiceProviderSettings}
-                      onOpenVoice={
-                        client.openVoice ? () => void openPanel(client.openVoice) : undefined
-                      }
-                    />
-                    <VoiceInputCoreSection
-                      enabled={voiceInput.enabled}
-                      provider={String(voiceInput.asr_provider)}
-                      language={voiceInput.language}
-                      showProviderSettings={showVoiceProviderSettings}
-                      systemVoice={systemVoice}
-                      macos={macosPlatform}
-                      harmony={harmonyPlatform}
-                      android={androidPlatform}
-                      localVoiceAvailable={localVoiceAvailable}
-                      nativeVoicePlatform={nativeVoicePlatform}
-                      harmonyUnsupportedAsr={harmonyUnsupportedAsr}
-                      onEnabledChange={(enabled) => updateVoice({ enabled })}
-                      onProviderChange={(provider) =>
-                        updateVoice({
-                          ...asrProviderUpdate(provider, voiceInput),
-                          ...(provider === "system" && voiceInput.language === "auto"
-                            ? { language: "zh-CN" }
-                            : {}),
-                          ...(linuxPlatform
-                            ? { asr_resource_id: "", doubao_boosting_table_id: "" }
-                            : {}),
-                        })
-                      }
-                      onLanguageChange={(language) => updateVoice({ language })}
-                    />
-                    {localVoice && client.localVoiceModels && (
-                      <LocalModelManager
-                        client={client.localVoiceModels}
-                        mobile={mobilePlatform}
-                        modelPath={voiceInput.asr_model_path ?? ""}
-                        onUse={(asr_model_path) => updateVoice({ asr_model_path })}
-                        onRemoved={(model) =>
-                          // Checked against the draft as it is once the removal lands.
-                          setDraft((current) =>
-                            current &&
-                            localModelInUse(model, current.voice_input?.asr_model_path ?? "")
-                              ? {
-                                  ...current,
-                                  voice_input: {
-                                    ...defaultVoiceInput,
-                                    ...current.voice_input,
-                                    asr_model_path: "",
-                                  },
-                                }
-                              : current,
-                          )
-                        }
-                        confirm={confirm}
-                        openExternalUrl={client.openExternalUrl ? openExternalUrl : undefined}
-                      />
-                    )}
-                    {localVoice && client.localVoiceModels && (
-                      <VoiceModelMirrorSection
-                        value={voiceInput.asr_model_mirror ?? ""}
-                        onChange={(asr_model_mirror) => updateVoice({ asr_model_mirror })}
-                      />
-                    )}
-                    {localVoice &&
-                      (client.localVoiceModels ? (
-                        <details className="section">
-                          <summary>高级：手动指定 Whisper 模型文件</summary>
-                          <VoiceModelPathSection
-                            path={voiceInput.asr_model_path ?? ""}
-                            pickPath={client.pickVoiceModelPath}
-                            onChange={(asr_model_path) => updateVoice({ asr_model_path })}
-                          />
-                        </details>
-                      ) : (
-                        <VoiceModelPathSection
-                          path={voiceInput.asr_model_path ?? ""}
-                          pickPath={client.pickVoiceModelPath}
-                          onChange={(asr_model_path) => updateVoice({ asr_model_path })}
-                        />
-                      ))}
-                    {showVoiceProviderSettings &&
-                      serviceVoice &&
-                      providerPresetControls(
-                        "识别服务",
-                        ASR_PROVIDER_DEFAULTS[String(voiceInput.asr_provider)],
-                        voiceInput.asr_model ?? "",
-                        (asr_model) => updateVoice({ asr_model }),
-                      )}
-                    {showVoiceProviderSettings && serviceVoice && (
-                      <VoiceModelSection
-                        value={voiceInput.asr_model ?? ""}
-                        onChange={(asr_model) => updateVoice({ asr_model })}
-                      />
-                    )}
-                    {showVoiceProviderSettings && voiceInput.asr_provider === "doubao" && (
-                      <DoubaoAuthModeSection
-                        value={doubaoAuthMode}
-                        linux={linuxPlatform}
-                        onChange={(doubao_auth_mode) => updateVoice({ doubao_auth_mode })}
-                      />
-                    )}
-                    {showVoiceProviderSettings && !linuxPlatform && serviceVoice && (
-                      <>
-                        {voiceInput.asr_provider === "doubao" && (
-                          <DoubaoStreamEndpointSection
-                            endpoint={voiceInput.asr_endpoint ?? ""}
-                            onChange={(asr_endpoint) => updateVoice({ asr_endpoint })}
-                          />
-                        )}
-                        <VoiceEndpointSection
-                          value={voiceInput.asr_endpoint ?? ""}
-                          onChange={(asr_endpoint) => updateVoice({ asr_endpoint })}
-                        />
-                        <VoiceCredentialFieldsSection
-                          showAppKey={
-                            voiceInput.asr_provider === "doubao" && doubaoAuthMode === "legacy"
-                          }
-                          appKey={voiceInput.asr_app_key ?? ""}
-                          tokenLabel={
-                            voiceInput.asr_provider === "doubao" && doubaoAuthMode !== "legacy"
-                              ? "Doubao API Key"
-                              : "识别 API Token"
-                          }
-                          token={voiceInput.asr_token ?? ""}
-                          onAppKeyChange={(asr_app_key) => updateVoice({ asr_app_key })}
-                          onTokenChange={(asr_token) => updateVoice({ asr_token })}
-                        />
-                      </>
-                    )}
-                    {showVoiceProviderSettings && serviceVoice && (
-                      <DoubaoResourceIdSection
-                        value={voiceInput.asr_resource_id ?? ""}
-                        onChange={(asr_resource_id) => updateVoice({ asr_resource_id })}
-                      />
-                    )}
-                    {linuxPlatform &&
-                      client.providerCredentials &&
-                      ["openai", "siliconflow", "groq", "everyapi", "mistral", "doubao"].includes(
-                        voiceInput.asr_provider ?? "doubao",
-                      ) &&
-                      (() => {
-                        const provider = voiceInput.asr_provider ?? "doubao";
-                        return (
-                          <VoiceCredentialSection
-                            kind="asr"
-                            provider={provider}
-                            model={voiceInput.asr_model ?? ""}
-                            resourceId={voiceInput.asr_resource_id}
-                            authMode={doubaoAuthMode}
-                            credentials={providerCredentials}
-                            input={voiceCredentialInput.asr}
-                            busy={providerCredentialBusy === "asr"}
-                            message={providerCredentialMessages.asr}
-                            onChange={(patch) =>
-                              setVoiceCredentialInput((current) => ({
-                                ...current,
-                                asr: { ...current.asr, ...patch },
-                              }))
-                            }
-                            onSave={(credential: VoiceCredentialSaveInput) =>
-                              void runVoiceCredential(
-                                "asr",
-                                (credentials) => credentials.saveVoice(credential),
-                                "凭据已保存，语音 provider 下次请求时生效。",
-                              )
-                            }
-                            onClear={() =>
-                              void runVoiceCredential(
-                                "asr",
-                                (credentials) => credentials.clearVoice("asr", provider),
-                                "凭据已清除。",
-                              )
-                            }
-                          />
-                        );
-                      })()}
-                    {linuxPlatform &&
-                      credentialTestControl("voice.asr", "测试语音识别配置", {
-                        asr_provider: voiceInput.asr_provider ?? "doubao",
-                        asr_model: voiceInput.asr_model ?? "",
-                        asr_resource_id: voiceInput.asr_resource_id ?? "",
-                        doubao_auth_mode: doubaoAuthMode,
-                        doubao_enable_itn: voiceInput.doubao_enable_itn !== false,
-                        doubao_enable_punc: voiceInput.doubao_enable_punc !== false,
-                        doubao_enable_ddc: voiceInput.doubao_enable_ddc === true,
-                      })}
-                    {/*
-                     * Doubao belongs in this list, not in a HarmonyOS-only arm: the probe is the
-                     * shared one, and Windows and macOS have had it since it was added. Gating it
-                     * on HarmonyOS alone silently dropped the button on the two hosts whose tests
-                     * cover it.
-                     */}
-                    {(windowsPlatform || macosPlatform || harmonyPlatform) &&
-                      ["openai", "siliconflow", "groq", "everyapi", "mistral", "doubao"].includes(
-                        voiceInput.asr_provider ?? "",
-                      ) && (
-                        <>
-                          <p className={settings.panelPreviewLabel}>
-                            测试会向当前服务发送一秒合成静音，不使用麦克风；服务可能计入 API 用量。
-                          </p>
-                          {credentialTestControl(
-                            "voice.asr",
-                            voiceInput.asr_provider === "doubao"
-                              ? "测试豆包识别配置"
-                              : "测试语音识别配置",
-                            {
-                              provider: voiceInput.asr_provider,
-                              endpoint:
-                                voiceInput.asr_endpoint?.trim() ||
-                                ASR_PROVIDER_DEFAULTS[voiceInput.asr_provider ?? ""]?.endpoint ||
-                                "",
-                              model:
-                                voiceInput.asr_model?.trim() ||
-                                ASR_PROVIDER_DEFAULTS[voiceInput.asr_provider ?? ""]?.model ||
-                                "",
-                              token: voiceInput.asr_token ?? "",
-                              ...(voiceInput.asr_provider === "doubao"
-                                ? {
-                                    auth_mode: doubaoAuthMode,
-                                    app_id:
-                                      doubaoAuthMode === "legacy"
-                                        ? (voiceInput.asr_app_key ?? "")
-                                        : "",
-                                    resource_id:
-                                      voiceInput.asr_resource_id ?? "volc.seedasr.sauc.duration",
-                                    doubao_enable_itn: voiceInput.doubao_enable_itn !== false,
-                                    doubao_enable_punc: voiceInput.doubao_enable_punc !== false,
-                                    doubao_enable_ddc: voiceInput.doubao_enable_ddc === true,
-                                    doubao_boosting_table_id:
-                                      voiceInput.doubao_boosting_table_id ?? "",
-                                  }
-                                : {}),
-                            },
-                            !voiceInput.asr_token?.trim() ||
-                              (voiceInput.asr_provider === "doubao" &&
-                                doubaoAuthMode === "legacy" &&
-                                !voiceInput.asr_app_key?.trim()),
-                          )}
-                        </>
-                      )}
-                    {showVoiceStreamPreedit && (
-                      <VoiceStreamPreeditSection
-                        enabled={voiceInput.stream_inline_preedit === true}
-                        onChange={(stream_inline_preedit) => updateVoice({ stream_inline_preedit })}
-                      />
-                    )}
-                    {showVoiceCommitMode && (
-                      <VoiceCommitModeSection
-                        macos={macosPlatform}
-                        value={voiceInput.commit_mode ?? "tsf"}
-                        onChange={(commit_mode) => updateVoice({ commit_mode })}
-                      />
-                    )}
-                    {showVoiceCaptureDevices && (
-                      <VoiceCaptureDevicesSection
-                        windows={windowsPlatform}
-                        harmony={harmonyPlatform}
-                        backend={voiceInput.capture_backend ?? ""}
-                        device={voiceInput.capture_device ?? ""}
-                        backendOptions={captureBackendOptions}
-                        readDevices={client.listVoiceCaptureDevices!}
-                        onBackendChange={(capture_backend, capture_device) =>
-                          updateVoice({ capture_backend, capture_device })
-                        }
-                        onDeviceChange={(capture_device) => updateVoice({ capture_device })}
-                      />
-                    )}
-                    {/* Not provider configuration: these four are the host's own recording
-                        behaviour, and the Android host plays no prompt tones and does not mute
-                        system audio while it records. Four switches with nothing behind them is
-                        what this page keeps being audited for. */}
-                    {!androidPlatform && (
-                      <VoiceRecordingBehaviorSection
-                        linux={linuxPlatform}
-                        soundEnabled={voiceInput.sound_enabled !== false}
-                        startSound={voiceInput.start_sound !== false}
-                        endSound={voiceInput.end_sound !== false}
-                        muteSystemAudio={voiceInput.mute_system_audio === true}
-                        onSoundEnabledChange={(sound_enabled) => updateVoice({ sound_enabled })}
-                        onStartSoundChange={(start_sound) => updateVoice({ start_sound })}
-                        onEndSoundChange={(end_sound) => updateVoice({ end_sound })}
-                        onMuteSystemAudioChange={(mute_system_audio) =>
-                          updateVoice({ mute_system_audio })
-                        }
-                      />
-                    )}
-                    {showVoiceProviderSettings && voiceInput.asr_provider === "doubao" && (
-                      <DoubaoOptionsSection
-                        linux={linuxPlatform}
-                        enableItn={voiceInput.doubao_enable_itn !== false}
-                        enablePunc={voiceInput.doubao_enable_punc !== false}
-                        enableDdc={voiceInput.doubao_enable_ddc === true}
-                        boostingTableId={voiceInput.doubao_boosting_table_id ?? ""}
-                        onEnableItnChange={(doubao_enable_itn) =>
-                          updateVoice({ doubao_enable_itn })
-                        }
-                        onEnablePuncChange={(doubao_enable_punc) =>
-                          updateVoice({ doubao_enable_punc })
-                        }
-                        onEnableDdcChange={(doubao_enable_ddc) =>
-                          updateVoice({ doubao_enable_ddc })
-                        }
-                        onBoostingTableIdChange={(doubao_boosting_table_id) =>
-                          updateVoice({ doubao_boosting_table_id })
-                        }
-                      />
-                    )}
-                    {showVoiceProviderSettings && (
-                      <div className="section">
-                        <div className="section-title">
-                          文本润色 provider<small>识别结果可交给用户管理的服务润色</small>
-                        </div>
-                        <label className="section-header">
-                          <span className="section-title">启用润色</span>
-                          <input
-                            aria-label="启用文本润色"
-                            className="toggle"
-                            type="checkbox"
-                            checked={
-                              voiceInput.polish_text === true || voiceInput.polish_enabled === true
-                            }
-                            onChange={(event) =>
-                              updateVoice({
-                                polish_text: event.target.checked,
-                                polish_enabled: event.target.checked,
-                              })
-                            }
-                          />
-                        </label>
-                        <label className="section-header">
-                          <span className="section-title">服务提供商</span>
-                          <select
-                            aria-label="文本润色服务提供商"
-                            value={voiceInput.polish_provider ?? "siliconflow"}
-                            onChange={(event) =>
-                              updateVoice(polishProviderUpdate(event.target.value, voiceInput))
-                            }
-                          >
-                            <option value="siliconflow">SiliconFlow</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="deepseek">DeepSeek</option>
-                            <option value="groq">Groq</option>
-                          </select>
-                        </label>
-                        {providerPresetControls(
-                          "文本润色",
-                          POLISH_PROVIDER_DEFAULTS[voiceInput.polish_provider ?? "siliconflow"],
-                          voiceInput.polish_model ?? "",
-                          (polish_model) => updateVoice({ polish_model }),
-                          "provider-preset-section",
-                        )}
-                        <label className="section-header">
-                          <span className="section-title">模型</span>
-                          <input
-                            aria-label="文本润色模型"
-                            value={voiceInput.polish_model ?? ""}
-                            onChange={(event) => updateVoice({ polish_model: event.target.value })}
-                          />
-                        </label>
-                        {!linuxPlatform && (
-                          <PolishCredentialFieldsSection
-                            endpoint={voiceInput.polish_endpoint ?? ""}
-                            token={voiceInput.polish_token ?? ""}
-                            onEndpointChange={(polish_endpoint) => updateVoice({ polish_endpoint })}
-                            onTokenChange={(polish_token) => updateVoice({ polish_token })}
-                          />
-                        )}
-                        <PolishPromptSection
-                          promptId={voiceInput.polish_prompt_id}
-                          prompt={voiceInput.polish_prompt ?? ""}
-                          customPrompts={{
-                            custom_1: voiceInput.polish_prompt_custom_1,
-                            custom_2: voiceInput.polish_prompt_custom_2,
-                            custom_3: voiceInput.polish_prompt_custom_3,
-                          }}
-                          onSelectPrompt={(polish_prompt_id, polish_prompt) =>
-                            updateVoice({ polish_prompt_id, polish_prompt })
-                          }
-                          onPromptChange={(polish_prompt, customSlot) =>
-                            updateVoice({
-                              polish_prompt,
-                              ...(customSlot
-                                ? { [`polish_prompt_${customSlot}`]: polish_prompt }
-                                : {}),
-                            })
-                          }
-                          onRestore={(polish_prompt) => updateVoice({ polish_prompt })}
-                        />
-                        {linuxPlatform &&
-                          client.providerCredentials &&
-                          (() => {
-                            const provider = voiceInput.polish_provider ?? "siliconflow";
-                            return (
-                              <VoiceCredentialSection
-                                kind="polish"
-                                provider={provider}
-                                model={voiceInput.polish_model ?? ""}
-                                credentials={providerCredentials}
-                                input={voiceCredentialInput.polish}
-                                busy={providerCredentialBusy === "polish"}
-                                message={providerCredentialMessages.polish}
-                                onChange={(patch) =>
-                                  setVoiceCredentialInput((current) => ({
-                                    ...current,
-                                    polish: { ...current.polish, ...patch },
-                                  }))
-                                }
-                                onSave={(credential: VoiceCredentialSaveInput) =>
-                                  void runVoiceCredential(
-                                    "polish",
-                                    (credentials) => credentials.saveVoice(credential),
-                                    "凭据已保存，语音 provider 下次请求时生效。",
-                                  )
-                                }
-                                onClear={() =>
-                                  void runVoiceCredential(
-                                    "polish",
-                                    (credentials) => credentials.clearVoice("polish", provider),
-                                    "凭据已清除。",
-                                  )
-                                }
-                              />
-                            );
-                          })()}
-                        {linuxPlatform &&
-                          credentialTestControl(
-                            "voice.polish",
-                            "测试语音润色配置",
-                            {
-                              polish_provider: voiceInput.polish_provider ?? "siliconflow",
-                              polish_model: voiceInput.polish_model ?? "",
-                            },
-                            !(
-                              voiceInput.polish_text === true || voiceInput.polish_enabled === true
-                            ),
-                          )}
-                        {(windowsPlatform || macosPlatform || iosPlatform || harmonyPlatform) &&
-                          credentialTestControl(
-                            "voice.polish",
-                            "测试语音润色配置",
-                            {
-                              provider: voiceInput.polish_provider ?? "siliconflow",
-                              endpoint:
-                                voiceInput.polish_endpoint?.trim() ||
-                                POLISH_PROVIDER_DEFAULTS[
-                                  voiceInput.polish_provider ?? "siliconflow"
-                                ]?.endpoint ||
-                                "",
-                              model:
-                                voiceInput.polish_model?.trim() ||
-                                POLISH_PROVIDER_DEFAULTS[
-                                  voiceInput.polish_provider ?? "siliconflow"
-                                ]?.model ||
-                                "",
-                              token: voiceInput.polish_token ?? "",
-                            },
-                            !voiceInput.polish_token?.trim(),
-                          )}
-                      </div>
-                    )}
-                    {desktopPanels && (
-                      <VoiceHotkeysSection
-                        platform={
-                          macosPlatform
-                            ? "macos"
-                            : windowsPlatform
-                              ? "windows"
-                              : linuxPlatform
-                                ? "linux"
-                                : "other"
-                        }
-                        values={draft.voice_input ?? {}}
-                        onChange={(key, enabled) =>
-                          setDraft({
-                            ...draft,
-                            voice_input: {
-                              ...draft.voice_input,
-                              enabled: draft.voice_input?.enabled ?? true,
-                              language: draft.voice_input?.language ?? "zh-CN",
-                              [key]: enabled,
-                            },
-                          })
-                        }
-                      />
-                    )}
-                  </fieldset>
-                  <fieldset disabled={busy} hidden={page !== "ai"} aria-label="AI 辅助">
-                    <AiBasicSettingsSection
-                      enabled={ai.enabled}
-                      enabledDescription={
-                        iosPlatform
-                          ? "为键盘 AI 联想、回复与润色提供共享配置"
-                          : androidPlatform
-                            ? "为拼音联想和 Android 选中文字润色提供共享配置"
-                            : "为拼音联想提供共享配置"
-                      }
-                      provider={ai.provider}
-                      providerOptions={AI_PROVIDER_OPTIONS as readonly AiProviderOption[]}
-                      model={ai.model}
-                      endpoint={ai.endpoint}
-                      providerPreset={providerPresetControls(
-                        "AI ",
-                        AI_PROVIDER_OPTIONS.find((option) => option.id === ai.provider),
-                        ai.model,
-                        (model) => updateAi({ model }),
-                      )}
-                      onEnabledChange={(enabled) => updateAi({ enabled })}
-                      onProviderChange={(provider) => updateAi(aiProviderUpdate(provider, ai))}
-                      onModelChange={(model) => updateAi({ model })}
-                      onEndpointChange={(endpoint) => updateAi({ endpoint })}
-                    />
-                    {linuxPlatform && client.providerCredentials ? (
-                      <AiCredentialSection
-                        endpoint={ai.endpoint}
-                        model={ai.model}
-                        origin={aiOrigin}
-                        token={aiCredentialInput}
-                        stored={storedAiCredential}
-                        invalid={providerCredentials?.aiInvalid === true}
-                        busy={providerCredentialBusy === "ai"}
-                        message={providerCredentialMessages.ai}
-                        onTokenChange={setAiCredentialInput}
-                        onSave={() =>
-                          void runProviderCredential(
-                            "ai",
-                            (credentials) =>
-                              credentials.saveAi({
-                                provider: ai.provider,
-                                endpoint: ai.endpoint,
-                                model: ai.model,
-                                ...(aiCredentialInput.trim() ? { token: aiCredentialInput } : {}),
-                              }),
-                            "凭据已保存，provider 服务下次请求时生效。",
-                          )
-                        }
-                        onClear={() =>
-                          void runProviderCredential(
-                            "ai",
-                            (credentials) => credentials.clearAi(ai.provider),
-                            "凭据已清除。",
-                          )
-                        }
-                      >
-                        {credentialTestControl(
-                          "ai.assistant",
-                          "测试 AI 辅助配置",
-                          { provider: ai.provider, endpoint: ai.endpoint, model: ai.model },
-                          !ai.enabled || !aiOrigin || !ai.model.trim(),
-                        )}
-                      </AiCredentialSection>
-                    ) : linuxPlatform ? (
-                      <div className="section">
-                        <div className="section-title">
-                          Linux AI provider<small>AI 请求由用户管理的 provider 服务完成</small>
-                        </div>
-                        <p className="input-setting-description">
-                          凭据不保存在共享设置中；请在用户配置目录的 <code>ai-provider.json</code>{" "}
-                          中配置，并使其中的 provider、接口地址和模型与上方设置一致。
-                        </p>
-                        {credentialTestControl(
-                          "ai.assistant",
-                          "测试 AI 辅助配置",
-                          { provider: ai.provider, endpoint: ai.endpoint, model: ai.model },
-                          !ai.enabled || !aiOrigin || !ai.model.trim(),
-                        )}
-                      </div>
-                    ) : (
-                      <div className="section">
-                        <label className="section-header">
-                          <span className="section-title">
-                            API Token
-                            <small>
-                              {aiOrigin ? `只用于 ${aiOrigin}` : "请先填写有效的 HTTPS 接口地址"}
-                            </small>
-                          </span>
-                          <SecretInput
-                            label="AI API Token"
-                            disabled={!aiOrigin}
-                            value={aiToken}
-                            onChange={updateAiToken}
-                          />
-                        </label>
-                      </div>
-                    )}
-                    {(windowsPlatform || macosPlatform || iosPlatform) &&
-                      credentialTestControl(
-                        "ai.assistant",
-                        "测试 AI 辅助配置",
-                        {
-                          provider: ai.provider,
-                          endpoint: ai.endpoint,
-                          model: ai.model,
-                          token: aiToken,
-                        },
-                        !ai.enabled || !aiOrigin || !ai.model.trim() || !aiToken.trim(),
-                      )}
-                    {client.aiAssistant && (
-                      <AiModelCatalogSection
-                        busy={aiModelsBusy}
-                        origin={aiOrigin ?? ""}
-                        models={aiModels ?? undefined}
-                        selectedModel={ai.model}
-                        status={aiModelsStatus}
-                        onFetch={() => void fetchAiModels()}
-                        onSelect={(model) => updateAi({ model })}
-                      />
-                    )}
-                    <AiCandidateLimitSection
-                      value={ai.candidate_limit}
-                      onChange={(candidate_limit) => updateAi({ candidate_limit })}
-                    />
-                    <AiPromptSettingsSection
-                      promptId={ai.prompt_id}
-                      prompt={ai.prompt}
-                      promptCustom1={ai.prompt_custom_1 ?? ""}
-                      promptCustom2={ai.prompt_custom_2 ?? ""}
-                      promptCustom3={ai.prompt_custom_3 ?? ""}
-                      fallbackPrompt={defaultAiAssistant.prompt ?? ""}
-                      onPromptIdChange={(prompt_id) => updateAi({ prompt_id })}
-                      onPromptChange={(prompt) => updateAi({ prompt })}
-                      onPromptCustom1Change={(prompt_custom_1) => updateAi({ prompt_custom_1 })}
-                      onPromptCustom2Change={(prompt_custom_2) => updateAi({ prompt_custom_2 })}
-                      onPromptCustom3Change={(prompt_custom_3) => updateAi({ prompt_custom_3 })}
-                    />
-                    {client.aiAssistant && (
-                      <AiTestToolsSection
-                        input={aiTestInput}
-                        busy={aiTestBusy}
-                        status={aiTestStatus}
-                        output={aiTestOutput}
-                        onInputChange={setAiTestInput}
-                        onTest={() => void testAi()}
-                        onCopyOutput={
-                          client.copyText ? () => void client.copyText!(aiTestOutput) : undefined
-                        }
-                      />
-                    )}
-                    {client.mcpServerStatus && (
-                      <McpConnectSection
-                        status={client.mcpServerStatus}
-                        install={client.installMcpClient}
-                        copyText={client.copyText}
-                      />
-                    )}
-                  </fieldset>
-                  <fieldset disabled={busy} hidden={page !== "feedback"} aria-label="反馈">
-                    <FeedbackSettingsSection
-                      hero={doc.hero}
-                      eyebrow={doc.eyebrow}
-                      heroTitle={doc.heroTitle}
-                      note={doc.note}
-                      feedbackList={doc.feedbackList}
-                      feedbackCard={doc.feedbackCard}
-                      feedbackIcon={doc.feedbackIcon}
-                      feedbackBody={doc.feedbackBody}
-                      feedbackTitle={doc.feedbackTitle}
-                      serviceRow={settings.serviceRow}
-                      kind={feedbackKind}
-                      detail={feedbackDetail}
-                      reportCopied={feedbackReportCopied}
-                      feedbackCopied={feedbackCopied}
-                      supportDiagnostics={supportDiagnostics}
-                      issuesUrl={platformIssuesUrl}
-                      copyText={client.copyText}
-                      openExternalUrl={client.openExternalUrl}
-                      onKindChange={setFeedbackKind}
-                      onDetailChange={setFeedbackDetail}
-                      onCopyReport={() => {
-                        if (!client.copyText) return;
-                        void client.copyText(feedbackReport).then(() => {
-                          setFeedbackReportCopied(true);
-                          window.setTimeout(() => setFeedbackReportCopied(false), 1600);
-                        });
-                      }}
-                      onSubmitFeedback={submitFeedback}
-                      onOpenIssues={() => void openExternalUrl(platformIssuesUrl)}
-                      onCopyGroup={() => {
-                        if (!client.copyText) return;
-                        void client.copyText("829919142").then(() => {
-                          setFeedbackCopied(true);
-                          window.setTimeout(() => setFeedbackCopied(false), 1600);
-                        });
-                      }}
-                      onOpenTelegram={() => void openExternalUrl("https://t.me/msimegroup")}
-                    />
-                  </fieldset>
+                  <VoiceSettingsPanel
+                    disabled={busy}
+                    hidden={page !== "voice"}
+                    client={client}
+                    draft={draft}
+                    setDraft={setDraft}
+                    confirm={confirm}
+                    openExternalUrl={openExternalUrl}
+                    openPanel={openPanel}
+                    voiceInput={voiceInput}
+                    systemVoice={systemVoice}
+                    systemVoiceHostName={systemVoiceHostName}
+                    localVoiceAvailable={localVoiceAvailable}
+                    localVoice={localVoice}
+                    serviceVoice={serviceVoice}
+                    harmonyUnsupportedAsr={harmonyUnsupportedAsr}
+                    doubaoAuthMode={doubaoAuthMode}
+                    updateVoice={updateVoice}
+                    providerCredentials={providerCredentials}
+                    voiceCredentialInput={voiceCredentialInput}
+                    setVoiceCredentialInput={setVoiceCredentialInput}
+                    providerCredentialBusy={providerCredentialBusy}
+                    providerCredentialMessages={providerCredentialMessages}
+                    runVoiceCredential={runVoiceCredential}
+                    credentialTestControl={credentialTestControl}
+                    providerPresetControls={providerPresetControls}
+                    androidPlatform={androidPlatform}
+                    iosPlatform={iosPlatform}
+                    macosPlatform={macosPlatform}
+                    harmonyPlatform={harmonyPlatform}
+                    linuxPlatform={linuxPlatform}
+                    windowsPlatform={windowsPlatform}
+                    mobilePlatform={mobilePlatform}
+                    nativeVoicePlatform={nativeVoicePlatform}
+                    desktopPanels={desktopPanels}
+                    showVoiceProviderSettings={showVoiceProviderSettings}
+                    showVoiceStreamPreedit={showVoiceStreamPreedit}
+                    showVoiceCommitMode={showVoiceCommitMode}
+                    showVoiceCaptureDevices={showVoiceCaptureDevices}
+                    captureBackendOptions={captureBackendOptions}
+                  />
+                  <AiSettingsPanel
+                    disabled={busy}
+                    hidden={page !== "ai"}
+                    client={client}
+                    ai={ai}
+                    updateAi={updateAi}
+                    aiOrigin={aiOrigin}
+                    aiToken={aiToken}
+                    updateAiToken={updateAiToken}
+                    aiModels={aiModels}
+                    aiModelsStatus={aiModelsStatus}
+                    aiModelsBusy={aiModelsBusy}
+                    fetchAiModels={fetchAiModels}
+                    aiTestInput={aiTestInput}
+                    setAiTestInput={setAiTestInput}
+                    aiTestOutput={aiTestOutput}
+                    aiTestStatus={aiTestStatus}
+                    aiTestBusy={aiTestBusy}
+                    testAi={testAi}
+                    providerPresetControls={providerPresetControls}
+                    linuxPlatform={linuxPlatform}
+                    windowsPlatform={windowsPlatform}
+                    macosPlatform={macosPlatform}
+                    iosPlatform={iosPlatform}
+                    androidPlatform={androidPlatform}
+                    providerCredentials={providerCredentials}
+                    storedAiCredential={storedAiCredential}
+                    aiCredentialInput={aiCredentialInput}
+                    setAiCredentialInput={setAiCredentialInput}
+                    providerCredentialBusy={providerCredentialBusy}
+                    providerCredentialMessages={providerCredentialMessages}
+                    runProviderCredential={runProviderCredential}
+                    credentialTestControl={credentialTestControl}
+                  />
+                  <FeedbackPageSection
+                    disabled={busy}
+                    hidden={page !== "feedback"}
+                    hero={doc.hero}
+                    eyebrow={doc.eyebrow}
+                    heroTitle={doc.heroTitle}
+                    note={doc.note}
+                    feedbackList={doc.feedbackList}
+                    feedbackCard={doc.feedbackCard}
+                    feedbackIcon={doc.feedbackIcon}
+                    feedbackBody={doc.feedbackBody}
+                    feedbackTitle={doc.feedbackTitle}
+                    serviceRow={settings.serviceRow}
+                    kind={feedbackKind}
+                    detail={feedbackDetail}
+                    reportCopied={feedbackReportCopied}
+                    feedbackCopied={feedbackCopied}
+                    supportDiagnostics={diagnosticsText}
+                    issuesUrl={platformIssuesUrl}
+                    copyText={client.copyText}
+                    openExternalUrl={client.openExternalUrl}
+                    onKindChange={setFeedbackKind}
+                    onDetailChange={setFeedbackDetail}
+                    onCopyReport={copyReport}
+                    onSubmitFeedback={submitFeedback}
+                    onOpenIssues={() => void openExternalUrl(platformIssuesUrl)}
+                    onCopyGroup={copyGroup}
+                    onOpenTelegram={() => void openExternalUrl("https://t.me/msimegroup")}
+                  />
                   {!validCandidateFonts(draft) && (
                     <p role="alert">
                       请在外观页修正字体：名称不能为空、不能含控制字符或超过 128 个 UTF-8
                       字节，补充字体最多 32 项。
                     </p>
                   )}
-                  <footer className={settings.settingsActions}>
-                    {client.loadDefaultPreferences && (
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={busy}
-                        onClick={() => void restoreDefaults()}
-                      >
-                        恢复默认设置
-                      </button>
-                    )}
-                    <span>{dirty ? "有未保存的修改" : ""}</span>
-                    <button type="submit" disabled={busy || !dirty || !validCandidateFonts(draft)}>
-                      {busy ? "处理中…" : "保存设置"}
-                    </button>
-                  </footer>
+                  <SettingsActionsFooter
+                    busy={busy}
+                    dirty={dirty}
+                    canSave={validCandidateFonts(draft)}
+                    showRestoreDefaults={Boolean(client.loadDefaultPreferences)}
+                    onRestoreDefaults={() => void restoreDefaults()}
+                  />
                 </form>
               )}
             {page !== "typing-statistics" &&

@@ -11,7 +11,7 @@ use serde_json::Value;
 use sha2::Digest;
 use sha2::Sha256;
 
-const MAX_SOURCE_CHARS: usize = 40;
+pub const MAX_SOURCE_CHARS: usize = 40;
 const MAX_PERSIST_GLOSS_CHARS: usize = 32;
 
 /// Tencent TC3 signing primitive. The caller owns credential lifetime.
@@ -88,9 +88,7 @@ pub fn tencent_tmt_payload(source: &str, target: &str, texts: &[String]) -> Opti
         || target.is_empty()
         || texts.is_empty()
         || texts.len() > 50
-        || texts
-            .iter()
-            .any(|text| text.is_empty() || !crate::text::is_bounded_chars(text, MAX_SOURCE_CHARS))
+        || texts.iter().any(|text| !is_valid_source_text(text))
     {
         return None;
     }
@@ -117,6 +115,19 @@ pub fn parse_tencent_tmt_response(response: &str, expected: usize) -> Option<Vec
             .map(|value| value.as_str().unwrap().to_owned())
             .collect(),
     )
+}
+
+/// Source text accepted by every cloud translation provider.
+pub fn is_valid_source_text(value: &str) -> bool {
+    !value.is_empty() && crate::text::is_bounded_chars(value, MAX_SOURCE_CHARS)
+}
+
+pub fn is_supported_translation_language(value: &str) -> bool {
+    matches!(value, "zh" | "en" | "fr" | "ja" | "es" | "ru" | "de" | "ko")
+}
+
+pub fn is_supported_translation_pair(source: &str, target: &str) -> bool {
+    is_supported_translation_language(source) && is_supported_translation_language(target)
 }
 
 pub fn format_translation_gloss(text: &str) -> Option<String> {
@@ -209,10 +220,29 @@ pub fn is_cloud_translatable_chinese(text: &str) -> bool {
     has_han
 }
 
+/// Credentials and private input may only travel over TLS or to a local service.
+pub fn is_secure_endpoint(endpoint: &str) -> bool {
+    if !crate::text::is_bounded_text(endpoint, 2048) {
+        return false;
+    }
+    let Ok(url) = reqwest::Url::parse(endpoint) else {
+        return false;
+    };
+    if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
+        return false;
+    }
+    match url.scheme() {
+        "https" => url.host_str().is_some(),
+        "http" => matches!(
+            url.host_str(),
+            Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
+        ),
+        _ => false,
+    }
+}
+
 pub fn is_supported_endpoint(endpoint: &str) -> bool {
-    !endpoint.is_empty()
-        && crate::text::is_bounded_text(endpoint, 2048)
-        && (endpoint.starts_with("https://") || endpoint.starts_with("http://"))
+    is_secure_endpoint(endpoint)
 }
 
 /// Whether a DeepLX-compatible reply reports a failure rather than an answer: a body that is not a JSON object, or one whose `code` is not 200. A reply that answers with no translation is still an answer, which `parse_translation_response` cannot tell apart from a failure because it returns `None` for both. Hosts negative-cache answers only, so a rate limit or an outage is asked again instead of hiding the gloss.
@@ -275,6 +305,13 @@ mod tests {
     fn accepts_supported_endpoints_only() {
         assert!(is_supported_endpoint("https://translate.example/api"));
         assert!(is_supported_endpoint("http://localhost:8080/translate"));
+        assert!(is_supported_endpoint("http://127.0.0.1:8080/translate"));
+        assert!(is_supported_endpoint("http://[::1]:8080/translate"));
+        assert!(!is_supported_endpoint("http://translate.example/api"));
+        assert!(!is_supported_endpoint("http://localhost.example/api"));
+        assert!(!is_supported_endpoint("http://127.0.0.2/api"));
+        assert!(!is_supported_endpoint("http://user:secret@localhost/api"));
+        assert!(!is_supported_endpoint("http://localhost/api#fragment"));
         assert!(!is_supported_endpoint("ftp://translate.example"));
         assert!(!is_supported_endpoint("https://bad\n.example"));
     }

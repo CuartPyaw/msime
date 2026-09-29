@@ -101,13 +101,6 @@ use std::collections::HashMap;
     test
 ))]
 use std::fs;
-#[cfg(any(
-    target_os = "linux",
-    target_os = "windows",
-    target_os = "android",
-    test
-))]
-use std::io::Read;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "android"))]
 use std::io::Write;
 #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
@@ -200,7 +193,19 @@ fn host_capabilities() -> HostCapabilities {
 fn linux_candidate_panel_limit() -> Option<msime_client_core::host_surface::CandidatePanelLimit> {
     use msime_client_core::host_surface::CandidatePanelLimit;
     let file = CandidatePanelLimit::status_file(std::env::var_os("XDG_RUNTIME_DIR").as_deref())?;
-    CandidatePanelLimit::from_host_status(&fs::read_to_string(file).ok()?)
+    CandidatePanelLimit::from_host_status(&read_candidate_panel_status(&file)?)
+}
+
+#[cfg(any(target_os = "linux", test))]
+const CANDIDATE_PANEL_STATUS_READ_LIMIT: u64 = 4096;
+
+#[cfg(any(target_os = "linux", test))]
+fn read_candidate_panel_status(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let bytes =
+        crate::shared::bounded_body::read_bounded(file, CANDIDATE_PANEL_STATUS_READ_LIMIT as usize)
+            .ok()?;
+    String::from_utf8(bytes).ok()
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -730,19 +735,18 @@ fn custom_translations_path(user: &std::path::Path) -> PathBuf {
 }
 
 fn read_custom_translations_at(user: PathBuf) -> Result<String, CommandError> {
-    match std::fs::read(custom_translations_path(&user)) {
-        Ok(bytes) => {
-            if bytes.len() > CUSTOM_TRANSLATIONS_MAX_BYTES {
-                return Err(CommandError { code: "storage" });
-            }
-            // A UTF-8 BOM is an encoding marker the reference accepts, not part of the first source word.
-            let text = String::from_utf8(bytes).map_err(|_| CommandError { code: "storage" })?;
-            Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
-        }
+    let path = custom_translations_path(&user);
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
         // No overlay yet is the ordinary state, not a failure: the page opens on an empty document.
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(_) => Err(CommandError { code: "storage" }),
-    }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(_) => return Err(CommandError { code: "storage" }),
+    };
+    let bytes = crate::shared::bounded_body::read_bounded(file, CUSTOM_TRANSLATIONS_MAX_BYTES)
+        .map_err(|_| CommandError { code: "storage" })?;
+    // A UTF-8 BOM is an encoding marker the reference accepts, not part of the first source word.
+    let text = String::from_utf8(bytes).map_err(|_| CommandError { code: "storage" })?;
+    Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
 }
 
 fn write_custom_translations_at(user: PathBuf, text: &str) -> Result<(), CommandError> {
@@ -977,6 +981,7 @@ impl RuntimeOptionsState {
     target_os = "linux",
     target_os = "windows",
     target_os = "android",
+    target_os = "ios",
     test
 ))]
 const RUNTIME_OPTIONS_READ_LIMIT: u64 = 2 << 20;
@@ -985,20 +990,19 @@ const RUNTIME_OPTIONS_READ_LIMIT: u64 = 2 << 20;
     target_os = "linux",
     target_os = "windows",
     target_os = "android",
+    target_os = "ios",
     test
 ))]
 fn read_runtime_options_bytes(path: &Path) -> Result<Vec<u8>, std::io::Error> {
     let file = fs::File::open(path)?;
-    let mut bytes = Vec::new();
-    file.take(RUNTIME_OPTIONS_READ_LIMIT + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > RUNTIME_OPTIONS_READ_LIMIT {
-        return Err(std::io::Error::new(
+    match crate::shared::bounded_body::read_bounded(file, RUNTIME_OPTIONS_READ_LIMIT as usize) {
+        Ok(bytes) => Ok(bytes),
+        Err(crate::shared::bounded_body::BoundedReadError::TooLarge) => Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "runtime options exceed size limit",
-        ));
+        )),
+        Err(crate::shared::bounded_body::BoundedReadError::Read(error)) => Err(error),
     }
-    Ok(bytes)
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -2706,7 +2710,8 @@ const MACOS_ON_DEVICE_TRANSLATION_DOWNLOADABLE_DEFAULTS_KEY: &str =
 fn parse_on_device_translation_downloadable(value: &str) -> Vec<String> {
     let mut codes = Vec::new();
     for code in value.trim().split(',').map(str::trim) {
-        if ["en", "fr", "ja", "es", "ru", "de", "ko"].contains(&code)
+        if code != "zh"
+            && msime_client_core::translation::is_supported_translation_language(code)
             && !codes.iter().any(|known| known == code)
         {
             codes.push(code.to_owned());
@@ -4407,8 +4412,8 @@ pub fn run() {
             let host_document: Value = {
                 #[cfg(target_os = "android")]
                 {
-                    match fs::read_to_string(&host_options_path) {
-                        Ok(host_options) => serde_json::from_str(&host_options)
+                    match read_runtime_options_bytes(&host_options_path) {
+                        Ok(host_options) => serde_json::from_slice(&host_options)
                             .map_err(|_| "Cannot parse prepared HostOptions JSON".to_string())?,
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                             // The Tauri shell owns the first-run guide. Before the
@@ -4426,12 +4431,16 @@ pub fn run() {
                 #[cfg(target_os = "ios")]
                 {
                     let resources = app.path().resource_dir()?.join("EngineResources");
-                    match fs::read_to_string(&host_options_path) {
-                        Ok(host_options) => ios_host_options_document(
-                            Some(&host_options),
-                            &resources,
-                            &directory,
-                        )?,
+                    match read_runtime_options_bytes(&host_options_path) {
+                        Ok(host_options) => {
+                            let host_options = std::str::from_utf8(&host_options)
+                                .map_err(|_| "Cannot parse prepared HostOptions JSON".to_string())?;
+                            ios_host_options_document(
+                                Some(host_options),
+                                &resources,
+                                &directory,
+                            )?
+                        }
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                             ios_host_options_document(None, &resources, &directory)?
                         }
@@ -4444,8 +4453,8 @@ pub fn run() {
                 }
                 #[cfg(target_os = "linux")]
                 {
-                    match fs::read_to_string(&host_options_path) {
-                        Ok(host_options) => serde_json::from_str(&host_options)
+                    match read_runtime_options_bytes(&host_options_path) {
+                        Ok(host_options) => serde_json::from_slice(&host_options)
                             .map_err(|_| "Cannot parse prepared HostOptions JSON".to_string())?,
                         // The first-run page prepares this file; until then every resource-backed command fails closed on the empty document, and the snapshot re-reads the file once it exists.
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -4461,9 +4470,9 @@ pub fn run() {
                     target_os = "linux"
                 )))]
                 {
-                    let host_options = fs::read_to_string(&host_options_path)
+                    let host_options = read_runtime_options_bytes(&host_options_path)
                         .map_err(|_| "Cannot read prepared HostOptions JSON".to_string())?;
-                    serde_json::from_str(&host_options)
+                    serde_json::from_slice(&host_options)
                         .map_err(|_| "Cannot parse prepared HostOptions JSON".to_string())?
                 }
             };

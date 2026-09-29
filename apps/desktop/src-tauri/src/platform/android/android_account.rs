@@ -27,7 +27,8 @@ use msime_client_core::account::{
 };
 use msime_client_core::cloud::dictionary::DictionaryKind;
 use msime_client_core::cloud::snapshot_validation::{
-    has_keys as snapshot_has_keys, parse_strict_object, valid_timestamp as snapshot_timestamp,
+    has_keys as snapshot_has_keys, parse_strict_object, required_integer as snapshot_integer,
+    required_text as snapshot_text, valid_timestamp as snapshot_timestamp,
 };
 use msime_client_core::preferences::{
     FrequencyMode, InputScheme, Preferences, PreferencesSnapshot, PreferencesStore,
@@ -46,6 +47,10 @@ use tauri::{Manager, Runtime, State, Wry};
 use uuid::Uuid;
 
 const MAX_SECURE_SESSION_BYTES: usize = 16 * 1024;
+
+fn valid_secure_session(value: &str) -> bool {
+    !value.is_empty() && value.len() <= MAX_SECURE_SESSION_BYTES
+}
 
 #[derive(Deserialize)]
 struct LoadResponse {
@@ -103,7 +108,7 @@ impl<R: Runtime> AccountSessionStorage for AndroidAccountStorage<R> {
         response
             .value
             .map(|value| {
-                if value.is_empty() || value.len() > MAX_SECURE_SESSION_BYTES {
+                if !valid_secure_session(&value) {
                     return Err(AccountError::Storage);
                 }
                 serde_json::from_str(&value).map_err(|_| AccountError::Storage)
@@ -113,7 +118,7 @@ impl<R: Runtime> AccountSessionStorage for AndroidAccountStorage<R> {
 
     fn save(&self, session: &SavedAccountSession) -> Result<(), AccountError> {
         let value = serde_json::to_string(session).map_err(|_| AccountError::Storage)?;
-        if value.is_empty() || value.len() > MAX_SECURE_SESSION_BYTES {
+        if !valid_secure_session(&value) {
             return Err(AccountError::Storage);
         }
         self.0
@@ -173,35 +178,6 @@ pub fn init() -> TauriPlugin<Wry> {
         .build()
 }
 
-fn parse_snapshot_object(bytes: &[u8]) -> Result<serde_json::Map<String, Value>, AccountError> {
-    parse_strict_object(bytes).map_err(|_| AccountError::Invalid)
-}
-
-fn snapshot_text<'a>(
-    data: &'a serde_json::Map<String, Value>,
-    key: &str,
-    maximum: usize,
-) -> Result<&'a str, AccountError> {
-    let value = data
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|value| {
-            !value.is_empty()
-                && value.len() <= maximum
-                && !value
-                    .bytes()
-                    .any(|byte| matches!(byte, 0 | b'\t' | b'\n' | b'\r'))
-        })
-        .ok_or(AccountError::Invalid)?;
-    Ok(value)
-}
-
-fn snapshot_integer(data: &serde_json::Map<String, Value>, key: &str) -> Result<i64, AccountError> {
-    data.get(key)
-        .and_then(Value::as_i64)
-        .ok_or(AccountError::Invalid)
-}
-
 fn inspect_snapshot_record(
     map: &serde_json::Map<String, Value>,
     revision: i64,
@@ -220,8 +196,8 @@ fn inspect_snapshot_record(
         .get("data")
         .and_then(Value::as_object)
         .ok_or(AccountError::Invalid)?;
-    let code = snapshot_text(data, "code", 512)?.to_owned();
-    let word = snapshot_text(data, "word", 2048)?.to_owned();
+    let code = snapshot_text(data, "code", 512, AccountError::Invalid)?.to_owned();
+    let word = snapshot_text(data, "word", 2048, AccountError::Invalid)?.to_owned();
     match kind {
         "entry" | "overlay" => {
             let outer_keys_valid = if kind == "overlay" {
@@ -283,8 +259,8 @@ fn inspect_snapshot_record(
             {
                 return Err(AccountError::Invalid);
             }
-            let weight = snapshot_integer(data, "weight")?;
-            let record_revision = snapshot_integer(data, "revision")?;
+            let weight = snapshot_integer(data, "weight", AccountError::Invalid)?;
+            let record_revision = snapshot_integer(data, "revision", AccountError::Invalid)?;
             if !(0..=100_000_000).contains(&weight)
                 || (weight == 0 && !deleted)
                 || !(1..=revision).contains(&record_revision)
@@ -327,13 +303,13 @@ fn inspect_snapshot_record(
             if !snapshot_has_keys(data, &["context", "code", "word", value_key]) {
                 return Err(AccountError::Invalid);
             }
-            let context = snapshot_text(data, "context", 512)?.to_owned();
+            let context = snapshot_text(data, "context", 512, AccountError::Invalid)?.to_owned();
             if context.len() + code.len() + word.len() > 2048 {
                 return Err(AccountError::Invalid);
             }
             let identity = (context.clone(), code, word);
             if kind == "position" {
-                let position = snapshot_integer(data, "position")?;
+                let position = snapshot_integer(data, "position", AccountError::Invalid)?;
                 if !(1..=5).contains(&position)
                     || !positions.insert(identity)
                     || !position_slots.insert((context, position))
@@ -342,7 +318,7 @@ fn inspect_snapshot_record(
                 }
                 Ok(3)
             } else {
-                let count = snapshot_integer(data, "count")?;
+                let count = snapshot_integer(data, "count", AccountError::Invalid)?;
                 if !(0..=10).contains(&count) || !selections.insert(identity) {
                     return Err(AccountError::Invalid);
                 }
@@ -410,7 +386,7 @@ fn inspect_snapshot(path: &std::path::Path) -> Result<SnapshotMetadata, AccountE
         if total_bytes > MAX_BYTES || line.is_empty() {
             return Err(AccountError::Invalid);
         }
-        let map = parse_snapshot_object(&line)?;
+        let map = parse_strict_object(&line).map_err(|_| AccountError::Invalid)?;
         let kind = map
             .get("type")
             .and_then(Value::as_str)
@@ -483,9 +459,7 @@ fn inspect_snapshot(path: &std::path::Path) -> Result<SnapshotMetadata, AccountE
                 let expected_sha = map
                     .get("sha256")
                     .and_then(Value::as_str)
-                    .filter(|value| {
-                        value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
-                    })
+                    .filter(|value| msime_client_core::is_ascii_hex(value, 64))
                     .ok_or(AccountError::Invalid)?;
                 // Cloned, not consumed: the loop keeps reading after the footer
                 // so that trailing data is rejected, and those iterations still
@@ -1091,10 +1065,7 @@ pub async fn app_icon_set(
     state: State<'_, AccountState>,
     style: String,
 ) -> Result<AppIconResponse, crate::CommandError> {
-    if !matches!(
-        style.as_str(),
-        "classic" | "forest" | "sky" | "dusk" | "vermilion"
-    ) {
+    if !msime_tauri_mobile_platform::is_supported_app_icon_style(&style) {
         return Err(crate::CommandError {
             code: "invalid_app_icon",
         });
@@ -1462,7 +1433,7 @@ fn apply_local_account_preferences(
     }
     if let Some(value) = string_setting(values, "platform.android.candidate_skin")? {
         if supports_schema_field(schema, "platform.android.candidate_skin", "string")? {
-            if value.is_empty() || value.len() > 128 || value.chars().any(char::is_control) {
+            if value.is_empty() || !msime_client_core::is_bounded_text(&value, 128) {
                 return Err(AccountError::Invalid);
             }
             preferences.candidate_skin = value;
