@@ -397,6 +397,12 @@ metasequoia::SessionOptions options_for(const EngineOptions& value) {
                            value.local_kaomoji, value.local_super_jianpin, value.local_temporary_english,
                            value.local_temporary_japanese};
     options.sentence_alternatives = value.sentence_alternatives;
+    options.sentence_association = {value.sentence_association.word_lattice,
+                                    value.sentence_association.google,
+                                    value.sentence_association.neural_desktop,
+                                    value.sentence_association.neural_keyboard,
+                                    value.sentence_association.show_next_on_duplicate};
+    options.rescoring_context = std::string(value.rescoring_context);
     return options;
 }
 EngineResult result_for(const metasequoia::KeyResult& value) {
@@ -934,6 +940,18 @@ EngineSnapshot EngineSession::snapshot() const {
 }
 void EngineSession::reset_cache() {
     session_.reset_cache();
+}
+void EngineSession::set_caret(std::uint64_t caret) {
+    if (caret == std::numeric_limits<std::uint64_t>::max())
+        session_.set_caret(std::nullopt);
+    else
+        session_.set_caret(static_cast<std::size_t>(caret));
+}
+std::size_t EngineSession::prefix_end() const {
+    return session_.prefix_end();
+}
+rust::String EngineSession::pending_suffix() const {
+    return rust::String(session_.pending_suffix());
 }
 void EngineSession::reset_context() {
     session_.reset_context();
