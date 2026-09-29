@@ -984,7 +984,7 @@ fn user_entries_page(
     }
     // The Engine pages the whole store in one sequence with no kind or prefix filter, so the selection happens here. Doing it on the client meant asking for 100 rows and discarding most of them: a user with more than a page of pinyin words who selected 五笔 saw an empty page 1 even though wubi entries existed.
     let mut selector = PageSelector::new(offset, limit);
-    let mut entries: Vec<Entry> = Vec::new();
+    let mut entries: Vec<Entry> = Vec::with_capacity(limit);
     let mut has_more = false;
     let mut scanned = 0usize;
     // Bound the work: a store with very few matches must not turn one request into an unbounded scan. Reaching the budget is reported as "there may be more" rather than silently ending the list.
@@ -1499,7 +1499,7 @@ pub fn user_quick_phrases(
     .ok_or("dictionary maintenance busy")?;
     let prefix = code_prefix.trim();
     let mut selector = PageSelector::new(offset, limit);
-    let mut phrases = Vec::new();
+    let mut phrases = Vec::with_capacity(limit);
     let mut has_more = false;
     scan_user_quick_phrases(options, |entry| {
         if !entry.matches(Some(Kind::QuickPhrase), prefix) {
