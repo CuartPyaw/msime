@@ -2,6 +2,8 @@
 
 use std::io::{self, Read};
 
+const INITIAL_READ_CAPACITY: usize = 8 * 1024;
+
 #[derive(Debug)]
 pub(crate) enum BoundedReadError {
     TooLarge,
@@ -11,7 +13,7 @@ pub(crate) enum BoundedReadError {
 /// Read at most one byte past `maximum` so streams without a trustworthy
 /// `Content-Length` cannot grow the settings process without bound.
 pub(crate) fn read_bounded(reader: impl Read, maximum: usize) -> Result<Vec<u8>, BoundedReadError> {
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(maximum.min(INITIAL_READ_CAPACITY));
     reader
         .take(maximum.saturating_add(1) as u64)
         .read_to_end(&mut bytes)
