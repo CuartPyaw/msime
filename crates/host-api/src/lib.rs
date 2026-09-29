@@ -211,6 +211,8 @@ struct HostSession {
     nine_key_override: Option<bool>,
     /// An AI provider credential the host keeps outside the preferences (the iOS Keychain), handed over for this session only and never written back.
     ai_credential: Option<String>,
+    /// Cached copy used by every online query until preferences change.
+    ai_provider_cache: Option<AiAssistantProviderConfig>,
     voice: VoiceSessionState,
     /// Committing candidate selections counted but not yet written to typing statistics, indexed by one-based position minus one, with every position past a page in the last slot. See `SELECTION_BATCH`.
     pending_selections: [u64; RANKS + 1],
@@ -257,14 +259,16 @@ impl HostSession {
         )
     }
 
-    fn ai_provider_config(&self) -> Option<AiAssistantProviderConfig> {
-        let preferences = self
-            .requested
-            .as_ref()
-            .map(|snapshot| &snapshot.preferences)
-            .unwrap_or(&self.applied);
+    fn ai_provider_config(&self) -> Option<&AiAssistantProviderConfig> {
+        self.ai_provider_cache.as_ref()
+    }
+    fn ai_query_is_current(&self, query: &OnlineQuery) -> bool {
+        self.ai_provider_config()
+            .is_some_and(|config| query.ai_assistant.as_ref() == Some(config))
+    }
+    fn set_ai_provider_cache(&mut self, preferences: &Preferences) {
         let ai = &preferences.ai_assistant;
-        ai.enabled.then(|| AiAssistantProviderConfig {
+        self.ai_provider_cache = ai.enabled.then(|| AiAssistantProviderConfig {
             enabled: true,
             provider: ai.provider.clone(),
             model: ai.model.clone(),
@@ -275,11 +279,7 @@ impl HostSession {
             prompt_custom_1: ai.prompt_custom_1.clone(),
             prompt_custom_2: ai.prompt_custom_2.clone(),
             prompt_custom_3: ai.prompt_custom_3.clone(),
-        })
-    }
-    fn ai_query_is_current(&self, query: &OnlineQuery) -> bool {
-        self.ai_provider_config()
-            .is_some_and(|config| query.ai_assistant.as_ref() == Some(&config))
+        });
     }
     fn cloud_candidates_enabled(&self) -> bool {
         self.applied.cloud_candidates
@@ -481,6 +481,13 @@ impl HostSession {
         }
         self.preferences_pending = snapshot.preferences != self.applied;
         self.requested = Some(snapshot);
+        let requested_preferences = self
+            .requested
+            .as_ref()
+            .expect("requested snapshot exists")
+            .preferences
+            .clone();
+        self.set_ai_provider_cache(&requested_preferences);
         self.apply_pending()?;
         let snapshot = self.requested.as_ref().expect("requested snapshot exists");
         Ok(
