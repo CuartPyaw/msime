@@ -2324,6 +2324,23 @@ fn dedicated_english_state_resets_highlight_without_guessing_from_text() {
 }
 
 #[test]
+fn punctuation_host_context_uses_the_applied_runtime_state() {
+    let mut runtime = runtime();
+    runtime.focus(true).unwrap();
+    assert!(runtime.punctuation_host_context_available(false));
+    assert!(!runtime.punctuation_host_context_available(true));
+
+    runtime.engine.dedicated_english = true;
+    runtime.refresh().unwrap();
+    assert!(!runtime.punctuation_host_context_available(false));
+
+    runtime.engine.dedicated_english = false;
+    runtime.engine.local_mode = "unicode".into();
+    runtime.refresh().unwrap();
+    assert!(!runtime.punctuation_host_context_available(false));
+}
+
+#[test]
 fn switching_the_language_drops_the_composition_being_spelled() {
     // The source pairs `SetEnglishInputMode` with `ClearState`, and the engine does the same inside
     // `set_dedicated_english_mode`: letters spelled for Chinese are not what the user wants sitting
