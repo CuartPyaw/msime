@@ -196,7 +196,7 @@ fn enum_array(
     if items.is_empty() {
         return None;
     }
-    let mut values = Vec::new();
+    let mut values = Vec::with_capacity(items.len().min(allowed.len()));
     for item in items {
         let value = item.as_str()?;
         if !allowed.contains(&value) || values.iter().any(|existing| existing == value) {
