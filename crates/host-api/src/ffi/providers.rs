@@ -143,18 +143,17 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
             // Non-English targets with an offline dictionary installed beside the resources, in preference order. The same switches as macOS's English fallback reach them: the offline gloss switch, or candidate translation, whose online answer replaces the offline one when it arrives. Never read from the user directory, so no user path is needed for them.
             let offline_gloss_languages =
                 if preferences.candidate_translations || preferences.candidate_english_gloss {
-                    target_languages
-                        .iter()
-                        .filter_map(|language| {
-                            let language = serde_json::to_value(language).ok()?;
-                            let code = language.as_str()?;
-                            crate::offline_glosses_beside(
-                                std::path::Path::new(&session.options.resources),
-                                code,
-                            )
-                            .map(|_| code.to_owned())
-                        })
-                        .collect::<Vec<_>>()
+                    let mut languages = Vec::with_capacity(target_languages.len());
+                    languages.extend(target_languages.iter().filter_map(|language| {
+                        let language = serde_json::to_value(language).ok()?;
+                        let code = language.as_str()?;
+                        crate::offline_glosses_beside(
+                            std::path::Path::new(&session.options.resources),
+                            code,
+                        )
+                        .map(|_| code.to_owned())
+                    }));
+                    languages
                 } else {
                     Vec::new()
                 };
