@@ -698,7 +698,7 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
         .iter()
         .map(|(_, replacement)| Path::new(replacement.as_str()))
         .collect();
-    let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
+    let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::with_capacity(pairs.len());
     let rollback = |moved: &[(std::path::PathBuf, std::path::PathBuf)]| {
         for (from, to) in moved.iter().rev() {
             let _ = std::fs::rename(to, from);
