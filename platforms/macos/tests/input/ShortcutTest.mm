@@ -4400,6 +4400,15 @@ static void TestCloudCandidateConsent() {
 - (NSDictionary *)hostOptions { return @{}; }
 @end
 
+@interface ApplySnapshotSession : ServiceSnapshotSession
+@end
+@implementation ApplySnapshotSession
+- (NSDictionary *)applyTranslations:(NSArray *)translations generation:(uint64_t)generation error:(NSError **)error {
+    (void)translations; (void)generation; (void)error;
+    return @{ @"applied": @NO };
+}
+@end
+
 static void TestCandidateServiceSnapshotsAreReused() {
     NSString *suite = [@"msime.service-snapshot." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
@@ -4413,6 +4422,28 @@ static void TestCandidateServiceSnapshotsAreReused() {
     [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
     [controller setValue:@NO forKey:@"glossEnabled"];
     [controller synchronizeCandidateServices];
+    assert(session.translationQueryCalls == 1 && session.viewCalls == 1);
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+}
+
+static void TestApplyCandidateTranslationSnapshotsAreReused() {
+    NSString *suite = [@"msime.apply-service-snapshot." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *appearance = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    appearance.candidateTranslations = YES;
+    appearance.candidateEnglishGloss = YES;
+    ApplySnapshotSession *session = [ApplySnapshotSession new];
+    MSIMEInputController *controller = [MSIMEInputController alloc];
+    [controller setValue:appearance forKey:@"appearance"];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
+    [controller setValue:@NO forKey:@"glossEnabled"];
+    NSDictionary *request = [controller currentGlossRequest];
+    [controller setValue:request forKey:@"glossRequest"];
+    [controller setValue:@[] forKey:@"glossResults"];
+    session.translationQueryCalls = 0;
+    session.viewCalls = 0;
+    [controller applyCandidateTranslationResults];
     assert(session.translationQueryCalls == 1 && session.viewCalls == 1);
     MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
@@ -5811,6 +5842,7 @@ int main(int argc, char **argv) {
         [NSApplication sharedApplication];
         if (argc == 2 && std::string(argv[1]) == "--translations") {
             TestCandidateServiceSnapshotsAreReused();
+            TestApplyCandidateTranslationSnapshotsAreReused();
             TestGlossScheduling();
             TestAccountGlossSkipsNonChineseCandidates();
             TestAccountGlossRequiresExplicitChoice();
