@@ -688,7 +688,9 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
             .map_err(|_| "dictionary access unavailable")?
             .ok_or("dictionary maintenance busy")?;
             let mut cursor = 0usize;
-            let mut matching = Vec::new();
+            // Export pages are fetched in fixed 1000-entry chunks; reserve one
+            // chunk so the first filtered page does not grow the accumulator.
+            let mut matching = Vec::with_capacity(1000);
             let mut source_has_more = true;
             while source_has_more && matching.len() < offset.saturating_add(limit) {
                 // The pinyin export also carries the weights learned or set for bundled words, and leaves out single characters, as the reference's does; the other dictionaries export the user's own words only.
