@@ -86,7 +86,7 @@ pub fn client_paths(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> Vec<(Mc
             .map(PathBuf::from)
             .filter(|path| path.is_absolute())
     };
-    let mut clients = Vec::new();
+    let mut clients = Vec::with_capacity(2);
     let home = if cfg!(windows) {
         absolute("USERPROFILE")
     } else {
