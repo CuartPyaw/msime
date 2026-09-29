@@ -478,7 +478,7 @@ pub fn send_key(virtual_key: u16, modifiers: Modifiers) -> bool {
     if virtual_key == 0 {
         return false;
     }
-    let mut held: Vec<u16> = Vec::new();
+    let mut held = Vec::with_capacity(4);
     if modifiers.ctrl {
         held.push(VK_CONTROL);
     }
