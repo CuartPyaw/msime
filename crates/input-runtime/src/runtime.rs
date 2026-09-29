@@ -1499,13 +1499,19 @@ impl<E: InputEngine> Runtime<E> {
             return Ok(transition);
         }
         // What the reading held before the Engine saw this key. A selection that consumes part of
-        // it has to record the piece it took, and only the difference says what that was.
-        // Hosts that do not draw the held phrase never consume this value. Avoid copying the
-        // current reading for their ordinary key path; Linux, macOS and iOS enable the feature and
-        // still receive the same snapshot.
-        let reading_before = self
-            .phrase_preedit
-            .then(|| self.cached.editing_text.clone());
+        // it has to record the piece it took, and only the difference says what that was. Digits
+        // may become a selection after the Engine sees them, so all Character actions stay in the
+        // set; commands, punctuation and navigation never consume a candidate reading.
+        let selection_action = matches!(
+            &action,
+            Action::Character { .. }
+                | Action::Select(_)
+                | Action::SelectAnyCandidate(_)
+                | Action::SelectEdge(..)
+                | Action::SelectHighlighted
+        );
+        let reading_before =
+            (self.phrase_preedit && selection_action).then(|| self.cached.editing_text.clone());
         // A digit on the candidate page picks a candidate; the Engine is asked the same question as
         // for Select, so it can begin a phrase the same way.
         let mut selected_by_digit = false;
@@ -1641,14 +1647,7 @@ impl<E: InputEngine> Runtime<E> {
             .as_deref()
             .and_then(|reading| reading.strip_suffix(self.cached.editing_text.as_str()))
             .unwrap_or("");
-        let picked = selected_by_digit
-            || matches!(
-                action,
-                Action::Select(_)
-                    | Action::SelectAnyCandidate(_)
-                    | Action::SelectEdge(..)
-                    | Action::SelectHighlighted
-            );
+        let picked = selected_by_digit || selection_action;
         // Escape throws the whole composition away, the chosen pieces with it - the reference's
         // _HandleCancel clears `word_for_creating_word` in the same breath.
         let discarded = matches!(action, Action::Command(Command::Cancel));
