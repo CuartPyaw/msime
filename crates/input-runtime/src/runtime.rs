@@ -135,12 +135,31 @@ pub(crate) fn move_to_back<T>(items: &mut Vec<T>, moved: &[bool]) {
     }
 }
 
-/// Move the element at `index` to the front, keeping everything else in its existing order.
+/// Apply a permutation in place. `order` maps each new seat to its old seat.
 ///
-/// A rotation rather than a swap, so the rest of the list stays as the engine ranked it: promoting
-/// one candidate is the whole change, not a reshuffle.
-fn apply_order<T: Clone>(items: &mut Vec<T>, order: &[usize]) {
-    *items = order.iter().map(|index| items[*index].clone()).collect();
+/// The order is built as a permutation of the candidate seats, so each cycle can be rotated with
+/// swaps. Keeping the operation in place matters here because the same order is applied to eight
+/// parallel arrays, several of which contain candidate strings.
+pub(crate) fn apply_order<T>(items: &mut [T], order: &[usize]) {
+    debug_assert_eq!(items.len(), order.len());
+    for start in 0..items.len() {
+        // Process each cycle only from its smallest member, without allocating a visited bitmap.
+        let mut current = order[start];
+        let mut smallest = start;
+        while current != start {
+            smallest = smallest.min(current);
+            current = order[current];
+        }
+        if smallest != start {
+            continue;
+        }
+        current = start;
+        while order[current] != start {
+            let next = order[current];
+            items.swap(current, next);
+            current = next;
+        }
+    }
 }
 
 /// Keep the Engine-index mapping empty while the cached candidates are still in Engine order.
