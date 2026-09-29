@@ -293,7 +293,7 @@ impl ImeSession {
         QuanpinScheme::apply_literal_segmentation(request);
     }
 
-    /// Query the request's provider and, for wubi with mixed pinyin, append the quanpin rows for the same letters (ime_session.cpp:333-368). The quanpin request gets the session switches but not the autocorrect suppression, as in the reference.
+    /// Query the request's provider and, for wubi with mixed pinyin, append the quanpin rows for the same letters (ime_session.cpp:333-368). The quanpin request gets the session switches and the autocorrect suppression, so a correction the user refused by committing raw stays refused when the same letters arrive through mixed Wubi.
     fn decode(&mut self, request: &QueryRequest) -> Decoded {
         let candidates = self.registry.query(request);
         if request.scheme != SchemeType::Wubi {
@@ -314,6 +314,7 @@ impl ImeSession {
         pinyin.set_raw_input(&request.raw_input, &request.raw_input_with_cases);
         let mut mixed = pinyin.build_request();
         self.apply_request_options(&mut mixed);
+        self.apply_autocorrect_suppression(&mut mixed);
         if !mixed.valid {
             return Decoded {
                 candidates,
