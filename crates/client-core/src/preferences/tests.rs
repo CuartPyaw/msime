@@ -19,6 +19,49 @@ fn preference_store_rejects_a_symlinked_directory_without_writing_through_it() {
 }
 
 #[test]
+fn retired_google_sentence_switch_still_loads_and_is_not_written_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let saved = store.save(0, Preferences::default()).unwrap();
+    let mut document: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    document["preferences"]["sentence_association"] = serde_json::json!({
+        "word_lattice": false,
+        "google": false,
+        "neural_desktop": true,
+    });
+    fs::write(store.path(), serde_json::to_vec_pretty(&document).unwrap()).unwrap();
+
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.revision, saved.revision);
+    let sentence = loaded.preferences.sentence_association;
+    assert!(!sentence.word_lattice);
+    assert!(sentence.neural_desktop);
+    assert_eq!(
+        sentence,
+        SentenceAssociationPreferences {
+            word_lattice: false,
+            neural_desktop: true,
+            ..SentenceAssociationPreferences::default()
+        }
+    );
+    let written = serde_json::to_value(sentence).unwrap();
+    assert!(written.get("google").is_none());
+    assert!(
+        serde_json::from_value::<SentenceAssociationPreferences>(serde_json::json!({
+            "google": "not a bool either",
+        }))
+        .is_ok()
+    );
+    assert!(
+        serde_json::from_value::<SentenceAssociationPreferences>(serde_json::json!({
+            "googel": true,
+        }))
+        .is_err()
+    );
+}
+
+#[test]
 fn voice_commit_mode_defaults_for_legacy_documents() {
     let mut value = serde_json::to_value(Preferences::default()).unwrap();
     value["voice_input"]

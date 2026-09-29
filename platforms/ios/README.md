@@ -194,7 +194,7 @@ Tauri CLI 只把 `APPLE_DEVELOPMENT_TEAM` 应用到它自己的 App target，内
 
 `devicectl device process launch` 需要设备处于解锁状态，锁屏时会被 `SBMainWorkspace` 以 `Locked` 拒绝（`FBSOpenApplicationErrorDomain error 7`）。
 
-确认改动真的进了产物不要用 `strings`：键面提示是运行时从引擎的 profile 表拼出来的，二进制里没有 `ing uai` 这样的字面量；`@_silgen_name` 引用的 C ABI 名也在链接时解析掉了。用 `nm` 查符号——`MetasequoiaInputSessionBridge.shuangpinKeyHints` 下应当挂着一个 `withUnsafeBytes` 闭包，`msime_client_shuangpin_key_hints` 与 `msime_engine_bridge::ffi::ShuangpinKeyHint` 应当出现在 Rust 侧的 mangled 符号里，而旧的 `makeShuangpinHints` 应当是 0 个。
+确认改动真的进了产物不要用 `strings`：键面提示是运行时从引擎的 profile 表拼出来的，二进制里没有 `ing uai` 这样的字面量；`@_silgen_name` 引用的 C ABI 名也在链接时解析掉了。用 `nm` 查符号——`MetasequoiaInputSessionBridge.shuangpinKeyHints` 下应当挂着一个 `withUnsafeBytes` 闭包，`msime_client_shuangpin_key_hints` 与 `msime_engine::shuangpin::hints::ShuangpinKeyHint` 应当出现在 Rust 侧的 mangled 符号里，而旧的 `makeShuangpinHints` 应当是 0 个。
 
 Tauri 公共组件的真机产物把最后一个参数改为 `device`。真机构建会在 `apps/desktop/src-tauri/gen/apple` 执行锁定的 CocoaPods 安装，再调用 Tauri CLI；模拟器使用 `aarch64-sim` 并保留手写 fallback。
 

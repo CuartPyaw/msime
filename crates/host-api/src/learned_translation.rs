@@ -82,7 +82,7 @@ pub fn execute(bytes: &[u8]) -> Result<Value, &'static str> {
         };
         match request.action {
             Action::Lookup => {
-                let learned = msime_engine_bridge::candidate_glosses_with_user(
+                let learned = msime_engine::host::candidate_glosses_with_user(
                     "",
                     &request.directory,
                     &[(key, if chinese { 0 } else { 4 })],
@@ -126,7 +126,7 @@ pub fn execute(bytes: &[u8]) -> Result<Value, &'static str> {
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                     Err(_) => return Err("learned translation storage unavailable"),
                 }
-                if !msime_engine_bridge::save_candidate_gloss(
+                if !msime_engine::host::save_candidate_gloss(
                     &request.directory,
                     chinese,
                     &key,
@@ -235,11 +235,11 @@ mod tests {
         );
         assert_eq!(run(&write).unwrap()["saved"], 1);
         assert_eq!(
-            msime_engine_bridge::candidate_glosses_with_user("", directory, &[("hello".into(), 4)])
+            msime_engine::host::candidate_glosses_with_user("", directory, &[("hello".into(), 4)])
                 .unwrap(),
             vec!["新释义"]
         );
-        assert!(msime_engine_bridge::save_candidate_gloss(
+        assert!(msime_engine::host::save_candidate_gloss(
             directory, true, "测试", "test"
         ));
         assert_eq!(

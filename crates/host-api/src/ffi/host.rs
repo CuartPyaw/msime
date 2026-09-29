@@ -362,7 +362,7 @@ pub unsafe extern "C" fn msime_client_shuangpin_key_hints(
         let bytes = unsafe { std::slice::from_raw_parts(profile, length) };
         let name = std::str::from_utf8(bytes).map_err(|_| "invalid shuangpin profile encoding")?;
         let hints: serde_json::Map<String, serde_json::Value> =
-            msime_engine_bridge::shuangpin_key_hints(name)
+            msime_engine::host::shuangpin_key_hints(name)
                 .into_iter()
                 .map(|entry| (entry.key, serde_json::Value::String(entry.hint)))
                 .collect();

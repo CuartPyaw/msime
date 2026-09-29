@@ -2589,13 +2589,13 @@ fn only_the_lattice_source_is_treated_as_alternative_readings() {
 // falls through to selection for a digit the Engine refused. A regression in
 // either one silently turns "U4e2d" into a candidate pick, and the Windows and
 // macOS suites that would notice both need their own host to run.
-fn real_engine_options(root: &std::path::Path) -> msime_engine_bridge::EngineOptions {
+fn real_engine_options(root: &std::path::Path) -> msime_engine::host::EngineOptions {
     let path = |name: &str| {
         let path = root.join(name);
         std::fs::create_dir_all(&path).unwrap();
         path.to_str().unwrap().to_owned()
     };
-    msime_engine_bridge::EngineOptions {
+    msime_engine::host::EngineOptions {
         resources: path("resources"),
         user_data: path("user"),
         cache: path("cache"),
@@ -2629,9 +2629,8 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine_bridge::EngineOpt
         local_super_jianpin: true,
         local_temporary_english: true,
         local_temporary_japanese: true,
-        sentence_association: msime_engine_bridge::SentenceAssociationOptions {
+        sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
-            google: true,
             neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
@@ -2644,8 +2643,7 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine_bridge::EngineOpt
 #[test]
 fn unicode_mode_digits_compose_a_code_point_rather_than_picking_a_candidate() {
     let directory = tempfile::tempdir().unwrap();
-    let session =
-        msime_engine_bridge::Session::new(&real_engine_options(directory.path())).unwrap();
+    let session = msime_engine::host::Session::new(&real_engine_options(directory.path())).unwrap();
     let mut runtime = Runtime::new(session, 5).unwrap();
     runtime.focus(true).unwrap();
 

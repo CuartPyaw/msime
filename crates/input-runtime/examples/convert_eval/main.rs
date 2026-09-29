@@ -3,20 +3,14 @@
 //! Why this exists: neither the word lattice nor any later reranking can be shown to help or hurt
 //! without a number to compare against, and the repository had none.
 //!
-//! Why it reports per source rather than top-1 alone: for three or more complete syllables the
-//! Engine adds exactly one lattice path (`nbest = 1`) and then, when the Google-Pinyin fallback
-//! produced a sentence, moves that fallback row to index 0 — quanpin/quanpin_dictionary.cpp, "Keep
-//! one local Google-Pinyin sentence as the primary whole-sentence suggestion. The lattice is a
-//! secondary source." Which source ends up at position 1 therefore depends on the input, and
-//! whether a lattice change can move top-1 depends on that. `top1_source` and `gold_source` record
-//! it per run instead of assuming either way.
+//! Why it reports per source rather than top-1 alone: for two or more complete syllables the Engine inserts lattice sentence rows among the dictionary rows, so whether position 1 is a dictionary word or a lattice sentence depends on the input, and whether a lattice change can move top-1 depends on that. `top1_source` and `gold_source` record it per run instead of assuming either way.
 //!
 //! Learning is off and each case gets a fresh session, so one case cannot bias the next.
 
 mod metrics;
 
 use metrics::{Bucket, Observation, Report};
-use msime_engine_bridge::{Command, Session};
+use msime_engine::host::{Command, Session};
 use msime_input_runtime::{Action, Reranker, Runtime, SentenceModel};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -167,7 +161,7 @@ fn run(
     let generation = generation["source_commit"]
         .as_str()
         .ok_or("lock has no source_commit")?;
-    let mut options = msime_engine_bridge::prepare_options(
+    let mut options = msime_engine::host::prepare_options(
         resources.to_str().ok_or("non-UTF-8 resource path")?,
         state.join("user").to_str().ok_or("non-UTF-8 state path")?,
         state.join("cache").to_str().ok_or("non-UTF-8 cache path")?,

@@ -68,7 +68,7 @@ impl Fixture {
     fn upgrade(&self) {
         self.install_packaged_dictionaries();
         let text = |path: PathBuf| path.to_str().unwrap().to_owned();
-        let (applied, _skipped, failed, error) = msime_engine_bridge::replay_user_dictionary(
+        let (applied, _skipped, failed, error) = msime_engine::host::replay_user_dictionary(
             &text(self.path("user").join("msime_user.db")),
             &text(self.path("dictionaries").join("msime.db")),
             &text(self.path("dictionaries").join("english.db")),

@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
         let key = key.to_ascii_lowercase();
-        let normalized = msime_engine_bridge::normalize_full_pinyin(&key, syllables);
+        let normalized = msime_engine::host::normalize_full_pinyin(&key, syllables);
         if normalized.is_empty() {
             truncated += 1;
             continue;

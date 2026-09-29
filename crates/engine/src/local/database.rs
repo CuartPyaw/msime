@@ -47,7 +47,7 @@ pub fn close_cached_local_databases() {
 }
 
 /// Never creates the file: a missing dictionary must stay missing (test_jianpin_input_session.cpp:172-176). The connection's own mutex is redundant under the `Mutex` wrapper, so SQLite's is not requested.
-fn open_read_only(path: &Path) -> rusqlite::Result<Connection> {
+pub(crate) fn open_read_only(path: &Path) -> rusqlite::Result<Connection> {
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,

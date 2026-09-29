@@ -4,8 +4,8 @@
 
 use super::*;
 
-fn import_engine_options() -> msime_engine_bridge::EngineOptions {
-    msime_engine_bridge::EngineOptions {
+fn import_engine_options() -> msime_engine::host::EngineOptions {
+    msime_engine::host::EngineOptions {
         resources: String::new(),
         user_data: String::new(),
         cache: String::new(),
@@ -39,9 +39,8 @@ fn import_engine_options() -> msime_engine_bridge::EngineOptions {
         local_super_jianpin: true,
         local_temporary_english: true,
         local_temporary_japanese: true,
-        sentence_association: msime_engine_bridge::SentenceAssociationOptions {
+        sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
-            google: true,
             neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
@@ -112,7 +111,7 @@ fn typed_quick_phrase_edits_find_rows_by_code_and_text_and_list_only_user_phrase
     )
     .unwrap();
     // Other dictionaries share the store and must never be listed.
-    let wubi = msime_engine_bridge::DictionaryEntry {
+    let wubi = msime_engine::host::DictionaryEntry {
         kind: DictionaryKind::Wubi,
         key: "dz".into(),
         value: "合成".into(),
@@ -399,8 +398,9 @@ fn tree(directory: &Path) -> Vec<(std::path::PathBuf, Vec<String>)> {
                 .collect::<Result<_, _>>()
                 .unwrap();
             for table in tables {
+                // Sorted rather than ordered by rowid: the personal n-gram tables are WITHOUT ROWID.
                 let mut statement = connection
-                    .prepare(&format!("SELECT * FROM \"{table}\" ORDER BY rowid"))
+                    .prepare(&format!("SELECT * FROM \"{table}\""))
                     .unwrap();
                 let columns = statement.column_count();
                 let mut query = statement.query([]).unwrap();
@@ -410,6 +410,7 @@ fn tree(directory: &Path) -> Vec<(std::path::PathBuf, Vec<String>)> {
                     rows.push(format!("{table} {values:?}"));
                 }
             }
+            rows.sort();
             files.push((path, rows));
         } else {
             let bytes = std::fs::read(&path).unwrap();
@@ -555,7 +556,7 @@ fn a_manual_pinyin_entry_is_cut_into_syllables_like_an_imported_one() {
         let entry = replacement_for_engine(pinyin(typed, "你好")).unwrap();
         assert_eq!(entry.key, "ni'hao", "{typed:?}");
         // What this layer hands on is what the Engine accepts.
-        msime_engine_bridge::dictionary_validate(&entry.into()).unwrap();
+        msime_engine::host::dictionary_validate(&entry.into()).unwrap();
     }
     // The word's length picks the cut, as it does for an imported row.
     assert_eq!(

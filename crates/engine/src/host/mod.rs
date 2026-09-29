@@ -1,6 +1,6 @@
-//! The host facade: the surface `crates/engine-bridge` exposed to host-api and input-runtime (api-contract.md), so the bridge can re-export this module and its callers stay unchanged. It holds the logic that lived in `bridge.cpp` rather than in the engine: the `EngineOptions` mapping and its error strings, the flattened snapshot with the helpcode annotation rule and the nine-key and Microsoft mirrors, the raw-commit learning policy and `CommitRawWithoutLearning`, and the session-free dictionary, gloss, catalog and text helpers.
+//! The host facade: the surface host-api and input-runtime call (api-contract.md), the one the removed C++ bridge used to expose. It holds the logic that lived in `bridge.cpp` rather than in the engine: the `EngineOptions` mapping and its error strings, the flattened snapshot with the helpcode annotation rule and the nine-key and Microsoft mirrors, the raw-commit learning policy and `CommitRawWithoutLearning`, and the session-free dictionary, gloss, catalog and text helpers.
 //!
-//! Errors are `EngineError`, whose `Display` is the C++ exception text. Callers read `cxx::Exception` through `to_string()`, except `host-api/src/lib.rs:1027`, which calls `.what()` and becomes `to_string()` when the bridge is re-pointed. Audio capture and offline handwriting recognition are not here (see modules.md).
+//! Errors are `EngineError`, whose `Display` is the C++ exception text; callers read it through `to_string()`. Audio capture lives in host-api, and offline handwriting recognition is `crate::handwriting`.
 
 pub mod dictionary;
 pub mod glosses;

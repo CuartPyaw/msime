@@ -51,8 +51,8 @@ VCPKG_DISABLE_METRICS=1 "$vcpkg_root/vcpkg" install \
   --x-manifest-root="$repo_root/platforms/windows" --x-install-root="$deps_root"
 env "MSIME_WINDOWS_DEPS=$prefix" "$linker_var=$compiler-gcc" \
   cargo build --locked -p msime-host-api --target "$triple"
-env "MSIME_WINDOWS_DEPS=$prefix" "$linker_var=$compiler-gcc" \
-  cargo build --locked -p msime-engine-bridge --bin MetasequoiaImeDictionaryReplay --target "$triple"
+env "$linker_var=$compiler-gcc" \
+  cargo build --locked -p msime-engine --bin MetasequoiaImeDictionaryReplay --target "$triple"
 output="$repo_root/target/windows-full/$arch"
 # compile_commands.json is what lets the same sources be re-checked for the
 # other architecture with the flags they are really built with, rather than a

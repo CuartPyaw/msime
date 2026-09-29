@@ -328,7 +328,7 @@ REVIEWED_COMMITS: dict[str, str] = {
         "In the locked Engine: InputSession::update_creating_word_progress in Engine "
         "core/input_session_composition.cpp accumulates canonical pinyin per pick; the Windows side "
         "keeps the picked prefix in platforms/windows/src/ipc/ReplyComposer.cpp. "
-        "crates/engine-bridge/examples/phrase_creation_dictionary.rs checks the stored phrase."
+        "crates/engine/examples/phrase_creation_dictionary.rs checks the stored phrase."
     ),
     "feat: add word-to-character setting": (
         "word_to_character and word_to_character_keys in platforms/windows/installer/config.default.toml."

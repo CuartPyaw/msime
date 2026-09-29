@@ -35,6 +35,9 @@ pub extern "C" fn msime_client_destroy(handle: u64) -> *mut c_char {
                 .ok_or("unknown session or wrong thread")?;
             // A host may tear a session down without a focus-out first; what it counted is still written.
             session.flush_selections();
+            // Dropping the engine session writes its own journal's delayed context learning; this also covers every other journal the process learned into, while this session still holds its dictionary access.
+            msime_engine::flush_personal_learning();
+            drop(session);
             Ok(Value::Null)
         })
     })

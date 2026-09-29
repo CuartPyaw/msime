@@ -240,11 +240,10 @@ pub fn request_autocorrect_mask(transposition: bool, neighbor: bool) -> u32 {
     }
 }
 
-/// Neural sentence association switches. `google` is still sent by hosts and stored in preferences, so it is accepted, but the Google decoder is gone and it has no effect.
+/// Neural sentence association switches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SentenceAssociationOptions {
     pub word_lattice: bool,
-    pub google: bool,
     pub neural_desktop: bool,
     pub neural_keyboard: bool,
     pub show_next_on_duplicate: bool,
@@ -254,7 +253,6 @@ impl Default for SentenceAssociationOptions {
     fn default() -> Self {
         Self {
             word_lattice: true,
-            google: true,
             neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,

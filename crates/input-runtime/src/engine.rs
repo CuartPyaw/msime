@@ -1,5 +1,4 @@
-//! The engine boundary: the trait the runtime drives, and the pinned C++ Session's
-//! implementation of it.
+//! The engine boundary: the trait the runtime drives, and the `msime_engine::host::Session` implementation of it.
 
 use super::*;
 

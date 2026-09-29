@@ -66,7 +66,7 @@ ANSWERED_BY: dict[str, str] = {
     # Dictionaries.
     "dictionary_manager": "crates/client-core/src/dictionary/import.rs",
     "dictionary_validation": "crates/client-core/src/dictionary/import.rs",
-    "dictionary_page": "crates/engine-bridge/src/lib.rs",
+    "dictionary_page": "crates/engine/src/host/dictionary.rs",
     # Windows settings are a native WinUI 3 window. The shared Tauri shell remains the panel host,
     # so its launcher is still part of the platform boundary but is no longer the settings product.
     "settings_app": "platforms/windows/settings/main.cpp",

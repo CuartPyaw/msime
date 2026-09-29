@@ -8,7 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-msime-engine-bridge = { path = "../engine-bridge" }
+msime-engine = { path = "../engine" }
 msime-client-core = { path = "../client-core" }
 rustix = { workspace = true, features = ["process"] }
 # The model and its reference implementation live upstream, where other input methods

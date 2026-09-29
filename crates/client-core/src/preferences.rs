@@ -438,33 +438,46 @@ pub enum CharacterWidthPreference {
     Fullwidth,
 }
 
-/// Candidate sentence-association sources. Dictionary and Google sources keep their historical
-/// defaults; neural rerankers are opt-in because they add model work while typing or settling.
+/// Candidate sentence-association sources. The dictionary lattice keeps its historical default; neural rerankers are opt-in because they add model work while typing or settling.
+/// The private unit field absorbs a retired key; it is not a non-exhaustive marker.
+#[allow(clippy::manual_non_exhaustive)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SentenceAssociationPreferences {
     #[serde(default = "enabled_by_default")]
     pub word_lattice: bool,
-    #[serde(default = "enabled_by_default")]
-    pub google: bool,
     #[serde(default)]
     pub neural_desktop: bool,
     #[serde(default)]
     pub neural_keyboard: bool,
     #[serde(default)]
     pub show_next_on_duplicate: bool,
+    /// The retired Google decoder switch. Documents saved before the decoder was dropped still carry `google`; it is accepted and discarded so they keep loading, and the next save no longer writes it.
+    #[serde(
+        rename = "google",
+        default,
+        skip_serializing,
+        deserialize_with = "discard_retired_value"
+    )]
+    retired_google: (),
 }
 
 impl Default for SentenceAssociationPreferences {
     fn default() -> Self {
         Self {
             word_lattice: true,
-            google: true,
             neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
+            retired_google: (),
         }
     }
+}
+
+fn discard_retired_value<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<(), D::Error> {
+    serde::de::IgnoredAny::deserialize(deserializer).map(|_| ())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

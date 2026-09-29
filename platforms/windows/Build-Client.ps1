@@ -73,7 +73,7 @@ try {
         Invoke-ClientBuild cmake @('-E', 'copy_if_different', (Join-Path $release 'msime_host_api.dll'), $bin)
         if ($arch -eq 'x64') {
             Invoke-ClientBuild cargo @('build', '--locked', '--release', '--target', $triple,
-                '-p', 'msime-engine-bridge', '--bin', 'MetasequoiaImeDictionaryReplay')
+                '-p', 'msime-engine', '--bin', 'MetasequoiaImeDictionaryReplay')
             Invoke-ClientBuild cmake @('-E', 'copy_if_different',
                 (Join-Path $release 'MetasequoiaImeDictionaryReplay.exe'), $bin)
             Invoke-ClientBuild cmake @('-E', 'copy_if_different',

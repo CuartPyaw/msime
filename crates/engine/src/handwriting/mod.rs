@@ -1,6 +1,17 @@
-//! The candidate policy for handwriting provider replies (`include/metasequoia/handwriting_candidates.h`), applied on every platform. Recognition itself (zinnia or its replacement) is not engine logic and is not in this crate.
+//! Handwriting: the candidate policy for provider replies (`include/metasequoia/handwriting_candidates.h`), applied on every platform, and the offline recognizer the desktop hosts run on the packaged zinnia model (`recognizer`, over a Rust port of zinnia in `features` and `model`).
 
 use std::collections::HashSet;
+
+// The model-backed recognizer is left out of the Android and OHOS builds, which only order provider replies (host-api gates its caller the same way); platforms/android/verify-native.sh checks that it stays out of libmsime_host_api.so.
+#[cfg(not(any(target_os = "android", target_env = "ohos")))]
+mod features;
+#[cfg(not(any(target_os = "android", target_env = "ohos")))]
+mod model;
+#[cfg(not(any(target_os = "android", target_env = "ohos")))]
+mod recognizer;
+
+#[cfg(not(any(target_os = "android", target_env = "ohos")))]
+pub use recognizer::handwriting_recognize;
 
 pub const MAX_CANDIDATES: usize = 12;
 pub const MAX_CANDIDATE_BYTES: usize = 4_096;

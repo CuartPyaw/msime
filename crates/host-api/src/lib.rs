@@ -28,7 +28,7 @@ use msime_client_core::voice::doubao_frame::{
     audio_frame, decode_error_code, decode_json_frame, start_frame,
 };
 use msime_client_core::voice::VoiceSessionState;
-use msime_engine_bridge::{CandidateEdge, Command, EngineOptions, Session};
+use msime_engine::host::{CandidateEdge, Command, EngineOptions, Session};
 use msime_input_runtime::HandwritingQuery;
 #[cfg(unix)]
 use msime_input_runtime::UnixSocketProvider;
@@ -100,6 +100,7 @@ pub use dictionary::{
     WordEdit, WordImport, WordKind, WordPage,
 };
 mod dictionary_snapshot;
+mod voice_capture;
 pub use dictionary_snapshot::{
     msime_client_snapshot_discard, msime_client_snapshot_inspect, msime_client_snapshot_prepare,
     msime_client_snapshot_queue, msime_client_snapshot_restore, msime_client_snapshot_version,
@@ -107,10 +108,7 @@ pub use dictionary_snapshot::{
 
 /// Capture endpoint identities paired with labels. Neither belongs in logs.
 pub fn voice_capture_devices() -> Vec<(String, String)> {
-    msime_engine_bridge::capture_devices()
-        .into_iter()
-        .map(|device| (device.id, device.label))
-        .collect()
+    voice_capture::capture_devices()
 }
 
 /// Capture bounded mono 16 kHz PCM for a platform host.
@@ -118,18 +116,14 @@ pub fn voice_capture_pcm(milliseconds: u32) -> Result<Vec<f32>, &'static str> {
     if !(1..=60_000).contains(&milliseconds) {
         return Err("invalid voice capture duration");
     }
-    let samples = msime_engine_bridge::capture_audio(milliseconds);
+    let samples = voice_capture::capture_audio(milliseconds);
     if samples.is_empty() {
         return Err("voice capture unavailable");
     }
     Ok(samples)
 }
 
-/// Run the optional offline Engine handwriting recognizer for a panel host.
-/// The caller must provide a trusted absolute model path; strokes are copied
-/// before crossing the C++ bridge. The shared panel uses a 420 by 420 canvas,
-/// which is also the coordinate space passed to the Engine. This path needs no
-/// provider socket, so every host can use it.
+/// Run the optional offline Engine handwriting recognizer for a panel host. The caller must provide a trusted absolute model path. The shared panel uses a 420 by 420 canvas, which is also the coordinate space passed to the Engine. This path needs no provider socket, so every host can use it.
 pub fn handwriting_local_candidates(
     model_path: &str,
     query: &HandwritingQuery,
@@ -153,7 +147,7 @@ fn engine_handwriting_candidates(
         .map(|stroke| stroke.iter().map(|point| (point.x, point.y)).collect())
         .collect::<Vec<Vec<(f32, f32)>>>();
     let recognize = |strokes: &[Vec<(f32, f32)>]| {
-        msime_engine_bridge::handwriting_recognize(model_path, strokes, width, height)
+        msime_engine::handwriting_recognize(model_path, strokes, width, height)
             .map_err(|_| "local handwriting recognizer unavailable")
     };
     // The Engine classifies one character per call and normalises each call's own bounding box, so a written line is split into character cells and each cell is classified on its own, as the Windows Ink recognizer segments a line into a multi-character candidate.
@@ -183,11 +177,7 @@ fn engine_handwriting_candidates(
     _width: f32,
     _height: f32,
 ) -> Result<Vec<String>, &'static str> {
-    // Android injects ML Kit Digital Ink through HandwritingRecognizer. Keeping
-    // this boundary unavailable prevents zinnia and its model path from becoming
-    // an unused second recognizer in the IME process. HarmonyOS is the same case:
-    // its build turns MSIME_ENGINE_BRIDGE_HANDWRITING off, so the Engine symbol
-    // is not there to call.
+    // Android injects ML Kit Digital Ink through HandwritingRecognizer and HarmonyOS uses its own recognizer. Keeping this boundary unavailable there prevents zinnia and its model path from becoming an unused second recognizer in the IME process.
     Err("local handwriting recognizer unavailable")
 }
 
@@ -595,9 +585,9 @@ impl HostOptions {
             local_super_jianpin: self.preferences.local_modes.super_jianpin,
             local_temporary_english: self.preferences.local_modes.temporary_english,
             local_temporary_japanese: self.preferences.local_modes.temporary_japanese,
-            sentence_association: msime_engine_bridge::SentenceAssociationOptions {
+            sentence_association: msime_engine::host::SentenceAssociationOptions {
                 word_lattice: self.preferences.sentence_association.word_lattice,
-                google: self.preferences.sentence_association.google,
+                // The Google decoder is gone and the engine reads nothing from this switch.
                 neural_desktop: self.preferences.sentence_association.neural_desktop,
                 neural_keyboard: self.preferences.sentence_association.neural_keyboard,
                 show_next_on_duplicate: self
@@ -663,10 +653,7 @@ pub(crate) const OFFLINE_GLOSS_LANGUAGES: [&str; 6] = ["fr", "ja", "es", "ru", "
 
 /// Drop the `\\?\` prefix Windows canonicalisation adds.
 ///
-/// The Engine validates the directories it is given with `std::filesystem::path::is_absolute`, and
-/// libstdc++ reads a verbatim path as having no root name - so `\\?\Z:\res` is not absolute to it
-/// and preparation is refused. MSVC's standard library parses the prefix, which is why a build with
-/// it never sees this; the GNU cross build, and every test that runs those binaries, does.
+/// The resource path is recorded in every HostOptions document this writes, and those documents have always held the plain drive form. Keeping it means an existing document and a freshly prepared one name the same directory the same way, and a native host reading the document gets the spelling it always got.
 ///
 /// Only the drive form is unwrapped. `\\?\UNC\server\share` means something different from
 /// `\\server\share` to the filesystem, so it is left alone rather than rewritten into a path that
@@ -691,8 +678,7 @@ fn without_verbatim_prefix(path: std::path::PathBuf) -> std::path::PathBuf {
 ///
 /// This runs at every Server start, and the desktop set is 169 MB: about half a second of SHA-256
 /// before the first keystroke can be served, repeated at every login. `VerifiedMarker` records what
-/// was verified so the repeat is skipped while the files are untouched, in the same shape
-/// `scripts/fetch_engine.py` already uses for the Engine archive.
+/// was verified so the repeat is skipped while the files are untouched.
 ///
 /// The marker lives under the state root rather than beside the resources: on Windows the
 /// resources are installed under Program Files, which the Server does not get to write to.
@@ -747,7 +733,7 @@ pub fn prepare_host_configuration(
     ))?;
     let state_root = std::path::absolute(state_root)?;
     verify_resources_once(&resources, &specification, &state_root)?;
-    let prepared = msime_engine_bridge::prepare_options(
+    let prepared = msime_engine::host::prepare_options(
         resources.to_str().ok_or("non-UTF-8 resource path")?,
         state_root
             .join("user")
@@ -1018,13 +1004,13 @@ pub(crate) fn invalid_dictionary_entry(reason: &str) -> String {
 /// An entry the Engine refuses is reported as `invalid dictionary entry: <reason>` with the Engine's reason, checked before anything is locked. Those reasons are fixed sentences in `validate_personal_dictionary_entry` that never repeat the submitted entry; collapsing them into one generic "rejected" left the settings page telling the user to retry an entry that could never be saved. Every other Engine diagnostic is still withheld, since it may include user text.
 pub fn edit_personal_dictionary(
     options: &EngineOptions,
-    previous: Option<&msime_engine_bridge::DictionaryEntry>,
-    replacement: Option<&msime_engine_bridge::DictionaryEntry>,
+    previous: Option<&msime_engine::host::DictionaryEntry>,
+    replacement: Option<&msime_engine::host::DictionaryEntry>,
     request_id: &str,
 ) -> Result<(), String> {
     for entry in previous.iter().chain(replacement.iter()) {
-        msime_engine_bridge::dictionary_validate(entry)
-            .map_err(|error| invalid_dictionary_entry(error.what()))?;
+        msime_engine::host::dictionary_validate(entry)
+            .map_err(|error| invalid_dictionary_entry(&error.to_string()))?;
     }
     let _access = DictionaryAccess::try_maintenance(
         std::path::Path::new(&options.user_data),
@@ -1035,7 +1021,7 @@ pub fn edit_personal_dictionary(
     if request_id.is_empty() {
         return Err("dictionary request id required".into());
     }
-    msime_engine_bridge::dictionary_edit(options, previous, replacement, request_id)
+    msime_engine::host::dictionary_edit(options, previous, replacement, request_id)
         .map_err(|_| "dictionary edit rejected".into())
 }
 
@@ -1055,11 +1041,7 @@ pub struct LocalEmojiCatalogSlice {
 }
 
 /// Read catalog rows without collapsing equal text from distinct categories.
-// Not unix-gated: the bodies only call the engine bridge, which builds on
-// Windows too (its build.rs has explicit Windows branches). The gate was a
-// porting gap, and it left the Windows desktop falling back to the compact
-// built-in catalog - 97 emoji against the several thousand rows in others.db -
-// behind a permanent "catalog failed to load" banner.
+// Not unix-gated: the bodies only call the engine, which builds on Windows too. The gate was a porting gap, and it left the Windows desktop falling back to the compact built-in catalog - 97 emoji against the several thousand rows in others.db - behind a permanent "catalog failed to load" banner.
 pub fn local_emoji_catalog_slice(
     resources: &str,
     category: &str,
@@ -1072,7 +1054,7 @@ pub fn local_emoji_catalog_slice(
     if limit == 0 || limit > 4096 {
         return Err("invalid local emoji page size");
     }
-    msime_engine_bridge::emoji_catalog_slice(resources, "", category, "", offset, limit, "")
+    msime_engine::host::emoji_catalog_slice(resources, "", category, "", offset, limit, "")
         .map(|page| LocalEmojiCatalogSlice {
             items: page
                 .items
@@ -1101,7 +1083,7 @@ pub fn local_symbol_catalog(resources: &str) -> Result<Vec<LocalSymbolCatalogGro
     if !std::path::Path::new(resources).is_absolute() {
         return Err("resources path must be absolute");
     }
-    let groups = msime_engine_bridge::emoji_symbol_groups(resources)
+    let groups = msime_engine::host::emoji_symbol_groups(resources)
         .map_err(|_| "local symbol catalog unavailable")?;
     let mut result = Vec::with_capacity(groups.len());
     let mut remaining_pages = 256usize;
@@ -1114,7 +1096,7 @@ pub fn local_symbol_catalog(resources: &str) -> Result<Vec<LocalSymbolCatalogGro
                 return Err("local symbol catalog exceeds limit");
             }
             remaining_pages -= 1;
-            let page = msime_engine_bridge::emoji_catalog_slice(
+            let page = msime_engine::host::emoji_catalog_slice(
                 resources,
                 "",
                 "symbols",

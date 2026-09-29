@@ -611,7 +611,7 @@ pub unsafe extern "C" fn msime_client_english_completions(
             return Err("invalid English completion prefix".into());
         }
         with_session(handle, |session| {
-            let words = msime_engine_bridge::english_completions(
+            let words = msime_engine::host::english_completions(
                 &session.options.dictionaries,
                 prefix,
                 limit,

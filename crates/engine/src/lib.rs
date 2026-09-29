@@ -2,7 +2,7 @@
 //!
 //! This crate replaces the C++ MSIME-Engine that used to be fetched from `engine-lock.json` and patched by overlay scripts. It owns the input algorithms; `msime-input-runtime` keeps orchestrating hosts and does not duplicate any of it.
 //!
-//! Two public layers: `Session` and the functions beside it mirror the C++ `metasequoia::` API the golden fixtures were recorded against, and `host` is the flattened surface `msime-engine-bridge` exposed, so the bridge can re-export it without changing its callers. The module map and who owns what is `.migration/spec/modules.md`.
+//! Two public layers: `Session` and the functions beside it mirror the C++ `metasequoia::` API the golden fixtures were recorded against, and `host` is the flattened surface host-api and input-runtime call. The module map and who owns what is `.migration/spec/modules.md`.
 
 pub mod assets;
 mod cache;
@@ -30,6 +30,8 @@ mod user_dictionary;
 mod wubi;
 
 pub use error::{EngineError, Result};
+#[cfg(not(any(target_os = "android", target_env = "ohos")))]
+pub use handwriting::handwriting_recognize;
 pub use handwriting::order_handwriting_candidates;
 pub use paths::RuntimePaths;
 pub use session::{Clock, Session, SessionOptions, SessionSnapshot};

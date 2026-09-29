@@ -1,4 +1,4 @@
-//! The port of `crates/engine-bridge/src/tests.rs` (tests-inventory.md §4.2) against the Rust facade, plus the two annotation tests of `engine-bridge/src/dictionary_stage/tests.rs` that exercise the host snapshot rule (fixtures written straight into the generation instead of staged), and unit tests of the bridge-local helpers.
+//! The port of the removed C++ bridge's `crates/engine-bridge/src/tests.rs` (tests-inventory.md §4.2) against the Rust facade, plus the two annotation tests of `engine-bridge/src/dictionary_stage/tests.rs` that exercise the host snapshot rule (fixtures written straight into the generation instead of staged), and unit tests of the bridge-local helpers.
 
 use std::path::Path;
 
@@ -49,7 +49,6 @@ fn options(root: &Path) -> EngineOptions {
         local_temporary_japanese: true,
         sentence_association: SentenceAssociationOptions {
             word_lattice: true,
-            google: true,
             neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,

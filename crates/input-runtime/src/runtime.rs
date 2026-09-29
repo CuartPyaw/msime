@@ -1385,10 +1385,8 @@ impl<E: InputEngine> Runtime<E> {
     /// sources are plural by design — English words, emoji, kaomoji, quick phrases and AI
     /// suggestions all arrive as lists, and that version silently dropped all but one of each.
     fn demote_runner_up_readings(&mut self) -> bool {
-        // The lattice never runs on fewer than three syllables, so a shorter candidate reached the
-        // list some other way and is not a reading of the same sentence. Japanese kana are the case
-        // that proves it: あ and ア are both Generated and both one character.
-        const SENTENCE_SYLLABLES: usize = 3;
+        // The lattice runs from two syllables (a single syllable is never decoded), so a shorter candidate reached the list some other way and is not a reading of the same sentence. Japanese kana are the case that proves it: あ and ア are both Generated and both one character. Two rather than three because two-syllable keys are where the lattice's runner-up readings (倪好, 你号, 你毫 after 你好) otherwise fill the first page ahead of dictionary words: on quanpin-words-v1 this moves two-syllable top5 from 0.883 to 0.924 with top1 unchanged.
+        const SENTENCE_SYLLABLES: usize = 2;
 
         let snapshot = &self.cached;
         let count = snapshot.candidates.len();

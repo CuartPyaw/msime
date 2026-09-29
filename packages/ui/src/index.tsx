@@ -1105,7 +1105,6 @@ export { useCandidatePreviewTheme } from "./candidate/candidate-preview-theme";
 /** Local whole-sentence candidate sources and optional neural reranking. */
 export type SentenceAssociationPreferences = {
   word_lattice?: boolean;
-  google?: boolean;
   neural_desktop?: boolean;
   neural_keyboard?: boolean;
   show_next_on_duplicate?: boolean;

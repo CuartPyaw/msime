@@ -159,7 +159,7 @@ if command -v cargo >/dev/null 2>&1; then
   # client-core carries the shared logic plus a few #[cfg(windows)] paths - the
   # file-replacement retry in the gloss store among them - that the host run can
   # never reach, because on macOS and Linux the other branch is compiled.
-  rust_packages="-p msime-host-windows -p msime-client-core -p msime-engine-bridge"
+  rust_packages="-p msime-host-windows -p msime-client-core -p msime-engine"
   deps_prefix="${MSIME_WINDOWS_DEPS_ROOT:-$root/target/windows-native-deps}/$arch/$arch-mingw-static"
   if [ -d "$deps_prefix" ]; then
     rust_packages="$rust_packages -p msime-host-api"
@@ -170,7 +170,7 @@ if command -v cargo >/dev/null 2>&1; then
   # Filter on profile.test: --no-run also reports examples, which are ordinary
   # programs that expect arguments and would be counted as failures here.
   # --tests excludes examples, which are not tests and need not build for this
-  # target - engine-bridge ships one that uses std::os::unix.
+  # target.
   rust_build_log="$rust_stage/cargo.log"
   cargo test $rust_packages --target "$rust_triple" --no-run --tests \
     --message-format=json 2>"$rust_build_log" \

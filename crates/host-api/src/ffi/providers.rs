@@ -614,13 +614,12 @@ pub unsafe extern "C" fn msime_client_emoji_catalog_request(
             return Err("invalid emoji page".into());
         }
         if query.list_groups {
-            let groups =
-                msime_engine_bridge::emoji_catalog_groups(resources, &query.panel.category)
-                    .map_err(|_| "local emoji catalog unavailable")?;
+            let groups = msime_engine::host::emoji_catalog_groups(resources, &query.panel.category)
+                .map_err(|_| "local emoji catalog unavailable")?;
             return Ok(json!({"groups": groups}));
         }
         if query.list_symbol_groups {
-            let groups = msime_engine_bridge::emoji_symbol_groups(resources)
+            let groups = msime_engine::host::emoji_symbol_groups(resources)
                 .map_err(|_| "local emoji catalog unavailable")?;
             return Ok(
                 json!({"symbol_groups": groups.into_iter().map(|g| json!({"parent":g.parent,"title":g.title})).collect::<Vec<_>>()}),
@@ -630,7 +629,7 @@ pub unsafe extern "C" fn msime_client_emoji_catalog_request(
             return Err("parent filter requires symbols catalog".into());
         }
         if query.cursor {
-            let slice = msime_engine_bridge::emoji_catalog_slice(
+            let slice = msime_engine::host::emoji_catalog_slice(
                 resources,
                 &query.panel.search,
                 &query.panel.category,
@@ -648,7 +647,7 @@ pub unsafe extern "C" fn msime_client_emoji_catalog_request(
                 "complete": slice.complete,
             }));
         }
-        let items = msime_engine_bridge::emoji_catalog_filtered_page(
+        let items = msime_engine::host::emoji_catalog_filtered_page(
             resources,
             &query.panel.search,
             &query.panel.category,

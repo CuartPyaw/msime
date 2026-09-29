@@ -41,7 +41,7 @@ nm_tool="${readelf_tool%/llvm-readelf}/llvm-nm"
 host_symbols=$("$nm_tool" -C --defined-only "$library_dir/libmsime_host_api.so")
 # The header-only candidate ordering policy is shared with Android. Keep only
 # the optional model-backed recognizer and its Zinnia implementation out.
-if grep -Eq 'msime_engine_bridge::handwriting_recognize|metasequoia::handwriting::Recognizer|zinnia::' <<< "$host_symbols"; then
+if grep -Eq 'handwriting_recognize|metasequoia::handwriting::Recognizer|zinnia::' <<< "$host_symbols"; then
   echo "Android host unexpectedly contains the Engine handwriting recognizer" >&2; exit 1
 fi
 echo "libmsime_host_api.so: Engine handwriting recognizer excluded for Android"

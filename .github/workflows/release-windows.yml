@@ -98,7 +98,7 @@ jobs:
           $supplemental = Join-Path $env:RUNNER_TEMP 'msime-supplemental-notices'
           $rust = Join-Path $supplemental 'rust-crates-NOTICES.txt'
           $frontend = Join-Path $supplemental 'frontend-npm-NOTICES.txt'
-          python -X utf8 platforms/linux/collect-notices.py cargo $rust msime-host-api msime-engine-bridge msime-mcp-server msime-desktop:tauri/custom-protocol
+          python -X utf8 platforms/linux/collect-notices.py cargo $rust msime-host-api msime-engine msime-mcp-server msime-desktop:tauri/custom-protocol
           if ($LASTEXITCODE -ne 0) { throw 'Rust crate notice collection failed' }
           python -X utf8 platforms/linux/collect-notices.py npm $frontend apps/desktop
           if ($LASTEXITCODE -ne 0) { throw 'npm notice collection failed' }

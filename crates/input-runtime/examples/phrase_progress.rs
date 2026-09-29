@@ -1,11 +1,6 @@
 //! What the user sees while a phrase is being put together out of two selections.
 //!
-//! Picking a candidate that consumes only part of the input leaves the Engine composing: it keeps
-//! the piece that was chosen, offers candidates for the rest, and stores the whole phrase once the
-//! input runs out. `engine-bridge/examples/phrase_creation_dictionary.rs` pins the storing half.
-//! This one pins the half the user actually looks at - what the host is told to put on screen and
-//! what it is told to send to the document in between - because that is where the reference and
-//! this client could differ without either of them being wrong about the dictionary.
+//! Picking a candidate that consumes only part of the input leaves the Engine composing: it keeps the piece that was chosen, offers candidates for the rest, and stores the whole phrase once the input runs out. This example pins the half the user actually looks at - what the host is told to put on screen and what it is told to send to the document in between - because that is where the reference and this client could differ without either of them being wrong about the dictionary.
 //!
 //! The reference keeps the chosen word inside its composition (`word_for_creating_word` is
 //! prepended to the reading, and the caret is shifted past it) and commits the phrase as one piece
@@ -14,7 +9,7 @@
 //!
 //! usage: phrase_progress <verified-dictionary-directory>
 
-use msime_engine_bridge::{prepare_options, Command, Session};
+use msime_engine::host::{prepare_options, Command, Session};
 use msime_input_runtime::{Action, Runtime};
 
 /// Pinyin for a phrase whose leading part is a word of its own, so the first candidate list holds

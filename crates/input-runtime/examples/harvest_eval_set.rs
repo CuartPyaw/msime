@@ -32,7 +32,7 @@
 //! usage: harvest_eval_set --resources <verified-dir> --corpus <file> --out <file.tsv>
 //!                         [--limit N] [--min-chars N] [--max-chars N] [--attribution TEXT]
 
-use msime_engine_bridge::{Command, Session};
+use msime_engine::host::{Command, Session};
 use msime_input_runtime::{Action, Reranker, Runtime, SentenceModel};
 use std::fmt::Write as _;
 use std::io::{BufRead, BufReader};
@@ -153,7 +153,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let generation = generation["source_commit"]
         .as_str()
         .ok_or("lock has no source_commit")?;
-    let mut options = msime_engine_bridge::prepare_options(
+    let mut options = msime_engine::host::prepare_options(
         args.resources.to_str().ok_or("non-UTF-8 resource path")?,
         state
             .path()
@@ -226,8 +226,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // The Engine returns apostrophe-separated syllables; the evaluation format is the
             // unsegmented key a user actually types, and `normalize_full_pinyin` below re-cuts it
             // using the character count, so the separators are dropped rather than carried.
-            let pinyin =
-                msime_engine_bridge::hanzi_to_pinyin(&options, &sentence).replace('\'', "");
+            let pinyin = msime_engine::host::hanzi_to_pinyin(&options, &sentence).replace('\'', "");
             pinyin_time += started.elapsed();
             pinyin_calls += 1;
             if pinyin_calls.is_multiple_of(500) {
@@ -242,7 +241,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // conversion.
             if pinyin.is_empty()
                 || !pinyin.bytes().all(|b| b.is_ascii_lowercase())
-                || msime_engine_bridge::normalize_full_pinyin(&pinyin, characters).is_empty()
+                || msime_engine::host::normalize_full_pinyin(&pinyin, characters).is_empty()
             {
                 rejected_pinyin += 1;
                 continue;

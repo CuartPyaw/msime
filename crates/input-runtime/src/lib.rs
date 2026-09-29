@@ -36,7 +36,7 @@ pub mod character_width {
 
 pub use chinese_ime_lm::{CandidateFacts, Reranker, SentenceModel, DICTIONARY_SOURCES};
 use msime_client_core::preferences::TouchKeyboardLayout;
-use msime_engine_bridge::{
+use msime_engine::host::{
     CandidateEdge, Command, EngineResult, EngineSnapshot, OnlineQuerySnapshot, Session,
 };
 use serde::{Deserialize, Serialize};

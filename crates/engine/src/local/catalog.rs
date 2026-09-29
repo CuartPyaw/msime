@@ -2,11 +2,10 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, Statement};
 
-use super::database::{lock, open_local_database};
+use super::database::open_read_only;
 use crate::assets;
 use crate::diagnostics;
 use crate::error::{EngineError, Result};
@@ -66,8 +65,7 @@ pub fn read_emoji_catalog_slice(
             diagnostics::INVALID_EMOJI_CATALOG_PAGE,
         ));
     };
-    let database = open_catalog(resources)?;
-    let connection = lock(&database);
+    let connection = open_catalog(resources)?;
     let kaomoji = category == KAOMOJI_CATEGORY;
     let symbols = category == SYMBOLS_CATEGORY;
     let sql = if kaomoji {
@@ -153,8 +151,7 @@ pub fn emoji_catalog_groups(resources: &Path, category: &str) -> Result<Vec<Stri
         SYMBOLS_CATEGORY => SYMBOLS_GROUPS_SQL,
         _ => EMOJI_GROUPS_SQL,
     };
-    let database = open_catalog(resources)?;
-    let connection = lock(&database);
+    let connection = open_catalog(resources)?;
     let mut statement = prepare(&connection, sql)?;
     let rows = statement
         .query_map([], |row| row.get::<_, Option<String>>(0))
@@ -170,8 +167,7 @@ pub fn emoji_catalog_groups(resources: &Path, category: &str) -> Result<Vec<Stri
 
 /// Symbol groups under their parent categories.
 pub fn emoji_symbol_groups(resources: &Path) -> Result<Vec<EmojiSymbolGroup>> {
-    let database = open_catalog(resources)?;
-    let connection = lock(&database);
+    let connection = open_catalog(resources)?;
     let mut statement = prepare(&connection, SYMBOL_PARENTS_SQL)?;
     let rows = statement
         .query_map([], |row| {
@@ -190,10 +186,10 @@ pub fn emoji_symbol_groups(resources: &Path) -> Result<Vec<EmojiSymbolGroup>> {
     Ok(groups)
 }
 
-/// The resource file is immutable and the picker pages through it repeatedly, so it shares the local modes' cached read-only connection.
-fn open_catalog(resources: &Path) -> Result<Arc<Mutex<Connection>>> {
-    open_local_database(&resources.join(assets::OTHER_DICTIONARY))
-        .ok_or_else(|| EngineError::failed(diagnostics::EMOJI_CATALOG_UNAVAILABLE))
+/// A fresh read-only connection per call, as bridge.cpp:1024-1030 opened one. The picker's calls are not per keystroke, and a cached handle would keep reading a replaced or once-unreadable `others.db` until the process restarts.
+fn open_catalog(resources: &Path) -> Result<Connection> {
+    open_read_only(&resources.join(assets::OTHER_DICTIONARY))
+        .map_err(|_| EngineError::failed(diagnostics::EMOJI_CATALOG_UNAVAILABLE))
 }
 
 // SQLite's messages can expose resource paths or data, so every failure maps to a fixed message (bridge.cpp:1062).

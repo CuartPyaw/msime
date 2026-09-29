@@ -12,7 +12,7 @@ use msime_client_core::cloud::snapshot_validation::{
     required_text as snapshot_text, valid_timestamp as snapshot_timestamp,
 };
 use msime_client_core::resources::{ResourceSet, ResourceStore};
-use msime_engine_bridge::{
+use msime_engine::host::{
     dictionary_state_revision, stage_dictionary_state, EngineOptions, Session, SnapshotReadError,
 };
 use serde::{Deserialize, Serialize};
@@ -552,7 +552,7 @@ fn write_activation_receipt(
 fn prepare(
     request: PrepareRequest,
     specification: &ResourceSet,
-    stream: impl Iterator<Item = Result<msime_engine_bridge::DictionaryStateRecord, SnapshotReadError>>
+    stream: impl Iterator<Item = Result<msime_engine::host::DictionaryStateRecord, SnapshotReadError>>
         + 'static,
 ) -> Result<Prepared, &'static str> {
     if request.records > 500_000 || request.expected_version.len() != 64 {
@@ -920,7 +920,7 @@ impl SnapshotFileRecords {
 }
 
 impl Iterator for SnapshotFileRecords {
-    type Item = Result<msime_engine_bridge::DictionaryStateRecord, SnapshotReadError>;
+    type Item = Result<msime_engine::host::DictionaryStateRecord, SnapshotReadError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.failed {

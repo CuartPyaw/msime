@@ -115,9 +115,10 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
 pub extern "C" fn msime_client_focus(handle: u64, focused: bool) -> *mut c_char {
     response(|| {
         with_session(handle, |session| {
-            // Focus-out is where a host's field ends, so selections counted in it are written here rather than waiting for a batch to fill.
+            // Focus-out is where a host's field ends, so selections counted in it are written here rather than waiting for a batch to fill. The same goes for the engine's delayed context learning: the iOS keyboard extension and the Android IME process can be killed without ever destroying their sessions, and the engine no longer writes that queue at process exit.
             if !focused {
                 session.flush_selections();
+                msime_engine::flush_personal_learning();
             }
             let result = session.runtime.focus(focused).map_err(|e| e.to_string())?;
             let result = session.complete_transition(result);
@@ -154,20 +155,20 @@ pub extern "C" fn msime_client_voice_cancel(handle: u64) -> *mut c_char {
     })
 }
 
-/// Capture a bounded PCM16-compatible sample buffer through the Engine audio
-/// layer. The returned JSON contains only the samples for this call; callers
-/// must transport them immediately and must not log or persist them.
+/// Capture a bounded PCM16-compatible sample buffer from the default input device. The returned JSON contains only the samples for this call; callers must transport them immediately and must not log or persist them.
 #[no_mangle]
 pub extern "C" fn msime_client_voice_capture(milliseconds: u32) -> *mut c_char {
     response(|| {
         if !(1..=60_000).contains(&milliseconds) {
             return Err("invalid voice capture duration".into());
         }
-        let samples = msime_engine_bridge::capture_audio(milliseconds);
+        let samples = crate::voice_capture::capture_audio(milliseconds);
         if samples.is_empty() {
             return Err("voice capture unavailable".into());
         }
-        Ok(json!({ "sample_rate": 16000, "channels": 1, "samples": samples }))
+        Ok(
+            json!({ "sample_rate": crate::voice_capture::SAMPLE_RATE, "channels": 1, "samples": samples }),
+        )
     })
 }
 

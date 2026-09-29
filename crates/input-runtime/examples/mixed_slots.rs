@@ -16,7 +16,7 @@
 //!
 //! usage: mixed_slots <verified-dictionary-directory>
 
-use msime_engine_bridge::{prepare_options, Session};
+use msime_engine::host::{prepare_options, Session};
 use msime_input_runtime::{Action, Runtime};
 
 fn texts(runtime: &Runtime<Session>) -> Vec<String> {

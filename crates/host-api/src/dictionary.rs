@@ -10,7 +10,7 @@ use msime_client_core::dictionary::personal::{
     PersonalDictionaryError, PersonalDictionaryStore, PersonalWord, PersonalWordKind,
     PersonalWordRequestStatus,
 };
-use msime_engine_bridge::{DictionaryEntry, DictionaryKind};
+use msime_engine::host::{DictionaryEntry, DictionaryKind};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::ffi::c_char;
@@ -110,7 +110,7 @@ impl From<Entry> for DictionaryEntry {
     }
 }
 
-impl From<Kind> for msime_engine_bridge::DictionaryKind {
+impl From<Kind> for msime_engine::host::DictionaryKind {
     fn from(kind: Kind) -> Self {
         match kind {
             Kind::Pinyin => Self::Pinyin,
@@ -304,7 +304,7 @@ pub unsafe extern "C" fn msime_client_dictionary_validate(
         let bytes = unsafe { std::slice::from_raw_parts(request, length) };
         let entry: Entry =
             serde_json::from_slice(bytes).map_err(|_| "invalid dictionary entry".to_owned())?;
-        let normalized = msime_engine_bridge::dictionary_validate(&entry.into())
+        let normalized = msime_engine::host::dictionary_validate(&entry.into())
             .map_err(|_| "invalid dictionary entry".to_owned())?;
         let normalized = Entry::try_from(normalized)?;
         if matches!(normalized.kind, Kind::QuickPhrase)
@@ -440,7 +440,7 @@ fn queued_import(
     kind: &Kind,
     format: &str,
     text: &str,
-    options: &msime_engine_bridge::EngineOptions,
+    options: &msime_engine::host::EngineOptions,
 ) -> Result<(Vec<PersonalWord>, serde_json::Value), String> {
     let (entries, report) = if format == "hans" {
         (parse_hans_import(kind, text, options)?, None)
@@ -448,7 +448,7 @@ fn queued_import(
         let (entries, report) = parse_import(kind, format, text, Some(options))?;
         (entries, Some(report))
     };
-    // The bridge entry carries no line number; the parsed report lists the same rows in the same order.
+    // The engine entry carries no line number; the parsed report lists the same rows in the same order.
     let source_lines: Vec<usize> = report
         .as_ref()
         .map(|parsed| parsed.entries.iter().map(|entry| entry.line).collect())
@@ -610,18 +610,16 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
             // user nothing but "check the format", leaving the dictionary
             // half-written with no way to know how far it got.
             let mut rejected_lines: Vec<usize> = Vec::new();
-            // The bridge entry carries no line number, so the parsed report is
-            // what maps a refused row back to the line the user has to fix.
-            // The two lists are built from the same rows in the same order.
+            // The engine entry carries no line number, so the parsed report is what maps a refused row back to the line the user has to fix. The two lists are built from the same rows in the same order.
             let source_lines: Vec<usize> = report
                 .as_ref()
                 .map(|parsed| parsed.entries.iter().map(|entry| entry.line).collect())
                 .unwrap_or_default();
             for (index, entry) in entries.iter().enumerate() {
                 let receipt = format!("{request_id}-{index}");
-                // The batch already owns the maintenance lock; use the Engine bridge directly.
+                // The batch already owns the maintenance lock; call the Engine directly.
                 let result =
-                    msime_engine_bridge::dictionary_edit(&options, None, Some(entry), &receipt);
+                    msime_engine::host::dictionary_edit(&options, None, Some(entry), &receipt);
                 if result.is_err() {
                     // A hans import has no parsed report, so its rows have no
                     // line to name; they are still counted.
@@ -665,7 +663,7 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
             )
             .map_err(|_| "dictionary access unavailable")?
             .ok_or("dictionary maintenance busy")?;
-            msime_engine_bridge::reset_learned_data(&options)
+            msime_engine::host::reset_learned_data(&options)
                 .map_err(|_| "learned-data reset rejected")?;
             Ok(json!({ "reset": true }))
         }
@@ -692,7 +690,7 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
             let mut source_has_more = true;
             while source_has_more && matching.len() < offset.saturating_add(limit) {
                 // The pinyin export also carries the weights learned or set for bundled words, and leaves out single characters, as the reference's does; the other dictionaries export the user's own words only.
-                let page = msime_engine_bridge::dictionary_export_entries(
+                let page = msime_engine::host::dictionary_export_entries(
                     &options,
                     cursor,
                     1000,
@@ -940,14 +938,14 @@ fn names_a_code(kind: Kind, prefix: &str) -> bool {
 
 /// One page of the dictionary table of `kind` under code `prefix`, bundled rows included and each marked with where it comes from. The caller holds dictionary access.
 fn table_entries_page(
-    options: &msime_engine_bridge::EngineOptions,
+    options: &msime_engine::host::EngineOptions,
     kind: Kind,
     prefix: &str,
     offset: usize,
     limit: usize,
 ) -> Result<(Vec<Entry>, bool), String> {
     let page =
-        msime_engine_bridge::dictionary_table_entries(options, kind.into(), prefix, offset, limit)
+        msime_engine::host::dictionary_table_entries(options, kind.into(), prefix, offset, limit)
             .map_err(|_| "dictionary read rejected")?;
     let entries = page
         .entries
@@ -966,7 +964,7 @@ fn table_entries_page(
 
 /// One page of the user's own words, optionally within one dictionary and under one code prefix. The caller holds dictionary access.
 fn user_entries_page(
-    options: &msime_engine_bridge::EngineOptions,
+    options: &msime_engine::host::EngineOptions,
     offset: usize,
     limit: usize,
     kind: Option<Kind>,
@@ -974,7 +972,7 @@ fn user_entries_page(
 ) -> Result<(Vec<Entry>, bool), String> {
     // Unfiltered pages still go straight through, so the common case costs exactly what it did before.
     if kind.is_none() && prefix.is_empty() {
-        let page = msime_engine_bridge::dictionary_entries(options, offset, limit)
+        let page = msime_engine::host::dictionary_entries(options, offset, limit)
             .map_err(|_| "dictionary read rejected")?;
         let entries: Vec<Entry> = page
             .entries
@@ -992,7 +990,7 @@ fn user_entries_page(
     const SCAN_BUDGET: usize = 20_000;
     const CHUNK: usize = 500;
     loop {
-        let page = msime_engine_bridge::dictionary_entries(options, scanned, CHUNK)
+        let page = msime_engine::host::dictionary_entries(options, scanned, CHUNK)
             .map_err(|_| "dictionary read rejected")?;
         let count = page.entries.len();
         for raw in page.entries {
@@ -1124,7 +1122,7 @@ fn personal_from_entry(entry: Entry) -> Result<PersonalWord, String> {
 }
 
 fn normalize_personal_word(word: PersonalWord) -> Result<PersonalWord, String> {
-    let entry = msime_engine_bridge::dictionary_validate(&personal_engine_entry(&word))
+    let entry = msime_engine::host::dictionary_validate(&personal_engine_entry(&word))
         .map_err(|_| "invalid personal dictionary entry".to_owned())?;
     Ok(PersonalWord {
         kind: personal_kind(entry.kind),
@@ -1134,8 +1132,8 @@ fn normalize_personal_word(word: PersonalWord) -> Result<PersonalWord, String> {
     })
 }
 
-fn personal_engine_entry(word: &PersonalWord) -> msime_engine_bridge::DictionaryEntry {
-    msime_engine_bridge::DictionaryEntry {
+fn personal_engine_entry(word: &PersonalWord) -> msime_engine::host::DictionaryEntry {
+    msime_engine::host::DictionaryEntry {
         kind: match word.kind {
             PersonalWordKind::Pinyin => DictionaryKind::Pinyin,
             PersonalWordKind::Wubi => DictionaryKind::Wubi,
@@ -1178,7 +1176,7 @@ fn bundled_weight(previous: &Entry, replacement: Option<&Entry>) -> Result<Optio
 
 /// Re-weight or delete a bundled row under the maintenance lock, journaled so the change survives replay onto a fresh dictionary. Engine diagnostics are withheld, as for a user entry.
 fn edit_bundled_entry(
-    options: &msime_engine_bridge::EngineOptions,
+    options: &msime_engine::host::EngineOptions,
     previous: &Entry,
     weight: Option<i64>,
     request_id: &str,
@@ -1198,7 +1196,7 @@ fn edit_bundled_entry(
         value: previous.value.clone(),
         weight: previous.weight,
     };
-    msime_engine_bridge::dictionary_edit_bundled(options, &previous, weight, request_id)
+    msime_engine::host::dictionary_edit_bundled(options, &previous, weight, request_id)
         .map_err(|_| "dictionary edit rejected")?;
     Ok(json!({ "applied": true }))
 }
@@ -1285,7 +1283,7 @@ fn full_pinyin_key(key: &str, value: &str) -> Option<String> {
     if !(1..=128).contains(&expected_syllables) {
         return None;
     }
-    Some(msime_engine_bridge::normalize_full_pinyin(
+    Some(msime_engine::host::normalize_full_pinyin(
         key,
         expected_syllables,
     ))
@@ -1317,7 +1315,7 @@ fn parse_import(
     kind: &Kind,
     format: &str,
     text: &str,
-    engine_options: Option<&msime_engine_bridge::EngineOptions>,
+    engine_options: Option<&msime_engine::host::EngineOptions>,
 ) -> Result<ParsedImport, String> {
     let mut report = msime_client_core::dictionary::import::parse(
         kind.into(),
@@ -1362,7 +1360,7 @@ fn parse_import(
 fn parse_hans_import(
     kind: &Kind,
     text: &str,
-    options: &msime_engine_bridge::EngineOptions,
+    options: &msime_engine::host::EngineOptions,
 ) -> Result<Vec<DictionaryEntry>, String> {
     if !matches!(kind, Kind::Pinyin)
         || text.is_empty()
@@ -1381,7 +1379,7 @@ fn parse_hans_import(
         if entries.len() >= 1000 || word.len() > 1024 || !word.chars().all(is_han_character) {
             return Err("invalid dictionary import".into());
         }
-        let key = msime_engine_bridge::hanzi_to_pinyin(options, word);
+        let key = msime_engine::host::hanzi_to_pinyin(options, word);
         if key.is_empty() || key.len() > 256 {
             return Err("dictionary pinyin unavailable".into());
         }
@@ -1399,7 +1397,7 @@ fn parse_hans_import(
 }
 
 /// Host options for a caller that manages the dictionary in-process rather than through the C ABI, such as the MCP server. Built from the same runtime-options document a host passes to `msime_client_create`.
-pub struct DictionaryOptions(msime_engine_bridge::EngineOptions);
+pub struct DictionaryOptions(msime_engine::host::EngineOptions);
 
 impl DictionaryOptions {
     /// Parse a runtime-options document. The Linux desktop publishes the candidate skin catalog into the same file, and the Host API refuses that field, so it is dropped here the way the IBus and Fcitx5 hosts drop it.
@@ -1456,13 +1454,13 @@ const QUICK_PHRASE_SCAN_LIMIT: usize = 1_000_000;
 
 /// Walk the user's own quick phrases in store order, stopping when `visit` returns false. Only rows the user added: the Engine never learns a quick phrase from typing, and the bundled table is not the user's.
 fn scan_user_quick_phrases(
-    options: &msime_engine_bridge::EngineOptions,
+    options: &msime_engine::host::EngineOptions,
     mut visit: impl FnMut(Entry) -> bool,
 ) -> Result<(), String> {
     const CHUNK: usize = 1000;
     let mut scanned = 0usize;
     while scanned < QUICK_PHRASE_SCAN_LIMIT {
-        let page = msime_engine_bridge::dictionary_entries(options, scanned, CHUNK)
+        let page = msime_engine::host::dictionary_entries(options, scanned, CHUNK)
             .map_err(|_| "dictionary read rejected")?;
         let count = page.entries.len();
         for raw in page.entries {
@@ -1523,7 +1521,7 @@ pub fn user_quick_phrases(
 
 /// The stored row for `phrase`, looked up by its folded code and exact text. The Engine only edits a row it is handed exactly as stored, weight included.
 fn stored_quick_phrase(
-    options: &msime_engine_bridge::EngineOptions,
+    options: &msime_engine::host::EngineOptions,
     phrase: &QuickPhrase,
 ) -> Result<Option<Entry>, String> {
     let _access = DictionaryAccess::try_session(
@@ -1719,7 +1717,7 @@ fn comparable_code(kind: WordKind, code: &str) -> String {
 
 /// The stored row typing `code` offers `word` from, the user's own or bundled, exactly as stored. The caller holds dictionary access.
 fn stored_word(
-    options: &msime_engine_bridge::EngineOptions,
+    options: &msime_engine::host::EngineOptions,
     kind: WordKind,
     code: &str,
     word: &str,
@@ -1750,7 +1748,7 @@ fn stored_word(
 
 /// The entry a new word is stored as, its pinyin code resolved from the word when it has none.
 fn new_word_entry(
-    options: &msime_engine_bridge::EngineOptions,
+    options: &msime_engine::host::EngineOptions,
     kind: WordKind,
     word: &NewWord,
 ) -> Result<Entry, String> {
@@ -1762,7 +1760,7 @@ fn new_word_entry(
                     "a word without a code must be Han characters only",
                 ));
             }
-            let reading = msime_engine_bridge::hanzi_to_pinyin(options, &word.word);
+            let reading = msime_engine::host::hanzi_to_pinyin(options, &word.word);
             if reading.is_empty() {
                 return Err(invalid_dictionary_entry("the word has no known reading"));
             }
@@ -1879,8 +1877,8 @@ pub fn import_dictionary_words(
             continue;
         }
         let receipt = format!("{request_id}-{index}");
-        // The import already holds the maintenance lock; use the Engine bridge directly.
-        match msime_engine_bridge::dictionary_edit(options, None, Some(&entry.into()), &receipt) {
+        // The import already holds the maintenance lock; call the Engine directly.
+        match msime_engine::host::dictionary_edit(options, None, Some(&entry.into()), &receipt) {
             Ok(()) => outcome.added += 1,
             Err(_) => outcome
                 .rejected
@@ -1898,7 +1896,7 @@ pub enum LookupScheme {
     Wubi,
 }
 
-/// Where a looked-up candidate came from: the Engine's `CandidateSource` (vendor/MSIME-Engine/core/word_item.h), with a dictionary candidate told apart by the row it was found as.
+/// Where a looked-up candidate came from: the Engine's `msime_engine::CandidateSource`, with a dictionary candidate told apart by the row it was found as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CandidateOrigin {
     /// A row shipped with the dictionary or learned from typing.
@@ -1976,7 +1974,7 @@ pub fn lookup_candidates(
     .map_err(|_| "dictionary access unavailable")?
     .ok_or("dictionary maintenance busy")?;
     let session =
-        msime_engine_bridge::Session::new(&options).map_err(|_| "cannot open the dictionaries")?;
+        msime_engine::host::Session::new(&options).map_err(|_| "cannot open the dictionaries")?;
     let mut runtime =
         msime_input_runtime::Runtime::new(session, 9).map_err(|error| error.to_string())?;
     // An unfocused runtime drops every keystroke.
