@@ -217,11 +217,13 @@ impl ResourceStore {
             count += 1;
         }
         if count != expected.len() {
-            let mut missing: Vec<_> = expected
-                .iter()
-                .filter(|name| !directory.join(name).is_file())
-                .copied()
-                .collect();
+            let mut missing = Vec::with_capacity(expected.len());
+            missing.extend(
+                expected
+                    .iter()
+                    .filter(|name| !directory.join(name).is_file())
+                    .copied(),
+            );
             missing.sort_unstable();
             return Err(ResourceError::ExistingGeneration(format!(
                 "{} holds {count} of the {} pinned resources, missing: {}",
@@ -329,7 +331,7 @@ impl VerifiedMarker {
         let Ok(directory_entries) = fs::read_dir(directory) else {
             return Ok(None);
         };
-        let mut entries = Vec::new();
+        let mut entries = Vec::with_capacity(specification.artifacts.len() + 1);
         for entry in directory_entries {
             let Ok(entry) = entry else {
                 return Ok(None);
