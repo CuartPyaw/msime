@@ -30,6 +30,6 @@ test("opens local designs and keeps the editor open", () => {
 
   actions.openLocalDesigns();
 
-  expect(selectPage).toHaveBeenCalledWith("appearance");
+  expect(selectPage).toHaveBeenCalledWith("skin");
   expect(setShowTouchSkinEditor).toHaveBeenCalledWith(true);
 });

@@ -24,9 +24,7 @@ QQ_GROUP = "829919142"
 TELEGRAM = "t.me/msimegroup"
 
 SURFACES = {
-    # The feedback section owns the channel labels after the settings page
-    # extraction; keep this check attached to the component that renders them.
-    "shared settings page": "packages/ui/src/settings/feedback-settings-section.tsx",
+    "shared settings page": "packages/ui/src/settings/pages/feedback-page.tsx",
     "macOS": "platforms/macos/src/core/SupportWindowController.mm",
     "iOS": "platforms/ios/App/Sources/settings/HelpAndFeedbackViews.swift",
     "Android strings": "platforms/android/res/values/strings.xml",
