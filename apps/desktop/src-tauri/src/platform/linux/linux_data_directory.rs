@@ -350,7 +350,7 @@ impl MovePlan {
         }
         drop(staging);
 
-        let mut backups = Vec::new();
+        let mut backups = Vec::with_capacity(rewrites.len());
         for (backup, rewritten) in rewrites {
             let path = backup.path.clone();
             backups.push(backup);
