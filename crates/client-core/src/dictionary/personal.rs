@@ -415,15 +415,17 @@ impl PersonalDictionaryStore {
         Page: FnMut(&PersonalPageRequest) -> Result<PersonalWordPage, String>,
     {
         self.update(|state| {
-            let pending: Vec<usize> = state
-                .requests
-                .iter()
-                .enumerate()
-                .filter_map(|(index, request)| {
-                    (request.status == PersonalWordRequestStatus::Pending).then_some(index)
-                })
-                .take(4)
-                .collect();
+            let mut pending = Vec::with_capacity(4);
+            pending.extend(
+                state
+                    .requests
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, request)| {
+                        (request.status == PersonalWordRequestStatus::Pending).then_some(index)
+                    })
+                    .take(4),
+            );
             for index in pending {
                 match apply(&state.requests[index]) {
                     Ok(()) => {
