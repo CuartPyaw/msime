@@ -243,6 +243,68 @@ impl Runtime<Session> {
         candidate: &str,
         source: u8,
     ) -> Result<bool, RuntimeError> {
+        let cloud_candidates = query.cloud_candidates;
+        let query = OnlineQuerySnapshot {
+            available: true,
+            scheme: query.scheme,
+            generation: query.generation,
+            identity: query.identity.clone(),
+            query_text: query.query_text.clone(),
+            cache_key: query.cache_key.clone(),
+            pinyin_segments: query.pinyin_segments.clone(),
+            cloud_eligible: query.cloud_eligible,
+            ai_eligible: query.ai_eligible,
+            session_id: query.session_id,
+        };
+        self.apply_online_candidate_snapshot(query, candidate, source, cloud_candidates)
+    }
+
+    /// Apply a provider result while transferring its query into the Engine call.
+    ///
+    /// Hosts that own the deserialized query do not need it after this call. Moving its strings
+    /// and pinyin segments avoids rebuilding the same bounded query just before every asynchronous
+    /// candidate is merged.
+    pub fn apply_online_candidate_owned(
+        &mut self,
+        query: OnlineQuery,
+        candidate: &str,
+        source: u8,
+    ) -> Result<bool, RuntimeError> {
+        let cloud_candidates = query.cloud_candidates;
+        let OnlineQuery {
+            scheme,
+            generation,
+            identity,
+            query_text,
+            cache_key,
+            pinyin_segments,
+            cloud_eligible,
+            ai_eligible,
+            session_id,
+            ..
+        } = query;
+        let query = OnlineQuerySnapshot {
+            available: true,
+            scheme,
+            generation,
+            identity,
+            query_text,
+            cache_key,
+            pinyin_segments,
+            cloud_eligible,
+            ai_eligible,
+            session_id,
+        };
+        self.apply_online_candidate_snapshot(query, candidate, source, cloud_candidates)
+    }
+
+    fn apply_online_candidate_snapshot(
+        &mut self,
+        query: OnlineQuerySnapshot,
+        candidate: &str,
+        source: u8,
+        cloud_candidates: bool,
+    ) -> Result<bool, RuntimeError> {
         // Provider callbacks are asynchronous and can be malformed even when
         // their query identity is still current. Keep the single-item path
         // subject to the same bounds as the batch path before handing text to
@@ -257,23 +319,11 @@ impl Runtime<Session> {
             // Windows accepts them for an otherwise eligible pinyin query
             // even when the local dictionary returned no rows.
             || (source == 0 && self.cached.candidates.is_empty())
-            || (source == 0 && (!query.cloud_candidates || !query.cloud_eligible))
+            || (source == 0 && (!cloud_candidates || !query.cloud_eligible))
             || (source == 1 && !query.ai_eligible)
         {
             return Ok(false);
         }
-        let query = OnlineQuerySnapshot {
-            available: true,
-            scheme: query.scheme,
-            generation: query.generation,
-            identity: query.identity.clone(),
-            query_text: query.query_text.clone(),
-            cache_key: query.cache_key.clone(),
-            pinyin_segments: query.pinyin_segments.clone(),
-            cloud_eligible: query.cloud_eligible,
-            ai_eligible: query.ai_eligible,
-            session_id: query.session_id,
-        };
         let applied = self
             .engine
             .apply_online_candidate(&query, candidate, source)
@@ -296,23 +346,12 @@ impl Runtime<Session> {
         candidates: &[String],
         source: u8,
     ) -> Result<bool, RuntimeError> {
+        let cloud_candidates = query.cloud_candidates;
         let limit = if source == 0 {
             1
         } else {
             query.ai_candidate_limit()
         };
-        if candidates.is_empty()
-            || candidates.len() > limit
-            || candidates
-                .iter()
-                .any(|text| text.is_empty() || !msime_client_core::is_bounded_text(text, 4096))
-            || source > 1
-            || (source == 0 && self.cached.candidates.is_empty())
-            || (source == 0 && (!query.cloud_candidates || !query.cloud_eligible))
-            || (source == 1 && !query.ai_eligible)
-        {
-            return Ok(false);
-        }
         let query = OnlineQuerySnapshot {
             available: true,
             scheme: query.scheme,
@@ -325,6 +364,69 @@ impl Runtime<Session> {
             ai_eligible: query.ai_eligible,
             session_id: query.session_id,
         };
+        self.apply_online_candidates_snapshot(query, candidates, source, cloud_candidates, limit)
+    }
+
+    /// Apply an ordered provider batch while transferring its query into the Engine call.
+    pub fn apply_online_candidates_owned(
+        &mut self,
+        query: OnlineQuery,
+        candidates: &[String],
+        source: u8,
+    ) -> Result<bool, RuntimeError> {
+        let cloud_candidates = query.cloud_candidates;
+        let limit = if source == 0 {
+            1
+        } else {
+            query.ai_candidate_limit()
+        };
+        let OnlineQuery {
+            scheme,
+            generation,
+            identity,
+            query_text,
+            cache_key,
+            pinyin_segments,
+            cloud_eligible,
+            ai_eligible,
+            session_id,
+            ..
+        } = query;
+        let query = OnlineQuerySnapshot {
+            available: true,
+            scheme,
+            generation,
+            identity,
+            query_text,
+            cache_key,
+            pinyin_segments,
+            cloud_eligible,
+            ai_eligible,
+            session_id,
+        };
+        self.apply_online_candidates_snapshot(query, candidates, source, cloud_candidates, limit)
+    }
+
+    fn apply_online_candidates_snapshot(
+        &mut self,
+        query: OnlineQuerySnapshot,
+        candidates: &[String],
+        source: u8,
+        cloud_candidates: bool,
+        limit: usize,
+    ) -> Result<bool, RuntimeError> {
+        if candidates.is_empty()
+            || candidates.len() > limit
+            || candidates
+                .iter()
+                .any(|text| text.is_empty() || !msime_client_core::is_bounded_text(text, 4096))
+            || source > 1
+            || (source == 0 && self.cached.candidates.is_empty())
+            || (source == 0 && (!cloud_candidates || !query.cloud_eligible))
+            || (source == 1 && !query.ai_eligible)
+        {
+            return Ok(false);
+        }
         let applied = self
             .engine
             .apply_online_candidates(&query, candidates, source)
