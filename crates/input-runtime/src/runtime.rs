@@ -120,18 +120,19 @@ pub(crate) const LATTICE_SOURCE: u8 = 8;
 
 /// Move the flagged elements to the end, keeping both groups in their existing order.
 pub(crate) fn move_to_back<T>(items: &mut Vec<T>, moved: &[bool]) {
-    let mut flags = moved.iter();
-    let mut tail: Vec<T> = Vec::new();
-    let mut head: Vec<T> = Vec::with_capacity(items.len());
-    for item in items.drain(..) {
-        if flags.next().copied().unwrap_or(false) {
-            tail.push(item);
-        } else {
-            head.push(item);
+    // Stable-partition in place. A rotation moves the next unflagged item ahead of the flagged
+    // run without allocating a second vector; candidate arrays are kept in lockstep by calling
+    // this once for each array below, and their usual size makes the bounded O(n²) movement cheap.
+    let mut head_len = 0;
+    for index in 0..items.len() {
+        if moved.get(index).copied().unwrap_or(false) {
+            continue;
         }
+        if head_len != index {
+            items[head_len..=index].rotate_right(1);
+        }
+        head_len += 1;
     }
-    head.append(&mut tail);
-    *items = head;
 }
 
 /// Move the element at `index` to the front, keeping everything else in its existing order.
