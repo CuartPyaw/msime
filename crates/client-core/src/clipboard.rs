@@ -101,7 +101,7 @@ impl ClipboardHistoryStore {
                 };
                 values.retain(|value| valid_stored(&value.text));
                 sort_entries(&mut values);
-                let mut entries = Vec::new();
+                let mut entries = Vec::with_capacity(MAX_ENTRIES);
                 for value in values {
                     if !entries
                         .iter()
