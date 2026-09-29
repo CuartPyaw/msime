@@ -701,7 +701,7 @@ impl UnixSocketProvider {
                 query.insert("options".to_owned(), options.clone());
             }
         }
-        let mut events = Vec::new();
+        let mut events = Vec::with_capacity(2);
         if status.is_some() {
             events.push("status");
         }
