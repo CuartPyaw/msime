@@ -1372,7 +1372,7 @@ fn parse_hans_import(
     {
         return Err("invalid dictionary import".into());
     }
-    let mut entries = Vec::new();
+    let mut entries = Vec::with_capacity(1000);
     for line in text.lines() {
         let word = line.trim();
         if word.is_empty() || word.starts_with('#') {
