@@ -15,6 +15,7 @@ use crate::types::{
     CandidateEdge, CandidateSource, KeyResult, LocalInputMode, OnlineQuery, SchemeType,
     ShuangpinProfileKind,
 };
+use crate::user_dictionary::ngram_store::flush_journal;
 use crate::user_dictionary::removal::learn_entered_english_word;
 
 /// The weight an entered English word is learned at: the C++ default argument of `learn_entered_english_word` (user_dictionary_journal.h:136-137), which the bridge relied on.
@@ -444,6 +445,15 @@ impl Session {
             }
         }
         result_for(result)
+    }
+}
+
+/// The C++ registered `PersonalNgramStore::flush_all` with `atexit` (personal_ngram_store.cpp:255), so context learned in the last ~2 s reached the journal when the host quit. Rust runs no destructors for statics and `atexit` needs unsafe, so the session writes its journal's queue when the host drops it, which every host does on deactivation and shutdown; a host that exits without dropping its sessions calls `flush_personal_learning` instead.
+impl Drop for Session {
+    fn drop(&mut self) {
+        let journal = runtime_paths(&self.options).user(assets::USER_JOURNAL);
+        // Nobody is left to report to: a failed write stays queued and flagged in the store, and the next record reports it and schedules another try.
+        let _ = flush_journal(&journal);
     }
 }
 

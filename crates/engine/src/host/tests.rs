@@ -1306,3 +1306,58 @@ fn snapshot_vectors_stay_parallel_to_the_candidates() {
     assert_eq!(view.shuangpin_profile, "xiaohe");
     assert!(!view.microsoft_shuangpin);
 }
+
+// The C++ wrote the queued personal context from `atexit`; here the dropped session writes it, so a host that quits within the ~2 s flush delay of its last pick keeps it.
+#[test]
+fn dropping_a_session_writes_its_queued_personal_context() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.learning = true;
+    let rows = [
+        ("ni", "甲", 300),
+        ("ni", "丙", 100),
+        ("hao", "子", 300),
+        ("hao", "寅", 100),
+    ];
+    for directory in [&value.resources, &value.dictionaries] {
+        let main = Connection::open(Path::new(directory).join("msime.db")).unwrap();
+        main.execute_batch(
+            "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
+             CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);",
+        )
+        .unwrap();
+        for (key, word, weight) in rows {
+            let table = crate::user_dictionary::journal::pinyin_table(key).unwrap();
+            main.execute_batch(&format!(
+                "CREATE TABLE IF NOT EXISTS \"{table}\"(key TEXT,jp TEXT,value TEXT,weight INTEGER);"
+            ))
+            .unwrap();
+            main.execute(
+                &format!("INSERT INTO \"{table}\" VALUES(?1,?2,?3,?4)"),
+                (key, &key[..1], word, weight),
+            )
+            .unwrap();
+        }
+    }
+    let mut session = Session::new(&value).unwrap();
+    for (typed, word) in [(&b"ni"[..], "丙"), (&b"hao"[..], "寅")] {
+        type_text(&mut session, typed);
+        let snapshot = session.snapshot().unwrap();
+        let index = snapshot
+            .candidates
+            .iter()
+            .position(|candidate| candidate == word)
+            .unwrap_or_else(|| panic!("{word} is not offered: {:?}", snapshot.candidates));
+        assert!(session.select(index).unwrap().has_commit);
+    }
+    drop(session);
+    let count: i64 = Connection::open(Path::new(&value.user_data).join("msime_user.db"))
+        .unwrap()
+        .query_row(
+            "SELECT count FROM personal_bigram WHERE previous='丙' AND word='寅'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 2);
+}
