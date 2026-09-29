@@ -309,12 +309,14 @@ impl HostSession {
         if !directory.is_absolute() {
             return;
         }
-        let batch: Vec<(usize, u64)> = pending
-            .iter()
-            .enumerate()
-            .filter(|(_, count)| **count > 0)
-            .map(|(slot, count)| (slot + 1, *count))
-            .collect();
+        let mut batch = Vec::with_capacity(RANKS);
+        batch.extend(
+            pending
+                .iter()
+                .enumerate()
+                .filter(|(_, count)| **count > 0)
+                .map(|(slot, count)| (slot + 1, *count)),
+        );
         let _ = TypingStatisticsStore::new(directory).record_selections(&batch);
     }
 
