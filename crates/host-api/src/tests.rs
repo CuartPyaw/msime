@@ -1315,6 +1315,45 @@ fn skin_catalog_reaches_native_presenters_without_the_settings_shell() {
 }
 
 #[test]
+fn custom_helpcode_schemas_reach_native_presenters_without_the_settings_shell() {
+    let directory = tempfile::tempdir().unwrap();
+    let resources = directory.path().join("resources");
+    let scan =
+        |path: &str| read(unsafe { msime_client_helpcode_schemas(path.as_ptr(), path.len()) });
+    let path = resources.to_str().unwrap().to_owned();
+
+    // Missing optional assets are an empty catalog, not an unavailable settings surface.
+    assert_eq!(scan(&path), json!({"ok": true, "value": []}));
+
+    let custom = resources.join("helpcodes/custom");
+    std::fs::create_dir_all(&custom).unwrap();
+    std::fs::write(
+        custom.join("synthetic.txt"),
+        "# name: Synthetic helper\n# name_en: Synthetic\nword=ab\n",
+    )
+    .unwrap();
+    std::fs::write(custom.join("README.md"), "# name: ignored\n").unwrap();
+    assert_eq!(
+        scan(&path),
+        json!({
+            "ok": true,
+            "value": [{
+                "schema": "custom/synthetic",
+                "file_stem": "synthetic",
+                "name": "Synthetic helper",
+                "name_en": "Synthetic"
+            }]
+        })
+    );
+
+    assert_eq!(scan("relative/resources")["ok"], false);
+    assert_eq!(
+        read(unsafe { msime_client_helpcode_schemas(std::ptr::null(), 0) })["ok"],
+        false
+    );
+}
+
+#[test]
 fn a_picked_skin_folder_is_copied_in_through_the_c_abi() {
     let files = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();

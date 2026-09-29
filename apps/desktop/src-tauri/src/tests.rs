@@ -101,6 +101,37 @@ fn runtime_options_reader_rejects_oversized_documents_without_allocating_them() 
 }
 
 #[test]
+fn helpcode_catalog_reads_only_the_host_resource_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let resources = directory.path().join("resources");
+    let custom = resources.join("helpcodes/custom");
+    std::fs::create_dir_all(&custom).unwrap();
+    std::fs::write(
+        custom.join("synthetic.txt"),
+        "# name: Synthetic helper\n# name_en: Synthetic\nword=ab\n",
+    )
+    .unwrap();
+    let document = serde_json::json!({"resources": resources});
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let options = {
+        let path = directory.path().join("runtime-options.json");
+        std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        DictionaryHostOptions { path }
+    };
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let options = DictionaryHostOptions {
+        document: Arc::new(document),
+    };
+
+    let schemas = super::list_helpcode_schemas_at(&options).unwrap();
+    assert_eq!(schemas.len(), 1);
+    assert_eq!(schemas[0].schema, "custom/synthetic");
+    assert_eq!(schemas[0].name, "Synthetic helper");
+    assert_eq!(schemas[0].name_en, "Synthetic");
+}
+
+#[test]
 fn candidate_panel_status_reader_rejects_oversized_documents() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("candidate-panel.json");

@@ -1134,6 +1134,24 @@ pub fn local_symbol_catalog(resources: &str) -> Result<Vec<LocalSymbolCatalogGro
     Ok(result)
 }
 
+/// Discover the optional helper-code tables installed below a verified resource directory.
+///
+/// The table files are Engine-owned assets, but their display metadata belongs to the shared
+/// settings surface. Keep the path check at this host boundary so neither a native caller nor the
+/// Tauri shell can ask the client core to inspect an arbitrary relative location. An absent or
+/// unreadable `helpcodes/custom` directory is a valid empty catalog.
+pub fn list_custom_helpcode_schemas(
+    resources: &str,
+) -> Result<Vec<msime_client_core::helpcode::CustomHelpcodeSchema>, &'static str> {
+    let path = std::path::Path::new(resources);
+    if !path.is_absolute() {
+        return Err("resources path must be absolute");
+    }
+    Ok(msime_client_core::helpcode::list_custom_helpcode_schemas(
+        path,
+    ))
+}
+
 fn response(operation: impl FnOnce() -> Result<Value, String>) -> *mut c_char {
     let value = match catch_unwind(AssertUnwindSafe(operation)) {
         Ok(Ok(value)) => json!({ "ok": true, "value": value }),

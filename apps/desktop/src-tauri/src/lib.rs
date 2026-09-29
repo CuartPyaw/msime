@@ -951,6 +951,32 @@ fn rescan_skin_catalog(root: PathBuf, runtime: &RuntimeOptionsState) -> SkinCata
     response
 }
 
+/// Discover the helper-code tables shipped beside the Engine's verified resources. The WebView
+/// receives metadata only; the resource path stays in the host options state and never comes from
+/// page input.
+fn list_helpcode_schemas_at(
+    options: &DictionaryHostOptions,
+) -> Result<Vec<msime_client_core::helpcode::CustomHelpcodeSchema>, CommandError> {
+    let document = options.snapshot()?;
+    let resources = document
+        .get("resources")
+        .and_then(Value::as_str)
+        .filter(|value| std::path::Path::new(value).is_absolute())
+        .ok_or(CommandError { code: "storage" })?;
+    msime_host_api::list_custom_helpcode_schemas(resources)
+        .map_err(|_| CommandError { code: "storage" })
+}
+
+#[tauri::command]
+async fn list_helpcode_schemas(
+    options: tauri::State<'_, DictionaryHostOptions>,
+) -> Result<Vec<msime_client_core::helpcode::CustomHelpcodeSchema>, CommandError> {
+    let options = options.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || list_helpcode_schemas_at(&options))
+        .await
+        .map_err(|_| CommandError { code: "storage" })?
+}
+
 /// `SettingsClient.resolveTheme`: the page's global theme draft, resolved the way `msime_client_resolve_theme` resolves it for native hosts.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -4659,6 +4685,7 @@ pub fn run() {
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             install_mcp_client,
             scan_skin_catalog,
+            list_helpcode_schemas,
             resolve_theme,
             read_skin_image,
             read_skin_font,

@@ -544,6 +544,31 @@ pub unsafe extern "C" fn msime_client_skin_catalog(
     })
 }
 
+/// Scan the Engine resource directory for optional custom helper-code tables. Native settings
+/// presenters use the same metadata as the shared settings page; the Engine remains responsible
+/// for parsing and applying the table itself. An absent `helpcodes/custom` directory is an empty
+/// catalog rather than an error.
+/// # Safety
+/// `resources` points to `length` readable UTF-8 bytes naming an absolute resource directory.
+/// Null is rejected. The returned JSON must be released with `msime_client_string_free`.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_helpcode_schemas(
+    resources: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if resources.is_null() || length > 16_384 {
+            return Err("invalid helpcode resource buffer".into());
+        }
+        // SAFETY: guaranteed by the documented caller contract; size checked above.
+        let bytes = unsafe { std::slice::from_raw_parts(resources, length) };
+        let resources =
+            std::str::from_utf8(bytes).map_err(|_| "invalid helpcode resource encoding")?;
+        let schemas = crate::list_custom_helpcode_schemas(resources)?;
+        serde_json::to_value(schemas).map_err(|error| error.to_string())
+    })
+}
+
 #[derive(Debug, Deserialize)]
 struct SkinPackageRequest {
     directory: String,

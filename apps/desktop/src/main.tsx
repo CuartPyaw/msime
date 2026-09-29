@@ -39,6 +39,7 @@ import {
   type CloudDictionaryPanelClient,
   type EmojiCatalogGroup,
   type EmojiPanelClient,
+  type CustomHelpcodeSchema,
   type HostCapabilities,
   type ProviderCredentialClient,
   type ProviderCredentialStatus,
@@ -190,6 +191,7 @@ const client: SettingsClient = {
   readAppVersion: getVersion,
   resolveFontFamilies: (names) => invoke("resolve_font_families", { names }),
   scanSkinCatalog: () => invoke("scan_skin_catalog"),
+  listHelpcodeSchemas: () => invoke<CustomHelpcodeSchema[]>("list_helpcode_schemas"),
   resolveTheme: (request) => invoke("resolve_theme", { request }),
   readSkinToolbarCss: (id, relative) =>
     relative
