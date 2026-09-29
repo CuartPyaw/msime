@@ -829,8 +829,8 @@ pub(crate) fn send_panel_key(
         let code = ydotool_key_code(request.virtual_key).ok_or(HostActionError {
             code: "invalid_key",
         })?;
-        let mut args = Vec::new();
-        let mut modifiers = Vec::new();
+        let mut args = Vec::with_capacity(10);
+        let mut modifiers = Vec::with_capacity(3);
         if request.include_sticky_modifiers {
             if request.modifiers.ctrl {
                 modifiers.push(29u16);
