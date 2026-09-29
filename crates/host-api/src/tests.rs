@@ -21,6 +21,35 @@ fn selection_statistics_use_the_candidate_id_absolute_index() {
 }
 
 #[test]
+fn completed_transition_keeps_dispatch_view_without_pending_changes() {
+    let directory = tempfile::tempdir().unwrap();
+    let handle = test_host(directory.path());
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let session = sessions.get_mut(&handle).unwrap();
+        let dispatched = session
+            .runtime
+            .dispatch(Action::Character {
+                value: b'n',
+                shift: false,
+            })
+            .unwrap();
+        let mut expected = dispatched.view.clone();
+        expected.generation = expected.generation.wrapping_add(99);
+        let completed = session.complete_transition(Transition {
+            handled: dispatched.handled,
+            commit: dispatched.commit,
+            commit_context: dispatched.commit_context,
+            diagnostic: dispatched.diagnostic,
+            view: expected.clone(),
+        });
+        assert_eq!(completed.view.generation, expected.generation);
+    });
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+#[test]
 fn default_sentence_model_uses_verified_resources_not_prepared_dictionaries() {
     let root = tempfile::tempdir().unwrap();
     let resources = root.path().join("resources");
