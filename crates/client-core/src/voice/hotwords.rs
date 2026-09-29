@@ -57,8 +57,8 @@ pub fn hotwords_from_entries<'a>(
     entries: impl IntoIterator<Item = (&'a str, &'a str)>,
     limit: usize,
 ) -> Vec<Hotword> {
-    let mut seen = HashSet::new();
-    let mut hotwords = Vec::new();
+    let mut seen = HashSet::with_capacity(limit);
+    let mut hotwords = Vec::with_capacity(limit);
     for (text, stored) in entries {
         if hotwords.len() >= limit {
             break;
