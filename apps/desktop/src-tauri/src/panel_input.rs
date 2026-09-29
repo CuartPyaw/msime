@@ -864,7 +864,7 @@ pub(crate) fn send_panel_key(
     let key = xdotool_key_name(request.virtual_key).ok_or(HostActionError {
         code: "invalid_key",
     })?;
-    let mut args = Vec::new();
+    let mut args = Vec::with_capacity(10);
     if request.include_sticky_modifiers {
         if request.modifiers.ctrl {
             args.extend(["-M".to_owned(), "ctrl".to_owned()]);
