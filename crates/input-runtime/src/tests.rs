@@ -2756,6 +2756,23 @@ fn candidate_page_len_matches_the_published_page_without_building_rows() {
 }
 
 #[test]
+fn translation_candidates_match_the_visible_page_without_full_rows() {
+    let mut runtime = withholding_runtime(12, 8, 5);
+    runtime.focus(true).unwrap();
+    type_key(&mut runtime);
+    let light = runtime.translation_candidates().unwrap();
+    let view = runtime.view();
+    assert_eq!(light.generation, view.generation);
+    assert_eq!(light.scheme, view.scheme);
+    assert_eq!(light.local_mode, view.local_mode);
+    assert_eq!(light.candidates.len(), view.candidates.len());
+    for (candidate, visible) in light.candidates.iter().zip(&view.candidates) {
+        assert_eq!(candidate.text, visible.text);
+        assert_eq!(candidate.source, visible.source);
+    }
+}
+
+#[test]
 fn the_full_list_holds_what_paging_would_have_reached() {
     // Twelve offered and eight held back. Paging to the last page releases the eight; a host that
     // opens the whole list instead never paged, so it used to see only the first twelve and the

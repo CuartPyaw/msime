@@ -517,6 +517,35 @@ impl<E: InputEngine> Runtime<E> {
             && self.cached.scheme != 3
     }
 
+    /// Copy only the state and candidate fields needed to plan translation requests. This avoids
+    /// constructing display-only codes, annotations, IDs and highlight flags on every key.
+    pub fn translation_candidates(&self) -> Option<TranslationCandidates> {
+        let start = (self.highlighted / self.page_size) * self.page_size;
+        let candidates = self
+            .cached
+            .candidates
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(self.page_size)
+            .map(|(index, text)| TranslationCandidate {
+                text: text.clone(),
+                source: self
+                    .cached
+                    .candidate_sources
+                    .get(index)
+                    .copied()
+                    .unwrap_or_default(),
+            })
+            .collect::<Vec<_>>();
+        (!candidates.is_empty()).then_some(TranslationCandidates {
+            generation: self.generation,
+            scheme: self.cached.scheme,
+            local_mode: self.cached.local_mode.clone(),
+            candidates,
+        })
+    }
+
     /// Copy the complete candidate generation for an explicitly opened panel.
     ///
     /// The engine holds candidates back behind the initial answer and only releases them when asked
