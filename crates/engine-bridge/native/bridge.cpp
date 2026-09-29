@@ -841,6 +841,7 @@ std::string join_shuangpin_units(std::vector<std::string> units) {
 // is not running is worse than labelling nothing.
 rust::Vec<ShuangpinKeyHint> shuangpin_key_hints(rust::Str profile) {
     rust::Vec<ShuangpinKeyHint> hints;
+    hints.reserve(29);
     const std::string name(profile);
     if (name != "xiaohe" && name != "ziranma" && name != "shoudao" && name != "microsoft") return hints;
 
