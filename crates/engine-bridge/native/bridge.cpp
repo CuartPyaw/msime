@@ -1253,6 +1253,7 @@ rust::Vec<rust::String> handwriting_recognize(rust::Str model_path,
     metasequoia::handwriting::Recognizer recognizer{std::string(model_path)};
     const auto candidates = recognizer.recognize(strokes, width, height);
     rust::Vec<rust::String> result;
+    result.reserve(candidates.size());
     for (const auto &candidate : candidates)
         result.push_back(rust::String(candidate));
     return result;
