@@ -627,6 +627,7 @@ void reset_learned_data(const EngineOptions& options) {
         bool published = false;
     };
     std::vector<Replacement> replacements;
+    replacements.reserve(3);
     replacements.push_back({main_target, temporary(main_target), backup(main_target)});
     replacements.push_back({english_target, temporary(english_target), backup(english_target)});
     replacements.push_back({journal, journal_temporary, journal_backup});
