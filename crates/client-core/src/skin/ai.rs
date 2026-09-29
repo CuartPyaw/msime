@@ -533,7 +533,7 @@ pub fn plan_ai_skins(text: &str) -> Result<Vec<AiSkinPlan>, AiSkinError> {
 
 fn distinct<T: PartialEq>(values: impl Iterator<Item = T>) -> usize {
     values
-        .fold(Vec::new(), |mut seen, value| {
+        .fold(Vec::with_capacity(3), |mut seen, value| {
             if !seen.contains(&value) {
                 seen.push(value);
             }
