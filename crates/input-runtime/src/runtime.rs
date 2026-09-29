@@ -367,7 +367,10 @@ impl<E: InputEngine> Runtime<E> {
             page_size: page_size.into(),
             highlighted: 0,
             translations: HashMap::new(),
-            engine_order: (0..cached.candidates.len()).collect(),
+            // The initial snapshot is already in Engine order. Keep the mapping empty until a
+            // presentation reorder actually needs it; engine_index falls back to the seat while
+            // the list remains untouched.
+            engine_order: Vec::new(),
             cached,
             snapshot_valid: true,
             character_width: CharacterWidth::Halfwidth,
