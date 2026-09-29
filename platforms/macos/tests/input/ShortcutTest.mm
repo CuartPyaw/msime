@@ -4409,6 +4409,46 @@ static void TestCloudCandidateConsent() {
 }
 @end
 
+@interface PreferenceSnapshotController : ModeController
+@property(nonatomic, copy) NSDictionary *snapshot;
+@property(nonatomic) NSUInteger completions;
+@end
+@implementation PreferenceSnapshotController
+- (NSDictionary *)readPreferencesSnapshotInDirectory:(NSString *)directory error:(NSError **)error {
+    (void)directory; (void)error;
+    assert(!NSThread.isMainThread);
+    return self.snapshot;
+}
+- (void)completePreferenceLoad:(NSDictionary *)snapshot error:(NSError *)error generation:(uint64_t)generation
+                       session:(MSIMEClientSession *)session client:(id)client {
+    assert(NSThread.isMainThread);
+    [super completePreferenceLoad:snapshot error:error generation:generation session:session client:client];
+    ++self.completions;
+}
+@end
+
+static void TestPreferenceLoadReusesCandidateServiceSnapshots() {
+    NSString *suite = [@"msime.preference-service-snapshot." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *appearance = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    appearance.candidateTranslations = YES;
+    appearance.candidateEnglishGloss = YES;
+    ServiceSnapshotSession *session = [ServiceSnapshotSession new];
+    PreferenceSnapshotController *controller = [PreferenceSnapshotController alloc];
+    controller.snapshot = @{ @"revision": @1, @"preferences": @{} };
+    [controller setValue:appearance forKey:@"appearance"];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
+    [controller setValue:@"/synthetic-preferences" forKey:@"preferencesDirectory"];
+    [controller reloadPreferences];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    while (controller.completions < 1 && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    assert(controller.completions == 1);
+    assert(session.translationQueryCalls == 1 && session.viewCalls == 3);
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+}
+
 static void TestCandidateServiceSnapshotsAreReused() {
     NSString *suite = [@"msime.service-snapshot." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
@@ -5841,6 +5881,7 @@ int main(int argc, char **argv) {
     @autoreleasepool {
         [NSApplication sharedApplication];
         if (argc == 2 && std::string(argv[1]) == "--translations") {
+            TestPreferenceLoadReusesCandidateServiceSnapshots();
             TestCandidateServiceSnapshotsAreReused();
             TestApplyCandidateTranslationSnapshotsAreReused();
             TestGlossScheduling();
