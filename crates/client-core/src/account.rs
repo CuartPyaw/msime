@@ -49,7 +49,13 @@ pub(crate) fn valid_model_catalog<'a>(
         && ids
             .iter()
             .all(|id| !id.is_empty() && crate::text::is_bounded_text(id, maximum_id_bytes))
-        && ids.iter().collect::<std::collections::HashSet<_>>().len() == ids.len()
+        && {
+            let mut unique = std::collections::HashSet::with_capacity(ids.len());
+            for id in &ids {
+                unique.insert(id);
+            }
+            unique.len() == ids.len()
+        }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
