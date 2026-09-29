@@ -442,16 +442,20 @@ pub extern "C" fn msime_client_punctuation_ascii(handle: u64, ascii: u8) -> *mut
 /// would have to guess. Call it when the composition has been unchanged for the pause, and not
 /// while keys are still arriving.
 ///
-/// Answers `{"moved": bool, "view": ...}`. `moved` is false when the order did not change, which
-/// is the common case and the signal to leave the candidate window alone: repainting it
-/// identically on every pause is a flicker with no explanation behind it.
+/// Answers `{"moved": false}` when the order did not change, or `{"moved": true, "view": ...}`
+/// after a reorder. The false case is common and lets hosts leave the candidate window alone
+/// without serializing a view they will discard.
 #[no_mangle]
 pub extern "C" fn msime_client_rerank_settled(handle: u64) -> *mut c_char {
     response(|| {
         with_session(handle, |session| {
             let moved = session.runtime.rerank_settled();
-            let view = session.runtime.view();
-            Ok(serde_json::json!({"moved": moved, "view": view}))
+            if moved {
+                let view = session.runtime.view();
+                Ok(serde_json::json!({"moved": true, "view": view}))
+            } else {
+                Ok(serde_json::json!({"moved": false}))
+            }
         })
     })
 }

@@ -2637,6 +2637,19 @@ fn test_host_with_pinyin_fixture(root: &std::path::Path, preferences: Preference
     assert_eq!(created["ok"], true);
     created["value"]["session"].as_u64().unwrap()
 }
+
+#[test]
+fn settled_rerank_without_movement_omits_the_unused_view() {
+    let directory = tempfile::tempdir().unwrap();
+    let handle = test_host(directory.path());
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    let result = read(msime_client_rerank_settled(handle));
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["value"]["moved"], false);
+    assert!(result["value"].get("view").is_none());
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
 fn update(handle: u64, revision: u64, preferences: &Preferences) -> Value {
     let snapshot = json!({ "format_version": 1, "revision": revision, "preferences": preferences })
         .to_string();
