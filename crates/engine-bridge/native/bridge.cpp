@@ -83,7 +83,9 @@ rust::Vec<float> capture_audio(std::uint32_t milliseconds) {
 rust::Vec<CaptureDevice> capture_devices() {
     rust::Vec<CaptureDevice> devices;
 #if MSIME_ENGINE_BRIDGE_AUDIO_CAPTURE
-    for (const auto &device : metasequoia::voice::AudioCapture::devices()) {
+    const auto available = metasequoia::voice::AudioCapture::devices();
+    devices.reserve(available.size());
+    for (const auto &device : available) {
         CaptureDevice value;
         value.id = device.id;
         value.label = device.label;
