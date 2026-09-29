@@ -45,7 +45,7 @@ pub unsafe extern "C" fn msime_client_custom_translation_plan(
         {
             return Err("invalid translation plan parameters".into());
         }
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(request.candidates.len());
         for candidate in request.candidates {
             // Engine CandidateSource::Emoji / Kaomoji, and unknown sources.
             if matches!(candidate.source, 6 | 7 | 10..=255)
