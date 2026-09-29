@@ -798,21 +798,23 @@ pub fn personal_dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Valu
             let requested_page_offset = state.requested_page_offset;
             let page_kind = state.page_kind.map(personal_to_kind);
             let page_query = state.page_query.clone();
-            let failed_requests: Vec<_> = state
-                .requests
-                .iter()
-                .filter(|request| request.status == PersonalWordRequestStatus::Failed)
-                .map(|request| {
-                    json!({
-                        "request_id": request.id,
-                        "label": request.replacement.as_ref()
-                            .or(request.previous.as_ref())
-                            .map(|word| word.value.clone())
-                            .unwrap_or_else(|| "词条".to_owned()),
-                        "error": request.error.as_deref().unwrap_or("同步失败"),
-                    })
-                })
-                .collect();
+            let mut failed_requests = Vec::with_capacity(state.requests.len());
+            failed_requests.extend(
+                state
+                    .requests
+                    .iter()
+                    .filter(|request| request.status == PersonalWordRequestStatus::Failed)
+                    .map(|request| {
+                        json!({
+                            "request_id": request.id,
+                            "label": request.replacement.as_ref()
+                                .or(request.previous.as_ref())
+                                .map(|word| word.value.clone())
+                                .unwrap_or_else(|| "词条".to_owned()),
+                            "error": request.error.as_deref().unwrap_or("同步失败"),
+                        })
+                    }),
+            );
             let entries = state
                 .entries
                 .into_iter()
@@ -890,11 +892,13 @@ pub fn personal_dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Valu
                 return Err("invalid dictionary export".into());
             }
             let state = store.read().map_err(personal_dictionary_error)?;
-            let matching: Vec<_> = state
-                .entries
-                .into_iter()
-                .filter(|entry| personal_to_kind(entry.kind) == kind)
-                .collect();
+            let mut matching = Vec::with_capacity(state.entries.len());
+            matching.extend(
+                state
+                    .entries
+                    .into_iter()
+                    .filter(|entry| personal_to_kind(entry.kind) == kind),
+            );
             let has_more = matching.len() > offset.saturating_add(limit);
             let text = matching
                 .into_iter()
