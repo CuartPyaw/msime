@@ -598,7 +598,7 @@ fn voice_status_of(
     if entries.entries.len() > kind.max_entries() {
         return Err(CredentialError::Existing);
     }
-    let mut status = Vec::new();
+    let mut status = Vec::with_capacity(entries.entries.len());
     for (provider, entry) in &entries.entries {
         validate_voice_entry(kind, entry).map_err(|_| CredentialError::Existing)?;
         // Not a credential: the settings page has nothing to show or clear for it.
