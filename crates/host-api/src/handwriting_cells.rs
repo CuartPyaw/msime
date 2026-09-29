@@ -157,7 +157,8 @@ pub(crate) fn combine_cell_candidates(cells: Vec<Vec<String>>) -> Vec<String> {
         .iter()
         .map(|cell| cell[0].as_str())
         .collect::<Vec<_>>();
-    let mut result = vec![best.concat()];
+    let mut result = Vec::with_capacity(MAX_HANDWRITING_CANDIDATES);
+    result.push(best.concat());
     let deepest = cells.iter().map(Vec::len).max().unwrap_or(0);
     'ranks: for rank in 1..deepest {
         for (index, cell) in cells.iter().enumerate() {
