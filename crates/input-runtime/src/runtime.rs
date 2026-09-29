@@ -1491,7 +1491,12 @@ impl<E: InputEngine> Runtime<E> {
         }
         // What the reading held before the Engine saw this key. A selection that consumes part of
         // it has to record the piece it took, and only the difference says what that was.
-        let reading_before = self.cached.editing_text.clone();
+        // Hosts that do not draw the held phrase never consume this value. Avoid copying the
+        // current reading for their ordinary key path; Linux, macOS and iOS enable the feature and
+        // still receive the same snapshot.
+        let reading_before = self
+            .phrase_preedit
+            .then(|| self.cached.editing_text.clone());
         // A digit on the candidate page picks a candidate; the Engine is asked the same question as
         // for Select, so it can begin a phrase the same way.
         let mut selected_by_digit = false;
@@ -1610,9 +1615,9 @@ impl<E: InputEngine> Runtime<E> {
         // mode rewriting it, a fallback replacing it - leaves nothing to restore, and that
         // selection is recorded as unretractable rather than guessed at.
         let consumed = reading_before
-            .strip_suffix(self.cached.editing_text.as_str())
-            .unwrap_or("")
-            .to_owned();
+            .as_deref()
+            .and_then(|reading| reading.strip_suffix(self.cached.editing_text.as_str()))
+            .unwrap_or("");
         let picked = selected_by_digit
             || matches!(
                 action,
