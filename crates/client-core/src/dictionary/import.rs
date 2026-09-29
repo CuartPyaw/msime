@@ -303,7 +303,8 @@ fn parse_row(
     format: ImportFormat,
     line: &str,
 ) -> Result<ImportEntry, ImportIssue> {
-    let columns: Vec<_> = line.split('\t').collect();
+    let mut columns = Vec::with_capacity(3);
+    columns.extend(line.splitn(4, '\t'));
     if !(2..=3).contains(&columns.len()) {
         return Err(ImportIssue::ColumnCount);
     }
