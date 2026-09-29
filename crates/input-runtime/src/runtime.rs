@@ -590,6 +590,12 @@ impl<E: InputEngine> Runtime<E> {
             && self.cached.candidates.is_empty()
     }
 
+    /// The host uses the generation to detect whether a deferred preference
+    /// update changed the view after an input action.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// Apply translations to the current candidate generation. Stale async
     /// responses are ignored so a newer candidate window cannot be polluted.
     pub fn apply_translations(

@@ -428,6 +428,7 @@ impl HostSession {
     }
 
     fn complete_transition(&mut self, mut result: Transition) -> Transition {
+        let generation = self.runtime.generation();
         if let Err(error) = self.apply_pending() {
             let prior = result.diagnostic.take().unwrap_or_default();
             result.diagnostic = Some(
@@ -453,7 +454,12 @@ impl HostSession {
                     .collect();
             }
         }
-        result.view = self.runtime.view();
+        // Dispatch already built the view for this transition. Rebuild it only
+        // when applying a deferred page-size or preference change advanced the
+        // runtime generation; otherwise cloning the page again costs every key.
+        if self.runtime.generation() != generation {
+            result.view = self.runtime.view();
+        }
         result
     }
 
