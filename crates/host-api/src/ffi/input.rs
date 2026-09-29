@@ -381,7 +381,10 @@ pub unsafe extern "C" fn msime_client_smart_punctuation_decide(
             let session = sessions
                 .get(&handle)
                 .ok_or_else(|| "unknown session or wrong thread".to_owned())?;
-            let view = session.runtime.view();
+            let candidate_count = repeat_snapshot
+                .as_ref()
+                .map(|_| session.runtime.candidate_page_len())
+                .unwrap_or(0);
             let replace = msime_client_core::punctuation::should_replace_repeat(
                 repeat_snapshot,
                 msime_client_core::punctuation::RepeatContext {
@@ -392,7 +395,7 @@ pub unsafe extern "C" fn msime_client_smart_punctuation_decide(
                     smart_punctuation: session.applied.smart_punctuation,
                     repeat_enabled: session.applied.smart_punctuation_repeat,
                     has_composition: !session.runtime.is_idle(),
-                    candidate_count: view.candidates.len(),
+                    candidate_count,
                 },
             );
             let space = msime_client_core::punctuation::decide_space_convert(
