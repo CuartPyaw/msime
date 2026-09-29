@@ -388,6 +388,11 @@ char *msime_client_learned_translation_request(const uint8_t *request, size_t le
 char *msime_client_parse_tencent_translation_response(const uint8_t *body, size_t length, size_t expected);
 /* Provider body <=1 MiB. Returns a formatted translation string or null. */
 char *msime_client_parse_niutrans_translation_response(const uint8_t *body, size_t length);
+/* Host-produced gloss <=64 KiB UTF-8. Returns it formatted like provider replies (whitespace collapsed, ends trimmed) or null when empty or it has a control char. */
+char *msime_client_format_translation_gloss(const uint8_t *text, size_t length);
+/* Provider body <=1 MiB. True when the reply reports a failure (malformed, non-200 code, errorCode/errorMsg) rather than an answer, empty or not. Only answers may be negative-cached. */
+bool msime_client_custom_translation_reply_failed(const uint8_t *body, size_t length);
+bool msime_client_niutrans_translation_reply_failed(const uint8_t *body, size_t length);
 /* Provider body <=1 MiB. Returns translation string <=4096 bytes or null when
  * malformed/no result. No session mutation; host validates original identity. */
 char *msime_client_parse_custom_translation_response(const uint8_t *body, size_t length);

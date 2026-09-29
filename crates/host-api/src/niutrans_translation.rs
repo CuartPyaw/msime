@@ -74,6 +74,20 @@ pub fn descriptor(bytes: &[u8]) -> Result<Value, &'static str> {
     }))
 }
 
+/// Whether a NiuTrans reply reports a failure (a body that is not a JSON object, or one carrying `errorCode`/`errorMsg`, which is how NiuTrans reports rate limits and credential errors) rather than an answer. `parse` returns `None` for both a failure and an answer with no text; only answers are negative-cached.
+pub fn failed(bytes: &[u8]) -> bool {
+    if bytes.len() > 1048576 {
+        return true;
+    }
+    let Some(root) = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+    else {
+        return true;
+    };
+    !root.is_object() || root.get("errorCode").is_some() || root.get("errorMsg").is_some()
+}
+
 pub fn parse(bytes: &[u8]) -> Option<Value> {
     if bytes.len() > 1048576 {
         return None;
@@ -110,6 +124,18 @@ mod tests {
         let body = value["body_utf8"].as_str().unwrap();
         assert!(body.contains("srcText=hello"));
         assert!(body.contains("authStr=6da3515e010ef871b66e4e31ff5ba580"));
+    }
+
+    #[test]
+    fn an_empty_answer_is_not_a_failed_reply() {
+        assert!(!failed(br#"{"tgtText":""}"#));
+        assert!(!failed(br#"{"tgtText":"hello"}"#));
+        assert!(failed(
+            br#"{"errorCode":"13001","errorMsg":"rate limited"}"#
+        ));
+        assert!(failed(br#"{"errorMsg":"bad apikey"}"#));
+        assert!(failed(b"not json"));
+        assert!(failed(br#"[1]"#));
     }
 
     #[test]

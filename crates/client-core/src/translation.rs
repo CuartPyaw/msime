@@ -182,6 +182,11 @@ pub fn niutrans_auth_string(
     hex::encode(digest)
 }
 
+/// Mirrors the reference `BuildTranslationQuery`: Engine `CandidateSource::Emoji` (6) and `CandidateSource::Kaomoji` (7) are never translated, whatever their text. A kaomoji such as "(*Φ皿Φ*)" contains Han characters and would otherwise pass the Chinese text test, sending a picture to a gloss model that can only put noise under it.
+pub fn is_emoji_or_kaomoji_source(source: u8) -> bool {
+    matches!(source, 6 | 7)
+}
+
 pub fn is_cloud_translatable_english(text: &str) -> bool {
     let mut has_letter = false;
     for ch in text.chars() {
@@ -245,6 +250,18 @@ pub fn is_secure_endpoint(endpoint: &str) -> bool {
 
 pub fn is_supported_endpoint(endpoint: &str) -> bool {
     is_secure_endpoint(endpoint)
+}
+
+/// Whether a DeepLX-compatible reply reports a failure rather than an answer: a body that is not a JSON object, or one whose `code` is not 200. A reply that answers with no translation is still an answer, which `parse_translation_response` cannot tell apart from a failure because it returns `None` for both. Hosts negative-cache answers only, so a rate limit or an outage is asked again instead of hiding the gloss.
+pub fn translation_response_failed(response: &str) -> bool {
+    let Ok(root) = serde_json::from_str::<Value>(response) else {
+        return true;
+    };
+    if !root.is_object() {
+        return true;
+    }
+    root.get("code")
+        .is_some_and(|code| !(code.as_i64() == Some(200) || code.as_str() == Some("200")))
 }
 
 pub fn parse_translation_response(response: &str) -> Option<String> {
@@ -444,6 +461,29 @@ Signature=fdaffffbe1460ecd8cbc30e296ff6f49cc3b4af10b11e099462cca023fdb2c6c"
     }
 
     #[test]
+    fn formats_multiline_translation_gloss_onto_one_line() {
+        // A host shows one row per target language, so a newline kept here would push the next target's gloss onto the wrong row.
+        assert_eq!(
+            format_translation_gloss("test\nfoo"),
+            Some("test foo".into())
+        );
+        assert_eq!(
+            format_translation_gloss("a\r\n\r\nb\n\tc"),
+            Some("a b c".into())
+        );
+    }
+
+    #[test]
+    fn formats_translation_gloss_without_trailing_whitespace() {
+        assert_eq!(
+            format_translation_gloss("test foo "),
+            Some("test foo".into())
+        );
+        assert_eq!(format_translation_gloss("test\n"), Some("test".into()));
+        assert_eq!(format_translation_gloss(" \n\t"), None);
+    }
+
+    #[test]
     fn niutrans_auth_string_is_sorted_md5_and_credentials_filter_placeholders() {
         assert_eq!(
             niutrans_auth_string("app-id", "api-key", "en", "zh", "1704067200000", "hello"),
@@ -453,6 +493,18 @@ Signature=fdaffffbe1460ecd8cbc30e296ff6f49cc3b4af10b11e099462cca023fdb2c6c"
         assert!(!usable_credential("<YOUR_NIUTRANS_APP_ID>"));
         assert!(!usable_credential("FAKESECRET_test"));
         assert!(!usable_credential(" \n\t"));
+    }
+
+    #[test]
+    fn an_empty_answer_is_not_a_failed_reply() {
+        assert!(!translation_response_failed(r#"{"code":200,"data":""}"#));
+        assert!(!translation_response_failed(r#"{"data":"hello"}"#));
+        assert!(translation_response_failed(
+            r#"{"code":429,"message":"rate limited"}"#
+        ));
+        assert!(translation_response_failed(r#"{"code":"500"}"#));
+        assert!(translation_response_failed("<html>Bad Gateway</html>"));
+        assert!(translation_response_failed(r#"["data"]"#));
     }
 
     #[test]

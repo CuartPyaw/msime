@@ -261,6 +261,14 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/desktop-cloud-provider-te
 add_custom_target(desktop-cloud-provider-test-build ALL DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/desktop-cloud-provider-test")
 add_test(NAME desktop-cloud-provider COMMAND "${CMAKE_CURRENT_BINARY_DIR}/desktop-cloud-provider-test")
 set_tests_properties(desktop-cloud-provider PROPERTIES TIMEOUT 30)
+# The account backend harness compiles the whole Swift backend with its test entry point, the same source list build_backend_swift.sh links into the dylib, so the script owns the list rather than a second copy here.
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/backend-account-swift-test"
+  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_backend_account_swift.sh" "${CMAKE_CURRENT_BINARY_DIR}/backend-account-swift-test"
+  DEPENDS ${MSIME_BACKEND_SWIFT} "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/BackendAccountTests.swift"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_backend_account_swift.sh" VERBATIM)
+add_custom_target(backend-account-swift-test-build ALL DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/backend-account-swift-test")
+add_test(NAME backend-account-swift COMMAND "${CMAKE_CURRENT_BINARY_DIR}/backend-account-swift-test")
+set_tests_properties(backend-account-swift PROPERTIES TIMEOUT 60)
 set(MSIME_EMOJI_WINDOW_CHROME_SOURCES src/backend/emoji/BackendEmojiWindowController.swift tests/emoji/EmojiWindowChromeTest.swift)
 list(TRANSFORM MSIME_EMOJI_WINDOW_CHROME_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/emoji-window-chrome-test"
@@ -1052,7 +1060,7 @@ endforeach()
 # The settings window's dictionary controller is the counter-example and the reason this loop exists rather than a hand-kept list: `feat(macos): open dictionary manager from settings` added the reference and the source file to shortcut-test only, and the other five targets compiling the same file did not link again until now.
 set(MSIME_OPTIONAL_BACKEND_SYMBOLS
   _MSIMEAccountPaneView _MSIMEAccountPaneAttach _MSIMEAccountPaneClose
-  _MSIMEEnsureAnonymousAccount _MSIMEFetchAccountCandidateGlosses
+  _MSIMEEnsureAnonymousAccount _MSIMEFetchAccountCandidateGlosses _MSIMECancelAccountCandidateGlosses
   _MSIMEFetchOnDeviceCandidateGlosses
   _msime_macos_uninstall_input_source)
 # The input method links MSIMEBackend.dylib itself, but a toolchain older than Swift 6.2 builds that without the on-device translation entry point (BackendOnDeviceGloss.swift), which the controller then finds null.

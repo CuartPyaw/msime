@@ -17,11 +17,14 @@ private enum BackendOnDeviceGloss {
   // One word in flight per language, taken from the newest page. The translation service works through its requests one at a time, about half a second per candidate and two to three seconds while it reloads a model that sat idle, and it keeps working through a batch after the task that asked for it is cancelled. A whole page as one batch therefore showed nothing for three to five seconds, and while the user typed on, the pages in between still had to finish before the one on screen started. Asking word by word, in page order, puts the first candidate's gloss up as soon as it alone is done and lets a newer page take over after at most one word.
   private static var busy: Set<String> = []
   private static var queued: [String: [String]] = [:]
+  // The word each language is translating right now. A newer page that still shows it would otherwise queue it again behind itself and pay for it twice; its reply is on the way and every controller hears it.
+  private static var inFlight: [String: String] = [:]
   private static let log = Logger(subsystem: "app.msime.inputmethod.MetasequoiaIME", category: "translation")
 
   static func fetch(words: [String], targets: [String]) {
     for code in targets {
-      queued[code] = words
+      let waiting = inFlight[code].map { word in words.filter { $0 != word } } ?? words
+      queued[code] = waiting.isEmpty ? nil : waiting
       pump(code)
     }
   }
@@ -44,6 +47,8 @@ private enum BackendOnDeviceGloss {
         queued[code] = words.isEmpty ? nil : words
         let started = ContinuousClock.now
         let response: TranslationSession.Response
+        inFlight[code] = word
+        defer { inFlight[code] = nil }
         do {
           response = try await session.translate(word)
         } catch {

@@ -3,6 +3,7 @@
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <regex>
 #include <string>
 #include <unistd.h>
 
@@ -44,6 +45,18 @@ int main() {
   assert(longStart != std::string::npos);
   const auto longEnd = contents.find('\n', longStart);
   assert(longEnd - longStart == 192);
+  // Every record starts with a millisecond timestamp and the process and thread ids, the shape the Windows log uses and the MCP reader parses by its first 19 bytes.
+  const std::regex prefix(R"(^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} \[p\d+:t\d+\] )");
+  std::size_t lines = 0;
+  for (std::size_t start = 0; start < contents.size();) {
+    const auto end = contents.find('\n', start);
+    assert(end != std::string::npos);
+    assert(std::regex_search(contents.substr(start, end - start), prefix));
+    ++lines;
+    start = end + 1;
+  }
+  assert(lines == 5);
+  assert(contents.find(" [p" + std::to_string(getpid()) + ":t") != std::string::npos);
 
   msime_macos_diagnostic_configure(directory.string(), false);
   assert(!msime_macos_diagnostic_enabled());
