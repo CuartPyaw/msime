@@ -992,6 +992,7 @@ static EmojiCatalogSlice read_emoji_catalog_slice(rust::Str resources, rust::Str
     result.next_offset = offset;
     if (limit == 0 || limit > 4096 || offset > static_cast<std::size_t>(std::numeric_limits<sqlite3_int64>::max()))
         throw std::invalid_argument("Invalid emoji catalog page");
+    result.items.reserve(limit);
     const auto path = std::filesystem::u8path(std::string(resources)) / "others.db";
     sqlite3 *database = nullptr;
     const int opened = sqlite3_open_v2(path.u8string().c_str(), &database,
