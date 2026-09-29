@@ -659,7 +659,9 @@ impl<E: InputEngine> Runtime<E> {
                 .copied()
                 .unwrap_or_default(),
             highlighted: index == self.highlighted,
-            translation: self.translations.get(text).cloned(),
+            translation: (!self.translations.is_empty())
+                .then(|| self.translations.get(text).cloned())
+                .flatten(),
         }
     }
 
