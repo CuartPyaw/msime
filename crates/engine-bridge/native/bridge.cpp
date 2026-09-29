@@ -940,6 +940,7 @@ OnlineQuerySnapshot EngineSession::online_query() const {
     output.identity = query->identity;
     output.query_text = query->query_text;
     output.cache_key = query->cache_key;
+    output.pinyin_segments.reserve(query->pinyin_segments.size());
     for (const auto& segment : query->pinyin_segments)
         output.pinyin_segments.push_back(rust::String(segment));
     output.cloud_eligible = query->cloud_eligible;
