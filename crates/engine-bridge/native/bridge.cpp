@@ -55,6 +55,7 @@ rust::Vec<float> capture_audio(std::uint32_t milliseconds) {
     std::condition_variable done;
     bool failed = false;
     std::size_t maximum = 16000u * milliseconds / 1000u;
+    samples.reserve(maximum);
     auto callback = [&](const float *input, std::size_t frames) {
         std::lock_guard lock(mutex);
         if (samples.size() + frames > maximum) frames = maximum - samples.size();
