@@ -70,7 +70,7 @@ fn read_bounded_line(
     response_limit: usize,
     accept_eof: bool,
 ) -> Option<String> {
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(response_limit.min(1024));
     loop {
         let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
         if remaining.is_zero() {
