@@ -1733,7 +1733,7 @@ fn online_provider_worker_keeps_only_the_latest_completed_result() {
     let observed = std::sync::Arc::clone(&calls);
     let worker = OnlineProviderWorker::spawn(1, move |query| {
         observed.fetch_add(1, Ordering::SeqCst);
-        Some((query.query_text, 0))
+        Some((query.query_text.clone(), 0))
     })
     .unwrap();
     let query = |text: &str| OnlineQuery {
@@ -3134,7 +3134,7 @@ fn a_busy_provider_keeps_only_the_newest_completed_result() {
     let (started, first_running) = std::sync::mpsc::channel::<()>();
     let (release, gate) = std::sync::mpsc::channel::<()>();
     let gate = std::sync::Mutex::new(gate);
-    let worker = OnlineProviderWorker::spawn(1, move |query: OnlineQuery| {
+    let worker = OnlineProviderWorker::spawn(1, move |query: &OnlineQuery| {
         if query.query_text == "ni" {
             started.send(()).unwrap();
             gate.lock().unwrap().recv().unwrap();
