@@ -259,7 +259,7 @@ impl UnixSocketProvider {
         let ai_limit = query.ai_candidate_limit();
         let limits = [1, ai_limit];
         let mut source_counts = [0; 2];
-        let mut candidates = Vec::new();
+        let mut candidates = Vec::with_capacity(replies.len());
         for reply in replies {
             if reply.text.is_empty()
                 || !msime_client_core::is_bounded_text(&reply.text, 4096)
