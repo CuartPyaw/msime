@@ -1543,6 +1543,28 @@ fn helpcode_legacy_defaults_and_independent_schemes_roundtrip() {
 }
 
 #[test]
+fn custom_helpcode_schema_roundtrips_and_rejects_unsafe_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let preferences = Preferences {
+        quanpin_helpcode: HelpcodePreferences {
+            schema: HelpcodeSchema::Custom("custom/synthetic".into()),
+            ..default_quanpin_helpcode()
+        },
+        ..Preferences::default()
+    };
+    let saved = store.save(0, preferences).unwrap();
+    assert_eq!(saved.preferences.quanpin_helpcode.schema.as_str(), "custom/synthetic");
+
+    let document = fs::read_to_string(store.path()).unwrap();
+    for unsafe_id in ["custom/../escape", "custom/a\\b", "custom/"] {
+        let invalid = document.replace("custom/synthetic", unsafe_id);
+        fs::write(store.path(), invalid).unwrap();
+        assert!(store.load().is_err(), "accepted unsafe schema {unsafe_id}");
+    }
+}
+
+#[test]
 fn autocorrect_legacy_default_and_disabled_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let store = PreferencesStore::new(dir.path());
