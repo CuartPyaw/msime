@@ -455,7 +455,7 @@ fn xdotool_key_name(virtual_key: u16) -> Option<String> {
 #[cfg(target_os = "linux")]
 fn xdotool_key_args(request: &KeyboardInputRequest) -> Option<String> {
     let key = xdotool_key_name(request.virtual_key)?;
-    let mut parts: Vec<String> = Vec::new();
+    let mut parts: Vec<String> = Vec::with_capacity(5);
     if request.include_sticky_modifiers {
         if request.modifiers.ctrl {
             parts.push("ctrl".to_owned());
