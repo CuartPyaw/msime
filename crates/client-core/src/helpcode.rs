@@ -1,9 +1,10 @@
 //! Discovery metadata for user supplied helper-code tables.
 
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 /// A helper-code table found below `helpcodes/custom`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CustomHelpcodeSchema {
     /// The identifier persisted in preferences and passed to Engine.
     pub schema: String,

@@ -414,7 +414,7 @@ import { ShortcutSettingsPage } from "./settings/pages/shortcuts-page";
 import { ToolsSettingsPage } from "./settings/pages/tools-page";
 import { AboutSettingsPage } from "./settings/pages/about-page";
 import { HelpcodeSettingsPage } from "./settings/pages/helpcode-page";
-import type { HelpcodePreferences } from "./settings/pages/helpcode-page";
+import type { CustomHelpcodeSchema, HelpcodePreferences } from "./settings/pages/helpcode-page";
 import type { ClipboardHistoryClient } from "./settings/clipboard-history-section";
 import { defaultFuzzyPinyin, type FuzzyPinyinPreferences } from "./settings/fuzzy-pinyin-section";
 import {
@@ -528,6 +528,7 @@ export {
 export { SettingsStartupPage } from "./settings/settings-startup-page";
 export {
   HelpcodeSettingsPage,
+  type CustomHelpcodeSchema,
   type HelpcodePreferences,
   type HelpcodeSchema,
   type HelpcodeSettings,
@@ -1445,6 +1446,8 @@ export interface SettingsClient {
   listFontFamilies?: FontCatalogReader;
   resolveFontFamilies?: (names: string[]) => Promise<string[]>;
   scanSkinCatalog?: () => Promise<SkinCatalog>;
+  /** Custom helper-code tables found below the host's verified resource directory. */
+  listHelpcodeSchemas?: () => Promise<CustomHelpcodeSchema[]>;
   /**
    * The colours a host draws for a theme, from the same `resolve` the input method runs (`msime_client_resolve_theme`), with the custom theme's package read from the host's own skin directory. Absent on hosts whose bridge has no theme call; the picker and built-in previews read `themeCatalog` and need no host.
    */
@@ -2476,6 +2479,27 @@ export type SettingsPageModel = ReturnType<typeof useSettingsPageModel>;
 export function SettingsPage(props: SettingsPageProps) {
   const { onReplayOnboarding } = props;
   const model = useSettingsPageModel(props);
+  const [customHelpcodeSchemas, setCustomHelpcodeSchemas] = useState<CustomHelpcodeSchema[]>([]);
+  useEffect(() => {
+    let active = true;
+    const reader = props.client.listHelpcodeSchemas;
+    if (!reader) {
+      setCustomHelpcodeSchemas([]);
+      return () => {
+        active = false;
+      };
+    }
+    void reader()
+      .then((schemas) => {
+        if (active) setCustomHelpcodeSchemas(schemas);
+      })
+      .catch(() => {
+        if (active) setCustomHelpcodeSchemas([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [props.client.listHelpcodeSchemas]);
   // Filters the sidebar by page name; the model does not need it, since it never leaves the shell.
   const [navQuery, setNavQuery] = useState("");
   // The phone page that has scrolled its large title away, which brings in the compact bar. Keyed by page so that arriving on another page, which opens at its top, never inherits the bar.
@@ -2998,6 +3022,7 @@ export function SettingsPage(props: SettingsPageProps) {
                     <InputSettingsPage />
                     <HelpcodeSettingsPage
                       value={draft}
+                      customSchemas={customHelpcodeSchemas}
                       mobile={mobilePlatform}
                       showShiftEntry={model.showHelpcodeShiftEntry}
                       disabled={busy}

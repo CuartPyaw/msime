@@ -225,6 +225,11 @@ char *msime_client_vocabulary_review(const uint8_t *request, size_t length);
  * package supports the layout and theme before adopting its colors.
  * Keys are camelCase, the same document the settings page consumes. */
 char *msime_client_skin_catalog(const uint8_t *directory, size_t length);
+/* Scan an absolute Engine resource directory for optional custom helper-code tables. The
+ * response value is an array of {schema,file_stem,name,name_en}; missing or unreadable
+ * helpcodes/custom is an empty array. Display metadata comes from leading # name: and
+ * # name_en: comments, while the Engine remains the owner of table parsing. */
+char *msime_client_helpcode_schemas(const uint8_t *resources, size_t length);
 /* JSON {directory:absolute skin root,id:package folder}. Validates that one package with the same loader as msime_client_skin_catalog and returns one of its camelCase packages entries; an invalid, built-in, symlinked or missing package is {ok:false,error} with the loader's reason. Reads the package: resolve on a skin or appearance change, never while drawing. */
 char *msime_client_skin_package(const uint8_t *request, size_t length);
 /* JSON {directory:absolute path,id:skin id,relative:package asset,kind:"image"|"font"}.
