@@ -449,9 +449,13 @@ fn queued_import(
         (entries, Some(report))
     };
     // The bridge entry carries no line number; the parsed report lists the same rows in the same order.
-    let source_lines: Vec<usize> = report
+    let source_lines = report
         .as_ref()
-        .map(|parsed| parsed.entries.iter().map(|entry| entry.line).collect())
+        .map(|parsed| {
+            let mut lines = Vec::with_capacity(parsed.entries.len());
+            lines.extend(parsed.entries.iter().map(|entry| entry.line));
+            lines
+        })
         .unwrap_or_default();
     let mut report = report.unwrap_or(msime_client_core::dictionary::import::ImportReport {
         entries: Vec::new(),
@@ -613,9 +617,13 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
             // The bridge entry carries no line number, so the parsed report is
             // what maps a refused row back to the line the user has to fix.
             // The two lists are built from the same rows in the same order.
-            let source_lines: Vec<usize> = report
+            let source_lines = report
                 .as_ref()
-                .map(|parsed| parsed.entries.iter().map(|entry| entry.line).collect())
+                .map(|parsed| {
+                    let mut lines = Vec::with_capacity(parsed.entries.len());
+                    lines.extend(parsed.entries.iter().map(|entry| entry.line));
+                    lines
+                })
                 .unwrap_or_default();
             for (index, entry) in entries.iter().enumerate() {
                 let receipt = format!("{request_id}-{index}");
