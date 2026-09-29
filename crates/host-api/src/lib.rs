@@ -1073,7 +1073,7 @@ pub fn local_symbol_catalog(resources: &str) -> Result<Vec<LocalSymbolCatalogGro
     }
     let groups = msime_engine_bridge::emoji_symbol_groups(resources)
         .map_err(|_| "local symbol catalog unavailable")?;
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(groups.len());
     let mut remaining_pages = 256usize;
     for group in groups {
         let mut items = Vec::new();
