@@ -2384,7 +2384,7 @@ async fn load_emoji_catalog(
             .and_then(Value::as_str)
             .filter(|value| std::path::Path::new(value).is_absolute())
             .ok_or(CommandError { code: "storage" })?;
-        let mut unavailable = Vec::new();
+        let mut unavailable = Vec::with_capacity(3);
         let mut read = |category, name| {
             read_local_emoji_groups(resources, category).unwrap_or_else(|_| {
                 unavailable.push(name);
