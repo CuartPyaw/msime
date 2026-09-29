@@ -1706,6 +1706,14 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     return results;
 }
 - (void)applyCandidateTranslationResults {
+    const BOOL ownSnapshot = !_serviceSnapshotActive;
+    if (ownSnapshot) {
+        _serviceSnapshotActive = YES;
+        _serviceSnapshotQueryLoaded = NO;
+        _serviceSnapshotViewLoaded = NO;
+        _serviceSnapshotQuery = nil;
+        _serviceSnapshotView = nil;
+    }
     NSMutableArray *results = [NSMutableArray array];
     BOOL customCurrent = _customResults && [_customQuery isEqual:[self currentCustomTranslationRequest]];
     BOOL glossCurrent = _glossResults && [_glossRequest isEqual:[self currentGlossRequest]];
@@ -1728,7 +1736,10 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
         }
     }
     NSDictionary *view = [self serviceSnapshotView];
-    if (!view) return;
+    if (!view) {
+        if (ownSnapshot) [self invalidateServiceSnapshots];
+        return;
+    }
     // Applying translations advances the Engine snapshot. Any enclosing service pass must
     // fetch the new query/view before it asks another provider to synchronize.
     [self invalidateServiceSnapshots];
