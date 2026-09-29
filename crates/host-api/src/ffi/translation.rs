@@ -488,8 +488,14 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
         let request: Request =
             serde_json::from_slice(unsafe { std::slice::from_raw_parts(request, request_length) })
                 .map_err(|_| "invalid candidate gloss request")?;
-        if request.candidates.len() > 4096
-            || request.candidates.iter().any(|candidate| {
+        let Request {
+            generation,
+            user_data,
+            target_language,
+            candidates: raw_candidates,
+        } = request;
+        if raw_candidates.len() > 4096
+            || raw_candidates.iter().any(|candidate| {
                 candidate.text.is_empty() || !is_bounded_text(&candidate.text, 4096)
             })
         {
@@ -500,20 +506,17 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
             "resources path is not UTF-8",
             "resources path must be absolute",
         )?;
-        let mut candidates = Vec::with_capacity(request.candidates.len());
-        candidates.extend(
-            request
-                .candidates
-                .iter()
-                .map(|candidate| (candidate.text.clone(), candidate.source)),
-        );
-        let user_data = request.user_data.as_deref().unwrap_or("");
+        let candidates = raw_candidates
+            .into_iter()
+            .map(|candidate| (candidate.text, candidate.source))
+            .collect::<Vec<_>>();
+        let user_data = user_data.as_deref().unwrap_or("");
         if !user_data.is_empty()
             && (user_data.len() > 4096 || !std::path::Path::new(user_data).is_absolute())
         {
             return Err("user data path must be absolute".into());
         }
-        let glosses = match request.target_language.as_deref() {
+        let glosses = match target_language.as_deref() {
             None | Some("en") => {
                 msime_engine_bridge::candidate_glosses_with_user(resources, user_data, &candidates)
                     .map_err(|_| "candidate gloss dictionary unavailable")?
@@ -524,7 +527,7 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
                     crate::offline_glosses_beside(std::path::Path::new(resources), language)
                 else {
                     return Ok(json!({
-                        "generation": request.generation,
+                        "generation": generation,
                         "translations": [],
                     }));
                 };
@@ -561,7 +564,7 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
             })
             .collect::<Vec<_>>();
         Ok(json!({
-            "generation": request.generation,
+            "generation": generation,
             "translations": translations,
         }))
     })
