@@ -282,7 +282,9 @@ mod macos {
                 }
             }
         }
-        Ok(names.into_iter().collect())
+        let mut result = Vec::with_capacity(names.len());
+        result.extend(names);
+        Ok(result)
     }
 
     #[cfg(test)]
