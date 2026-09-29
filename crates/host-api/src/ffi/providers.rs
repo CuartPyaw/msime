@@ -186,21 +186,18 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
             // machine.
             //
             // Emoji and kaomoji sources never qualify, whatever their text: many kaomoji carry Han characters ("(*Φ皿Φ*)") and would otherwise queue behind real words on the serial on-device model and spend account quota, as Windows' BuildTranslationQuery already refuses.
-            let candidates = candidates_view
-                .candidates
-                .iter()
-                .map(|candidate| {
-                    json!({
-                        "text": candidate.text,
-                        "online_gloss":
-                            !msime_client_core::translation::is_emoji_or_kaomoji_source(
-                                candidate.source,
-                            ) && msime_client_core::translation::is_cloud_translatable_chinese(
-                                &candidate.text,
-                            ),
-                    })
+            let mut candidates = Vec::with_capacity(candidates_view.candidates.len());
+            candidates.extend(candidates_view.candidates.iter().map(|candidate| {
+                json!({
+                    "text": candidate.text,
+                    "online_gloss":
+                        !msime_client_core::translation::is_emoji_or_kaomoji_source(
+                            candidate.source,
+                        ) && msime_client_core::translation::is_cloud_translatable_chinese(
+                            &candidate.text,
+                        ),
                 })
-                .collect::<Vec<_>>();
+            }));
             let custom_translation = &preferences.custom_translation;
             let tencent = &preferences.tencent_tmt;
             // The MSIME account gloss endpoint (api.msime.app) is used only when the user explicitly chose it and no service of their own takes precedence. Tencent counts only with usable secrets, because its default `enabled: true` is not a user choice.
