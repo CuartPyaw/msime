@@ -39,7 +39,8 @@ pub(crate) fn valid_model_catalog<'a>(
     maximum_models: usize,
     maximum_id_bytes: usize,
 ) -> bool {
-    let ids: Vec<&str> = models.into_iter().collect();
+    let mut ids = Vec::with_capacity(maximum_models);
+    ids.extend(models);
     !ids.is_empty()
         && ids.len() <= maximum_models
         && !default_model.is_empty()
