@@ -309,7 +309,7 @@ impl PersonalDictionaryStore {
             return Err(PersonalDictionaryError::InvalidRequest);
         }
         validate_request_id(&id_prefix)?;
-        let mut identities = std::collections::HashSet::new();
+        let mut identities = std::collections::HashSet::with_capacity(words.len());
         for word in &words {
             word.validate_new()
                 .map_err(|_| PersonalDictionaryError::InvalidRequest)?;
@@ -590,7 +590,7 @@ fn validate_state(state: &PersonalDictionaryState) -> Result<(), PersonalDiction
     {
         return Err(PersonalDictionaryError::InvalidState);
     }
-    let mut ids = std::collections::HashSet::new();
+    let mut ids = std::collections::HashSet::with_capacity(state.requests.len());
     for request in &state.requests {
         if request.id.is_empty() || !ids.insert(&request.id) {
             return Err(PersonalDictionaryError::InvalidState);
