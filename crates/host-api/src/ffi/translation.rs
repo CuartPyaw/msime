@@ -553,16 +553,15 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
             })
             .filter(|total| *total <= 900_000)
             .ok_or("candidate gloss response exceeds limits")?;
-        let translations = candidates
-            .into_iter()
-            .zip(glosses)
-            .filter_map(|((text, _), translation)| {
+        let mut translations = Vec::with_capacity(candidates.len());
+        translations.extend(candidates.into_iter().zip(glosses).filter_map(
+            |((text, _), translation)| {
                 (!translation.is_empty()).then_some(json!({
                     "text": text,
                     "translation": translation,
                 }))
-            })
-            .collect::<Vec<_>>();
+            },
+        ));
         Ok(json!({
             "generation": generation,
             "translations": translations,
