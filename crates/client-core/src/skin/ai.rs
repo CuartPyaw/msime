@@ -367,9 +367,10 @@ where
             first_error.map_or_else(|| Ok(results), Err)
         })?;
         results.sort_by_key(|(index, _)| *index);
-        let results = results.into_iter().map(|(_, result)| result).collect();
+        let mut ordered = Vec::with_capacity(results.len());
+        ordered.extend(results.into_iter().map(|(_, result)| result));
         self.ensure_identity(&user_id)?;
-        Ok(results)
+        Ok(ordered)
     }
 
     fn request_authenticated<T>(
