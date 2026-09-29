@@ -250,7 +250,7 @@ pub(crate) fn install_bundle_at(
 fn source_candidates(resource_directory: Option<&Path>, current_directory: &Path) -> Vec<PathBuf> {
     let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let repository_root = manifest_root.join("../../..");
-    let mut candidates = Vec::new();
+    let mut candidates = Vec::with_capacity(3);
     if let Some(resource_directory) = resource_directory {
         candidates.push(resource_directory.join(INPUT_SOURCE_BUNDLE_NAME));
     }
