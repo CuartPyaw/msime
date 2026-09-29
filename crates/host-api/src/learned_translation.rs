@@ -85,7 +85,7 @@ pub fn execute(bytes: &[u8]) -> Result<Value, &'static str> {
                 let learned = msime_engine_bridge::candidate_glosses_with_user(
                     "",
                     &request.directory,
-                    &[(key.clone(), if chinese { 0 } else { 4 })],
+                    &[(key, if chinese { 0 } else { 4 })],
                 )
                 .ok()
                 .and_then(|values| values.into_iter().next())
