@@ -188,7 +188,7 @@ pub fn parse_chat_completion_response(body: &[u8], limit: u8) -> Option<AiSugges
         .as_str()?;
     let inner: serde_json::Value = serde_json::from_str(content).ok()?;
     let entries = inner.get("candidates")?.as_array()?;
-    let mut candidates: Vec<AiSuggestion> = Vec::new();
+    let mut candidates: Vec<AiSuggestion> = Vec::with_capacity(usize::from(limit));
     for entry in entries {
         let Some(text) = entry.get("text").and_then(serde_json::Value::as_str) else {
             continue;
