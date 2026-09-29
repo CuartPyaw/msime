@@ -513,7 +513,7 @@ pub fn send_text(text: &str) -> bool {
     if !valid_text(text) {
         return false;
     }
-    let mut inputs = Vec::new();
+    let mut inputs = Vec::with_capacity(text.encode_utf16().count() * 2);
     for unit in text.encode_utf16() {
         inputs.push(unicode_input(unit, false));
         inputs.push(unicode_input(unit, true));
