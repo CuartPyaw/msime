@@ -93,8 +93,10 @@ rust::Vec<CaptureDevice> capture_devices() {
 }
 rust::Vec<rust::String> handwriting_order_candidates(rust::Slice<const rust::String> candidates) {
     std::vector<std::string> input;
+    input.reserve(candidates.size());
     for (const auto &candidate : candidates) input.emplace_back(std::string(candidate));
     rust::Vec<rust::String> output;
+    output.reserve(candidates.size());
 #if MSIME_HAS_HANDWRITING_CANDIDATES
     for (const auto &candidate : metasequoia::handwriting::order_candidates(input))
         output.push_back(rust::String(candidate));
