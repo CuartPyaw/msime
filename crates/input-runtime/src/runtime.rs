@@ -744,18 +744,20 @@ impl<E: InputEngine> Runtime<E> {
 
     /// The generation as it stands, without asking the engine for more.
     fn all_candidates_cached(&self) -> CandidateSnapshot {
+        let mut candidates = Vec::with_capacity(self.cached.candidates.len());
+        candidates.extend(
+            self.cached
+                .candidates
+                .iter()
+                .enumerate()
+                .map(|(index, text)| self.candidate(index, text)),
+        );
         CandidateSnapshot {
             session: self.session,
             generation: self.generation,
             preedit: self.cached.preedit.clone(),
             reading: self.cached.reading.clone(),
-            candidates: self
-                .cached
-                .candidates
-                .iter()
-                .enumerate()
-                .map(|(index, text)| self.candidate(index, text))
-                .collect(),
+            candidates,
         }
     }
 
