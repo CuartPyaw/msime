@@ -2795,7 +2795,8 @@ const MACOS_ON_DEVICE_TRANSLATION_DOWNLOADABLE_DEFAULTS_KEY: &str =
 // Only the target languages the settings page can choose; anything else in the value is not ours to report.
 #[cfg(any(target_os = "macos", test))]
 fn parse_on_device_translation_downloadable(value: &str) -> Vec<String> {
-    let mut codes = Vec::new();
+    // The supported translation language set has eight entries; `zh` is filtered out below.
+    let mut codes = Vec::with_capacity(7);
     for code in value.trim().split(',').map(str::trim) {
         if code != "zh"
             && msime_client_core::translation::is_supported_translation_language(code)
