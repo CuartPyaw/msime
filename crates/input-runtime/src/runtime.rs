@@ -227,7 +227,11 @@ impl Runtime<Session> {
             ai_eligible: query.ai_eligible,
             cloud_candidates: true,
             session_id: query.session_id,
-            ai_context: self.ai_context.clone(),
+            ai_context: if query.ai_eligible {
+                self.ai_context.clone()
+            } else {
+                String::new()
+            },
             ai_assistant: None,
             ai_cache_only: false,
         }))
