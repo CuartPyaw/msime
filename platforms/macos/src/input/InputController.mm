@@ -4041,14 +4041,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         // Another surface - the shared settings page, an account push - can have changed the scheme.
         [self syncSystemInputModeForClient:_activeClient];
         [self renderCandidates];
-        [self synchronizeCloudCandidates];
-    [self scheduleSettledRerank];
-        [self synchronizeCandidateGloss];
-        [self synchronizeTargetGloss];
-        [self synchronizeOnDeviceGloss];
-        [self synchronizeAccountGloss:[self currentAccountGlossRequest]];
-        [self synchronizeCustomTranslations];
-        [self synchronizeAITranslations];
+        [self synchronizeCandidateServices];
     } else {
         msime_macos_diagnostic_write("preferences_apply_failed");
     }
