@@ -1096,6 +1096,7 @@ pub fn local_symbol_catalog(resources: &str) -> Result<Vec<LocalSymbolCatalogGro
     let mut remaining_pages = 256usize;
     for group in groups {
         let mut items = Vec::new();
+        let mut first_page = true;
         let mut offset = 0usize;
         loop {
             if remaining_pages == 0 {
@@ -1112,18 +1113,26 @@ pub fn local_symbol_catalog(resources: &str) -> Result<Vec<LocalSymbolCatalogGro
                 &group.parent,
             )
             .map_err(|_| "local symbol catalog unavailable")?;
+            if first_page {
+                // The engine exposes pages rather than a total count. Use the first
+                // page's actual item count as the only reliable initial capacity.
+                items = Vec::with_capacity(page.items.len());
+                first_page = false;
+            }
+            let complete = page.complete;
+            let next_offset = page.next_offset;
             items.extend(page.items.into_iter().map(|item| LocalEmojiCatalogItem {
                 text: item.text,
                 annotation: item.annotation,
                 group: item.group,
             }));
-            if page.complete {
+            if complete {
                 break;
             }
-            if page.next_offset <= offset {
+            if next_offset <= offset {
                 return Err("local symbol catalog cursor did not advance");
             }
-            offset = page.next_offset;
+            offset = next_offset;
         }
         result.push(LocalSymbolCatalogGroup {
             parent: group.parent,
