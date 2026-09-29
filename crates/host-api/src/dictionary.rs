@@ -460,9 +460,10 @@ fn queued_import(
         truncated: false,
         swapped: false,
     });
-    let mut words = Vec::new();
-    let mut identities = std::collections::HashSet::new();
-    let mut rejected_lines = Vec::new();
+    let capacity = entries.len().min(MAX_QUEUED_IMPORT);
+    let mut words = Vec::with_capacity(capacity);
+    let mut identities = std::collections::HashSet::with_capacity(capacity);
+    let mut rejected_lines = Vec::with_capacity(entries.len());
     for (index, entry) in entries.into_iter().enumerate() {
         let Ok(word) = normalize_personal_word(PersonalWord {
             kind: personal_kind(entry.kind),
