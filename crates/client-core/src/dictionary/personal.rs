@@ -359,8 +359,8 @@ impl PersonalDictionaryStore {
             }) else {
                 return Ok(());
             };
-            let identities: std::collections::HashSet<_> =
-                state.requests[index].identities().collect();
+            let mut identities = std::collections::HashSet::with_capacity(2);
+            identities.extend(state.requests[index].identities());
             if has_identity_conflict(
                 &state.requests,
                 &identities,
@@ -514,7 +514,8 @@ fn enqueue_request(
     if active >= MAX_ACTIVE_REQUESTS {
         return Err(PersonalDictionaryError::TooManyRequests);
     }
-    let identities: HashSet<_> = request.identities().collect();
+    let mut identities = HashSet::with_capacity(2);
+    identities.extend(request.identities());
     if has_identity_conflict(
         &state.requests,
         &identities,
