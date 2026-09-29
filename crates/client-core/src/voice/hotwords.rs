@@ -112,10 +112,10 @@ pub fn correct(text: &str, hotwords: &[Hotword]) -> String {
     prepared.sort_by_key(|(characters, _)| std::cmp::Reverse(characters.len()));
 
     let characters: Vec<char> = text.chars().collect();
-    let sounds: Vec<Option<Vec<String>>> = characters
-        .iter()
-        .map(|&ch| is_han(ch).then(|| readings(ch).iter().map(|reading| fuzzy(reading)).collect()))
-        .collect();
+    let mut sounds: Vec<Option<Vec<String>>> = Vec::with_capacity(characters.len());
+    sounds.extend(characters.iter().map(|&ch| {
+        is_han(ch).then(|| readings(ch).iter().map(|reading| fuzzy(reading)).collect())
+    }));
     let mut output = String::with_capacity(text.len());
     let mut index = 0;
     'outer: while index < characters.len() {
