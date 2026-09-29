@@ -1,0 +1,33 @@
+{
+ "name": "sp_xiaohe_trailing_helpcode",
+ "source": "tests/src/test_shuangpin.cpp:129-136; cases :137-158",
+ "covers": [
+  "shuangpin",
+  "helpcode"
+ ],
+ "fixture": {
+  "databases": {
+   "msime.db": "CREATE TABLE tbl_1_s(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_s VALUES('shi', 's', '使', 200);INSERT INTO tbl_1_s VALUES('shi', 's', '是', 100);"
+  },
+  "files": {
+   "helpcodes/helpcode.txt": "使=ab\n是=uc\n"
+  }
+ },
+ "options": {
+  "scheme": "shuangpin"
+ },
+ "steps": [
+  {
+   "op": "type",
+   "arg": "uiu"
+  },
+  {
+   "op": "command",
+   "arg": "Cancel"
+  },
+  {
+   "op": "type",
+   "arg": "ui'u"
+  }
+ ]
+}

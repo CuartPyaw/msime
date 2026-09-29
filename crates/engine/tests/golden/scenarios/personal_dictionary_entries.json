@@ -1,0 +1,217 @@
+{
+ "name": "personal_dictionary_entries",
+ "source": "tests/src/test_personal_dictionary.cpp:53-60; cases :61-100",
+ "note": "Reference ctest personal_dictionary fails against this build (test_personal_dictionary.cpp:67-76): overlay apply_engine_english_display.py lets an English code differ from its display, so {English, hello, different} is accepted. Recorded as-is. The invalid-UTF-8 and kind-99 entries of that loop cannot be expressed in JSON and are left to a Rust unit test.",
+ "covers": [
+  "personal dictionary"
+ ],
+ "fixture": {
+  "english_schema": true,
+  "databases": {
+   "msime.db": "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);CREATE TABLE tbl_7_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);CREATE TABLE tbl_others_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);"
+  }
+ },
+ "options": {},
+ "steps": [
+  {
+   "op": "validate_entry",
+   "arg": {
+    "kind": "pinyin",
+    "key": "NI HAO",
+    "value": "拟好",
+    "weight": 12345
+   }
+  },
+  {
+   "op": "validate_entry",
+   "arg": {
+    "kind": "pinyin",
+    "key": "nihao",
+    "value": "你好"
+   }
+  },
+  {
+   "op": "validate_entry",
+   "arg": {
+    "kind": "pinyin",
+    "key": "ni''hao",
+    "value": "你好"
+   }
+  },
+  {
+   "op": "validate_entry",
+   "arg": {
+    "kind": "pinyin",
+    "key": "ni'hao",
+    "value": "你"
+   }
+  },
+  {
+   "op": "validate_entry",
+   "arg": {
+    "kind": "wubi",
+    "key": "abcde",
+    "value": "词"
+   }
+  },
+  {
+   "op": "validate_entry",
+   "arg": {
+    "kind": "quick_phrase",
+    "key": "bad;code",
+    "value": "text"
+   }
+  },
+  {
+   "op": "validate_entry",
+   "arg": {
+    "kind": "english",
+    "key": "hello",
+    "value": "different"
+   }
+  },
+  {
+   "op": "validate_entry",
+   "arg": {
+    "kind": "english",
+    "key": "dont",
+    "value": "don't"
+   }
+  },
+  {
+   "op": "dict_edit",
+   "arg": {
+    "replacement": {
+     "kind": "pinyin",
+     "key": "ni'hao",
+     "value": "拟好",
+     "weight": 12345
+    }
+   }
+  },
+  {
+   "op": "dict_edit",
+   "arg": {
+    "replacement": {
+     "kind": "wubi",
+     "key": "wq",
+     "value": "拟好",
+     "weight": 12345
+    }
+   }
+  },
+  {
+   "op": "dict_edit",
+   "arg": {
+    "replacement": {
+     "kind": "english",
+     "key": "metasequoia",
+     "value": "Metasequoia",
+     "weight": 12345
+    }
+   }
+  },
+  {
+   "op": "dict_edit",
+   "arg": {
+    "replacement": {
+     "kind": "quick_phrase",
+     "key": "test1",
+     "value": "fixture\nsecond line",
+     "weight": 12345
+    }
+   }
+  },
+  {
+   "op": "dict_list",
+   "arg": {}
+  },
+  {
+   "op": "reopen"
+  },
+  {
+   "op": "type",
+   "arg": "nihao"
+  },
+  {
+   "op": "command",
+   "arg": "Cancel"
+  },
+  {
+   "op": "switch_scheme",
+   "arg": "shuangpin"
+  },
+  {
+   "op": "type",
+   "arg": "nihc"
+  },
+  {
+   "op": "command",
+   "arg": "Cancel"
+  },
+  {
+   "op": "switch_scheme",
+   "arg": "wubi"
+  },
+  {
+   "op": "type",
+   "arg": "wq"
+  },
+  {
+   "op": "command",
+   "arg": "Cancel"
+  },
+  {
+   "op": "switch_scheme",
+   "arg": "quanpin"
+  },
+  {
+   "op": "set_nine_key_enabled",
+   "arg": true
+  },
+  {
+   "op": "type",
+   "arg": "64426"
+  },
+  {
+   "op": "command",
+   "arg": "Cancel"
+  },
+  {
+   "op": "set_nine_key_enabled",
+   "arg": false
+  },
+  {
+   "op": "set_dedicated_english",
+   "arg": true
+  },
+  {
+   "op": "type",
+   "arg": "metasequoia"
+  },
+  {
+   "op": "command",
+   "arg": "Cancel"
+  },
+  {
+   "op": "set_dedicated_english",
+   "arg": false
+  },
+  {
+   "op": "char",
+   "arg": "K",
+   "shift": true
+  },
+  {
+   "op": "type",
+   "arg": "test1"
+  },
+  {
+   "op": "command",
+   "arg": "Cancel"
+  },
+  {
+   "op": "dump_journal"
+  }
+ ]
+}
