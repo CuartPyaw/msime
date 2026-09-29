@@ -27,6 +27,7 @@ def apply(root: Path) -> None:
     replace_once(h, "std::optional<WordItem> find_candidate(const std::string &key, const std::string &value);", "std::optional<WordItem> find_candidate(const std::string &key, const std::string &value, SchemeType scheme = SchemeType::Quanpin);")
     replace_once(h, "const std::string &selected_canonical_pinyin);", "const std::string &selected_canonical_pinyin, SchemeType selected_scheme = SchemeType::Quanpin);")
     replace_once(h, "bool selection_completes_composition(const std::string &selected_pinyin, const std::string &selected_word) const;", "bool selection_completes_composition(const std::string &selected_pinyin, const std::string &selected_word, SchemeType selected_scheme = SchemeType::Quanpin) const;")
+    replace_once(h, "    std::string position_context(bool english) const;", "    std::string position_context(bool english, bool wubi = false) const;")
     replace_once(h, "    bool wubi_candidates_are_native() const;", "    bool wubi_candidates_are_native() const;\n    static bool is_wubi_native_candidate(const WordItem &item);\n    std::size_t wubi_native_candidate_count() const;")
 
     c = root / "core/input_session_composition.cpp"
@@ -36,7 +37,7 @@ def apply(root: Path) -> None:
     candidates = root / "core/input_session_candidates.cpp"
     replace_once(candidates,
                  "[this](const std::string &key, const std::string &word) { return engine_.find_candidate(key, word); },",
-                 "[this](const std::string &key, const std::string &word) { return engine_.find_candidate(key, word, scheme()); },")
+                 "[this](const std::string &key, const std::string &word) { return engine_.find_candidate(scheme(), key, word); },")
     replace_once(c, "bool InputSession::selection_completes_composition(const std::string &selected_pinyin,\n                                                   const std::string &selected_word) const", "bool InputSession::selection_completes_composition(const std::string &selected_pinyin, const std::string &selected_word,\n                                                   SchemeType selected_scheme) const")
     replace_once(c, "if (is_japanese() || wubi_candidates_are_native())", "if (is_japanese() || selected_scheme == SchemeType::Wubi)")
     replace_once(c, "const std::string &selected_pinyin, const std::string &selected_word, const std::string &selected_canonical_pinyin)\n{\n    SelectionTransition transition;\n    transition.selected_canonical_pinyin = selected_canonical_pinyin;", "const std::string &selected_pinyin, const std::string &selected_word, const std::string &selected_canonical_pinyin,\n    SchemeType selected_scheme)\n{\n    SelectionTransition transition;\n    transition.selected_canonical_pinyin = selected_canonical_pinyin;\n    transition.wubi_native = selected_scheme == SchemeType::Wubi;")
@@ -118,12 +119,13 @@ bool InputSession::candidates_follow_pinyin() const
         cpp,
         """    const bool adjusted = user_dictionary::adjust_candidate_ranking(
         path_to_utf8(paths_.dictionary(assets::main_dictionary)), path_to_utf8(paths_.user(assets::user_journal)),
-        context_key, candidates(), entry_key, selected.word, frequency_mode_name(options.mode), options.linear_step,
+        context_key, ordered, entry_key, selected.word, frequency_mode_name(options.mode), options.linear_step,
         options.trigger_count, force_top, &ranking_changed,
-        (wubi && !super_jianpin) ? user_dictionary::DictionaryKind::Wubi : user_dictionary::DictionaryKind::Pinyin);""",
+        (wubi && !super_jianpin) ? user_dictionary::DictionaryKind::Wubi : user_dictionary::DictionaryKind::Pinyin,
+        active_delta_);""",
         """    std::vector<WordItem> ranked_candidates;
-    ranked_candidates.reserve(candidates().size());
-    for (const auto &candidate : candidates())
+    ranked_candidates.reserve(ordered.size());
+    for (const auto &candidate : ordered)
     {
         if (is_wubi() && candidate.scheme != selected.scheme)
             continue;
@@ -133,9 +135,9 @@ bool InputSession::candidates_follow_pinyin() const
         path_to_utf8(paths_.dictionary(assets::main_dictionary)), path_to_utf8(paths_.user(assets::user_journal)),
         context_key, ranked_candidates, entry_key, selected.word, frequency_mode_name(options.mode), options.linear_step,
         options.trigger_count, force_top, &ranking_changed,
-        (wubi && !super_jianpin) ? user_dictionary::DictionaryKind::Wubi : user_dictionary::DictionaryKind::Pinyin);""",
+        (wubi && !super_jianpin) ? user_dictionary::DictionaryKind::Wubi : user_dictionary::DictionaryKind::Pinyin,
+        active_delta_);""",
     )
-    replace_once(cpp, "    const bool wubi = wubi_candidates_are_native();", "    const bool wubi = selected.scheme == SchemeType::Wubi;")
 
     composition = root / "core/input_session_composition.cpp"
     replace_once(
@@ -169,7 +171,7 @@ bool InputSession::candidates_follow_pinyin() const
     old_positions = """    if (local_input_mode_ == LocalInputMode::None && !dedicated_english_mode_ && scheme() != SchemeType::JapaneseRomaji)
         user_dictionary::apply_fixed_positions(
             journal, position_context(false), items, engine_.get_request().raw_input.size() == 1,
-            [this](const std::string &key, const std::string &word) { return engine_.find_candidate(key, word, scheme()); },
+            [this](const std::string &key, const std::string &word) { return engine_.find_candidate(scheme(), key, word); },
             has_active_helpcode());
     else if (local_input_mode_ == LocalInputMode::SuperJianpin)
 """
@@ -186,14 +188,14 @@ bool InputSession::candidates_follow_pinyin() const
             user_dictionary::apply_fixed_positions(
                 journal, position_context(false, true), wubi_items, include_missing,
                 [this](const std::string &key, const std::string &word) {
-                    return engine_.find_candidate(key, word, SchemeType::Wubi);
+                    return engine_.find_candidate(SchemeType::Wubi, key, word);
                 },
                 has_active_helpcode());
         if (!pinyin_items.empty())
             user_dictionary::apply_fixed_positions(
                 journal, position_context(false, false), pinyin_items, include_missing,
                 [this](const std::string &key, const std::string &word) {
-                    return engine_.find_candidate(key, word, SchemeType::Quanpin);
+                    return engine_.find_candidate(SchemeType::Quanpin, key, word);
                 },
                 has_active_helpcode());
         items.clear();
@@ -205,7 +207,7 @@ bool InputSession::candidates_follow_pinyin() const
     else if (regular)
         user_dictionary::apply_fixed_positions(
             journal, position_context(false, false), items, engine_.get_request().raw_input.size() == 1,
-            [this](const std::string &key, const std::string &word) { return engine_.find_candidate(key, word, scheme()); },
+            [this](const std::string &key, const std::string &word) { return engine_.find_candidate(scheme(), key, word); },
             has_active_helpcode());
     else if (local_input_mode_ == LocalInputMode::SuperJianpin)
 """
