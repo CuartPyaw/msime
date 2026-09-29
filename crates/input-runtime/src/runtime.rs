@@ -1437,38 +1437,40 @@ impl<E: InputEngine> Runtime<E> {
     pub(crate) fn refresh(&mut self) -> Result<(), RuntimeError> {
         self.snapshot_valid = false;
         self.translations.clear();
-        // Drop cached candidate identities even if fetching the replacement fails.
-        let previous = std::mem::replace(
-            &mut self.cached,
-            EngineSnapshot {
-                scheme: 255,
-                nine_key: false,
-                nine_key_spellings: Vec::new(),
-                candidate_annotations: Vec::new(),
-                candidate_codes: Vec::new(),
-                candidate_sources: Vec::new(),
-                candidate_positions: Vec::new(),
-                candidate_corrected: Vec::new(),
-                candidate_answers_key: Vec::new(),
-                microsoft_shuangpin: false,
-                shuangpin_profile: String::new(),
-                answered_by_pinyin_fallback: true,
-                wubi_unique_four_code: false,
-                local_mode: "unknown".into(),
-                dedicated_english: false,
-                preedit: String::new(),
-                reading: String::new(),
-                editing_text: String::new(),
-                caret_position: 0,
-                segment_raw_boundaries: vec![],
-                candidates: Vec::new(),
-            },
-        );
         self.engine_order.clear();
         let previous_highlight = self.highlighted;
         self.highlighted = 0;
-        let snapshot = self.engine.snapshot()?;
-        self.load_snapshot(snapshot);
+        // Drop cached candidate identities even if fetching the replacement fails.
+        let snapshot = match self.engine.snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.cached = EngineSnapshot {
+                    scheme: 255,
+                    nine_key: false,
+                    nine_key_spellings: Vec::new(),
+                    candidate_annotations: Vec::new(),
+                    candidate_codes: Vec::new(),
+                    candidate_sources: Vec::new(),
+                    candidate_positions: Vec::new(),
+                    candidate_corrected: Vec::new(),
+                    candidate_answers_key: Vec::new(),
+                    microsoft_shuangpin: false,
+                    shuangpin_profile: String::new(),
+                    answered_by_pinyin_fallback: true,
+                    wubi_unique_four_code: false,
+                    local_mode: "unknown".into(),
+                    dedicated_english: false,
+                    preedit: String::new(),
+                    reading: String::new(),
+                    editing_text: String::new(),
+                    caret_position: 0,
+                    segment_raw_boundaries: vec![],
+                    candidates: Vec::new(),
+                };
+                return Err(error);
+            }
+        };
+        let previous = std::mem::replace(&mut self.cached, snapshot);
         self.rerank();
         self.demote_runner_up_readings();
         self.normalize_online_slots();
