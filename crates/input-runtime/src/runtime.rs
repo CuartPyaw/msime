@@ -143,6 +143,17 @@ fn apply_order<T: Clone>(items: &mut Vec<T>, order: &[usize]) {
     *items = order.iter().map(|index| items[*index].clone()).collect();
 }
 
+/// Keep the Engine-index mapping empty while the cached candidates are still in Engine order.
+/// Reordering paths call this immediately before their first permutation, so ordinary keystrokes
+/// avoid rebuilding an identity vector on every snapshot.
+fn ensure_engine_order(engine_order: &mut Vec<usize>, count: usize) {
+    if engine_order.len() == count {
+        return;
+    }
+    engine_order.clear();
+    engine_order.extend(0..count);
+}
+
 fn rotate_to_front<T>(items: &mut [T], index: usize) {
     items[..=index].rotate_right(1);
 }
@@ -774,7 +785,9 @@ impl<E: InputEngine> Runtime<E> {
 
     /// Take a snapshot straight from the Engine, whose seats are still in the Engine's order.
     fn load_snapshot(&mut self, snapshot: EngineSnapshot) {
-        self.engine_order = (0..snapshot.candidates.len()).collect();
+        // An empty mapping means the cached order is the Engine's order; build it lazily only if
+        // one of the presentation reorderings below actually moves a candidate.
+        self.engine_order.clear();
         self.cached = snapshot;
     }
 
@@ -1139,6 +1152,7 @@ impl<E: InputEngine> Runtime<E> {
             return;
         }
 
+        ensure_engine_order(&mut self.engine_order, count);
         let snapshot = &mut self.cached;
         apply_order(&mut snapshot.candidates, &order);
         apply_order(&mut snapshot.candidate_codes, &order);
@@ -1147,9 +1161,7 @@ impl<E: InputEngine> Runtime<E> {
         apply_order(&mut snapshot.candidate_positions, &order);
         apply_order(&mut snapshot.candidate_corrected, &order);
         apply_order(&mut snapshot.candidate_answers_key, &order);
-        if self.engine_order.len() == count {
-            apply_order(&mut self.engine_order, &order);
-        }
+        apply_order(&mut self.engine_order, &order);
     }
 
     fn rerank(&mut self) {
@@ -1197,6 +1209,7 @@ impl<E: InputEngine> Runtime<E> {
         }) else {
             return;
         };
+        ensure_engine_order(&mut self.engine_order, count);
         let snapshot = &mut self.cached;
         rotate_to_front(&mut snapshot.candidates, promote);
         rotate_to_front(&mut snapshot.candidate_codes, promote);
@@ -1205,9 +1218,7 @@ impl<E: InputEngine> Runtime<E> {
         rotate_to_front(&mut snapshot.candidate_positions, promote);
         rotate_to_front(&mut snapshot.candidate_corrected, promote);
         rotate_to_front(&mut snapshot.candidate_answers_key, promote);
-        if self.engine_order.len() == count {
-            rotate_to_front(&mut self.engine_order, promote);
-        }
+        rotate_to_front(&mut self.engine_order, promote);
     }
 
     /// Move the runner-up sentence readings behind the rest of the list.
@@ -1260,6 +1271,7 @@ impl<E: InputEngine> Runtime<E> {
         if !demote.iter().any(|moved| *moved) {
             return;
         }
+        ensure_engine_order(&mut self.engine_order, count);
         let snapshot = &mut self.cached;
         move_to_back(&mut snapshot.candidates, &demote);
         move_to_back(&mut snapshot.candidate_codes, &demote);
@@ -1268,9 +1280,7 @@ impl<E: InputEngine> Runtime<E> {
         move_to_back(&mut snapshot.candidate_positions, &demote);
         move_to_back(&mut snapshot.candidate_corrected, &demote);
         move_to_back(&mut snapshot.candidate_answers_key, &demote);
-        if self.engine_order.len() == count {
-            move_to_back(&mut self.engine_order, &demote);
-        }
+        move_to_back(&mut self.engine_order, &demote);
     }
 
     pub(crate) fn refresh(&mut self) -> Result<(), RuntimeError> {
