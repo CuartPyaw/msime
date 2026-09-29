@@ -8,7 +8,16 @@ export type HelpcodeSchema =
   | "shouyou2_0"
   | "shouyouplus"
   | "xiaohe"
-  | "jiajia";
+  | "jiajia"
+  | `custom/${string}`;
+
+/** Metadata for a helper-code table discovered below the host's resource directory. */
+export type CustomHelpcodeSchema = {
+  schema: `custom/${string}`;
+  file_stem: string;
+  name: string;
+  name_en: string;
+};
 
 export type HelpcodePreferences = {
   enabled: boolean;
@@ -34,12 +43,21 @@ const helpcodeSchemas: readonly (readonly [HelpcodeSchema, string])[] = [
   ["jiajia", "加加"],
 ];
 
+function customSchemaLabel(schema: CustomHelpcodeSchema): string {
+  if (schema.name && schema.name_en && schema.name !== schema.name_en) {
+    return `${schema.name} (${schema.name_en})`;
+  }
+  return schema.name || schema.name_en || schema.file_stem || schema.schema;
+}
+
 export interface HelpcodeSettingsPageProps {
   value: HelpcodeSettings;
   mobile: boolean;
   showShiftEntry: boolean;
   disabled?: boolean;
   hidden?: boolean;
+  /** Custom tables discovered by the host. They are optional for hosts without resource scanning. */
+  customSchemas?: readonly CustomHelpcodeSchema[];
   onChange: (patch: HelpcodeSettings) => void;
 }
 
@@ -50,8 +68,17 @@ export function HelpcodeSettingsPage({
   showShiftEntry,
   disabled = false,
   hidden = false,
+  customSchemas = [],
   onChange,
 }: HelpcodeSettingsPageProps) {
+  const schemaOptions = [
+    ...helpcodeSchemas,
+    ...customSchemas.map((schema): readonly [HelpcodeSchema, string] => [
+      schema.schema,
+      customSchemaLabel(schema),
+    ]),
+  ];
+
   return (
     <fieldset disabled={disabled} hidden={hidden} aria-label="辅助码">
       <div className={settings.groups}>
@@ -94,11 +121,20 @@ export function HelpcodeSettingsPage({
                       })
                     }
                   >
-                    {helpcodeSchemas.map(([schema, name]) => (
-                      <option key={schema} value={schema}>
-                        {name}
-                      </option>
-                    ))}
+                    {schemaOptions
+                      // Keep a previously selected table visible if the resource directory was
+                      // changed or is temporarily unavailable during settings startup.
+                      .concat(
+                        current.schema.startsWith("custom/") &&
+                          !schemaOptions.some(([schema]) => schema === current.schema)
+                          ? [[current.schema, current.schema] as const]
+                          : [],
+                      )
+                      .map(([schema, name]) => (
+                        <option key={schema} value={schema}>
+                          {name}
+                        </option>
+                      ))}
                   </Select>
                 </Row>
                 <Row title={display}>
