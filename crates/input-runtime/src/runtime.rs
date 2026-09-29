@@ -496,6 +496,18 @@ impl<E: InputEngine> Runtime<E> {
         }
     }
 
+    /// Number of candidates on the currently published page, without building candidate rows.
+    /// Hosts that only need the count for a punctuation decision can avoid materializing a full
+    /// [`View`].
+    pub fn candidate_page_len(&self) -> usize {
+        let start = (self.highlighted / self.page_size) * self.page_size;
+        self.cached
+            .candidates
+            .len()
+            .saturating_sub(start)
+            .min(self.page_size)
+    }
+
     /// Copy the complete candidate generation for an explicitly opened panel.
     ///
     /// The engine holds candidates back behind the initial answer and only releases them when asked

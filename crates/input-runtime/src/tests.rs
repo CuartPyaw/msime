@@ -2720,6 +2720,25 @@ fn paging_reaches_candidates_the_engine_withheld() {
 }
 
 #[test]
+fn candidate_page_len_matches_the_published_page_without_building_rows() {
+    let mut short = withholding_runtime(3, 4, 5);
+    short.focus(true).unwrap();
+    type_key(&mut short);
+    assert_eq!(short.candidate_page_len(), 3);
+    short.dispatch(Action::NextPage).unwrap();
+    assert_eq!(short.candidate_page_len(), 5);
+
+    let mut runtime = withholding_runtime(12, 8, 5);
+    runtime.focus(true).unwrap();
+    type_key(&mut runtime);
+    assert_eq!(runtime.candidate_page_len(), 5);
+    runtime.dispatch(Action::NextPage).unwrap();
+    assert_eq!(runtime.candidate_page_len(), 5);
+    runtime.dispatch(Action::NextPage).unwrap();
+    assert_eq!(runtime.candidate_page_len(), 5);
+}
+
+#[test]
 fn the_full_list_holds_what_paging_would_have_reached() {
     // Twelve offered and eight held back. Paging to the last page releases the eight; a host that
     // opens the whole list instead never paged, so it used to see only the first twelve and the
