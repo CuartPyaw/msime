@@ -953,6 +953,7 @@ bool EngineSession::apply_online_candidate(const OnlineQuerySnapshot& query,
     request.identity = std::string(query.identity);
     request.query_text = std::string(query.query_text);
     request.cache_key = std::string(query.cache_key);
+    request.pinyin_segments.reserve(query.pinyin_segments.size());
     for (const auto& segment : query.pinyin_segments)
         request.pinyin_segments.emplace_back(std::string(segment));
     request.cloud_eligible = query.cloud_eligible;
@@ -971,6 +972,7 @@ bool EngineSession::apply_online_candidates(const OnlineQuerySnapshot& query,
     request.identity = std::string(query.identity);
     request.query_text = std::string(query.query_text);
     request.cache_key = std::string(query.cache_key);
+    request.pinyin_segments.reserve(query.pinyin_segments.size());
     for (const auto& segment : query.pinyin_segments)
         request.pinyin_segments.emplace_back(std::string(segment));
     request.cloud_eligible = query.cloud_eligible;
@@ -979,6 +981,7 @@ bool EngineSession::apply_online_candidates(const OnlineQuerySnapshot& query,
     const auto kind = source == 0 ? CandidateSource::CloudSuggestion
                                   : CandidateSource::AiSuggestion;
     std::vector<std::string> words;
+    words.reserve(candidates.size());
     for (const auto& candidate : candidates) words.emplace_back(std::string(candidate));
     return session_.apply_online_candidates(request, words, kind);
 }
