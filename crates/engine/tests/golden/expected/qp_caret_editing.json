@@ -297,56 +297,8 @@
      5,
      7
     ],
-    "candidate_count": 5,
-    "candidates": [
-     {
-      "word": "你好",
-      "pinyin": "ni'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 200,
-      "annotation": "(AE)",
-      "answers_key": false
-     },
-     {
-      "word": "拟好",
-      "pinyin": "ni'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 100,
-      "annotation": "(CE)",
-      "answers_key": false
-     },
-     {
-      "word": "𠀀方案𠮷",
-      "pinyin": "ni'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 90,
-      "answers_key": false
-     },
-     {
-      "word": "C语言 2",
-      "pinyin": "ni'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 80,
-      "answers_key": false
-     },
-     {
-      "word": "GitHub",
-      "pinyin": "ni'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 70,
-      "answers_key": false
-     }
-    ],
+    "candidate_count": 0,
+    "candidates": [],
     "online_query": {
      "scheme": "quanpin",
      "query_text": "ni'hao'ma",
@@ -383,56 +335,8 @@
      5,
      7
     ],
-    "candidate_count": 5,
-    "candidates": [
-     {
-      "word": "你好",
-      "pinyin": "ni'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 200,
-      "annotation": "(AE)",
-      "answers_key": false
-     },
-     {
-      "word": "拟好",
-      "pinyin": "ni'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 100,
-      "annotation": "(CE)",
-      "answers_key": false
-     },
-     {
-      "word": "𠀀方案𠮷",
-      "pinyin": "ni'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 90,
-      "answers_key": false
-     },
-     {
-      "word": "C语言 2",
-      "pinyin": "ni'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 80,
-      "answers_key": false
-     },
-     {
-      "word": "GitHub",
-      "pinyin": "ni'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 70,
-      "answers_key": false
-     }
-    ],
+    "candidate_count": 0,
+    "candidates": [],
     "online_query": {
      "scheme": "quanpin",
      "query_text": "ni'hao'ma",
@@ -469,55 +373,8 @@
      4,
      6
     ],
-    "candidate_count": 6,
+    "candidate_count": 1,
     "candidates": [
-     {
-      "word": "你好",
-      "pinyin": "n'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 200,
-      "annotation": "(AE)",
-      "answers_key": false
-     },
-     {
-      "word": "拟好",
-      "pinyin": "n'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 100,
-      "annotation": "(CE)",
-      "answers_key": false
-     },
-     {
-      "word": "𠀀方案𠮷",
-      "pinyin": "n'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 90,
-      "answers_key": false
-     },
-     {
-      "word": "C语言 2",
-      "pinyin": "n'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 80,
-      "answers_key": false
-     },
-     {
-      "word": "GitHub",
-      "pinyin": "n'hao",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "quanpin",
-      "weight": 70,
-      "answers_key": false
-     },
      {
       "word": "虐",
       "pinyin": "n",

@@ -1,0 +1,1300 @@
+//! T9 digit composition over quanpin syllables plus English T9 (core-session.md §8). Active while it holds digits; `Session` routes to it then.
+//!
+//! The digits stay the composition: a chosen spelling only rewrites its span of digits and is remembered in `locked`, and every candidate's `pinyin` is the run of digits it consumes, so selection advances the same way whichever reading produced the row.
+
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
+
+use crate::assets;
+use crate::diagnostics;
+use crate::dictionary::english::EnglishDictionary;
+use crate::paths::RuntimePaths;
+use crate::pinyin::syllables::intact_pinyin_list;
+use crate::quanpin::QuanpinDictionary;
+use crate::session::SessionSnapshot;
+use crate::text::count_utf8_chars;
+use crate::types::{
+    Command, EnglishInputOptions, FrequencyAdjustmentMode, FrequencyAdjustmentOptions,
+    FuzzyPinyinOptions, KeyResult, LocalInputMode, PersonalDictionaryKind, SchemeType, WordItem,
+};
+use crate::user_dictionary::positions;
+use crate::user_dictionary::ranking::{self, RankingRequest};
+use crate::user_dictionary::removal;
+
+pub const PATH_LIMIT: usize = 48;
+pub const DIGIT_LIMIT: usize = 32;
+pub const CANDIDATE_LIMIT: usize = 128;
+
+/// The digit printed beside each of `a..=z` (NK:37).
+const KEYPAD: &[u8; 26] = b"22233344455566677778889999";
+/// The letters printed on each digit key (NK:74).
+const DIGIT_LETTERS: [&str; 10] = [
+    "", "", "abc", "def", "ghi", "jkl", "mno", "pqrs", "tuv", "wxyz",
+];
+/// T9 expansion multiplies by three or four per digit, so only the leading digits become letter prefixes and the dictionary's own prefix search carries the rest (NK:189).
+const ENGLISH_PREFIX_BUDGET: usize = 64;
+const ENGLISH_LIMIT: usize = 5;
+
+type Path = Vec<String>;
+
+pub struct NineKeySession {
+    paths: RuntimePaths,
+    learning: bool,
+    frequency: FrequencyAdjustmentOptions,
+    fuzzy: FuzzyPinyinOptions,
+    english_options: EnglishInputOptions,
+    digits: String,
+    locked: Vec<String>,
+    spellings: Vec<String>,
+    candidates: Vec<WordItem>,
+    english_only: bool,
+    /// Opened on first use.
+    dictionary: Option<QuanpinDictionary>,
+    english: Option<EnglishDictionary>,
+}
+
+impl NineKeySession {
+    /// English options are fixed here; the reference never updated them afterwards.
+    pub fn new(
+        paths: &RuntimePaths,
+        learning: bool,
+        frequency: FrequencyAdjustmentOptions,
+        fuzzy: FuzzyPinyinOptions,
+        english: EnglishInputOptions,
+    ) -> Self {
+        Self {
+            paths: paths.clone(),
+            learning,
+            frequency,
+            fuzzy,
+            english_options: english,
+            digits: String::new(),
+            locked: Vec::new(),
+            spellings: Vec::new(),
+            candidates: Vec::new(),
+            english_only: false,
+            dictionary: None,
+            english: None,
+        }
+    }
+
+    /// Holds digits.
+    pub fn active(&self) -> bool {
+        !self.digits.is_empty()
+    }
+
+    /// English-only T9 is a mode the host enters deliberately, so it is not gated on the mixed-candidate setting or on the minimum prefix a mixed list needs (nine_key_session.h:22-35).
+    pub fn set_english_only(&mut self, english_only: bool) {
+        if self.english_only == english_only {
+            return;
+        }
+        self.english_only = english_only;
+        self.refresh();
+    }
+
+    /// `2`..=`9`; at 32 digits handled with `NINE_KEY_DIGIT_LIMIT`.
+    pub fn character(&mut self, digit: u8) -> KeyResult {
+        if !(b'2'..=b'9').contains(&digit) {
+            return KeyResult::unhandled();
+        }
+        if self.digits.len() >= DIGIT_LIMIT {
+            return KeyResult::handled()
+                .with_diagnostic(Some(diagnostics::NINE_KEY_DIGIT_LIMIT.to_string()));
+        }
+        self.digits.push(char::from(digit));
+        self.refresh();
+        KeyResult::handled()
+    }
+
+    pub fn choose_spelling(&mut self, index: usize) -> KeyResult {
+        let Some(spelling) = self.spellings.get(index).cloned() else {
+            return KeyResult::unhandled();
+        };
+        let offset = self.locked_length();
+        // A spelling longer than what is typed extends the digits to its whole code; the spelling list only offers ones that stay within the digit limit.
+        let end = offset + spelling.len().min(self.digits.len() - offset);
+        self.digits.replace_range(offset..end, &encode(&spelling));
+        self.locked.push(spelling);
+        self.refresh();
+        KeyResult::handled()
+    }
+
+    pub fn select(&mut self, index: usize) -> KeyResult {
+        let Some(selected) = self.candidates.get(index).cloned() else {
+            return KeyResult::unhandled();
+        };
+        let diagnostic = if self.learning
+            && self.frequency.mode != FrequencyAdjustmentMode::Disabled
+            && index != 0
+            && selected.fixed_position == 0
+            && self.editable(index)
+        {
+            self.adjust_frequency(index, false)
+        } else {
+            None
+        };
+        self.consume(selected.pinyin.len());
+        self.refresh();
+        KeyResult::committed(selected.word).with_diagnostic(diagnostic)
+    }
+
+    /// Out of range commits the digits.
+    pub fn finish(&mut self, first_index: usize) -> KeyResult {
+        if !self.active() {
+            return KeyResult::unhandled();
+        }
+        if first_index >= self.candidates.len() {
+            return self.command(Command::CommitRaw);
+        }
+        let mut commit = String::new();
+        let mut diagnostic = None;
+        let mut index = first_index;
+        while self.active() {
+            if self.candidates.is_empty() {
+                commit.push_str(&self.digits);
+                break;
+            }
+            let result = self.select(index);
+            if diagnostic.is_none() {
+                diagnostic = result.diagnostic;
+            }
+            if let Some(text) = result.commit {
+                commit.push_str(&text);
+            }
+            index = 0;
+        }
+        self.command(Command::Cancel);
+        KeyResult::committed(commit).with_diagnostic(diagnostic)
+    }
+
+    pub fn command(&mut self, command: Command) -> KeyResult {
+        if !self.active() {
+            return KeyResult::unhandled();
+        }
+        match command {
+            Command::CommitCandidate => return self.select(0),
+            Command::CommitRaw => {
+                let raw = self.digits.clone();
+                self.command(Command::Cancel);
+                return KeyResult::committed(raw);
+            }
+            Command::Cancel => {
+                self.digits.clear();
+                self.locked.clear();
+            }
+            Command::Backspace => {
+                self.digits.pop();
+                while self.locked_length() > self.digits.len() {
+                    self.locked.pop();
+                }
+            }
+            _ => return KeyResult::unhandled(),
+        }
+        self.refresh();
+        KeyResult::handled()
+    }
+
+    pub fn pin(&mut self, index: usize) -> KeyResult {
+        if !self.editable(index) {
+            return KeyResult::unhandled();
+        }
+        let diagnostic = self.adjust_frequency(index, true);
+        self.refresh();
+        KeyResult::handled().with_diagnostic(diagnostic)
+    }
+
+    pub fn remove(&mut self, index: usize) -> KeyResult {
+        if !self.editable(index) || count_utf8_chars(&self.candidates[index].word) <= 1 {
+            return KeyResult::unhandled();
+        }
+        let item = &self.candidates[index];
+        let deleted = removal::delete_dictionary_candidate(
+            &self.paths.dictionary(assets::MAIN_DICTIONARY),
+            &self.paths.user(assets::USER_JOURNAL),
+            PersonalDictionaryKind::Pinyin,
+            &item.canonical_pinyin,
+            &item.word,
+        );
+        // The reference reports every failed removal with this one message and keeps the composition (NK:434-437).
+        if deleted.is_err() {
+            return KeyResult::handled().with_diagnostic(Some(
+                diagnostics::NINE_KEY_REMOVAL_NOT_PERSISTED.to_string(),
+            ));
+        }
+        if let Some(dictionary) = self.dictionary.as_mut() {
+            dictionary.reset_cache();
+        }
+        self.refresh();
+        KeyResult::handled()
+    }
+
+    /// 0 clears.
+    pub fn set_position(&mut self, index: usize, position: i32) -> KeyResult {
+        if !self.editable(index) || !(0..=5).contains(&position) {
+            return KeyResult::unhandled();
+        }
+        let item = &self.candidates[index];
+        let journal = self.paths.user(assets::USER_JOURNAL);
+        let context = self.ranking_context();
+        let saved = if position == 0 {
+            positions::clear_fixed_position(&journal, &context, &item.canonical_pinyin, &item.word)
+        } else {
+            positions::set_fixed_position(
+                &journal,
+                &context,
+                &item.canonical_pinyin,
+                &item.word,
+                position,
+            )
+        };
+        // Same rule as removal: one message for every failure, composition kept (NK:453-454).
+        if saved.is_err() {
+            return KeyResult::handled().with_diagnostic(Some(
+                diagnostics::NINE_KEY_POSITION_NOT_PERSISTED.to_string(),
+            ));
+        }
+        self.refresh();
+        KeyResult::handled()
+    }
+
+    pub fn snapshot(&self) -> SessionSnapshot {
+        let locked_length = self.locked_length();
+        let mut preedit = self.locked.join("'");
+        if self.active() && locked_length < self.digits.len() {
+            if !preedit.is_empty() {
+                preedit.push('\'');
+            }
+            preedit.push_str(&self.digits[locked_length..]);
+        }
+        SessionSnapshot {
+            scheme: SchemeType::Quanpin,
+            local_mode: LocalInputMode::None,
+            // The grid's snapshot stands in for the whole session's while it is composing, so it carries the mode too: a host that draws its English keys from this flag would otherwise put Chinese ones back on the first digit.
+            dedicated_english: self.english_only,
+            preedit,
+            candidates: self.candidates.clone(),
+            editing_text: self.digits.clone(),
+            caret_position: self.digits.len(),
+            nine_key_spellings: self.spellings.clone(),
+            candidate_sources: self.candidates.iter().map(|item| item.source).collect(),
+            candidate_annotations: self
+                .candidates
+                .iter()
+                .map(|item| item.corrected_from.clone())
+                .collect(),
+            // The same test `select` performs: consuming the candidate's digits empties the buffer exactly when its code covers everything typed.
+            candidate_answers_key: self
+                .candidates
+                .iter()
+                .map(|item| item.pinyin.len() >= self.digits.len())
+                .collect(),
+            ..SessionSnapshot::default()
+        }
+    }
+
+    fn refresh(&mut self) {
+        self.candidates.clear();
+        self.spellings.clear();
+        if !self.active() {
+            return;
+        }
+        if self.english_only {
+            // No syllables to offer and no pinyin to look up: the digits stand for letters only.
+            self.candidates = self.english_candidates();
+            return;
+        }
+        let table = spelling_table();
+        let locked_length = self.locked_length();
+        let remaining = self.digits[locked_length..].to_string();
+        self.spellings = table.spellings_for(&remaining, locked_length);
+        let alternatives = if remaining.is_empty() {
+            vec![Vec::new()]
+        } else {
+            let mut alternatives = table.paths(&remaining);
+            // Even an unfinished or invalid tail must still offer the leading syllable for partial selection.
+            alternatives.extend(
+                self.spellings
+                    .iter()
+                    .filter(|spelling| spelling.len() <= remaining.len())
+                    .map(|spelling| vec![spelling.clone()]),
+            );
+            alternatives
+        };
+
+        let locked_key = self.locked.join("'");
+        let dictionary = self
+            .dictionary
+            .get_or_insert_with(|| QuanpinDictionary::new(&self.paths));
+        let mut queried = HashSet::new();
+        let mut candidates = Vec::new();
+        for path in alternatives {
+            let mut full = self.locked.clone();
+            full.extend(path);
+            let key = full.join("'");
+            if key.is_empty() || !queried.insert(key.clone()) {
+                continue;
+            }
+            for mut candidate in dictionary.query(&key, &key, 0, self.fuzzy) {
+                let canonical = if candidate.canonical_pinyin.is_empty() {
+                    candidate.pinyin.clone()
+                } else {
+                    candidate.canonical_pinyin.clone()
+                };
+                // A row with more syllables than the path is a completion past the typed digits.
+                if canonical.matches('\'').count() >= full.len() {
+                    continue;
+                }
+                let matched = if candidate.fuzzy {
+                    candidate.pinyin.as_str()
+                } else {
+                    canonical.as_str()
+                };
+                let code = encode(matched);
+                if code.is_empty()
+                    || (!code.starts_with(&self.digits) && !self.digits.starts_with(&code))
+                {
+                    continue;
+                }
+                if !agrees_with_locked(matched, &locked_key) {
+                    continue;
+                }
+                candidate.pinyin = self.digits[..code.len().min(self.digits.len())].to_string();
+                candidate.canonical_pinyin = canonical;
+                candidates.push(candidate);
+            }
+        }
+        rank_candidates(&mut candidates);
+
+        let mut english = self.english_candidates();
+        if !english.is_empty() {
+            // Second place is ahead of every pinyin reading but the first, which is worth it for a word the user is plainly spelling and not for one the frequency table has never seen; a zero-weight word still belongs in the list, at its end (NK:311-318).
+            let first = english.remove(0);
+            let slot = if first.weight > 0 {
+                candidates.len().min(1)
+            } else {
+                candidates.len()
+            };
+            candidates.insert(slot, first);
+            candidates.extend(english);
+        }
+        positions::apply_fixed_positions(
+            &self.paths.user(assets::USER_JOURNAL),
+            &self.ranking_context(),
+            &mut candidates,
+            false,
+            None,
+            false,
+        );
+        // Keep the most likely reading visible without requiring a horizontal scroll.
+        if let Some(front) = candidates.first() {
+            let offset = if locked_key.is_empty() {
+                0
+            } else {
+                locked_key.len() + 1
+            };
+            if let Some(rest) = front.canonical_pinyin.get(offset..) {
+                let preferred = rest.split('\'').next().unwrap_or_default();
+                if let Some(found) = self.spellings.iter().position(|s| s == preferred) {
+                    self.spellings[..=found].rotate_right(1);
+                }
+            }
+        }
+        self.candidates = candidates;
+    }
+
+    fn english_candidates(&mut self) -> Vec<WordItem> {
+        // In English-only mode the words are the whole answer, so neither the mixed-candidate setting nor the prefix length that keeps a mixed list readable applies: one digit already narrows the alphabet enough (NK:169-178).
+        if self.english_only {
+            if self.digits.is_empty() {
+                return Vec::new();
+            }
+        } else if !self.english_options.mixed_candidates
+            || !self.locked.is_empty()
+            || self.digits.len() < self.english_options.minimum_prefix
+        {
+            return Vec::new();
+        }
+        let digits = self.digits.clone();
+        let Some(english) = self.open_english() else {
+            return Vec::new();
+        };
+        let mut words = Vec::new();
+        let mut seen = HashSet::new();
+        for prefix in letter_prefixes(&digits, ENGLISH_PREFIX_BUDGET) {
+            for word in english.query_prefix(&prefix, ENGLISH_LIMIT) {
+                // Only a whole code that starts with the digits counts; otherwise letters beyond the expanded prefix leak in.
+                if !digits_for_word(&word.word).starts_with(&digits)
+                    || !seen.insert(word.word.clone())
+                {
+                    continue;
+                }
+                words.push(word);
+            }
+        }
+        rank_english(&mut words, digits.len());
+        words
+    }
+
+    /// `english.db` is optional; a missing file means no English rows and is looked for again on the next refresh (NK:179-186).
+    fn open_english(&mut self) -> Option<&EnglishDictionary> {
+        if self.english.is_none() {
+            let path = self.paths.dictionary(assets::ENGLISH_DICTIONARY);
+            if !path.exists() {
+                return None;
+            }
+            self.english = Some(EnglishDictionary::open(&path, None, None));
+        }
+        self.english.as_ref()
+    }
+
+    fn locked_length(&self) -> usize {
+        self.locked.iter().map(String::len).sum()
+    }
+
+    /// Drop the digits a selection consumed and every locked syllable they fully cover (NK:355-361). An English row's `pinyin` is the word, which can be longer than what was typed.
+    fn consume(&mut self, count: usize) {
+        let count = count.min(self.digits.len());
+        self.digits.drain(..count);
+        let mut consumed = count;
+        while let Some(front) = self.locked.first() {
+            if consumed < front.len() {
+                break;
+            }
+            consumed -= front.len();
+            self.locked.remove(0);
+        }
+    }
+
+    fn ranking_context(&self) -> String {
+        format!("nine-key:{}:{}", self.digits, self.locked.join("'"))
+    }
+
+    fn editable(&self, index: usize) -> bool {
+        self.candidates
+            .get(index)
+            .is_some_and(|item| !item.canonical_pinyin.is_empty() && item.source.is_dictionary())
+    }
+
+    /// Learning and explicit management use canonical dictionary keys, never digit strings.
+    fn adjust_frequency(&mut self, index: usize, force_top: bool) -> Option<String> {
+        let item = &self.candidates[index];
+        let main_db = self.paths.dictionary(assets::MAIN_DICTIONARY);
+        let user_db = self.paths.user(assets::USER_JOURNAL);
+        let context = self.ranking_context();
+        let request = RankingRequest {
+            main_db: &main_db,
+            user_db: &user_db,
+            context_key: &context,
+            ordered: &self.candidates,
+            entry_key: &item.canonical_pinyin,
+            value: &item.word,
+            mode: if force_top {
+                FrequencyAdjustmentMode::Pin
+            } else {
+                self.frequency.mode
+            },
+            linear_step: self.frequency.linear_step,
+            trigger_count: self.frequency.trigger_count,
+            force_top,
+            kind: PersonalDictionaryKind::Pinyin,
+        };
+        match ranking::adjust_candidate_ranking(&request) {
+            Ok(changed) => {
+                if changed {
+                    if let Some(dictionary) = self.dictionary.as_mut() {
+                        dictionary.reset_cache();
+                    }
+                }
+                None
+            }
+            // A failed write keeps the commit and reports this one message (NK:409-414).
+            Err(_) => Some(diagnostics::NINE_KEY_FREQUENCY_NOT_PERSISTED.to_string()),
+        }
+    }
+}
+
+/// A row read under the locked syllables must spell them, or be a whole-syllable prefix of them.
+fn agrees_with_locked(matched: &str, locked_key: &str) -> bool {
+    if locked_key.is_empty() || matched == locked_key {
+        return true;
+    }
+    let under = matched
+        .strip_prefix(locked_key)
+        .is_some_and(|rest| rest.starts_with('\''));
+    let over = locked_key
+        .strip_prefix(matched)
+        .is_some_and(|rest| rest.starts_with('\''));
+    under || over
+}
+
+/// More digits covered first. Synthesised rows (whole-sentence Generated, Fallback) score on a different scale from dictionary weights, so within one coverage bucket dictionary rows lead; then exact before fuzzy, then weight. Dedup by word, capped (NK:283-307).
+fn rank_candidates(candidates: &mut Vec<WordItem>) {
+    candidates.sort_by(|a, b| {
+        b.pinyin
+            .len()
+            .cmp(&a.pinyin.len())
+            .then_with(|| {
+                a.source
+                    .is_generated_or_fallback()
+                    .cmp(&b.source.is_generated_or_fallback())
+            })
+            .then_with(|| a.fuzzy.cmp(&b.fuzzy))
+            .then_with(|| b.weight.cmp(&a.weight))
+    });
+    let mut seen = HashSet::new();
+    candidates.retain(|item| seen.insert(item.word.clone()));
+    candidates.truncate(CANDIDATE_LIMIT);
+}
+
+/// A word spelling the typed code exactly leads, but only when people type it: 64426 is 你好 and `ogham` is the only five-letter word those keys spell, so a zero-weight exact word gets no privilege. Then weight, then shorter (NK:199-220).
+fn rank_english(words: &mut Vec<WordItem>, typed: usize) {
+    let exact = |item: &WordItem| item.word.len() == typed && item.weight > 0;
+    words.sort_by(|a, b| {
+        exact(b)
+            .cmp(&exact(a))
+            .then_with(|| b.weight.cmp(&a.weight))
+            .then_with(|| a.word.len().cmp(&b.word.len()))
+    });
+    words.truncate(ENGLISH_LIMIT);
+}
+
+/// The digit code of a pinyin spelling; anything but `a..=z` (apostrophes) is skipped.
+fn encode(pinyin: &str) -> String {
+    pinyin
+        .bytes()
+        .filter(u8::is_ascii_lowercase)
+        .map(|letter| char::from(KEYPAD[usize::from(letter - b'a')]))
+        .collect()
+}
+
+/// The digit code of an English word, ignoring case; a word with any non-letter has none.
+fn digits_for_word(word: &str) -> String {
+    let lowered = word.to_ascii_lowercase();
+    if !lowered.bytes().all(|byte| byte.is_ascii_lowercase()) {
+        return String::new();
+    }
+    encode(&lowered)
+}
+
+fn letters_for_digit(digit: u8) -> &'static str {
+    if (b'2'..=b'9').contains(&digit) {
+        DIGIT_LETTERS[usize::from(digit - b'0')]
+    } else {
+        ""
+    }
+}
+
+/// Every letter prefix of the leading digits, expanded while the count stays within `budget`.
+fn letter_prefixes(digits: &str, budget: usize) -> Vec<String> {
+    let mut prefixes = vec![String::new()];
+    for digit in digits.bytes() {
+        let letters = letters_for_digit(digit);
+        if letters.is_empty() || prefixes.len() * letters.len() > budget {
+            break;
+        }
+        prefixes = prefixes
+            .iter()
+            .flat_map(|prefix| {
+                letters
+                    .chars()
+                    .map(move |letter| format!("{prefix}{letter}"))
+            })
+            .collect();
+    }
+    if prefixes.len() == 1 && prefixes[0].is_empty() {
+        Vec::new()
+    } else {
+        prefixes
+    }
+}
+
+/// The syllables and spelling pieces digits can stand for, built once from the intact syllable list.
+struct SpellingTable {
+    /// Every complete syllable with its code, in list order.
+    syllables: Vec<(String, String)>,
+    intact: HashSet<String>,
+    /// Every prefix of every syllable, grouped by its code. Partial syllables are included, but never letter combinations pinyin does not have (NK:52-68).
+    by_code: HashMap<String, Vec<String>>,
+    longest_code: usize,
+}
+
+fn spelling_table() -> &'static SpellingTable {
+    static TABLE: OnceLock<SpellingTable> = OnceLock::new();
+    TABLE.get_or_init(|| SpellingTable::new(intact_pinyin_list()))
+}
+
+impl SpellingTable {
+    fn new(syllables: &[&str]) -> Self {
+        let mut seen = HashSet::new();
+        let mut by_code: HashMap<String, Vec<String>> = HashMap::new();
+        let mut longest_code = 0;
+        for syllable in syllables {
+            for end in 1..=syllable.len() {
+                let Some(prefix) = syllable.get(..end) else {
+                    continue;
+                };
+                if seen.insert(prefix.to_string()) {
+                    let code = encode(prefix);
+                    longest_code = longest_code.max(code.len());
+                    by_code.entry(code).or_default().push(prefix.to_string());
+                }
+            }
+        }
+        Self {
+            syllables: syllables
+                .iter()
+                .map(|syllable| (syllable.to_string(), encode(syllable)))
+                .collect(),
+            intact: syllables
+                .iter()
+                .map(|syllable| syllable.to_string())
+                .collect(),
+            by_code,
+            longest_code,
+        }
+    }
+
+    /// Complete syllables the unlocked digits can start with, or that complete them, longest covered first (NK:238-250). Coverage is counted in digits: comparing letter counts would put a syllable that needs two digits ahead under the same digit prefix.
+    fn spellings_for(&self, remaining: &str, locked_length: usize) -> Vec<String> {
+        if remaining.is_empty() {
+            return Vec::new();
+        }
+        let mut matches: Vec<&(String, String)> = self
+            .syllables
+            .iter()
+            .filter(|(_, code)| {
+                locked_length + remaining.len().max(code.len()) <= DIGIT_LIMIT
+                    && (remaining.starts_with(code.as_str()) || code.starts_with(remaining))
+            })
+            .collect();
+        let covered = |code: &str| code.len().min(remaining.len());
+        matches.sort_by(|(a, a_code), (b, b_code)| {
+            covered(b_code).cmp(&covered(a_code)).then_with(|| a.cmp(b))
+        });
+        matches.into_iter().map(|(text, _)| text.clone()).collect()
+    }
+
+    /// Syllable paths spelling `digits`, built from the end. A piece may end a path early only if it is a complete syllable; each offset keeps the 48 best by fewer syllables, complete last syllable, then lexicographic (NK:122-156).
+    fn paths(&self, digits: &str) -> Vec<Path> {
+        let length = digits.len();
+        let mut suffix: Vec<Vec<Path>> = vec![Vec::new(); length + 1];
+        suffix[length].push(Vec::new());
+        for offset in (0..length).rev() {
+            let mut result = Vec::new();
+            for end in offset + 1..=length.min(offset + self.longest_code) {
+                let Some(pieces) = self.by_code.get(&digits[offset..end]) else {
+                    continue;
+                };
+                for piece in pieces {
+                    if end != length && !self.intact.contains(piece) {
+                        continue;
+                    }
+                    for tail in &suffix[end] {
+                        let mut path = Vec::with_capacity(tail.len() + 1);
+                        path.push(piece.clone());
+                        path.extend(tail.iter().cloned());
+                        result.push(path);
+                    }
+                }
+            }
+            // Pieces are visited grouped by code rather than in list order; the order below is total on distinct paths, so the kept 48 are the same either way.
+            let complete = |path: &Path| path.last().is_some_and(|last| self.intact.contains(last));
+            result.sort_by(|a, b| {
+                a.len()
+                    .cmp(&b.len())
+                    .then_with(|| complete(b).cmp(&complete(a)))
+                    .then_with(|| a.cmp(b))
+            });
+            result.truncate(PATH_LIMIT);
+            suffix[offset] = result;
+        }
+        suffix.swap_remove(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::CandidateSource;
+    use rusqlite::Connection;
+
+    // ---- Pure helpers ----
+
+    #[test]
+    fn codes_follow_the_keypad() {
+        assert_eq!(encode("ni'hao"), "64426");
+        assert_eq!(encode("zhuang"), "948264");
+        assert_eq!(digits_for_word("OK"), "65");
+        assert_eq!(digits_for_word("ogham"), "64426");
+        assert_eq!(digits_for_word("don't"), "");
+        assert_eq!(digits_for_word("café"), "");
+    }
+
+    #[test]
+    fn letter_prefixes_stop_at_the_budget() {
+        assert_eq!(letter_prefixes("6", 64), ["m", "n", "o"]);
+        let prefixes = letter_prefixes("64426", 64);
+        assert_eq!(prefixes.len(), 27);
+        assert_eq!(prefixes.first().map(String::as_str), Some("mgg"));
+        assert_eq!(prefixes.last().map(String::as_str), Some("oii"));
+        assert_eq!(letter_prefixes("79", 64).len(), 16);
+        assert!(letter_prefixes("1", 64).is_empty());
+        assert!(letter_prefixes("", 64).is_empty());
+    }
+
+    #[test]
+    fn paths_prefer_fewer_syllables_then_a_complete_tail() {
+        let table = SpellingTable::new(&["ni", "mi", "o", "ma", "hao", "gao"]);
+        // Fewer syllables first; an incomplete piece (`g`, `h`) may only end the path.
+        assert_eq!(
+            table.paths("64"),
+            [vec!["mi"], vec!["ni"], vec!["o", "g"], vec!["o", "h"]]
+        );
+        // `o` is a syllable, `m` and `n` are only pieces of one: a complete tail comes first at equal length.
+        assert_eq!(table.paths("6"), [vec!["o"], vec!["m"], vec!["n"]]);
+        let paths = table.paths("64426");
+        assert_eq!(
+            paths[..4],
+            [
+                vec!["mi", "gao"],
+                vec!["mi", "hao"],
+                vec!["ni", "gao"],
+                vec!["ni", "hao"]
+            ]
+        );
+        // A piece may only end the path: `ni'ha'o` would need `ha`, which is not a syllable here.
+        assert_eq!(paths.len(), 4);
+        assert!(table.paths("11").is_empty());
+    }
+
+    #[test]
+    fn paths_keep_at_most_the_limit_per_offset() {
+        let table = SpellingTable::new(&["m", "n", "o"]);
+        let paths = table.paths("66666");
+        assert_eq!(paths.len(), PATH_LIMIT);
+        assert_eq!(paths[0], ["m", "m", "m", "m", "m"]);
+        assert!(paths.iter().all(|path| path.len() == 5));
+    }
+
+    #[test]
+    fn spellings_sort_by_digits_covered_within_the_limit() {
+        let table = SpellingTable::new(&[
+            "ga", "gan", "gang", "gao", "ha", "han", "hang", "hao", "ni", "a", "ai",
+        ]);
+        assert_eq!(
+            table.spellings_for("426", 2),
+            ["gan", "gang", "gao", "han", "hang", "hao", "ga", "ha"]
+        );
+        // With 31 digits already locked, only a one-digit completion still fits in 32.
+        assert_eq!(table.spellings_for("2", 31), ["a"]);
+        assert!(table.spellings_for("", 0).is_empty());
+    }
+
+    fn item(word: &str, digits: &str, weight: i64, source: CandidateSource) -> WordItem {
+        WordItem::new(digits, word, weight, source, "")
+    }
+
+    #[test]
+    fn candidates_rank_by_coverage_then_dictionary_rows() {
+        let mut fuzzy = item("泥", "64", 900, CandidateSource::Database);
+        fuzzy.fuzzy = true;
+        let mut candidates = vec![
+            item("你", "64", 100, CandidateSource::Database),
+            item("米好", "64426", -19113, CandidateSource::Generated),
+            fuzzy,
+            item("米", "64", 50, CandidateSource::UserDatabase),
+            item("你好", "64426", 1000, CandidateSource::Database),
+            item("你", "64", 10, CandidateSource::Database),
+        ];
+        rank_candidates(&mut candidates);
+        let words: Vec<_> = candidates.iter().map(|item| item.word.as_str()).collect();
+        assert_eq!(words, ["你好", "米好", "你", "米", "泥"]);
+        assert_eq!(candidates[2].weight, 100);
+    }
+
+    #[test]
+    fn english_exact_code_leads_only_with_a_weight() {
+        let english =
+            |word: &str, weight| item(word, word, weight, CandidateSource::EnglishDictionary);
+        let mut words = vec![
+            english("old", 1000),
+            english("ok", 900),
+            english("older", 800),
+        ];
+        rank_english(&mut words, 2);
+        let order: Vec<_> = words.iter().map(|item| item.word.as_str()).collect();
+        assert_eq!(order, ["ok", "old", "older"]);
+        let mut words = vec![english("ogham", 0), english("oh", 5), english("ogre", 5)];
+        rank_english(&mut words, 5);
+        let order: Vec<_> = words.iter().map(|item| item.word.as_str()).collect();
+        assert_eq!(order, ["oh", "ogre", "ogham"]);
+        let mut many: Vec<_> = (0..8).map(|n| english(&format!("w{n}"), n)).collect();
+        rank_english(&mut many, 2);
+        assert_eq!(many.len(), ENGLISH_LIMIT);
+    }
+
+    #[test]
+    fn locked_syllables_constrain_readings() {
+        assert!(agrees_with_locked("mi", ""));
+        assert!(agrees_with_locked("ni", "ni"));
+        assert!(agrees_with_locked("ni'hao", "ni"));
+        assert!(agrees_with_locked("ni", "ni'hao"));
+        assert!(!agrees_with_locked("mi", "ni"));
+        assert!(!agrees_with_locked("nian", "ni"));
+        assert!(!agrees_with_locked("ni", "nian"));
+    }
+
+    fn detached() -> NineKeySession {
+        NineKeySession::new(
+            &RuntimePaths::default(),
+            false,
+            FrequencyAdjustmentOptions::default(),
+            FuzzyPinyinOptions::default(),
+            EnglishInputOptions::default(),
+        )
+    }
+
+    #[test]
+    fn consuming_digits_drops_covered_locked_syllables() {
+        let mut session = detached();
+        session.digits = "64426".into();
+        session.locked = vec!["ni".into(), "hao".into()];
+        session.consume(2);
+        assert_eq!(session.digits, "426");
+        assert_eq!(session.locked, ["hao"]);
+        // An English row's code is the word, which may run past the digits.
+        session.consume(10);
+        assert!(session.digits.is_empty());
+        assert!(session.locked.is_empty());
+    }
+
+    #[test]
+    fn snapshot_shows_locked_syllables_before_the_open_digits() {
+        let mut session = detached();
+        session.digits = "64426".into();
+        assert_eq!(session.snapshot().preedit, "64426");
+        session.locked = vec!["ni".into()];
+        assert_eq!(session.snapshot().preedit, "ni'426");
+        session.locked.push("hao".into());
+        session.candidates = vec![
+            item("你好", "64426", 1000, CandidateSource::Database),
+            item("你", "64", 100, CandidateSource::Database),
+        ];
+        let view = session.snapshot();
+        assert_eq!(view.preedit, "ni'hao");
+        assert_eq!(view.editing_text, "64426");
+        assert_eq!(view.caret_position, 5);
+        assert_eq!(view.scheme, SchemeType::Quanpin);
+        assert_eq!(view.candidate_answers_key, [true, false]);
+        assert_eq!(view.candidate_sources, [CandidateSource::Database; 2]);
+        assert_eq!(view.candidate_annotations, ["", ""]);
+        assert_eq!(session.ranking_context(), "nine-key:64426:ni'hao");
+    }
+
+    // ---- Ported from test_nine_key_session.cpp against the session itself ----
+
+    const MAIN_FIXTURE: &str = "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_1_n VALUES('ni','n','你',100);CREATE TABLE tbl_1_m(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_1_m VALUES('mi','m','米',50);CREATE TABLE tbl_1_h(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_1_h VALUES('hao','h','好',100);CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',1000);";
+    const ENGLISH_FIXTURE: &str = "CREATE TABLE english_words(word TEXT,display TEXT,weight INTEGER);INSERT INTO english_words VALUES('ok','ok',900);INSERT INTO english_words VALUES('old','old',1000);INSERT INTO english_words VALUES('older','older',800);INSERT INTO english_words VALUES('ogham','ogham',0);";
+
+    struct Fixture {
+        directory: tempfile::TempDir,
+        paths: RuntimePaths,
+    }
+
+    fn fixture() -> Fixture {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path().to_path_buf();
+        Connection::open(root.join(assets::MAIN_DICTIONARY))
+            .and_then(|db| db.execute_batch(MAIN_FIXTURE))
+            .expect("main fixture");
+        Connection::open(root.join(assets::ENGLISH_DICTIONARY))
+            .and_then(|db| db.execute_batch(ENGLISH_FIXTURE))
+            .expect("english fixture");
+        let paths = RuntimePaths {
+            resources: root.clone(),
+            user_data: root.clone(),
+            cache: root.clone(),
+            dictionaries: root,
+        };
+        Fixture { directory, paths }
+    }
+
+    fn open(paths: &RuntimePaths, learning: bool, english: EnglishInputOptions) -> NineKeySession {
+        let frequency = FrequencyAdjustmentOptions {
+            mode: if learning {
+                FrequencyAdjustmentMode::Promote
+            } else {
+                FrequencyAdjustmentMode::Disabled
+            },
+            ..FrequencyAdjustmentOptions::default()
+        };
+        NineKeySession::new(
+            paths,
+            learning,
+            frequency,
+            FuzzyPinyinOptions::default(),
+            english,
+        )
+    }
+
+    fn mixed() -> EnglishInputOptions {
+        EnglishInputOptions {
+            mixed_candidates: true,
+            ..EnglishInputOptions::default()
+        }
+    }
+
+    fn type_digits(session: &mut NineKeySession, digits: &str) {
+        for digit in digits.bytes() {
+            assert!(session.character(digit).handled, "digit {digit} unhandled");
+        }
+    }
+
+    fn index_of(session: &NineKeySession, word: &str) -> usize {
+        session
+            .snapshot()
+            .candidates
+            .iter()
+            .position(|item| item.word == word)
+            .unwrap_or_else(|| panic!("missing candidate {word}"))
+    }
+
+    fn words(session: &NineKeySession) -> Vec<String> {
+        session
+            .snapshot()
+            .candidates
+            .into_iter()
+            .map(|item| item.word)
+            .collect()
+    }
+
+    #[test]
+    fn digits_offer_readings_and_ranked_english() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, mixed());
+        assert!(!session.character(b'0').handled && !session.character(b'1').handled);
+        // old is more frequent, but 65 spells ok exactly.
+        type_digits(&mut session, "65");
+        assert_eq!(words(&session), ["ok", "old", "older"]);
+        assert_eq!(session.snapshot().nine_key_spellings, ["o"]);
+        session.command(Command::Cancel);
+
+        // 64426 is ni'hao and also the only code for ogham; spelling it exactly does not earn a zero-weight word the second slot. The two-syllable lattice adds a Generated 米好 that covers every digit, so it ranks above the two-digit dictionary rows (tests-inventory.md §2.4).
+        type_digits(&mut session, "64426");
+        let view = session.snapshot();
+        assert_eq!(words(&session), ["你好", "米好", "你", "米", "ogham"]);
+        assert_eq!(view.candidate_sources[1], CandidateSource::Generated);
+        assert_eq!(view.nine_key_spellings, ["ni", "mi", "o"]);
+        assert_eq!(view.candidate_answers_key[..4], [true, true, false, false]);
+        // Within one coverage bucket no dictionary row follows a synthesised one.
+        for pair in view.candidates.windows(2) {
+            if pair[0].pinyin.len() == pair[1].pinyin.len()
+                && pair[0].source.is_generated_or_fallback()
+            {
+                assert!(
+                    !pair[1].source.is_dictionary(),
+                    "{} after {}",
+                    pair[1].word,
+                    pair[0].word
+                );
+            }
+        }
+        session.command(Command::Cancel);
+
+        type_digits(&mut session, "6");
+        assert_eq!(
+            words(&session),
+            ["你", "米"],
+            "mixed English waits for the minimum prefix"
+        );
+        assert_eq!(session.snapshot().candidates[0].pinyin, "6");
+    }
+
+    #[test]
+    fn spellings_lock_and_partial_selection_advances() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, mixed());
+        type_digits(&mut session, "64");
+        let before = session.snapshot();
+        assert!(!session.select(999).handled && !session.choose_spelling(999).handled);
+        assert_eq!(session.snapshot(), before);
+        assert_eq!(
+            before.nine_key_spellings,
+            [
+                "ni", "mi", "mian", "miao", "mie", "min", "ming", "miu", "nian", "niang", "niao",
+                "nie", "nin", "ning", "niu", "o"
+            ],
+            "the preferred spelling leads"
+        );
+        assert!(session.choose_spelling(0).handled);
+        assert_eq!(session.snapshot().preedit, "ni");
+        assert_eq!(words(&session), ["你"], "the lock keeps 米 out");
+        type_digits(&mut session, "426");
+        let view = session.snapshot();
+        assert_eq!(view.preedit, "ni'426");
+        assert_eq!(
+            view.nine_key_spellings,
+            ["hao", "gan", "gang", "gao", "han", "hang", "ga", "ha"]
+        );
+        let result = session.select(index_of(&session, "你好"));
+        assert_eq!(result.commit.as_deref(), Some("你好"));
+        assert!(!session.active() && session.snapshot().preedit.is_empty());
+
+        type_digits(&mut session, "64426");
+        let ni = session
+            .snapshot()
+            .nine_key_spellings
+            .iter()
+            .position(|s| s == "ni")
+            .expect("ni offered");
+        session.choose_spelling(ni);
+        session.choose_spelling(0);
+        assert_eq!(session.snapshot().preedit, "ni'hao");
+        assert!(session.snapshot().nine_key_spellings.is_empty());
+        let result = session.select(index_of(&session, "你"));
+        assert_eq!(result.commit.as_deref(), Some("你"));
+        let view = session.snapshot();
+        assert_eq!(view.editing_text, "426");
+        assert_eq!(
+            view.preedit, "hao",
+            "partial selection lost the locked suffix"
+        );
+        let result = session.finish(0);
+        assert_eq!(result.commit.as_deref(), Some("好"));
+        assert!(!session.active());
+
+        // A longer spelling extends the digits to its whole code.
+        type_digits(&mut session, "6");
+        let ming = session
+            .snapshot()
+            .nine_key_spellings
+            .iter()
+            .position(|s| s == "ming")
+            .expect("ming offered");
+        session.choose_spelling(ming);
+        assert_eq!(session.snapshot().editing_text, "6464");
+        assert_eq!(session.snapshot().preedit, "ming");
+    }
+
+    #[test]
+    fn commands_edit_commit_and_cancel_the_digits() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, mixed());
+        assert!(!session.command(Command::Backspace).handled && !session.finish(0).handled);
+        type_digits(&mut session, "64");
+        session.command(Command::Backspace);
+        assert_eq!(session.snapshot().editing_text, "6");
+        session.command(Command::Backspace);
+        assert!(
+            !session.command(Command::Backspace).handled,
+            "idle backspace"
+        );
+
+        type_digits(&mut session, "64");
+        session.choose_spelling(0);
+        session.command(Command::Backspace);
+        assert!(
+            session.locked.is_empty(),
+            "backspace keeps a lock past the digits"
+        );
+        assert_eq!(session.snapshot().preedit, "6");
+        session.command(Command::Cancel);
+
+        type_digits(&mut session, "64");
+        assert!(!session.command(Command::MoveLeft).handled);
+        assert_eq!(
+            session.command(Command::CommitRaw).commit.as_deref(),
+            Some("64")
+        );
+        assert!(!session.active());
+        type_digits(&mut session, "64");
+        assert_eq!(session.finish(999).commit.as_deref(), Some("64"));
+        type_digits(&mut session, "64426");
+        assert_eq!(
+            session.command(Command::CommitCandidate).commit.as_deref(),
+            Some("你好")
+        );
+        type_digits(&mut session, "64");
+        session.command(Command::Cancel);
+        let view = session.snapshot();
+        assert!(
+            view.preedit.is_empty()
+                && view.nine_key_spellings.is_empty()
+                && view.candidates.is_empty()
+        );
+
+        type_digits(&mut session, &"7".repeat(DIGIT_LIMIT));
+        let result = session.character(b'7');
+        assert!(result.handled);
+        assert_eq!(
+            result.diagnostic.as_deref(),
+            Some(diagnostics::NINE_KEY_DIGIT_LIMIT)
+        );
+        assert_eq!(session.snapshot().editing_text.len(), DIGIT_LIMIT);
+        assert!(session.snapshot().candidates.is_empty());
+        // Finishing with nothing to choose commits the digits as typed.
+        assert_eq!(
+            session.finish(0).commit.as_deref(),
+            Some("7".repeat(DIGIT_LIMIT).as_str())
+        );
+    }
+
+    #[test]
+    fn learning_and_management_use_canonical_keys() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, mixed());
+        type_digits(&mut session, "64");
+        assert_eq!(
+            session.select(index_of(&session, "米")).commit.as_deref(),
+            Some("米")
+        );
+        let mut unchanged = open(&fixture.paths, false, mixed());
+        type_digits(&mut unchanged, "64");
+        assert_eq!(
+            words(&unchanged)[0],
+            "你",
+            "disabled learning changed ranking"
+        );
+
+        let mut learner = open(&fixture.paths, true, mixed());
+        type_digits(&mut learner, "64");
+        let learned = learner.select(index_of(&learner, "米"));
+        assert_eq!(learned.commit.as_deref(), Some("米"));
+        assert_eq!(learned.diagnostic, None);
+
+        let mut managed = open(&fixture.paths, false, mixed());
+        type_digits(&mut managed, "64");
+        assert_eq!(words(&managed)[0], "米", "learning did not persist");
+        let pinned = managed.pin(index_of(&managed, "你"));
+        assert_eq!(pinned, KeyResult::handled());
+        assert_eq!(managed.snapshot().editing_text, "64");
+        assert_eq!(words(&managed)[0], "你");
+        assert!(
+            !managed.remove(index_of(&managed, "你")).handled,
+            "single character was removed"
+        );
+        let ogham = index_of(&managed, "ogham");
+        assert!(
+            !managed.pin(ogham).handled,
+            "an English row is not a pinyin dictionary row"
+        );
+        assert!(!managed.pin(999).handled && !managed.remove(999).handled);
+        assert!(!managed.set_position(0, 6).handled && !managed.set_position(0, -1).handled);
+        assert!(!managed.set_position(999, 0).handled);
+        assert_eq!(
+            managed.set_position(index_of(&managed, "米"), 1),
+            KeyResult::handled()
+        );
+        assert_eq!(words(&managed)[0], "米", "fixed position not applied");
+
+        let mut fixed = open(&fixture.paths, false, mixed());
+        type_digits(&mut fixed, "64");
+        assert_eq!(words(&fixed)[0], "米", "fixed position not persisted");
+        let ni = fixed
+            .snapshot()
+            .nine_key_spellings
+            .iter()
+            .position(|s| s == "ni")
+            .expect("ni offered");
+        fixed.choose_spelling(ni);
+        assert_eq!(
+            words(&fixed)[0],
+            "你",
+            "fixed position escaped the spelling constraint"
+        );
+
+        assert_eq!(
+            managed.set_position(index_of(&managed, "米"), 0),
+            KeyResult::handled()
+        );
+        assert_eq!(words(&managed)[0], "你", "clear fixed position failed");
+        managed.command(Command::Cancel);
+        type_digits(&mut managed, "64426");
+        let removed = managed.remove(index_of(&managed, "你好"));
+        assert_eq!(removed, KeyResult::handled());
+        assert_eq!(managed.snapshot().editing_text, "64426");
+
+        let mut after_removal = open(&fixture.paths, false, mixed());
+        type_digits(&mut after_removal, "64426");
+        // Only the dictionary row is gone; the two-syllable lattice may still compose 你好 from 你 and 好.
+        assert!(
+            !after_removal
+                .snapshot()
+                .candidates
+                .iter()
+                .any(|item| item.word == "你好" && item.source.is_dictionary()),
+            "phrase removal did not persist"
+        );
+    }
+
+    #[test]
+    fn failed_learning_keeps_the_commit() {
+        let fixture = fixture();
+        let mut paths = fixture.paths.clone();
+        paths.user_data = fixture.directory.path().join("blocked");
+        std::fs::create_dir_all(paths.user(assets::USER_JOURNAL)).expect("block the journal");
+        let mut failing = open(&paths, true, mixed());
+        type_digits(&mut failing, "64");
+        let result = failing.finish(index_of(&failing, "米"));
+        assert_eq!(result.commit.as_deref(), Some("米"));
+        assert_eq!(
+            result.diagnostic.as_deref(),
+            Some(diagnostics::NINE_KEY_FREQUENCY_NOT_PERSISTED)
+        );
+        assert!(!failing.active() && failing.snapshot().preedit.is_empty());
+    }
+
+    #[test]
+    fn english_only_spells_words_from_the_first_digit() {
+        let fixture = fixture();
+        let options = EnglishInputOptions {
+            mixed_candidates: false,
+            minimum_prefix: 2,
+        };
+        let mut words_only = open(&fixture.paths, false, options);
+        words_only.set_english_only(true);
+        type_digits(&mut words_only, "65");
+        let view = words_only.snapshot();
+        assert_eq!(words(&words_only), ["ok", "old", "older"]);
+        assert!(
+            view.nine_key_spellings.is_empty(),
+            "english nine-key offered pinyin spellings"
+        );
+        assert!(
+            view.dedicated_english,
+            "the grid's snapshot dropped the English mode"
+        );
+        words_only.command(Command::Cancel);
+        type_digits(&mut words_only, "653");
+        assert_eq!(words(&words_only), ["old", "older"]);
+        words_only.command(Command::Cancel);
+
+        // One digit is enough: the prefix length that quiets a mixed list means nothing when words are the whole list.
+        type_digits(&mut words_only, "6");
+        let result = words_only.select(index_of(&words_only, "old"));
+        assert_eq!(result.commit.as_deref(), Some("old"));
+        assert!(!words_only.active());
+
+        // Leaving English brings syllables back, and English rows stay off without mixed candidates.
+        words_only.set_english_only(false);
+        type_digits(&mut words_only, "64");
+        assert_eq!(words(&words_only), ["你", "米"]);
+        assert!(!words_only.snapshot().nine_key_spellings.is_empty());
+        assert!(!words_only.snapshot().dedicated_english);
+        // Switching mid-composition requeries the same digits.
+        words_only.set_english_only(true);
+        assert_eq!(words(&words_only), ["ogham"]);
+    }
+
+    #[test]
+    fn a_missing_english_dictionary_means_no_english_rows() {
+        let fixture = fixture();
+        std::fs::remove_file(fixture.paths.dictionary(assets::ENGLISH_DICTIONARY))
+            .expect("remove english.db");
+        let mut session = open(&fixture.paths, false, mixed());
+        type_digits(&mut session, "64");
+        assert_eq!(words(&session), ["你", "米"]);
+        session.set_english_only(true);
+        assert!(words(&session).is_empty());
+    }
+}
