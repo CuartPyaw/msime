@@ -618,6 +618,22 @@ impl<E: InputEngine> Runtime<E> {
     pub fn view(&self) -> View {
         let page = self.highlighted / self.page_size;
         let start = page * self.page_size;
+        let page_len = self
+            .cached
+            .candidates
+            .len()
+            .saturating_sub(start)
+            .min(self.page_size);
+        let mut candidates = Vec::with_capacity(page_len);
+        candidates.extend(
+            self.cached
+                .candidates
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(page_len)
+                .map(|(index, text)| self.candidate(index, text)),
+        );
         View {
             scheme: self.cached.scheme,
             nine_key: self.cached.nine_key,
@@ -640,15 +656,7 @@ impl<E: InputEngine> Runtime<E> {
             page,
             page_size: self.page_size,
             page_count: self.cached.candidates.len().div_ceil(self.page_size),
-            candidates: self
-                .cached
-                .candidates
-                .iter()
-                .enumerate()
-                .skip(start)
-                .take(self.page_size)
-                .map(|(index, text)| self.candidate(index, text))
-                .collect(),
+            candidates,
         }
     }
 
@@ -677,23 +685,30 @@ impl<E: InputEngine> Runtime<E> {
     /// constructing display-only codes, annotations, IDs and highlight flags on every key.
     pub fn translation_candidates(&self) -> Option<TranslationCandidates> {
         let start = (self.highlighted / self.page_size) * self.page_size;
-        let candidates = self
+        let page_len = self
             .cached
             .candidates
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(self.page_size)
-            .map(|(index, text)| TranslationCandidate {
-                text: text.clone(),
-                source: self
-                    .cached
-                    .candidate_sources
-                    .get(index)
-                    .copied()
-                    .unwrap_or_default(),
-            })
-            .collect::<Vec<_>>();
+            .len()
+            .saturating_sub(start)
+            .min(self.page_size);
+        let mut candidates = Vec::with_capacity(page_len);
+        candidates.extend(
+            self.cached
+                .candidates
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(page_len)
+                .map(|(index, text)| TranslationCandidate {
+                    text: text.clone(),
+                    source: self
+                        .cached
+                        .candidate_sources
+                        .get(index)
+                        .copied()
+                        .unwrap_or_default(),
+                }),
+        );
         (!candidates.is_empty()).then_some(TranslationCandidates {
             generation: self.generation,
             scheme: self.cached.scheme,
