@@ -542,14 +542,16 @@ fn has_identity_conflict(
 }
 
 fn prune_history(state: &mut PersonalDictionaryState) {
-    let keep: std::collections::HashSet<_> = state
-        .requests
-        .iter()
-        .filter(|request| request.status == PersonalWordRequestStatus::Applied)
-        .rev()
-        .take(MAX_HISTORY)
-        .map(|request| request.id.clone())
-        .collect();
+    let mut keep = std::collections::HashSet::with_capacity(MAX_HISTORY.min(state.requests.len()));
+    keep.extend(
+        state
+            .requests
+            .iter()
+            .filter(|request| request.status == PersonalWordRequestStatus::Applied)
+            .rev()
+            .take(MAX_HISTORY)
+            .map(|request| request.id.clone()),
+    );
     state.requests.retain(|request| {
         request.status != PersonalWordRequestStatus::Applied || keep.contains(&request.id)
     });
