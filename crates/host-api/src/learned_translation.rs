@@ -60,7 +60,7 @@ pub fn execute(bytes: &[u8]) -> Result<Value, &'static str> {
     // Preserve previous JSON records as read-only fallback. New writes use the
     // same Engine-owned user database as other native hosts, never resources.
     let legacy = TranslationGlossStore::new(directory);
-    let mut translations = Vec::new();
+    let mut translations = Vec::with_capacity(request.items.len());
     let mut saved = 0;
     if request.target_language != "en" {
         return Ok(json!({"generation":request.generation,"translations":[],"saved":0}));
