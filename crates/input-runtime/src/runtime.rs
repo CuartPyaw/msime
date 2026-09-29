@@ -1257,7 +1257,7 @@ impl<E: InputEngine> Runtime<E> {
             }
         }
         // An English candidate the user fixed to a seat goes back to that seat after the seating, so a cloud or AI reply does not push it behind the online candidates (reference: server/src/ipc/candidate_selection_policy.h, the fixed-English pass at the end of NormalizeMixedCandidateOrder). Seats are 1-based and 0 means unfixed; a seat past the end clamps to the end, as the reference's `insert_at` does.
-        let mut fixed_english = Vec::new();
+        let mut fixed_english = Vec::with_capacity(count);
         order.retain(|index| {
             let fixed = snapshot.candidate_sources[*index] == ENGLISH
                 && snapshot.candidate_positions[*index] > 0;
