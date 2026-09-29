@@ -1,6 +1,5 @@
 import type {
   Preferences,
-  LocalDictionaryKind,
   HostCapabilities,
 } from "../index";
 import type { ThemeCatalogEntry } from "../theme/global-theme";
@@ -13,15 +12,9 @@ export {
 export { defaultAiAssistant } from "./ai-assistant-defaults";
 export { defaultVoiceInput } from "./voice-input-defaults";
 export { defaultNavigation } from "./navigation-section";
+export { localDictionaryKinds } from "../dictionary/dictionary-kinds";
 
 // Options and defaults that the settings model in index.tsx shares with the settings pages, or that several pages share with each other.
-
-export const localDictionaryKinds: [LocalDictionaryKind, string][] = [
-  ["pinyin", "全拼"],
-  ["wubi", "五笔"],
-  ["english", "英文"],
-  ["quick_phrase", "快捷短语"],
-];
 
 // The Linux hosts do not draw the candidate list themselves; when the desktop panel that does ignores these settings, the host says why (HostCapabilities.candidate_panel_limit) and the appearance and skin pages say so once.
 export const candidatePanelLimitNotes: Record<

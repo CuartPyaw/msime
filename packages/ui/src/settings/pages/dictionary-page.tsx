@@ -1,6 +1,6 @@
 import * as settings from "../settings-style";
 import type { LocalDictionaryKind, LocalDictionaryFormat } from "../../index";
-import { localDictionaryKinds } from "../settings-options";
+import { localDictionaryKinds } from "../../dictionary/dictionary-kinds";
 import { DICTIONARY_PAGE_SIZE } from "../../dictionary/dictionary-file";
 import { useSettingsForm } from "../settings-form-context";
 import { SubPageEntries } from "./sub-page-entries";
