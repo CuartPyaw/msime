@@ -119,6 +119,7 @@ pub struct Runtime<E: InputEngine = Session> {
 pub(crate) const LATTICE_SOURCE: u8 = 8;
 
 /// Move the flagged elements to the end, keeping both groups in their existing order.
+#[cfg(test)]
 pub(crate) fn move_to_back<T>(items: &mut Vec<T>, moved: &[bool]) {
     // Stable-partition in place. A rotation moves the next unflagged item ahead of the flagged
     // run without allocating a second vector; candidate arrays are kept in lockstep by calling
@@ -1283,27 +1284,47 @@ impl<E: InputEngine> Runtime<E> {
         if width < SENTENCE_SYLLABLES {
             return false;
         }
-        // Everything after the first lattice reading of the full key is a runner-up.
+        // Everything after the first lattice reading of the full key is a runner-up. First detect
+        // whether there is work, then partition all parallel arrays in one pass so no per-candidate
+        // mask needs to be allocated.
         let mut kept_one = false;
-        let mut demote: Vec<bool> = Vec::with_capacity(count);
-        for (text, source) in snapshot.candidates.iter().zip(&snapshot.candidate_sources) {
-            let reading = *source == LATTICE_SOURCE && text.chars().count() == width;
-            demote.push(reading && kept_one);
+        let mut moved = false;
+        for index in 0..count {
+            let reading = self.cached.candidate_sources[index] == LATTICE_SOURCE
+                && self.cached.candidates[index].chars().count() == width;
+            if reading && kept_one {
+                moved = true;
+                continue;
+            }
             kept_one |= reading;
         }
-        if !demote.iter().any(|moved| *moved) {
+        if !moved {
             return false;
         }
         ensure_engine_order(&mut self.engine_order, count);
         let snapshot = &mut self.cached;
-        move_to_back(&mut snapshot.candidates, &demote);
-        move_to_back(&mut snapshot.candidate_codes, &demote);
-        move_to_back(&mut snapshot.candidate_annotations, &demote);
-        move_to_back(&mut snapshot.candidate_sources, &demote);
-        move_to_back(&mut snapshot.candidate_positions, &demote);
-        move_to_back(&mut snapshot.candidate_corrected, &demote);
-        move_to_back(&mut snapshot.candidate_answers_key, &demote);
-        move_to_back(&mut self.engine_order, &demote);
+        let engine_order = &mut self.engine_order;
+        let mut kept_one = false;
+        let mut head_len = 0;
+        for index in 0..count {
+            let reading = snapshot.candidate_sources[index] == LATTICE_SOURCE
+                && snapshot.candidates[index].chars().count() == width;
+            if reading && kept_one {
+                continue;
+            }
+            kept_one |= reading;
+            if head_len != index {
+                snapshot.candidates[head_len..=index].rotate_right(1);
+                snapshot.candidate_codes[head_len..=index].rotate_right(1);
+                snapshot.candidate_annotations[head_len..=index].rotate_right(1);
+                snapshot.candidate_sources[head_len..=index].rotate_right(1);
+                snapshot.candidate_positions[head_len..=index].rotate_right(1);
+                snapshot.candidate_corrected[head_len..=index].rotate_right(1);
+                snapshot.candidate_answers_key[head_len..=index].rotate_right(1);
+                engine_order[head_len..=index].rotate_right(1);
+            }
+            head_len += 1;
+        }
         true
     }
 
