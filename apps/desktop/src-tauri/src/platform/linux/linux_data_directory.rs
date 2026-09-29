@@ -340,7 +340,7 @@ impl MovePlan {
         {
             return Err(MoveError::Copy);
         }
-        let mut placed = Vec::new();
+        let mut placed = Vec::with_capacity(entries.len());
         for name in &entries {
             if fs::rename(staging.path().join(name), target.join(name)).is_err() {
                 rollback(&target, &placed, wrote_marker, &[]);
