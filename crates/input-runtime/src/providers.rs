@@ -722,7 +722,7 @@ impl UnixSocketProvider {
         // Up to ten minutes of capture, two sixty-second ASR attempts and
         // optional polishing. Cancellation is checked at least every 100ms.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(730);
-        let mut pending = Vec::new();
+        let mut pending = Vec::with_capacity(16_384);
         loop {
             let line = read_voice_provider_line(&mut stream, &mut pending, deadline, cancelled)?;
             let value = serde_json::from_str::<Value>(line.trim_end()).ok()?;
