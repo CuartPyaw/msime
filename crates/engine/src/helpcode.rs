@@ -69,7 +69,7 @@ pub fn is_supported_helpcode_schema(schema: &str) -> bool {
     built_in_helpcode_file(schema).is_some() || custom_schema_stem(schema).is_some()
 }
 
-/// The table file for a schema under the resource root; `UNKNOWN_HELPCODE_SCHEMA` for an unsupported name.
+/// The table file for a schema under the resource root; `UNKNOWN_HELPCODE_SCHEMA` for an unsupported name. This joins directly rather than through `paths::join_checked`, as helpcode_utils.cpp:37-40 does: `custom_schema_stem` already refuses every separator and a leading `.`, so the stem is one normal component and can never be `..`, which is a stricter guarantee than the `..` refusal would add.
 pub fn helpcode_path(resources: &Path, schema: &str) -> Result<PathBuf> {
     if let Some(file) = built_in_helpcode_file(schema) {
         return Ok(resources.join(file));
@@ -307,13 +307,19 @@ mod tests {
             "unknown",
             "custom/",
             "custom/.hidden",
+            "custom/..",
             "custom/../x",
+            "custom/a/b",
             "custom/a\\b",
             "custom/a:b",
             "custom/a\u{1}",
             "Custom/x",
         ] {
             assert!(!is_supported_helpcode_schema(schema), "{schema:?}");
+            assert!(
+                helpcode_path(Path::new("/res"), schema).is_err(),
+                "{schema:?}"
+            );
         }
         let root = Path::new("/res");
         assert_eq!(

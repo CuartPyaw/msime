@@ -19,7 +19,7 @@ pub struct RuntimePaths {
 }
 
 impl RuntimePaths {
-    /// A file in the resource bundle. Names are the constants in `assets`; a name built from user input goes through `join_checked` first.
+    /// A file in the resource bundle. Names are the constants in `assets` or a custom helpcode stem that `helpcode::custom_schema_stem` has already reduced to one normal component.
     pub fn resource(&self, name: &str) -> PathBuf {
         join(&self.resources, name)
     }
@@ -63,7 +63,7 @@ fn join(root: &Path, name: &str) -> PathBuf {
     not(test),
     expect(
         dead_code,
-        reason = "the only user-derived resource name, a custom helpcode schema, is still joined inside helpcode_path with its own stem check"
+        reason = "no caller joins a user-derived name: the custom helpcode schema is guarded by custom_schema_stem, which refuses separators and a leading dot, matching helpcode_utils.cpp:37-40"
     )
 )]
 pub fn join_checked(root: &Path, name: &str) -> Result<PathBuf> {

@@ -1,7 +1,7 @@
 //! The pinyin tables `tbl_<n>_<initial>` (quanpin.md §9). A missing file or a missing table is an empty answer, never an error: `i`, `u` and `v` name tables that do not exist, and the reference treated a failed prepare as no rows.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use rusqlite::types::ToSql;
@@ -32,7 +32,6 @@ const DICTIONARY_CLOSED: &str = "Pinyin dictionary is not open";
 const INVALID_DICTIONARY_KEY: &str = "Invalid pinyin dictionary key";
 
 pub struct PinyinDatabase {
-    path: PathBuf,
     connection: Option<Connection>,
     data_version: Option<i64>,
 }
@@ -41,7 +40,6 @@ impl PinyinDatabase {
     /// READWRITE without CREATE, busy timeout 250 ms (QD:239-246). A missing file leaves the database closed and every query empty.
     pub fn open(path: &Path) -> Self {
         let mut database = Self {
-            path: path.to_path_buf(),
             connection: open_connection(path),
             data_version: None,
         };
@@ -52,10 +50,6 @@ impl PinyinDatabase {
 
     pub fn is_open(&self) -> bool {
         self.connection.is_some()
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     /// Whether `PRAGMA data_version` moved since the last call, meaning another connection wrote the file and cached answers are stale (QD:1409-1432). The first call records the version and answers false.
@@ -292,20 +286,6 @@ impl PinyinDatabase {
         Ok(())
     }
 
-    /// The compatibility weight path: set the row's weight to its key's heaviest weight plus one, unclamped (QD:1608-1635).
-    pub fn bump_weight(&self, key: &str, value: &str) -> Result<()> {
-        let connection = self.writable()?;
-        let table = build_table_name(&split_segments(key))
-            .ok_or_else(|| EngineError::invalid(INVALID_DICTIONARY_KEY))?;
-        // An update that matches no row still succeeds, as it did in the reference (QD:1520-1536).
-        connection
-            .prepare_cached(&format!(
-                "UPDATE \"{table}\" SET weight = (SELECT MAX(weight) + 1 FROM \"{table}\" AS sub WHERE sub.key = ?1) WHERE key = ?1 AND value = ?2"
-            ))?
-            .execute((key, value))?;
-        Ok(())
-    }
-
     fn writable(&self) -> Result<&Connection> {
         self.connection
             .as_ref()
@@ -489,7 +469,6 @@ mod tests {
         let mut database = PinyinDatabase::open(&path);
         assert!(!database.is_open());
         assert!(!path.exists(), "opening must not create the dictionary");
-        assert_eq!(database.path(), path.as_path());
         assert!(!database.database_changed());
         assert!(database.query_initial("n", 10).is_empty());
         assert!(!database.han_char_exists("你"));
@@ -539,7 +518,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut database = cascade_fixture(directory.path());
         assert!(!database.database_changed());
-        let other = Connection::open(database.path()).unwrap();
+        let other = Connection::open(directory.path().join("msime.db")).unwrap();
         other
             .execute(
                 "INSERT INTO tbl_1_n (key, jp, value, weight) VALUES ('ni', 'n', '伱', 1)",
@@ -771,7 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn inserted_words_get_the_user_weight_and_the_bump_goes_past_the_heaviest() {
+    fn inserted_words_get_the_user_weight_and_their_jianpin() {
         let directory = tempfile::tempdir().unwrap();
         let path = pinyin_db(
             directory.path(),
@@ -792,20 +771,12 @@ mod tests {
             .unwrap();
         assert_eq!(jp, "cl");
 
-        database.bump_weight("ce'li", "测棂").unwrap();
-        assert_eq!(database.find_weight("ce'li", "测棂"), Some(20_001));
-        // The bump is unclamped and an update matching no row still succeeds.
-        database.bump_weight("ce'li", "测棂").unwrap();
-        assert_eq!(database.find_weight("ce'li", "测棂"), Some(20_002));
-        database.bump_weight("ce'li", "没有").unwrap();
-
         assert_eq!(database.find_weight("ni", "你"), Some(100));
         assert_eq!(database.find_weight("", "你"), None);
         assert_eq!(database.find_weight("ia", "你"), None);
         // No table for the key: the write fails rather than landing anywhere else.
         assert!(database.insert_word("ia", "呀").is_err());
         assert!(database.insert_word("", "呀").is_err());
-        assert!(database.bump_weight("", "呀").is_err());
     }
 
     #[test]
