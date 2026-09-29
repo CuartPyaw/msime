@@ -19,6 +19,7 @@ use std::time::Duration;
 pub(crate) const DATA_DIRECTORY_MARKER: &str = ".metasequoiaime-data";
 const OPTIONS_FILE: &str = "runtime-options.json";
 const MAX_OPTIONS_BYTES: u64 = 1024 * 1024;
+const INITIAL_OPTIONS_READ_CAPACITY: usize = 8 * 1024;
 /// Files that belong to the fixed configuration directory rather than to the movable state: the locator and the provider credentials the systemd services read from `$XDG_CONFIG_HOME/msime-client`.
 const PINNED_FILES: [&str; 4] = [
     OPTIONS_FILE,
@@ -168,7 +169,8 @@ fn rebased_locator(
     target: &Path,
 ) -> Result<(LocatorBackup, Vec<u8>), MoveError> {
     let file = fs::File::open(path).map_err(|_| MoveError::Publish)?;
-    let mut contents = Vec::new();
+    let mut contents =
+        Vec::with_capacity((MAX_OPTIONS_BYTES as usize).min(INITIAL_OPTIONS_READ_CAPACITY));
     file.take(MAX_OPTIONS_BYTES + 1)
         .read_to_end(&mut contents)
         .map_err(|_| MoveError::Publish)?;
