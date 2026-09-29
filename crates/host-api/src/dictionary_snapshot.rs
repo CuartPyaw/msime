@@ -535,18 +535,25 @@ fn write_activation_receipt(
     activation_id: &str,
 ) -> Result<(), &'static str> {
     let directory = Path::new(&options.user_data);
-    let temporary = directory.join(format!("{ACTIVATION_RECEIPT_NAME}.tmp"));
     let path = directory.join(ACTIVATION_RECEIPT_NAME);
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&temporary)
+    write_activation_receipt_at(directory, &path, activation_id)
+}
+
+fn write_activation_receipt_at(
+    directory: &Path,
+    path: &Path,
+    activation_id: &str,
+) -> Result<(), &'static str> {
+    let mut temporary = tempfile::NamedTempFile::new_in(directory)
         .map_err(|_| "snapshot activation receipt unavailable")?;
-    file.write_all(activation_id.as_bytes())
-        .and_then(|_| file.sync_all())
+    temporary
+        .write_all(activation_id.as_bytes())
+        .and_then(|_| temporary.as_file().sync_all())
         .map_err(|_| "snapshot activation receipt unavailable")?;
-    std::fs::rename(temporary, path).map_err(|_| "snapshot activation receipt unavailable")
+    temporary
+        .persist(path)
+        .map(|_| ())
+        .map_err(|_| "snapshot activation receipt unavailable")
 }
 
 fn prepare(
@@ -667,20 +674,18 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
         (&active.cache, &staged.cache),
         (&active.dictionaries, &staged.dictionaries),
     ];
-    let backups: Vec<std::path::PathBuf> = pairs
-        .iter()
-        .map(|(current, _)| {
-            let current = Path::new(current.as_str());
-            current.with_file_name(format!(
-                "{}{}",
-                current
-                    .file_name()
-                    .and_then(|x| x.to_str())
-                    .unwrap_or("state"),
-                suffix
-            ))
-        })
-        .collect();
+    let mut backups = Vec::with_capacity(pairs.len());
+    backups.extend(pairs.iter().map(|(current, _)| {
+        let current = Path::new(current.as_str());
+        current.with_file_name(format!(
+            "{}{}",
+            current
+                .file_name()
+                .and_then(|x| x.to_str())
+                .unwrap_or("state"),
+            suffix
+        ))
+    }));
     // Swap each root's contents rather than the root itself.
     //
     // Renaming the roots cannot work on Windows: the maintenance guard holds
@@ -690,14 +695,14 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
     // files exactly where they are, which is also what they are documented to
     // require: they are stable coordination objects, and renaming a root moved
     // one out from under every other process using it.
-    let roots: Vec<&Path> = pairs
-        .iter()
-        .map(|(current, _)| Path::new(current.as_str()))
-        .collect();
-    let staged_roots: Vec<&Path> = pairs
-        .iter()
-        .map(|(_, replacement)| Path::new(replacement.as_str()))
-        .collect();
+    let mut roots = Vec::with_capacity(pairs.len());
+    roots.extend(pairs.iter().map(|(current, _)| Path::new(current.as_str())));
+    let mut staged_roots = Vec::with_capacity(pairs.len());
+    staged_roots.extend(
+        pairs
+            .iter()
+            .map(|(_, replacement)| Path::new(replacement.as_str())),
+    );
     let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::with_capacity(pairs.len());
     let rollback = |moved: &[(std::path::PathBuf, std::path::PathBuf)]| {
         for (from, to) in moved.iter().rev() {

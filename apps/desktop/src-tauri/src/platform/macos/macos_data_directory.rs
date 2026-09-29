@@ -37,7 +37,7 @@ struct LocatorBackup {
 
 fn locator_backups(locators: &[PathBuf]) -> Result<Vec<LocatorBackup>, MoveError> {
     let mut unique = BTreeSet::new();
-    let mut backups = Vec::new();
+    let mut backups = Vec::with_capacity(locators.len());
     for path in locators {
         if !unique.insert(path.clone()) {
             continue;

@@ -40,6 +40,7 @@
 #include "WindowsServer.h"
 #include "ipc_negotiation.h"
 #include <fstream>
+#include <windows.h>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -204,16 +205,36 @@ std::string read_document(const std::filesystem::path &path) {
 void write_document_atomic(const std::filesystem::path &path, const std::string &document) {
   if (document.size() > kMaxConfigBytes)
     throw std::runtime_error("Configuration document oversized");
-  const auto temporary = path.wstring() + L".tmp";
-  {
-    std::ofstream output(std::filesystem::path(temporary), std::ios::binary | std::ios::trunc);
-    if (!output) throw std::runtime_error("Configuration temporary file unavailable");
-    output.write(document.data(), static_cast<std::streamsize>(document.size()));
-    output.flush();
-    if (!output) throw std::runtime_error("Configuration write failed");
+#ifdef _WIN32
+  msime::windows::reject_reparse_ancestors(path.parent_path());
+#endif
+  wchar_t temporary_name[MAX_PATH] = {};
+  if (!GetTempFileNameW(path.parent_path().c_str(), L"msi", 0, temporary_name))
+    throw std::runtime_error("Configuration temporary file unavailable");
+  const std::filesystem::path temporary(temporary_name);
+  HANDLE handle = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) {
+    std::filesystem::remove(temporary);
+    throw std::runtime_error("Configuration temporary file unavailable");
   }
-  if (!MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+  DWORD written = 0;
+  const bool complete = document.size() <= MAXDWORD &&
+                        WriteFile(handle, document.data(),
+                                  static_cast<DWORD>(document.size()), &written,
+                                  nullptr) &&
+                        written == static_cast<DWORD>(document.size()) &&
+                        FlushFileBuffers(handle);
+  CloseHandle(handle);
+  if (!complete) {
+    std::filesystem::remove(temporary);
+    throw std::runtime_error("Configuration write failed");
+  }
+  if (!MoveFileExW(temporary.c_str(), path.c_str(),
+                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    std::filesystem::remove(temporary);
     throw std::runtime_error("Configuration replace failed");
+  }
 }
 // The native toolbar and TSF shortcut use the same revisioned store as the
 // settings shell. Read and write on their shared single action worker so
@@ -486,6 +507,9 @@ void publish_switch_language_keybindings(const nlohmann::json &preferences) {
   values.character_set_ctrl_shift_f =
       bindings.value("toggle_character_set_ctrl_shift_f", true);
   try {
+#ifdef _WIN32
+    msime::windows::reject_reparse_ancestors(path.parent_path());
+#endif
     std::string existing;
     {
       std::ifstream input(path, std::ios::binary);
@@ -502,21 +526,9 @@ void publish_switch_language_keybindings(const nlohmann::json &preferences) {
       return;
     std::error_code ignored;
     std::filesystem::create_directories(path.parent_path(), ignored);
-    // Write beside the target and rename over it: a crash mid-write must not
-    // leave the user with a truncated config the TIP then reads as defaults.
-    const auto temporary = std::filesystem::path(path).concat(L".new");
-    {
-      std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-      if (!output)
-        return;
-      output.write(updated.data(),
-                   static_cast<std::streamsize>(updated.size()));
-      if (!output)
-        return;
-    }
-    std::filesystem::rename(temporary, path, ignored);
-    if (ignored)
-      std::filesystem::remove(temporary, ignored);
+    // Use a unique private sibling so a pre-existing staging symlink cannot
+    // redirect the keybinding document outside the state directory.
+    write_document_atomic(path, updated);
   } catch (const std::exception &) {
     // A read-only or roaming profile is the user's business, not a fatal error.
   }
@@ -645,6 +657,7 @@ int wmain(int argc, wchar_t **argv) {
       document = production_preview_document(document, default_state);
     auto config = PreviewConfig::parse(document);
     config.resources = std::filesystem::canonical(config.resources);
+    reject_reparse_ancestors(config.state_root);
     config.state_root = std::filesystem::weakly_canonical(config.state_root);
     if (contains(config.resources, config.state_root) ||
         contains(config.state_root, config.resources))
@@ -1057,6 +1070,16 @@ int wmain(int argc, wchar_t **argv) {
     auto current_candidate_theme = candidate_theme_values(
         prepared.at("value").at("preferences"));
     std::map<std::string, CandidateThemeResolution> resolved_themes;
+    // Package assets by id, read from the catalog once per package and forgotten with the resolved themes.
+    std::map<std::string, msime::windows::CandidateSkinAssets> skin_assets;
+    auto package_assets = [&](const std::string &id)
+        -> const msime::windows::CandidateSkinAssets & {
+      auto found = skin_assets.find(id);
+      if (found == skin_assets.end())
+        found = skin_assets.emplace(id, resolve_skin_assets(config.skin_directory, id))
+                    .first;
+      return found->second;
+    };
     auto resolved_theme = [&](bool dark,
                               bool horizontal) -> const CandidateThemeResolution & {
       const auto request = candidate_theme_request(
@@ -1085,12 +1108,11 @@ int wmain(int argc, wchar_t **argv) {
         palette.show_selected_bar = *config.candidate_selected_bar;
       candidates.set_palette(palette);
       // An external package may ask for a wider card than the font implies; the artwork is drawn against that width.
-      const auto assets =
-          resolve_skin_assets(config.skin_directory, theme.candidate_skin);
+      const auto &assets = package_assets(theme.candidate_skin);
       candidates.set_skin_min_width(assets.min_width);
-      candidates.set_skin_decoration(assets.decoration.image,
-                                     assets.decoration.top_dip,
-                                     assets.decoration.width_dip);
+      candidates.set_skin_decoration(assets.decoration);
+      candidates.set_skin_background(assets.background);
+      candidates.set_skin_corner_radius(assets.corner_radius);
       candidate_skin_applied = theme.candidate_skin;
     }
     candidates.set_follow_cursor(follow_cursor->load(std::memory_order_acquire));
@@ -1098,6 +1120,12 @@ int wmain(int argc, wchar_t **argv) {
     auto surface_palette = [&](bool dark) {
       return candidate_theme_palette(
           resolved_theme(dark, candidate_horizontal_applied), dark);
+    };
+    // The toolbar's palette in `dark`: the theme's, with the toolbar colours and radius of the package that theme draws in that mode.
+    auto toolbar_surface_palette = [&](bool dark) {
+      const auto &theme = resolved_theme(dark, candidate_horizontal_applied);
+      return apply_toolbar_skin(toolbar_palette(candidate_theme_palette(theme, dark)),
+                                package_assets(theme.candidate_skin).toolbar, dark);
     };
     bool toolbar_visible = toolbar_enabled->load(std::memory_order_acquire);
     FloatingToolbarWindow toolbar(
@@ -1107,7 +1135,7 @@ int wmain(int argc, wchar_t **argv) {
     bool toolbar_dark_applied = !surface_theme_is_light(
         toolbar_theme->load(std::memory_order_acquire), system_dark);
     uint64_t toolbar_theme_applied = candidate_theme_generation;
-    toolbar.set_palette(toolbar_palette(surface_palette(toolbar_dark_applied)));
+    toolbar.set_palette(toolbar_surface_palette(toolbar_dark_applied));
     toolbar.set_scale(config.floating_toolbar_scale);
     toolbar.set_font_size(config.floating_toolbar_font_size);
     toolbar.set_items(config.floating_toolbar_items);
@@ -1466,6 +1494,7 @@ int wmain(int argc, wchar_t **argv) {
         if (*theme != current_candidate_theme) {
           current_candidate_theme = std::move(*theme);
           resolved_themes.clear();
+          skin_assets.clear();
           candidate_theme_dirty = true;
         }
       }
@@ -1479,8 +1508,10 @@ int wmain(int argc, wchar_t **argv) {
         const bool skin_resources_changed = candidate_skin_revision.changed(
             config.skin_directory,
             candidate_theme_package(current_candidate_theme));
-        if (skin_resources_changed)
+        if (skin_resources_changed) {
           resolved_themes.clear();
+          skin_assets.clear();
+        }
         const bool dark =
             candidate_theme_dark(current_candidate_theme, system_dark);
         if (candidate_theme_dirty || skin_resources_changed || dark != candidate_dark_applied ||
@@ -1491,12 +1522,12 @@ int wmain(int argc, wchar_t **argv) {
             next_palette.show_selected_bar = *config.candidate_selected_bar;
           candidates.set_theme_palette(next_palette);
           if (skin_resources_changed || theme.candidate_skin != candidate_skin_applied) {
-            const auto assets =
-                resolve_skin_assets(config.skin_directory, theme.candidate_skin);
+            const auto &assets = package_assets(theme.candidate_skin);
             candidates.invalidate_skin_images();
             candidates.set_skin_min_width(assets.min_width);
-            candidates.set_skin_decoration(assets.decoration.image,
-                assets.decoration.top_dip, assets.decoration.width_dip);
+            candidates.set_skin_decoration(assets.decoration);
+            candidates.set_skin_background(assets.background);
+            candidates.set_skin_corner_radius(assets.corner_radius);
             candidate_skin_applied = theme.candidate_skin;
           }
           candidate_dark_applied = dark;
@@ -1524,7 +1555,7 @@ int wmain(int argc, wchar_t **argv) {
           dark != toolbar_dark_applied || toolbar_theme_applied != candidate_theme_generation) {
         toolbar_dark_applied = dark;
         toolbar_theme_applied = candidate_theme_generation;
-        toolbar.set_palette(toolbar_palette(surface_palette(dark)));
+        toolbar.set_palette(toolbar_surface_palette(dark));
       }
       // The toolbar is topmost, so without this it floats over full-screen
       // video and presentations. ShouldShowFloatingToolbar was ported long ago

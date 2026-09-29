@@ -24,17 +24,24 @@ def replace_once(path: Path, before: str, after: str, marker: str) -> None:
 
 def apply(root: Path) -> None:
     source = root / "shuangpin/shuangpin_dictionary.cpp"
-    before = """        quanpin::merge_lattice_candidates(candidate_list, quanpin_segments,
-                                          quanpin::make_lattice_db_lookup(quanpin_db_, quanpin_statement_cache_,
-                                                                          lattice_options.span_limit),
-                                          pinyin_sequence, lattice_options);
+    before = """        if (need_lattice)
+        {
+            quanpin::merge_lattice_candidates(candidate_list, quanpin_segments,
+                                              quanpin::make_lattice_db_lookup(quanpin_db_, quanpin_statement_cache_,
+                                                                              lattice_options.span_limit),
+                                              pinyin_sequence, lattice_options, {}, nullptr, nullptr, rerankers);
+        }
         if (!google_sentence.empty())
 """
     after = """        quanpin::WholeSentenceComparison sentences;
-        quanpin::merge_lattice_candidates(candidate_list, quanpin_segments,
-                                          quanpin::make_lattice_db_lookup(quanpin_db_, quanpin_statement_cache_,
-                                                                          lattice_options.span_limit),
-                                          pinyin_sequence, lattice_options, google_sentence, &sentences);
+        if (need_lattice)
+        {
+            quanpin::merge_lattice_candidates(candidate_list, quanpin_segments,
+                                              quanpin::make_lattice_db_lookup(quanpin_db_, quanpin_statement_cache_,
+                                                                              lattice_options.span_limit),
+                                              pinyin_sequence, lattice_options, google_sentence, &sentences, nullptr,
+                                              rerankers);
+        }
         if (!google_sentence.empty() &&
             !sentences.lattice_outranks_fallback(lattice_options.fallback_margin))
 """
@@ -42,7 +49,7 @@ def apply(root: Path) -> None:
         source,
         before,
         after,
-        "lattice_options, google_sentence, &sentences);",
+        "lattice_options, google_sentence, &sentences, nullptr,",
     )
 
 

@@ -143,18 +143,17 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
             // Non-English targets with an offline dictionary installed beside the resources, in preference order. The same switches as macOS's English fallback reach them: the offline gloss switch, or candidate translation, whose online answer replaces the offline one when it arrives. Never read from the user directory, so no user path is needed for them.
             let offline_gloss_languages =
                 if preferences.candidate_translations || preferences.candidate_english_gloss {
-                    target_languages
-                        .iter()
-                        .filter_map(|language| {
-                            let language = serde_json::to_value(language).ok()?;
-                            let code = language.as_str()?;
-                            crate::offline_glosses_beside(
-                                std::path::Path::new(&session.options.resources),
-                                code,
-                            )
-                            .map(|_| code.to_owned())
-                        })
-                        .collect::<Vec<_>>()
+                    let mut languages = Vec::with_capacity(target_languages.len());
+                    languages.extend(target_languages.iter().filter_map(|language| {
+                        let language = serde_json::to_value(language).ok()?;
+                        let code = language.as_str()?;
+                        crate::offline_glosses_beside(
+                            std::path::Path::new(&session.options.resources),
+                            code,
+                        )
+                        .map(|_| code.to_owned())
+                    }));
+                    languages
                 } else {
                     Vec::new()
                 };
@@ -186,21 +185,18 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
             // machine.
             //
             // Emoji and kaomoji sources never qualify, whatever their text: many kaomoji carry Han characters ("(*Φ皿Φ*)") and would otherwise queue behind real words on the serial on-device model and spend account quota, as Windows' BuildTranslationQuery already refuses.
-            let candidates = candidates_view
-                .candidates
-                .iter()
-                .map(|candidate| {
-                    json!({
-                        "text": candidate.text,
-                        "online_gloss":
-                            !msime_client_core::translation::is_emoji_or_kaomoji_source(
-                                candidate.source,
-                            ) && msime_client_core::translation::is_cloud_translatable_chinese(
-                                &candidate.text,
-                            ),
-                    })
+            let mut candidates = Vec::with_capacity(candidates_view.candidates.len());
+            candidates.extend(candidates_view.candidates.iter().map(|candidate| {
+                json!({
+                    "text": candidate.text,
+                    "online_gloss":
+                        !msime_client_core::translation::is_emoji_or_kaomoji_source(
+                            candidate.source,
+                        ) && msime_client_core::translation::is_cloud_translatable_chinese(
+                            &candidate.text,
+                        ),
                 })
-                .collect::<Vec<_>>();
+            }));
             let custom_translation = &preferences.custom_translation;
             let tencent = &preferences.tencent_tmt;
             // The MSIME account gloss endpoint (api.msime.app) is used only when the user explicitly chose it and no service of their own takes precedence. Tencent counts only with usable secrets, because its default `enabled: true` is not a user choice.
@@ -621,9 +617,13 @@ pub unsafe extern "C" fn msime_client_emoji_catalog_request(
         if query.list_symbol_groups {
             let groups = msime_engine::host::emoji_symbol_groups(resources)
                 .map_err(|_| "local emoji catalog unavailable")?;
-            return Ok(
-                json!({"symbol_groups": groups.into_iter().map(|g| json!({"parent":g.parent,"title":g.title})).collect::<Vec<_>>()}),
+            let mut symbol_groups = Vec::with_capacity(groups.len());
+            symbol_groups.extend(
+                groups
+                    .into_iter()
+                    .map(|group| json!({"parent":group.parent,"title":group.title})),
             );
+            return Ok(json!({"symbol_groups": symbol_groups}));
         }
         if !query.parent.is_empty() && query.panel.category != "symbols" {
             return Err("parent filter requires symbols catalog".into());
@@ -639,12 +639,18 @@ pub unsafe extern "C" fn msime_client_emoji_catalog_request(
                 &query.parent,
             )
             .map_err(|_| "local emoji catalog unavailable")?;
-            return Ok(json!({
-                "items": slice.items.into_iter().map(|item| json!({
+            let next_offset = slice.next_offset;
+            let complete = slice.complete;
+            let mut items = Vec::with_capacity(slice.items.len());
+            items.extend(slice.items.into_iter().map(|item| {
+                json!({
                     "text": item.text, "annotation": item.annotation, "group": item.group,
-                })).collect::<Vec<_>>(),
-                "next_offset": slice.next_offset,
-                "complete": slice.complete,
+                })
+            }));
+            return Ok(json!({
+                "items": items,
+                "next_offset": next_offset,
+                "complete": complete,
             }));
         }
         let items = msime_engine::host::emoji_catalog_filtered_page(
@@ -657,17 +663,16 @@ pub unsafe extern "C" fn msime_client_emoji_catalog_request(
             &query.parent,
         )
         .map_err(|_| "local emoji catalog unavailable")?;
+        let mut rendered_items = Vec::with_capacity(items.len());
+        rendered_items.extend(items.into_iter().map(|item| {
+            json!({
+                "text": item.text,
+                "annotation": item.annotation,
+                "group": item.group,
+            })
+        }));
         Ok(json!({
-            "items": items
-                .into_iter()
-                .map(|item| {
-                    json!({
-                        "text": item.text,
-                        "annotation": item.annotation,
-                        "group": item.group,
-                    })
-                })
-                .collect::<Vec<_>>()
+            "items": rendered_items
         }))
     })
 }

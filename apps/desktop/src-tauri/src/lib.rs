@@ -98,6 +98,7 @@ use std::collections::HashMap;
     target_os = "linux",
     target_os = "windows",
     target_os = "android",
+    target_os = "ios",
     test
 ))]
 use std::fs;
@@ -771,15 +772,11 @@ fn write_custom_translations_at(user: PathBuf, text: &str) -> Result<(), Command
             Err(_) => Err(CommandError { code: "storage" }),
         };
     }
-    std::fs::create_dir_all(&user).map_err(|_| CommandError { code: "storage" })?;
-    // Written beside the target and renamed, so a failure halfway through leaves the previous overlay
-    // in place rather than a truncated one the Engine would read as the whole set.
-    let staging = user.join("custom_translations.txt.writing");
-    std::fs::write(&staging, text).map_err(|_| CommandError { code: "storage" })?;
-    std::fs::rename(&staging, &path).map_err(|_| {
-        let _ = std::fs::remove_file(&staging);
-        CommandError { code: "storage" }
-    })
+    // Use a fresh private sibling and publish it atomically. This avoids
+    // following a pre-existing staging symlink and leaves the previous overlay
+    // intact if writing or syncing fails.
+    crate::shared::atomic_file::write(&path, text.as_bytes())
+        .map_err(|_| CommandError { code: "storage" })
 }
 
 #[tauri::command]
@@ -2795,7 +2792,8 @@ const MACOS_ON_DEVICE_TRANSLATION_DOWNLOADABLE_DEFAULTS_KEY: &str =
 // Only the target languages the settings page can choose; anything else in the value is not ours to report.
 #[cfg(any(target_os = "macos", test))]
 fn parse_on_device_translation_downloadable(value: &str) -> Vec<String> {
-    let mut codes = Vec::new();
+    // The supported translation language set has eight entries; `zh` is filtered out below.
+    let mut codes = Vec::with_capacity(7);
     for code in value.trim().split(',').map(str::trim) {
         if code != "zh"
             && msime_client_core::translation::is_supported_translation_language(code)

@@ -410,6 +410,7 @@ fn tree(directory: &Path) -> Vec<(std::path::PathBuf, Vec<String>)> {
                     rows.push(format!("{table} {values:?}"));
                 }
             }
+            // Sorted here rather than by rowid: personal learning keeps some tables WITHOUT ROWID, and only the rows a file holds matter, not their order. Each row carries its table's name, so this also keeps the tables apart.
             rows.sort();
             files.push((path, rows));
         } else {

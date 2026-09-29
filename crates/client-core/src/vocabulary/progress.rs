@@ -231,8 +231,9 @@ pub fn build_queue(
     }
     let states = progress.cards.get(&book.id);
 
-    let mut due: Vec<(&str, &CardState)> = Vec::new();
-    let mut fresh: Vec<&str> = Vec::new();
+    let entry_count = book.entries.len();
+    let mut due: Vec<(&str, &CardState)> = Vec::with_capacity(entry_count);
+    let mut fresh: Vec<&str> = Vec::with_capacity(entry_count);
     let mut remaining = 0;
     for word in book.words() {
         match states.and_then(|words| words.get(word)) {
@@ -256,13 +257,15 @@ pub fn build_queue(
     let allowance = new_per_day.saturating_sub(introduced_today);
 
     let due_count = due.len();
-    let mut words: Vec<String> = due
-        .into_iter()
-        .map(|(word, _)| word.to_owned())
-        .take(session_limit)
-        .collect();
-    let room = session_limit.saturating_sub(words.len());
+    let due_take = due_count.min(session_limit);
+    let room = session_limit - due_take;
     let introducing = fresh.len().min(allowance).min(room);
+    let mut words = Vec::with_capacity(due_take + introducing);
+    words.extend(
+        due.into_iter()
+            .map(|(word, _)| word.to_owned())
+            .take(due_take),
+    );
     words.extend(
         fresh
             .iter()

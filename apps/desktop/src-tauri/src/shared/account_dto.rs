@@ -92,7 +92,7 @@ pub struct ProfileResponse {
 
 impl From<AccountProfile> for ProfileResponse {
     fn from(profile: AccountProfile) -> Self {
-        let mut providers = Vec::new();
+        let mut providers = Vec::with_capacity(profile.identities.len());
         for identity in profile.identities {
             if !providers.contains(&identity.provider) {
                 providers.push(identity.provider);

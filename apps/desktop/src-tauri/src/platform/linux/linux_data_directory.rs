@@ -19,6 +19,7 @@ use std::time::Duration;
 pub(crate) const DATA_DIRECTORY_MARKER: &str = ".metasequoiaime-data";
 const OPTIONS_FILE: &str = "runtime-options.json";
 const MAX_OPTIONS_BYTES: u64 = 1024 * 1024;
+const INITIAL_OPTIONS_READ_CAPACITY: usize = 8 * 1024;
 /// Files that belong to the fixed configuration directory rather than to the movable state: the locator and the provider credentials the systemd services read from `$XDG_CONFIG_HOME/msime-client`.
 const PINNED_FILES: [&str; 4] = [
     OPTIONS_FILE,
@@ -168,7 +169,8 @@ fn rebased_locator(
     target: &Path,
 ) -> Result<(LocatorBackup, Vec<u8>), MoveError> {
     let file = fs::File::open(path).map_err(|_| MoveError::Publish)?;
-    let mut contents = Vec::new();
+    let mut contents =
+        Vec::with_capacity((MAX_OPTIONS_BYTES as usize).min(INITIAL_OPTIONS_READ_CAPACITY));
     file.take(MAX_OPTIONS_BYTES + 1)
         .read_to_end(&mut contents)
         .map_err(|_| MoveError::Publish)?;
@@ -286,7 +288,7 @@ pub(crate) fn plan_move(
     }
 
     let mut unique = BTreeSet::new();
-    let mut rewrites = Vec::new();
+    let mut rewrites = Vec::with_capacity(locators.len());
     for locator in locators {
         if unique.insert(fs::canonicalize(locator).unwrap_or_else(|_| locator.clone())) {
             rewrites.push(rebased_locator(locator, &source, written_source, &target)?);
@@ -338,7 +340,7 @@ impl MovePlan {
         {
             return Err(MoveError::Copy);
         }
-        let mut placed = Vec::new();
+        let mut placed = Vec::with_capacity(entries.len());
         for name in &entries {
             if fs::rename(staging.path().join(name), target.join(name)).is_err() {
                 rollback(&target, &placed, wrote_marker, &[]);
@@ -348,7 +350,7 @@ impl MovePlan {
         }
         drop(staging);
 
-        let mut backups = Vec::new();
+        let mut backups = Vec::with_capacity(rewrites.len());
         for (backup, rewritten) in rewrites {
             let path = backup.path.clone();
             backups.push(backup);

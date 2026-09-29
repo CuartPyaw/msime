@@ -247,9 +247,13 @@ int ImeSession::cache_dynamic_candidate_for_current_request(const std::string &w
     if (commit_chain_.previous && personal_context_applies())
     {
         const auto personal = personal_context_->read();
-        reordered =
-            personal_context_order(decoded, personal.model(), commit_chain_.earlier ? &*commit_chain_.earlier : nullptr,
-                                   *commit_chain_.previous);
+        const std::string context_key = pinyin_ranking_context();
+        const std::string journal = path_to_utf8(paths_.user(assets::user_journal));
+        reordered = personal_context_order(
+            decoded, personal.model(), commit_chain_.earlier ? &*commit_chain_.earlier : nullptr,
+            *commit_chain_.previous, [&](const WordItem &leader) {
+                return user_dictionary::is_pinned_candidate(journal, context_key, leader.word);
+            });
     }
     mixed_candidates_ = mixed_from(reordered ? *reordered : decoded);
     personal_reranked_ = reordered.has_value();
@@ -271,12 +275,17 @@ std::vector<WordItem> InputSession::mixed_from(const std::vector<WordItem> &deco
     ranking_candidates_built_ = false;
     ranking_candidates_.clear();
     std::optional<std::vector<WordItem>> reordered;
+    // At the chain start the preference is context-free, which is the frequency setting's business, not this one's.
     if (commit_chain_.previous && personal_context_applies())
     {
         const auto personal = personal_context_->read();
-        reordered =
-            personal_context_order(decoded, personal.model(), commit_chain_.earlier ? &*commit_chain_.earlier : nullptr,
-                                   *commit_chain_.previous);
+        const std::string context_key = pinyin_ranking_context();
+        const std::string journal = path_to_utf8(paths_.user(assets::user_journal));
+        reordered = personal_context_order(
+            decoded, personal.model(), commit_chain_.earlier ? &*commit_chain_.earlier : nullptr,
+            *commit_chain_.previous, [&](const WordItem &leader) {
+                return user_dictionary::is_pinned_candidate(journal, context_key, leader.word);
+            });
     }
     mixed_candidates_ = mixed_from(reordered ? *reordered : decoded);
     personal_reranked_ = reordered.has_value();
@@ -333,7 +342,7 @@ void InputSession::refresh_prefix_candidates()
     }
     const std::string &raw_with_cases = get_pinyin_sequence_with_cases();
     const std::size_t end = quantized_prefix_end();
-    if (end >= raw_with_cases.size())
+    if (end == 0 || end >= raw_with_cases.size())
     {
         prefix_candidates_.clear();
         prefix_query_input_.clear();

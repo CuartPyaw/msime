@@ -18,6 +18,22 @@ fn preference_store_rejects_a_symlinked_directory_without_writing_through_it() {
     assert!(!target.path().join("preferences.lock").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn preference_store_rejects_a_symlinked_document() {
+    let directory = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let path = directory.path().join("preferences.json");
+    let outside_path = outside.path().join("preferences.json");
+    std::fs::write(&outside_path, br#"{"formatVersion":1}"#).unwrap();
+    std::os::unix::fs::symlink(&outside_path, &path).unwrap();
+
+    assert!(matches!(
+        PreferencesStore::new(directory.path()).load(),
+        Err(PreferencesError::Io(_))
+    ));
+}
+
 #[test]
 fn retired_google_sentence_switch_still_loads_and_is_not_written_back() {
     let dir = tempfile::tempdir().unwrap();

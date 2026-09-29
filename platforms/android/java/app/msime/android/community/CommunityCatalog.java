@@ -87,6 +87,9 @@ public final class CommunityCatalog {
         JSONArray values = root.optJSONArray(
             kind == CommunityRequest.Kind.SKIN ? "skins" : "items");
         if (values == null) return new Page(List.of(), false, "");
+        if (exceedsPageLimit(values.length())) {
+            return new Page(List.of(), false, CommunityRequest.message(null, 500));
+        }
         List<Item> items = new ArrayList<>(values.length());
         for (int index = 0; index < values.length(); index++) {
             JSONObject value = values.optJSONObject(index);
@@ -102,6 +105,11 @@ public final class CommunityCatalog {
                     : value.optJSONObject("content")));
         }
         return new Page(List.copyOf(items), root.optBoolean("has_more", false), "");
+    }
+
+    /** A page longer than the one the client asked for is a backend fault, not more results to show. Kept apart from parse so the JVM smoke can check it: the smokes run against android.jar, whose org.json classes are stubs that throw. */
+    private static boolean exceedsPageLimit(int length) {
+        return length > CommunityRequest.PAGE_SIZE;
     }
 
     /** The backend's own name for a failure, so the reader is told the specific thing. */

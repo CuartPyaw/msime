@@ -1,7 +1,6 @@
 import { AppearanceCandidatePreview } from "../../candidate/appearance-candidate-preview";
-import { candidatePanelLimitNotes } from "../settings-options";
 import { CandidateFontControls } from "../../candidate/candidate-font-controls";
-import { defaultNavigation } from "../settings-options";
+import { defaultNavigation } from "../navigation-section";
 import { useSettingsForm } from "../settings-form-context";
 import * as settings from "../settings-style";
 import { GroupList } from "../../core/platform-controls";
@@ -12,6 +11,8 @@ import { CandidateLayoutSection } from "../candidate-layout-section";
 import { PreeditSettingsSection } from "../preedit-settings-section";
 import { NavigationSection } from "../navigation-section";
 import { appearanceSettingsPreferences } from "../appearance-settings-preferences";
+import { CandidatePanelLimitSection } from "../candidate-panel-limit-section";
+import { CandidateFontUnsupportedNotice } from "../candidate-font-unsupported-notice";
 
 /** The 候选窗口 page of the settings form (route id `appearance`). */
 export function AppearanceSettingsPage() {
@@ -51,9 +52,7 @@ export function AppearanceSettingsPage() {
         mobile={mobilePlatform}
       />
       {host?.candidate_panel_limit && (
-        <div className="section">
-          <small>{candidatePanelLimitNotes[host.candidate_panel_limit]}</small>
-        </div>
+        <CandidatePanelLimitSection limit={host.candidate_panel_limit} />
       )}
       {/* The groups keep the reference window's order of these settings (following, fonts, page size and layout, preedit, paging); the design's 窗口布局 group leads with the layout instead. */}
       <div className={settings.groups}>
@@ -85,7 +84,7 @@ export function AppearanceSettingsPage() {
               />
             </>
           ) : (
-            <p className={settings.groupNote}>当前宿主的候选面板不支持自定义字体或字号。</p>
+            <CandidateFontUnsupportedNotice />
           )}
         </GroupList>
         {showWindowGroup && (

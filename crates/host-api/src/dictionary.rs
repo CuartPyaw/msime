@@ -221,7 +221,7 @@ fn parse_personal_dictionary_import(text: &str) -> Result<Vec<PersonalWord>, Str
     if file.entries.is_empty() || file.entries.len() > 128 {
         return Err("invalid personal dictionary entry count".into());
     }
-    let mut identities = std::collections::HashSet::new();
+    let mut identities = std::collections::HashSet::with_capacity(file.entries.len());
     let mut entries = Vec::with_capacity(file.entries.len());
     for entry in file.entries {
         let entry = normalize_personal_word(entry)?;
@@ -449,9 +449,13 @@ fn queued_import(
         (entries, Some(report))
     };
     // The engine entry carries no line number; the parsed report lists the same rows in the same order.
-    let source_lines: Vec<usize> = report
+    let source_lines = report
         .as_ref()
-        .map(|parsed| parsed.entries.iter().map(|entry| entry.line).collect())
+        .map(|parsed| {
+            let mut lines = Vec::with_capacity(parsed.entries.len());
+            lines.extend(parsed.entries.iter().map(|entry| entry.line));
+            lines
+        })
         .unwrap_or_default();
     let mut report = report.unwrap_or(msime_client_core::dictionary::import::ImportReport {
         entries: Vec::new(),
@@ -609,11 +613,15 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
             // some. Aborting discarded the rows already committed and told the
             // user nothing but "check the format", leaving the dictionary
             // half-written with no way to know how far it got.
-            let mut rejected_lines: Vec<usize> = Vec::new();
+            let mut rejected_lines = Vec::with_capacity(entries.len());
             // The engine entry carries no line number, so the parsed report is what maps a refused row back to the line the user has to fix. The two lists are built from the same rows in the same order.
-            let source_lines: Vec<usize> = report
+            let source_lines = report
                 .as_ref()
-                .map(|parsed| parsed.entries.iter().map(|entry| entry.line).collect())
+                .map(|parsed| {
+                    let mut lines = Vec::with_capacity(parsed.entries.len());
+                    lines.extend(parsed.entries.iter().map(|entry| entry.line));
+                    lines
+                })
                 .unwrap_or_default();
             for (index, entry) in entries.iter().enumerate() {
                 let receipt = format!("{request_id}-{index}");
@@ -686,7 +694,9 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
             .map_err(|_| "dictionary access unavailable")?
             .ok_or("dictionary maintenance busy")?;
             let mut cursor = 0usize;
-            let mut matching = Vec::new();
+            // Export pages are fetched in fixed 1000-entry chunks; reserve one
+            // chunk so the first filtered page does not grow the accumulator.
+            let mut matching = Vec::with_capacity(1000);
             let mut source_has_more = true;
             while source_has_more && matching.len() < offset.saturating_add(limit) {
                 // The pinyin export also carries the weights learned or set for bundled words, and leaves out single characters, as the reference's does; the other dictionaries export the user's own words only.
@@ -794,21 +804,23 @@ pub fn personal_dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Valu
             let requested_page_offset = state.requested_page_offset;
             let page_kind = state.page_kind.map(personal_to_kind);
             let page_query = state.page_query.clone();
-            let failed_requests: Vec<_> = state
-                .requests
-                .iter()
-                .filter(|request| request.status == PersonalWordRequestStatus::Failed)
-                .map(|request| {
-                    json!({
-                        "request_id": request.id,
-                        "label": request.replacement.as_ref()
-                            .or(request.previous.as_ref())
-                            .map(|word| word.value.clone())
-                            .unwrap_or_else(|| "词条".to_owned()),
-                        "error": request.error.as_deref().unwrap_or("同步失败"),
-                    })
-                })
-                .collect();
+            let mut failed_requests = Vec::with_capacity(state.requests.len());
+            failed_requests.extend(
+                state
+                    .requests
+                    .iter()
+                    .filter(|request| request.status == PersonalWordRequestStatus::Failed)
+                    .map(|request| {
+                        json!({
+                            "request_id": request.id,
+                            "label": request.replacement.as_ref()
+                                .or(request.previous.as_ref())
+                                .map(|word| word.value.clone())
+                                .unwrap_or_else(|| "词条".to_owned()),
+                            "error": request.error.as_deref().unwrap_or("同步失败"),
+                        })
+                    }),
+            );
             let entries = state
                 .entries
                 .into_iter()
@@ -886,11 +898,13 @@ pub fn personal_dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Valu
                 return Err("invalid dictionary export".into());
             }
             let state = store.read().map_err(personal_dictionary_error)?;
-            let matching: Vec<_> = state
-                .entries
-                .into_iter()
-                .filter(|entry| personal_to_kind(entry.kind) == kind)
-                .collect();
+            let mut matching = Vec::with_capacity(state.entries.len());
+            matching.extend(
+                state
+                    .entries
+                    .into_iter()
+                    .filter(|entry| personal_to_kind(entry.kind) == kind),
+            );
             let has_more = matching.len() > offset.saturating_add(limit);
             let text = matching
                 .into_iter()

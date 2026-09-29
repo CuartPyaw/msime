@@ -124,7 +124,12 @@ pub fn parse(text: &str, max_bytes: usize) -> Result<WordbookImportReport, Wordb
         Delimiter::Comma
     };
 
-    let mut report = WordbookImportReport::default();
+    let row_capacity = text.lines().take(MAX_ROWS).count();
+    let mut report = WordbookImportReport {
+        entries: Vec::with_capacity(row_capacity),
+        first_failures: Vec::with_capacity(REPORTED_FAILURES),
+        ..WordbookImportReport::default()
+    };
     let mut seen = std::collections::BTreeSet::new();
     for (index, line) in text.lines().enumerate() {
         if report.entries.len() >= MAX_ROWS {
@@ -220,10 +225,10 @@ fn split_columns(delimiter: Delimiter, line: &str) -> Vec<String> {
         Delimiter::Comma => ',',
     };
     if delimiter == Delimiter::Tab {
-        return line.split(separator).map(str::to_owned).collect();
+        return line.splitn(4, separator).map(str::to_owned).collect();
     }
 
-    let mut columns = Vec::new();
+    let mut columns = Vec::with_capacity(4);
     let mut current = String::new();
     let mut quoted = false;
     let mut characters = line.chars().peekable();
@@ -243,7 +248,12 @@ fn split_columns(delimiter: Delimiter, line: &str) -> Vec<String> {
                 current.clear();
                 quoted = true;
             }
-            c if c == separator && !quoted => columns.push(std::mem::take(&mut current)),
+            c if c == separator && !quoted => {
+                columns.push(std::mem::take(&mut current));
+                if columns.len() == 4 {
+                    return columns;
+                }
+            }
             c => current.push(c),
         }
     }
