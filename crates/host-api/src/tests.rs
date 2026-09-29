@@ -3789,11 +3789,17 @@ fn preferences_wait_for_commit_keep_handle_and_reject_old_revisions() {
     let queued = update(handle, 1, &prefs);
     assert_eq!(queued["value"]["deferred"], true);
     assert_eq!(queued["value"]["view"], before);
+    SESSIONS.with(|sessions| {
+        assert!(sessions.borrow().get(&handle).unwrap().preferences_pending);
+    });
     let committed = read(msime_client_command(handle, 1));
     assert_eq!(committed["value"]["commit"], "中");
     assert_eq!(committed["value"]["view"]["session"], handle);
     assert_eq!(committed["value"]["view"]["focused"], true);
     assert_eq!(update(handle, 1, &prefs)["value"]["deferred"], false);
+    SESSIONS.with(|sessions| {
+        assert!(!sessions.borrow().get(&handle).unwrap().preferences_pending);
+    });
     assert_eq!(
         read(msime_client_character(handle, b',', false))["value"]["handled"],
         false
