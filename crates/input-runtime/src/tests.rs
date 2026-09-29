@@ -2515,6 +2515,13 @@ fn demotion_moves_flagged_items_to_the_end_and_keeps_both_orders() {
 }
 
 #[test]
+fn in_place_order_applies_candidate_permutations() {
+    let mut values = vec!["zero", "one", "two", "three", "four"];
+    apply_order(&mut values, &[2, 4, 1, 0, 3]);
+    assert_eq!(values, vec!["two", "four", "one", "zero", "three"]);
+}
+
+#[test]
 fn demotion_loses_nothing() {
     // The point of moving rather than removing: every candidate is still reachable by paging.
     let mut items: Vec<u32> = (0..9).collect();
