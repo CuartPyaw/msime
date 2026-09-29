@@ -556,6 +556,7 @@ rust::Vec<rust::String> english_completions(rust::Str resources, rust::Str prefi
     EnglishDictionary dictionary(path.u8string(), false);
     if (!dictionary.ready()) throw std::runtime_error("English dictionary unavailable");
     rust::Vec<rust::String> result;
+    result.reserve(limit);
     for (const auto &item : dictionary.query_prefix(lowered, limit))
         result.push_back(rust::String(item.word));
     return result;
