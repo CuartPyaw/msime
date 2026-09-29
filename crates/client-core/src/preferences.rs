@@ -1506,21 +1506,21 @@ pub enum ShuangpinProfile {
     Microsoft,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum HelpcodeSchema {
     Lantian,
     #[default]
     Ziranma,
-    #[serde(rename = "shouyou2_0")]
     Shouyou2,
     Shouyouplus,
     Xiaohe,
     Jiajia,
+    /// A user table under the resource set's `helpcodes/custom` directory.
+    Custom(String),
 }
 
 impl HelpcodeSchema {
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Lantian => "lantian",
             Self::Ziranma => "ziranma",
@@ -1528,11 +1528,40 @@ impl HelpcodeSchema {
             Self::Shouyouplus => "shouyouplus",
             Self::Xiaohe => "xiaohe",
             Self::Jiajia => "jiajia",
+            Self::Custom(value) => value,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+impl Serialize for HelpcodeSchema {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for HelpcodeSchema {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "lantian" => Ok(Self::Lantian),
+            "ziranma" => Ok(Self::Ziranma),
+            "shouyou2_0" => Ok(Self::Shouyou2),
+            "shouyouplus" => Ok(Self::Shouyouplus),
+            "xiaohe" => Ok(Self::Xiaohe),
+            "jiajia" => Ok(Self::Jiajia),
+            value if crate::helpcode::is_custom_schema(value) => Ok(Self::Custom(value.into())),
+            _ => Err(serde::de::Error::custom("unknown helpcode schema")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HelpcodePreferences {
     #[serde(default = "enabled_by_default")]
@@ -1642,8 +1671,8 @@ impl Preferences {
 
     pub fn active_helpcode(&self) -> HelpcodePreferences {
         match self.scheme {
-            InputScheme::Shuangpin => self.shuangpin_helpcode,
-            InputScheme::Quanpin => self.quanpin_helpcode,
+            InputScheme::Shuangpin => self.shuangpin_helpcode.clone(),
+            InputScheme::Quanpin => self.quanpin_helpcode.clone(),
             _ => HelpcodePreferences {
                 enabled: false,
                 ..HelpcodePreferences::default()

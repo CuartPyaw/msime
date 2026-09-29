@@ -31,7 +31,7 @@ pub fn custom_schema_stem(schema: &str) -> Option<&str> {
         || stem.starts_with('.')
         || stem
             .chars()
-            .any(|character| "/\\:*?\"<>|".contains(character))
+            .any(|character| character.is_control() || "/\\:*?\"<>|".contains(character))
     {
         return None;
     }
