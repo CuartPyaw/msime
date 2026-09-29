@@ -193,7 +193,6 @@ pub extern "C" fn msime_client_punctuation_with_context(
         let session = sessions
             .get(&handle)
             .ok_or_else(|| "unknown session or wrong thread".to_owned())?;
-        let view = session.runtime.view();
         let lock = match session.punctuation_lock_override {
             Some(1) => msime_client_core::preferences::PunctuationLock::Chinese,
             Some(2) => msime_client_core::preferences::PunctuationLock::English,
@@ -203,10 +202,9 @@ pub extern "C" fn msime_client_punctuation_with_context(
         let route = punctuation_route(PunctuationContext {
             character: ascii,
             preceding,
-            host_context_available: !session.english_mode
-                && !view.dedicated_english
-                && view.local_mode == "none"
-                && view.scheme != 3,
+            host_context_available: session
+                .runtime
+                .punctuation_host_context_available(session.english_mode),
             has_composition: !session.runtime.is_idle(),
             chinese_punctuation: session
                 .punctuation_override

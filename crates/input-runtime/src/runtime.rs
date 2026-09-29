@@ -508,6 +508,15 @@ impl<E: InputEngine> Runtime<E> {
             .min(self.page_size)
     }
 
+    /// Whether punctuation may use the Engine's Chinese route for this applied state.
+    /// This mirrors the host-facing mode checks without materializing a [`View`].
+    pub fn punctuation_host_context_available(&self, english_mode: bool) -> bool {
+        !english_mode
+            && !self.cached.dedicated_english
+            && self.cached.local_mode == "none"
+            && self.cached.scheme != 3
+    }
+
     /// Copy the complete candidate generation for an explicitly opened panel.
     ///
     /// The engine holds candidates back behind the initial answer and only releases them when asked
