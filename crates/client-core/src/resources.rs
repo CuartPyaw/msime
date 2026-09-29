@@ -58,7 +58,7 @@ impl ResourceSet {
         {
             return Err(ResourceError::InvalidManifest);
         }
-        let mut names = HashSet::new();
+        let mut names = HashSet::with_capacity(self.artifacts.len());
         for artifact in &self.artifacts {
             // A flat, portable resource layout. Reject aliases, traversal and device names.
             let stem = artifact
@@ -181,11 +181,8 @@ impl ResourceStore {
                 describe(kind)
             )));
         }
-        let expected: HashSet<_> = specification
-            .artifacts
-            .iter()
-            .map(|a| a.name.as_str())
-            .collect();
+        let mut expected = HashSet::with_capacity(specification.artifacts.len());
+        expected.extend(specification.artifacts.iter().map(|a| a.name.as_str()));
         let mut count = 0;
         for entry in fs::read_dir(directory)? {
             let entry = entry?;
@@ -323,11 +320,13 @@ impl VerifiedMarker {
         directory: &Path,
         specification: &ResourceSet,
     ) -> Result<Option<Self>, ResourceError> {
-        let expected: HashSet<_> = specification
-            .artifacts
-            .iter()
-            .map(|artifact| artifact.name.as_str())
-            .collect();
+        let mut expected = HashSet::with_capacity(specification.artifacts.len());
+        expected.extend(
+            specification
+                .artifacts
+                .iter()
+                .map(|artifact| artifact.name.as_str()),
+        );
         let Ok(directory_entries) = fs::read_dir(directory) else {
             return Ok(None);
         };
