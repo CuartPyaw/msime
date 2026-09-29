@@ -400,7 +400,7 @@ fn tree(directory: &Path) -> Vec<(std::path::PathBuf, Vec<String>)> {
                 .unwrap();
             for table in tables {
                 let mut statement = connection
-                    .prepare(&format!("SELECT * FROM \"{table}\" ORDER BY rowid"))
+                    .prepare(&format!("SELECT * FROM \"{table}\""))
                     .unwrap();
                 let columns = statement.column_count();
                 let mut query = statement.query([]).unwrap();
@@ -410,6 +410,8 @@ fn tree(directory: &Path) -> Vec<(std::path::PathBuf, Vec<String>)> {
                     rows.push(format!("{table} {values:?}"));
                 }
             }
+            // Sorted here rather than by rowid: personal learning keeps some tables WITHOUT ROWID, and only the rows a file holds matter, not their order. Each row carries its table's name, so this also keeps the tables apart.
+            rows.sort();
             files.push((path, rows));
         } else {
             let bytes = std::fs::read(&path).unwrap();

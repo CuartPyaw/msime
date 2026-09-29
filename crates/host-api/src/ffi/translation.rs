@@ -232,6 +232,28 @@ pub unsafe extern "C" fn msime_client_parse_niutrans_translation_response(
     })
 }
 
+/// Format one gloss a host produced itself (Apple's on-device model, say) the way provider replies are formatted: whitespace runs collapse to one space, the ends are trimmed, and a gloss that is empty afterwards or carries a control character becomes null. A newline left in would otherwise start a new row and push the next target language's gloss out of place. No I/O.
+/// # Safety
+/// `text` must reference `length` readable bytes for this call.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_format_translation_gloss(
+    text: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if text.is_null() || length > 65536 {
+            return Err("invalid translation gloss buffer".into());
+        }
+        let text = std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, length) })
+            .map_err(|_| "invalid translation gloss text")?;
+        Ok(
+            msime_client_core::translation::format_translation_gloss(text)
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        )
+    })
+}
+
 /// Build a DeepLX-compatible request for a host-owned HTTP transport. No I/O.
 /// # Safety
 /// `request` must reference `length` readable bytes for this call.
@@ -319,6 +341,37 @@ pub unsafe extern "C" fn msime_client_parse_custom_translation_response(
             .filter(|text| !text.is_empty() && text.len() <= 4096);
         Ok(result.map(Value::String).unwrap_or(Value::Null))
     })
+}
+
+/// Whether a DeepLX-compatible reply reports a failure rather than an answer. A failed reply is asked again; only an answer, empty or not, may be negative-cached. An oversized or null buffer is a failure.
+/// # Safety
+/// `body` must reference `length` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_custom_translation_reply_failed(
+    body: *const u8,
+    length: usize,
+) -> bool {
+    if body.is_null() || length > 1048576 {
+        return true;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(body, length) };
+    std::str::from_utf8(bytes)
+        .map(msime_client_core::translation::translation_response_failed)
+        .unwrap_or(true)
+}
+
+/// Whether a NiuTrans reply reports a failure (rate limit, credentials, malformed body) rather than an answer. A failed reply is asked again; only an answer, empty or not, may be negative-cached.
+/// # Safety
+/// `body` must reference `length` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_niutrans_translation_reply_failed(
+    body: *const u8,
+    length: usize,
+) -> bool {
+    if body.is_null() {
+        return true;
+    }
+    niutrans_translation::failed(unsafe { std::slice::from_raw_parts(body, length) })
 }
 
 /// Apply asynchronous candidate translations for an exact candidate generation.
