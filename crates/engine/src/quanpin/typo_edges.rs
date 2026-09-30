@@ -1,6 +1,6 @@
 //! Typo edges for the lattice's typo sentence (quanpin.md §10.5, QD:1056-1182): legal-to-legal syllable swaps, weak positions first, priced by kind and discounted by how often the user accepted that typo.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::cache::FifoCache;
 use crate::dictionary::pinyin::PinyinDatabase;
@@ -102,7 +102,6 @@ fn plan_keys(
         .chain((0..n).filter(|&i| !weak[i]));
 
     let mut planned = Vec::with_capacity(TYPO_KEY_BUDGET);
-    let mut seen = HashSet::with_capacity(TYPO_KEY_BUDGET);
     'positions: for position in positions {
         if planned.len() >= TYPO_KEY_BUDGET {
             break;
@@ -129,7 +128,7 @@ fn plan_keys(
                     let mut span = segments[start..start + length].to_vec();
                     span[position - start] = typo.syllable.clone();
                     let key = join_segments(&span);
-                    if !seen.insert(key.clone()) {
+                    if contains_planned_key(&planned, &key) {
                         continue;
                     }
                     planned.push(PlannedKey {
@@ -146,4 +145,25 @@ fn plan_keys(
         }
     }
     planned
+}
+
+fn contains_planned_key(planned: &[PlannedKey], key: &str) -> bool {
+    planned.iter().any(|entry| entry.key == key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn planned_key_lookup_scans_owned_keys() {
+        let planned = vec![PlannedKey {
+            start: 0,
+            end: 2,
+            key: "ni'hao".to_owned(),
+            penalty: 1.0,
+        }];
+        assert!(contains_planned_key(&planned, "ni'hao"));
+        assert!(!contains_planned_key(&planned, "ni'he"));
+    }
 }
