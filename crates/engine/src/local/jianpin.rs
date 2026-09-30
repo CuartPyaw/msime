@@ -140,12 +140,12 @@ fn read(
 }
 
 fn key_matches_initials(key: &str, initials: &[String]) -> bool {
-    let syllables: Vec<&str> = key.split('\'').collect();
-    syllables.len() == initials.len()
-        && syllables
-            .iter()
-            .zip(initials)
-            .all(|(syllable, initial)| syllable_initial(syllable) == initial)
+    let mut syllables = key.split('\'');
+    initials.iter().all(|initial| {
+        syllables
+            .next()
+            .is_some_and(|syllable| syllable_initial(syllable) == initial)
+    }) && syllables.next().is_none()
 }
 
 fn syllable_initial(syllable: &str) -> &str {
