@@ -228,7 +228,7 @@
      2,
      3
     ],
-    "candidate_count": 6,
+    "candidate_count": 4,
     "candidates": [
      {
       "word": "你",
@@ -249,15 +249,6 @@
       "answers_key": true
      },
      {
-      "word": "你",
-      "pinyin": "ni",
-      "canonical_pinyin": "ni",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 200,
-      "answers_key": true
-     },
-     {
       "word": "泥",
       "pinyin": "ni",
       "canonical_pinyin": "",
@@ -273,15 +264,6 @@
       "source": 3,
       "scheme": "shuangpin",
       "weight": 1,
-      "answers_key": true
-     },
-     {
-      "word": "倪",
-      "pinyin": "ni",
-      "canonical_pinyin": "ni",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 100,
       "answers_key": true
      }
     ]

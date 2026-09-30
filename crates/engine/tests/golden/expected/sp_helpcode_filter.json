@@ -39,7 +39,7 @@
      4,
      5
     ],
-    "candidate_count": 10,
+    "candidate_count": 5,
     "candidates": [
      {
       "word": "拟好",
@@ -49,53 +49,6 @@
       "scheme": "shuangpin",
       "weight": 100,
       "annotation": "(cE)",
-      "answers_key": true
-     },
-     {
-      "word": "你好",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 200,
-      "annotation": "(aE)",
-      "answers_key": true
-     },
-     {
-      "word": "拟好",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 100,
-      "annotation": "(cE)",
-      "answers_key": true
-     },
-     {
-      "word": "𠀀方案𠮷",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 90,
-      "answers_key": true
-     },
-     {
-      "word": "C语言 2",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 80,
-      "answers_key": true
-     },
-     {
-      "word": "GitHub",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 70,
       "answers_key": true
      },
      {
@@ -264,7 +217,7 @@
      4,
      5
     ],
-    "candidate_count": 10,
+    "candidate_count": 5,
     "candidates": [
      {
       "word": "你好",
@@ -274,53 +227,6 @@
       "scheme": "shuangpin",
       "weight": 200,
       "annotation": "(aE)",
-      "answers_key": true
-     },
-     {
-      "word": "你好",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 200,
-      "annotation": "(aE)",
-      "answers_key": true
-     },
-     {
-      "word": "拟好",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 100,
-      "annotation": "(cE)",
-      "answers_key": true
-     },
-     {
-      "word": "𠀀方案𠮷",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 90,
-      "answers_key": true
-     },
-     {
-      "word": "C语言 2",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 80,
-      "answers_key": true
-     },
-     {
-      "word": "GitHub",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 70,
       "answers_key": true
      },
      {
@@ -515,7 +421,7 @@
      4,
      5
     ],
-    "candidate_count": 10,
+    "candidate_count": 5,
     "candidates": [
      {
       "word": "你好",
@@ -525,53 +431,6 @@
       "scheme": "shuangpin",
       "weight": 200,
       "annotation": "(aE)",
-      "answers_key": true
-     },
-     {
-      "word": "你好",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 200,
-      "annotation": "(aE)",
-      "answers_key": true
-     },
-     {
-      "word": "拟好",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 100,
-      "annotation": "(cE)",
-      "answers_key": true
-     },
-     {
-      "word": "𠀀方案𠮷",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 90,
-      "answers_key": true
-     },
-     {
-      "word": "C语言 2",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 80,
-      "answers_key": true
-     },
-     {
-      "word": "GitHub",
-      "pinyin": "nihc",
-      "canonical_pinyin": "ni'hao",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 70,
       "answers_key": true
      },
      {

@@ -86,6 +86,20 @@ fn index_of(candidates: &[WordItem], word: &str) -> usize {
         .unwrap_or_else(|| panic!("{word} missing from {:?}", words(candidates)))
 }
 
+/// A manual delimiter leaves empty pieces in the whole-input segmentation, so several of its shorter prefix groups are the same `ni` group; the reference appended each group whole and listed 你 and 拟 once per group. A word keeps its first, longest-prefix seat (decision 2026-09-30).
+#[test]
+fn prefix_groups_list_a_word_once() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_n VALUES('ni', 'n', '你', 10000),('ni', 'n', '拟', 9000);",
+    );
+    let microsoft = profile(ShuangpinProfileKind::Microsoft);
+    let mut dictionary = super::dictionary::ShuangpinDictionary::new(microsoft, &fixture.paths);
+    let segmentation = super::utils::pinyin_segmentation("ni'nni", microsoft);
+    assert_eq!(segmentation, "ni'''nn'i");
+    let rows = dictionary.generate_series("ni'nni", &segmentation, "");
+    assert_eq!(words(&rows), ["你", "拟"]);
+}
+
 const TRAILING_HELPCODE: &str = "BEGIN;CREATE TABLE tbl_1_s(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_s VALUES('shi', 's', '使', 200);INSERT INTO tbl_1_s VALUES('shi', 's', '是', 100);COMMIT;";
 
 /// Xiaohe reads `ui` as shi, so `uiu` is a complete syllable plus the single helpcode `u`, while `ui'u` is the same syllable followed by a user-delimited segment (test_shuangpin.cpp:129-158, golden sp_xiaohe_trailing_helpcode).
@@ -102,7 +116,8 @@ fn manual_delimiter_disables_single_helpcode() {
 
     let undelimited = query("uiu", true);
     assert!(index_of(&undelimited, "是") < index_of(&undelimited, "使"));
-    assert_eq!(words(&undelimited), ["是", "使", "是", "使"]);
+    // The reference listed the whole-input answer after the reordered rows again, [是, 使, 是, 使]; each word keeps its first seat (decision 2026-09-30).
+    assert_eq!(words(&undelimited), ["是", "使"]);
     assert!(undelimited.iter().all(|item| item.pinyin == "ui"));
 
     let delimited = query("ui'u", true);
@@ -118,7 +133,7 @@ fn helpcode_filter_keymap() -> HelpcodeKeymap {
     keymap(&[("你", "ab"), ("拟", "cd"), ("好", "ef")])
 }
 
-/// Golden sp_helpcode_filter (test_input_session.cpp:1009-1067): matched rows, then the full input read as pinyin, then the rest.
+/// Golden sp_helpcode_filter (test_input_session.cpp:1009-1067): matched rows, then the full input read as pinyin, then the rest, each word once (decision 2026-09-30; the reference listed a word again in every later list that answered it).
 #[test]
 fn single_and_double_helpcodes_filter_the_base() {
     let fixture = Fixture::new(HELPCODE_FILTER);
@@ -137,35 +152,13 @@ fn single_and_double_helpcodes_filter_the_base() {
     let lowercase = engine.query(&request("nihcc", true), Some(&codes));
     assert_eq!(
         words(&lowercase),
-        [
-            "拟好",
-            "你好",
-            "拟好",
-            "𠀀方案𠮷",
-            "C语言 2",
-            "GitHub",
-            "你好",
-            "𠀀方案𠮷",
-            "C语言 2",
-            "GitHub"
-        ]
+        ["拟好", "你好", "𠀀方案𠮷", "C语言 2", "GitHub"]
     );
 
     let uppercase = engine.query(&request("nihcA", true), Some(&codes));
     assert_eq!(
         words(&uppercase),
-        [
-            "你好",
-            "你好",
-            "拟好",
-            "𠀀方案𠮷",
-            "C语言 2",
-            "GitHub",
-            "拟好",
-            "𠀀方案𠮷",
-            "C语言 2",
-            "GitHub"
-        ]
+        ["你好", "拟好", "𠀀方案𠮷", "C语言 2", "GitHub"]
     );
 
     assert!(engine

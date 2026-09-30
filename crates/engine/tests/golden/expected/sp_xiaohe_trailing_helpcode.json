@@ -38,28 +38,8 @@
      2,
      3
     ],
-    "candidate_count": 4,
+    "candidate_count": 2,
     "candidates": [
-     {
-      "word": "是",
-      "pinyin": "ui",
-      "canonical_pinyin": "shi",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 100,
-      "annotation": "(uC)",
-      "answers_key": true
-     },
-     {
-      "word": "使",
-      "pinyin": "ui",
-      "canonical_pinyin": "shi",
-      "source": 0,
-      "scheme": "shuangpin",
-      "weight": 200,
-      "annotation": "(aB)",
-      "answers_key": true
-     },
      {
       "word": "是",
       "pinyin": "ui",

@@ -213,13 +213,17 @@ impl ShuangpinDictionary {
         }
 
         let mut candidates = self.generate(pure, segmentation, rows_key);
-        // Every shorter prefix group follows, longest first; phrase creation picks from them (SD:215-231).
+        // Every shorter prefix group follows, longest first; phrase creation picks from them (SD:215-231). The reference appended each group whole, so a word several groups answer (a manual delimiter leaves empty pieces, and ni'''nn'i holds the ni group three times) was listed once per group; a word already listed keeps its first, longest-prefix seat instead.
+        let mut listed: HashSet<String> = candidates.iter().map(|item| item.word.clone()).collect();
         let mut prefix = segmentation;
         while let Some(cut) = prefix.rfind('\'') {
             prefix = &prefix[..cut];
             let prefix_pure = remove_manual_delimiters(prefix);
             let rows = self.generate(&prefix_pure, prefix, "");
-            candidates.extend(rows);
+            candidates.extend(
+                rows.into_iter()
+                    .filter(|item| listed.insert(item.word.clone())),
+            );
         }
 
         let segments = split_segments(&convert_seg_shuangpin_to_seg_complete_pinyin(
@@ -311,8 +315,15 @@ impl ShuangpinDictionary {
         };
         // The whole raw input, the last letter read as pinyin instead of a helpcode. The reference segments the raw input as one chunk, `'` included; the conversion drops the empty pieces that leaves (SD:370-372).
         let original_segmentation = pinyin_segmentation(raw, self.profile);
-        result.extend(self.generate_series(raw, &original_segmentation, ""));
-        result.extend(unmatched);
+        let whole = self.generate_series(raw, &original_segmentation, "");
+        // The reference appended the whole-input answer and then the unmatched rows whole, so a word already among the matched rows, or in both lists, was listed again; a word already listed keeps its first seat.
+        let mut listed: HashSet<String> = result.iter().map(|item| item.word.clone()).collect();
+        result.extend(
+            whole
+                .into_iter()
+                .chain(unmatched)
+                .filter(|item| listed.insert(item.word.clone())),
+        );
         result
     }
 

@@ -412,6 +412,22 @@ fn caret_prefix_follows_the_personal_context_order_and_its_pins() {
     );
 }
 
+// ---- shuangpin candidate assembly ----
+
+/// Microsoft `ni'nni` (golden ri_microsoft_semicolon_editing step 18): every shorter prefix group answers 你 and 拟, and the trailing `i` is also a single helpcode whose answer appends the whole-input series again, so the reference listed each word four times. A word keeps its first seat (decision 2026-09-30).
+#[test]
+fn shuangpin_lists_a_word_once() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_1_n VALUES('ni','n','你',10000),('ni','n','拟',9000);",
+    );
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.shuangpin_profile = ShuangpinProfileKind::Microsoft;
+    });
+    type_text(&mut session, "ni'nni");
+    assert_eq!(words(&session), ["你", "拟"]);
+}
+
 // ---- wubi mixed routing (overlays.md §3.3) ----
 
 fn wubi_mixed(fixture: &Fixture) -> Session {
