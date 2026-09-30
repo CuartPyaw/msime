@@ -543,7 +543,7 @@ fn rank_candidates(candidates: &mut Vec<WordItem>) {
             .then_with(|| a.fuzzy.cmp(&b.fuzzy))
             .then_with(|| b.weight.cmp(&a.weight))
     });
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::with_capacity(candidates.len());
     candidates.retain(|item| seen.insert(item.word.clone()));
     candidates.truncate(CANDIDATE_LIMIT);
 }
