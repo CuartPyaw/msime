@@ -331,7 +331,7 @@ impl NineKeySession {
             let mut full = self.locked.clone();
             full.extend(path);
             let key = full.join("'");
-            if key.is_empty() || !queried.insert(key.clone()) {
+            if key.is_empty() || !is_unseen_query_key(&queried, &key) {
                 continue;
             }
             for mut candidate in dictionary.query(&key, &key, 0, self.fuzzy) {
@@ -362,6 +362,7 @@ impl NineKeySession {
                 candidate.canonical_pinyin = canonical;
                 candidates.push(candidate);
             }
+            queried.insert(key);
         }
         rank_candidates(&mut candidates);
 
@@ -530,6 +531,10 @@ fn agrees_with_locked(matched: &str, locked_key: &str) -> bool {
 
 fn has_candidate_word(candidates: &[WordItem], word: &str) -> bool {
     candidates.iter().any(|candidate| candidate.word == word)
+}
+
+fn is_unseen_query_key(queried: &HashSet<String>, key: &str) -> bool {
+    !queried.contains(key)
 }
 
 /// More digits covered first. Synthesised rows (whole-sentence Generated, Fallback) score on a different scale from dictionary weights, so within one coverage bucket dictionary rows lead; then exact before fuzzy, then weight. Dedup by word, capped (NK:283-307).
@@ -805,6 +810,14 @@ mod tests {
         let candidates = vec![item("old", "653", 1, CandidateSource::EnglishDictionary)];
         assert!(has_candidate_word(&candidates, "old"));
         assert!(!has_candidate_word(&candidates, "older"));
+    }
+
+    #[test]
+    fn query_key_lookup_borrows_before_inserting() {
+        let mut queried = HashSet::new();
+        assert!(is_unseen_query_key(&queried, "ni'hao"));
+        queried.insert("ni'hao".to_owned());
+        assert!(!is_unseen_query_key(&queried, "ni'hao"));
     }
 
     #[test]
