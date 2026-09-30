@@ -107,7 +107,7 @@ fn pipewire_devices(document: &Value) -> Vec<CaptureDevice> {
 }
 
 pub fn list() -> Vec<CaptureDevice> {
-    let mut devices = Vec::new();
+    let mut devices = Vec::with_capacity(MAX_CAPTURE_DEVICES);
     if let Some(Value::Array(sources)) = output("pactl", &["--format=json", "list", "sources"])
         .and_then(|text| serde_json::from_str(&text).ok())
     {
