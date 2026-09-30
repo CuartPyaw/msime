@@ -14,9 +14,14 @@ pub(crate) const LOCAL_MODEL_PROGRESS_EVENT: &str = "voice-local-model-progress"
 /// Catalog ids are short ASCII slugs; anything much longer is not one and is refused before it reaches the map below.
 const MAX_MODEL_ID_BYTES: usize = 128;
 
-/// The cancellation flags of the installs this process is running, by model id. One install per id at a time.
+enum LocalModelOperation {
+    Install(Arc<AtomicBool>),
+    Remove,
+}
+
+/// The operations this process is running, by model id. One install or removal per id at a time.
 #[derive(Default)]
-pub(crate) struct LocalModelInstalls(Mutex<HashMap<String, Arc<AtomicBool>>>);
+pub(crate) struct LocalModelInstalls(Mutex<HashMap<String, LocalModelOperation>>);
 
 impl LocalModelInstalls {
     /// Register an install of `id`, or `None` when one is already running.
@@ -26,8 +31,23 @@ impl LocalModelInstalls {
             return None;
         }
         let cancel = Arc::new(AtomicBool::new(false));
-        installs.insert(id.to_owned(), Arc::clone(&cancel));
+        installs.insert(
+            id.to_owned(),
+            LocalModelOperation::Install(Arc::clone(&cancel)),
+        );
         Some(cancel)
+    }
+
+    pub(crate) fn begin_remove(&self, id: &str) -> bool {
+        let mut installs = match self.0.lock() {
+            Ok(installs) => installs,
+            Err(_) => return false,
+        };
+        if installs.contains_key(id) {
+            return false;
+        }
+        installs.insert(id.to_owned(), LocalModelOperation::Remove);
+        true
     }
 
     pub(crate) fn finish(&self, id: &str) {
@@ -42,9 +62,13 @@ impl LocalModelInstalls {
             .lock()
             .ok()
             .and_then(|installs| {
-                installs
-                    .get(id)
-                    .map(|flag| flag.store(true, Ordering::Release))
+                installs.get(id).and_then(|operation| match operation {
+                    LocalModelOperation::Install(flag) => {
+                        flag.store(true, Ordering::Release);
+                        Some(())
+                    }
+                    LocalModelOperation::Remove => None,
+                })
             })
             .is_some()
     }
@@ -227,18 +251,25 @@ pub(crate) async fn voice_local_model_remove<R: tauri::Runtime>(
     id: String,
 ) -> Result<(), HostActionError> {
     valid_model_id(&id)?;
-    if installs.running(&id) {
+    let root = app_model_root(&app)?;
+    if !installs.begin_remove(&id) {
         return Err(HostActionError { code: "busy" });
     }
-    let root = app_model_root(&app)?;
-    tauri::async_runtime::spawn_blocking(move || local_models::remove(&root, &id))
-        .await
-        .map_err(|_| HostActionError {
-            code: "unavailable",
-        })?
-        .map_err(|error| HostActionError {
-            code: local_model_error_code(&error),
-        })
+    let worker_id = id.clone();
+    let result =
+        match tauri::async_runtime::spawn_blocking(move || local_models::remove(&root, &worker_id))
+            .await
+        {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(HostActionError {
+                code: local_model_error_code(&error),
+            }),
+            Err(_) => Err(HostActionError {
+                code: "unavailable",
+            }),
+        };
+    installs.finish(&id);
+    result
 }
 
 /// Rows read per dictionary page, the most one list request accepts.

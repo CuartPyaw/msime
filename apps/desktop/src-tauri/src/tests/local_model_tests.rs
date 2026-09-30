@@ -104,6 +104,18 @@ fn installs_run_once_per_model_and_cancel_only_their_own_flag() {
 }
 
 #[test]
+fn removing_reserves_a_model_slot_against_a_new_install() {
+    let installs = LocalModelInstalls::default();
+    assert!(installs.begin_remove("x-asr-zh-en-streaming"));
+    assert!(installs.begin("x-asr-zh-en-streaming").is_none());
+    assert!(installs.running("x-asr-zh-en-streaming"));
+
+    installs.finish("x-asr-zh-en-streaming");
+    assert!(!installs.running("x-asr-zh-en-streaming"));
+    assert!(installs.begin("x-asr-zh-en-streaming").is_some());
+}
+
+#[test]
 fn install_failures_map_to_the_codes_the_settings_page_knows() {
     for (error, code) in [
         (LocalModelError::Cancelled, "local_model_cancelled"),
