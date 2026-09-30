@@ -166,7 +166,10 @@ pub fn dictionary_table_entries(
     let mut statement = connection
         .prepare(&sql)
         .map_err(|_| failed(DICTIONARY_NOT_READ))?;
-    let mut page = DictionaryTablePage::default();
+    let mut page = DictionaryTablePage {
+        entries: Vec::with_capacity(limit),
+        has_more: false,
+    };
     let read = (|| -> rusqlite::Result<()> {
         // Every statement binds all six numbers even when a clause does not use one: SQLite counts parameters up to the highest number.
         let mut cursor = statement.query(params![
