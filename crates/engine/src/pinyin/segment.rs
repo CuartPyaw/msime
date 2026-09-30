@@ -56,7 +56,7 @@ pub fn cut_one_piece_min_segments(pinyin: &str, intact_only: bool) -> Vec<String
         }
         best[index] = chosen;
     }
-    let mut segments = Vec::new();
+    let mut segments = Vec::with_capacity(length);
     let mut index = 0;
     while index < length {
         let Some((end, _)) = best[index] else {
@@ -76,7 +76,7 @@ pub fn cut_pinyin_greedy(pinyin: &str, intact_only: bool) -> Vec<String> {
     if !pinyin.contains('\'') {
         return cut_one_piece_min_segments(pinyin, intact_only);
     }
-    let mut merged = Vec::new();
+    let mut merged = Vec::with_capacity(pinyin.len());
     for part in pinyin.split('\'') {
         let cut = cut_one_piece_min_segments(part, intact_only);
         if !cut.is_empty() {
