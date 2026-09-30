@@ -136,7 +136,7 @@ impl PinyinDatabase {
         let prefix = format!("{}'", join_segments(segments));
         let upper_bound = key_prefix_upper_bound(&prefix);
         let initial = segments[0].as_bytes()[0];
-        let mut rows = Vec::new();
+        let mut rows = Vec::with_capacity(extra_syllables.saturating_mul(limit));
         for extra in 1..=extra_syllables {
             let Some(table) = quanpin_table(segments.len() + extra, initial) else {
                 continue;
