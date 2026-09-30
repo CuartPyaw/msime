@@ -86,9 +86,29 @@ fn neighbors(letter: u8) -> &'static [u8] {
     }
 }
 
+fn insertion_letters_capacity(syllable: &[u8], position: usize) -> usize {
+    let mut capacity = 0;
+    if position > 0 {
+        capacity += 1 + neighbors(syllable[position - 1]).len();
+    }
+    if position < syllable.len() {
+        capacity += 1 + neighbors(syllable[position]).len();
+    }
+    capacity
+}
+
 /// Every one-edit variant of `syllable` a rule produces, duplicates included (GEN:176-224).
 fn rule_variants(syllable: &[u8], correction_type: u32) -> Vec<Vec<u8>> {
-    let mut variants = Vec::new();
+    let capacity = match correction_type {
+        autocorrect_type::TRANSPOSITION => syllable.len().saturating_sub(1),
+        autocorrect_type::NEIGHBOR => syllable.iter().map(|&letter| neighbors(letter).len()).sum(),
+        autocorrect_type::DELETION => syllable.len(),
+        autocorrect_type::INSERTION => (0..=syllable.len())
+            .map(|position| insertion_letters_capacity(syllable, position))
+            .sum(),
+        _ => 0,
+    };
+    let mut variants = Vec::with_capacity(capacity);
     match correction_type {
         autocorrect_type::TRANSPOSITION => {
             for i in 0..syllable.len() - 1 {
@@ -116,7 +136,8 @@ fn rule_variants(syllable: &[u8], correction_type: u32) -> Vec<Vec<u8>> {
         autocorrect_type::INSERTION => {
             // A realistic extra key repeats an adjacent letter or is one of its neighbours; unconstrained insertion would add some 60k mostly implausible keys.
             for position in 0..=syllable.len() {
-                let mut letters = Vec::new();
+                let mut letters =
+                    Vec::with_capacity(insertion_letters_capacity(syllable, position));
                 if position > 0 {
                     let left = syllable[position - 1];
                     letters.push(left);
