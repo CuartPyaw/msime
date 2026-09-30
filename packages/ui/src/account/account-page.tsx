@@ -1044,8 +1044,10 @@ function AccountDetailsPage({
 
   const resendSeconds = Math.max(0, Math.ceil((resendAt - now) / 1000));
   const expired = Boolean(challenge) && expiresAt <= now;
+  // Count only providers this host can render; the backend may enable Apple for hosts without a native Apple client.
+  const appleAvailable = providers.apple === true && Boolean(client.appleLogin);
   const enabledProviders =
-    Number(providers.email) + Number(providers.phone) + Number(providers.apple === true);
+    Number(providers.email) + Number(providers.phone) + Number(appleAvailable);
 
   const signInWithApple = () =>
     void perform(async () => {
@@ -1403,7 +1405,7 @@ function AccountDetailsPage({
           {!channel ? (
             <>
               <div className={account.actionRow}>
-                {providers.apple && client.appleLogin && (
+                {appleAvailable && (
                   <button
                     type="button"
                     className={account.primary}
