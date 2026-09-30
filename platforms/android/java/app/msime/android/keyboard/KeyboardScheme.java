@@ -18,7 +18,8 @@ public enum KeyboardScheme {
     JAPANESE_NINE_KEY("japanese_nine_key", "japanese", null, "nine_key", "日语 9 键", "あ", "9"),
     JAPANESE("japanese", "japanese", null, "twenty_six_key", "日语 26 键", "あ", "26"),
     HANDWRITING("handwriting", "quanpin", null, "handwriting", "手写", "写", "手"),
-    THOUGHTFUL_REPLY("thoughtful_reply", "quanpin", null, "twenty_six_key", "高情商回复", "聊", "AI");
+    THOUGHTFUL_REPLY("thoughtful_reply", "quanpin", null, "twenty_six_key", "高情商回复", "聊", "AI"),
+    KOREAN("korean", "korean", null, "twenty_six_key", "韩语 26 键", "한", "26");
 
     /** Complete preference values needed for one compare-and-swap update. */
     public record PreferenceMapping(
@@ -121,7 +122,8 @@ public enum KeyboardScheme {
         if (shuangpinProfile != null) profile = shuangpinProfile;
         String lastChinese = isChineseScheme(currentLastChineseScheme)
             ? currentLastChineseScheme : "quanpin";
-        if (!"japanese".equals(engineScheme)) lastChinese = engineScheme;
+        // Japanese and Korean keep the Chinese scheme to return to; neither is one.
+        if (isChineseScheme(engineScheme)) lastChinese = engineScheme;
         return new PreferenceMapping(engineScheme, lastChinese, profile, touchKeyboardLayout);
     }
 

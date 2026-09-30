@@ -14,11 +14,14 @@ public final class QuickPunctuationPolicySmoke {
         var japanese = QuickPunctuationPolicy.entries(false, 3, "none");
         check(japanese.get(0).face().equals("、") && japanese.get(4).input() == '[',
             "Japanese quick punctuation uses Japanese faces and ASCII engine inputs");
+        var korean = QuickPunctuationPolicy.entries(false, 4, "none");
+        check(korean.get(0).face().equals(",") && korean.get(1).face().equals("."),
+            "Korean quick punctuation uses half-width ASCII faces");
         var ascii = QuickPunctuationPolicy.entries(true, 0, "none");
         check(ascii.get(0).face().equals(",") && ascii.get(0).input() == ',',
             "English mode uses ASCII faces");
         check(QuickPunctuationPolicy.entries(false, 0, "emoji").get(0).face().equals(","),
             "Local mode uses ASCII faces");
-        System.out.println("Android quick punctuation: Chinese, Japanese and ASCII modes passed");
+        System.out.println("Android quick punctuation: Chinese, Japanese, Korean and ASCII modes passed");
     }
 }

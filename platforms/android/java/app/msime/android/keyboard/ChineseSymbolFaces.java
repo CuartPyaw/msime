@@ -15,7 +15,7 @@ public final class ChineseSymbolFaces {
     private ChineseSymbolFaces() {}
 
     /**
-     * Chinese punctuation is not used by English, Japanese, or local utility modes.
+     * Chinese punctuation is not used by English, Japanese, Korean, or local utility modes. Korean always writes half-width ASCII punctuation, whatever the Chinese punctuation switch says.
      *
      * <p>`chinesePunctuation` is the user's own switch, which the runtime holds and the toolbar
      * card and the chord move. It gates the faces as well as the output: a key that shows 。 and
@@ -23,7 +23,8 @@ public final class ChineseSymbolFaces {
      */
     public static boolean shouldUseChineseFaces(boolean dedicatedEnglish, int scheme,
                                                 String localMode, boolean chinesePunctuation) {
-        return chinesePunctuation && !dedicatedEnglish && scheme != 3 && "none".equals(localMode);
+        return chinesePunctuation && !dedicatedEnglish && scheme != 3
+            && scheme != KoreanInputPolicy.KOREAN_SCHEME && "none".equals(localMode);
     }
 
     /** Returns the key face for the active language; unmapped symbols retain their own face. */

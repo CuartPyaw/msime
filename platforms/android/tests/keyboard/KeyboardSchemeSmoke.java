@@ -19,13 +19,14 @@ public final class KeyboardSchemeSmoke {
 
     public static void main(String[] args) {
         check(Arrays.stream(KeyboardScheme.values()).map(KeyboardScheme::title).toList().equals(List.of(
-            "全拼 26 键", "全拼 9 键", "小鹤双拼", "自然码双拼", "微软双拼", "首道双拼", "86 五笔", "日语 9 键", "日语 26 键", "手写", "高情商回复")));
+            "全拼 26 键", "全拼 9 键", "小鹤双拼", "自然码双拼", "微软双拼", "首道双拼", "86 五笔", "日语 9 键", "日语 26 键", "手写", "高情商回复", "韩语 26 键")));
         check(Arrays.stream(KeyboardScheme.values()).map(KeyboardScheme::preferenceId).toList().equals(List.of(
             "quanpin", "nine_key", "xiaohe", "ziranma", "microsoft", "shoudao", "wubi",
-            "japanese_nine_key", "japanese", "handwriting", "thoughtful_reply")));
+            "japanese_nine_key", "japanese", "handwriting", "thoughtful_reply", "korean")));
         check(Arrays.stream(KeyboardScheme.values()).map(value -> value.glyph() + value.badge()).toList().equals(
-            List.of("拼26", "拼9", "鹤双", "自双", "微双", "S双", "五86", "あ9", "あ26", "写手", "聊AI")));
+            List.of("拼26", "拼9", "鹤双", "自双", "微双", "S双", "五86", "あ9", "あ26", "写手", "聊AI", "한26")));
         check(KeyboardScheme.fromPreferenceId("japanese_nine_key") == KeyboardScheme.JAPANESE_NINE_KEY);
+        check(KeyboardScheme.fromPreferenceId("korean") == KeyboardScheme.KOREAN);
         check(KeyboardScheme.fromPreferenceId("future") == null);
         List<KeyboardScheme> visible = KeyboardScheme.enabledFromPreferenceIds(List.of(
             "thoughtful_reply", "future", "nine_key", "nine_key", "quanpin"));
@@ -48,6 +49,9 @@ public final class KeyboardSchemeSmoke {
         check(KeyboardScheme.fromPreferences("quanpin", "xiaohe", "handwriting") == KeyboardScheme.HANDWRITING);
         check(KeyboardScheme.fromPreferences("quanpin", "xiaohe", "nine_key") == KeyboardScheme.QUANPIN_NINE_KEY);
         check(KeyboardScheme.fromPreferences("japanese", "xiaohe", "nine_key") == KeyboardScheme.JAPANESE_NINE_KEY);
+        check(KeyboardScheme.fromPreferences("korean", "xiaohe", "twenty_six_key") == KeyboardScheme.KOREAN);
+        // Korean has one layout; a stale nine-key value must not fall back to another scheme.
+        check(KeyboardScheme.fromPreferences("korean", "xiaohe", "nine_key") == KeyboardScheme.KOREAN);
         check(KeyboardScheme.fromPreferences("shuangpin", "microsoft", "nine_key") == KeyboardScheme.MICROSOFT);
         check(KeyboardScheme.fromPreferences("shuangpin", "unknown", "twenty_six_key") == KeyboardScheme.XIAOHE);
         check(KeyboardScheme.fromPreferences("future", "xiaohe", "nine_key") == KeyboardScheme.QUANPIN);
@@ -58,6 +62,11 @@ public final class KeyboardSchemeSmoke {
         mapping(KeyboardScheme.WUBI, "shuangpin", "ziranma", "wubi", "wubi", "ziranma");
         mapping(KeyboardScheme.JAPANESE, "wubi", "shoudao", "japanese", "wubi", "shoudao");
         mapping(KeyboardScheme.JAPANESE_NINE_KEY, "wubi", "shoudao", "japanese", "wubi", "shoudao");
+        // Korean keeps the Chinese scheme to return to, as Japanese does, and is never one itself.
+        mapping(KeyboardScheme.KOREAN, "wubi", "shoudao", "korean", "wubi", "shoudao");
+        mapping(KeyboardScheme.KOREAN, "japanese", "xiaohe", "korean", "quanpin", "xiaohe");
+        mapping(KeyboardScheme.KOREAN, "korean", "xiaohe", "korean", "quanpin", "xiaohe");
+        mapping(KeyboardScheme.JAPANESE, "korean", "xiaohe", "japanese", "quanpin", "xiaohe");
         mapping(KeyboardScheme.HANDWRITING, "wubi", "microsoft", "quanpin", "quanpin", "microsoft");
         mapping(KeyboardScheme.THOUGHTFUL_REPLY, "wubi", "microsoft", "quanpin", "quanpin", "microsoft");
         check(KeyboardScheme.fromHostSelection("THOUGHTFUL_REPLY", true, KeyboardScheme.QUANPIN)
@@ -66,7 +75,9 @@ public final class KeyboardSchemeSmoke {
             == KeyboardScheme.QUANPIN);
         check(KeyboardScheme.fromHostSelection("THOUGHTFUL_REPLY", true, KeyboardScheme.WUBI)
             == KeyboardScheme.WUBI);
+        check(KeyboardScheme.enabledFromPreferenceIds(List.of("korean", "quanpin"))
+            .equals(List.of(KeyboardScheme.QUANPIN, KeyboardScheme.KOREAN)));
         mapping(KeyboardScheme.JAPANESE, "invalid", "invalid", "japanese", "quanpin", "xiaohe");
-        System.out.println("Android keyboard schemes: eleven labels, glyphs, host fallback and shared preference mappings passed");
+        System.out.println("Android keyboard schemes: twelve labels, glyphs, host fallback and shared preference mappings passed");
     }
 }

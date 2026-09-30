@@ -57,7 +57,8 @@ public final class KeyboardActionRow {
      * question is not answered by the touch layout alone.
      */
     public static boolean usesLetterRows(int touchLayout, boolean symbols) {
-        if (touchLayout == KeyboardLayout.STANDARD_TOUCH_LAYOUT) return true;
+        if (touchLayout == KeyboardLayout.STANDARD_TOUCH_LAYOUT
+                || touchLayout == KeyboardLayout.KOREAN_LAYOUT) return true;
         return touchLayout == KeyboardLayout.HANDWRITING_LAYOUT && symbols;
     }
 
@@ -77,6 +78,7 @@ public final class KeyboardActionRow {
     /** The face the layer key prints for the surface it switches. */
     public static String layerTitle(int touchLayout, boolean symbols) {
         if (!symbols) return "123";
+        if (touchLayout == KeyboardLayout.KOREAN_LAYOUT) return "한";
         return touchLayout == KeyboardLayout.QUANPIN_NINE_KEY_LAYOUT ? "九键" : "ABC";
     }
 

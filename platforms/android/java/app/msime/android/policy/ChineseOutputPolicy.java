@@ -9,8 +9,10 @@ public final class ChineseOutputPolicy {
 
     private ChineseOutputPolicy() {}
 
+    /** Japanese (3) and Korean (4) text is not Chinese, so it is never converted. */
     public static boolean applies(boolean dedicatedEnglish, int scheme, String localMode) {
-        return !dedicatedEnglish && scheme != 3 && !"temporary_japanese".equals(localMode);
+        return !dedicatedEnglish && scheme != 3 && scheme != KoreanInputPolicy.KOREAN_SCHEME
+            && !"temporary_japanese".equals(localMode);
     }
 
     public static String output(String text, boolean traditional, boolean applies,

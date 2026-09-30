@@ -187,6 +187,7 @@ public final class TypingStatisticsModel {
         List<Slice> slices = new ArrayList<>();
         slices.add(new Slice("chinese", "中文模式", chinese));
         slices.add(new Slice("japanese", "日语模式", values.getOrDefault("japanese", 0L)));
+        slices.add(new Slice("korean", "韩语模式", values.getOrDefault("korean", 0L)));
         slices.add(new Slice("english", "英文模式", values.getOrDefault("english", 0L)));
         slices.add(new Slice("handwriting", "手写输入", values.getOrDefault("handwriting", 0L)));
         slices.add(new Slice("local", "本地输入", values.getOrDefault("local", 0L)));
@@ -255,6 +256,7 @@ public final class TypingStatisticsModel {
         titles.put("shoudao", "首道双拼");
         titles.put("wubi", "86 五笔");
         titles.put("japanese", "日语");
+        titles.put("korean", "韩语");
         titles.put("handwriting", "手写");
         titles.put("english", "英文键盘");
         titles.put("local", "本地输入");

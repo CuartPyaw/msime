@@ -17,8 +17,12 @@ public final class KeyboardActionRowSmoke {
             "the nine-key sidebar already carries punctuation");
         check(slots(KeyboardLayout.HANDWRITING_LAYOUT, true).contains(Slot.PUNCTUATION),
             "handwriting keeps the quick punctuation key");
+        check(slots(KeyboardLayout.KOREAN_LAYOUT, true).equals(
+                slots(KeyboardLayout.STANDARD_TOUCH_LAYOUT, true)),
+            "the Korean keycaps sit over the standard rows and keep the standard action row");
         for (int layout : new int[] {KeyboardLayout.STANDARD_TOUCH_LAYOUT,
-                KeyboardLayout.QUANPIN_NINE_KEY_LAYOUT, KeyboardLayout.HANDWRITING_LAYOUT}) {
+                KeyboardLayout.QUANPIN_NINE_KEY_LAYOUT, KeyboardLayout.HANDWRITING_LAYOUT,
+                KeyboardLayout.KOREAN_LAYOUT}) {
             List<Slot> slots = slots(layout, true);
             check(slots.contains(Slot.SPACE) && slots.contains(Slot.RETURN)
                 && slots.contains(Slot.LANGUAGE), "every action row commits, spaces and switches");
@@ -50,6 +54,11 @@ public final class KeyboardActionRowSmoke {
             "the digit page has no case to shift");
         check(!KeyboardActionRow.rowsCarryCase(KeyboardLayout.QUANPIN_NINE_KEY_LAYOUT, false),
             "九键切数字仍然是九键，没有大小写可切");
+        check(KeyboardActionRow.rowsCarryCase(KeyboardLayout.KOREAN_LAYOUT, false)
+                && KeyboardActionRow.rowsCarryDelete(KeyboardLayout.KOREAN_LAYOUT, false)
+                && KeyboardActionRow.rowsCarryDelete(KeyboardLayout.KOREAN_LAYOUT, true)
+                && !KeyboardActionRow.rowsCarryCase(KeyboardLayout.KOREAN_LAYOUT, true),
+            "the Korean rows carry Shift for the double consonants and delete, like the standard rows");
         check(KeyboardActionRow.letterRowEdgeWeight(false)
             > KeyboardActionRow.letterRowEdgeWeight(true),
             "the ten-key symbol row leaves its edges less room than the seven-key letter row");
@@ -60,6 +69,9 @@ public final class KeyboardActionRowSmoke {
             "the digit page returns to 26 keys");
         check("九键".equals(KeyboardActionRow.layerTitle(KeyboardLayout.QUANPIN_NINE_KEY_LAYOUT, true)),
             "the digit page returns to the grid the user picked");
+        check("123".equals(KeyboardActionRow.layerTitle(KeyboardLayout.KOREAN_LAYOUT, false))
+                && "한".equals(KeyboardActionRow.layerTitle(KeyboardLayout.KOREAN_LAYOUT, true)),
+            "the Korean digit page returns to the Hangul keycaps");
         check("切换到数字和符号".equals(KeyboardActionRow.layerDescription(false))
             && "切换到字母键盘".equals(KeyboardActionRow.layerDescription(true)),
             "layer key descriptions");

@@ -8,6 +8,7 @@ public final class ChineseOutputPolicySmoke {
         check(ChineseOutputPolicy.applies(false, 2, "unicode"));
         check(!ChineseOutputPolicy.applies(true, 0, "none"));
         check(!ChineseOutputPolicy.applies(false, 3, "none"));
+        check(!ChineseOutputPolicy.applies(false, 4, "none"));
         check(!ChineseOutputPolicy.applies(false, 0, "temporary_japanese"));
 
         // The shared tables are phrase-level, which is the reason this host stopped converting one

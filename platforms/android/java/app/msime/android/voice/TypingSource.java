@@ -4,7 +4,7 @@ package app.msime.android;
 public enum TypingSource {
     QUANPIN("quanpin"), NINE_KEY("nineKey"), SHUANGPIN("shuangpin"),
     ZIRANMA("ziranma"), MICROSOFT("microsoft"), SHOUDAO("shoudao"),
-    WUBI("wubi"), JAPANESE("japanese"), HANDWRITING("handwriting"),
+    WUBI("wubi"), JAPANESE("japanese"), KOREAN("korean"), HANDWRITING("handwriting"),
     ENGLISH("english"), LOCAL("local"), AI("ai"), REPLY("reply"),
     VOICE("voice"), UNKNOWN("unknown");
 
@@ -29,6 +29,7 @@ public enum TypingSource {
             case SHOUDAO -> SHOUDAO;
             case WUBI -> WUBI;
             case JAPANESE, JAPANESE_NINE_KEY -> JAPANESE;
+            case KOREAN -> KOREAN;
             case HANDWRITING -> HANDWRITING;
         };
     }

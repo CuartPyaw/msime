@@ -41,6 +41,17 @@ public final class KeyboardLayoutSmoke {
             == KeyboardLayout.HANDWRITING_LAYOUT);
         check(KeyboardLayout.resolveTouchLayout(false, false, 3, "twenty_six_key")
             == KeyboardLayout.STANDARD_TOUCH_LAYOUT);
+        check(KeyboardLayout.resolveTouchLayout(false, false, 4, "twenty_six_key")
+            == KeyboardLayout.KOREAN_LAYOUT);
+        check(KeyboardLayout.resolveTouchLayout(false, false, 4, "nine_key")
+            == KeyboardLayout.KOREAN_LAYOUT);
+        check(KeyboardLayout.resolveTouchLayout(true, false, 4, "handwriting")
+            == KeyboardLayout.KOREAN_LAYOUT);
+        check(KeyboardLayout.carriesLetterCase(KeyboardLayout.STANDARD_TOUCH_LAYOUT)
+            && KeyboardLayout.carriesLetterCase(KeyboardLayout.KOREAN_LAYOUT)
+            && !KeyboardLayout.carriesLetterCase(KeyboardLayout.QUANPIN_NINE_KEY_LAYOUT)
+            && !KeyboardLayout.carriesLetterCase(KeyboardLayout.JAPANESE_NINE_KEY_LAYOUT)
+            && !KeyboardLayout.carriesLetterCase(KeyboardLayout.HANDWRITING_LAYOUT));
 
         System.out.println("Android keyboard layers: canonical keys, faces and symbol layouts passed");
     }
