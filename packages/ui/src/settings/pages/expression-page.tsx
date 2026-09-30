@@ -49,13 +49,14 @@ export function ExpressionSettingsPage() {
     setCustomTranslationsText,
     customTranslationsNotice,
     customTranslationsPlaceholder,
-    customTranslationsBusy,
+    customTranslationsSaveState,
+    customTranslationsSaveError,
     customTranslationsSummary,
     providerCredentials,
     tencentCredentialInput,
     setTencentCredentialInput,
     providerCredentialBusy,
-    saveCustomTranslations,
+    flushCustomTranslations,
     mixedInput,
     fuzzyPinyin,
     candidateTranslations,
@@ -298,9 +299,10 @@ export function ExpressionSettingsPage() {
                   placeholder={customTranslationsPlaceholder}
                   notice={customTranslationsNotice}
                   summary={customTranslationsSummary}
-                  busy={customTranslationsBusy}
+                  saveState={customTranslationsSaveState}
+                  saveError={customTranslationsSaveError}
                   onChange={setCustomTranslationsText}
-                  onSave={() => void saveCustomTranslations()}
+                  onFlush={() => void flushCustomTranslations()}
                 />
               )}
               <CustomTranslationSection

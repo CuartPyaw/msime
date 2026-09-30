@@ -648,7 +648,10 @@ export {
   SettingsActionsFooter,
   type SettingsActionsFooterProps,
 } from "./settings/settings-actions-footer";
-export type { SettingsSaveState } from "./settings/use-settings-persistence";
+export {
+  SETTINGS_AUTOSAVE_DELAY_MS,
+  type SettingsSaveState,
+} from "./settings/use-settings-persistence";
 export { AboutHeroSection, type AboutHeroSectionProps } from "./settings/about-hero-section";
 export { SkinPlatformNotice, type SkinPlatformNoticeProps } from "./settings/skin-platform-notice";
 export { ThemeCarousel, type ThemeCarouselProps } from "./settings/theme-carousel";
@@ -1860,9 +1863,10 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     setText: setCustomTranslationsText,
     notice: customTranslationsNotice,
     summary: customTranslationsSummary,
-    busy: customTranslationsBusy,
+    saveState: customTranslationsSaveState,
+    saveError: customTranslationsSaveError,
     placeholder: customTranslationsPlaceholder,
-    save: saveCustomTranslations,
+    flush: flushCustomTranslations,
   } = useCustomTranslations({ client: client.customTranslations });
   const {
     phrases,
@@ -2321,7 +2325,8 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     setCustomTranslationsText,
     customTranslationsNotice,
     customTranslationsPlaceholder,
-    customTranslationsBusy,
+    customTranslationsSaveState,
+    customTranslationsSaveError,
     customTranslationsSummary,
     macosShuangpinKeymap,
     setShuangpinKeymap,
@@ -2371,7 +2376,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     supportDiagnostics: diagnosticsText,
     feedbackReport,
     submitFeedback,
-    saveCustomTranslations,
+    flushCustomTranslations,
     reload,
     retrySave,
     saveState,

@@ -10,6 +10,8 @@ final class LocalSpeechModelManager: ObservableObject {
   @Published private(set) var savedMirror = ""
   @Published var mirror = ""
   @Published var status = ""
+  /// Saves the mirror address as it is typed.
+  let mirrorAutosave = SettingsAutosave()
   /// Created the first time the model list is shown, so the AI page, which shares the view type, never makes the directory.
   private(set) lazy var root: URL? = {
     do { return try LocalSpeechModelLocation.root() }
@@ -45,6 +47,8 @@ final class LocalSpeechModelManager: ObservableObject {
 
   func install(_ model: LocalSpeechModelInfo) {
     guard let root, !installing.contains(model.id) else { return }
+    // A mirror typed just before tapping 下载 is used, not the one saved before it.
+    mirrorAutosave.flush()
     let mirror = savedMirror
     installing.insert(model.id)
     progress[model.id] = nil
@@ -98,22 +102,25 @@ final class LocalSpeechModelManager: ObservableObject {
     }
   }
 
-  /// `voice_input.asr_model_mirror`: empty for the catalog's own URLs, otherwise an https prefix put before each download URL.
-  func saveMirror() {
+  /// `voice_input.asr_model_mirror`: empty for the catalog's own URLs, otherwise an https prefix put before each download URL. Saved once typing pauses; an address that is not a valid one yet is shown as such and left unsaved.
+  func mirrorChanged() {
     let value = mirror.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard value != savedMirror || mirrorAutosave.hasPending else { return }
     guard Self.isValidMirror(value) else {
-      status = LocalSpeechModelStore.message(for: "local_model_invalid_mirror")
+      mirrorAutosave.reject(LocalSpeechModelStore.message(for: "local_model_invalid_mirror"))
       return
     }
+    mirrorAutosave.schedule { [weak self] in try self?.saveMirror(value) }
+  }
+
+  private func saveMirror(_ value: String) throws {
     let written = MetasequoiaInputSessionBridge.updateSharedPreferences { preferences in
       var voice = preferences["voice_input"] as? [String: Any] ?? [:]
       voice["asr_model_mirror"] = value
       preferences["voice_input"] = voice
     }
-    guard written else { status = "未能保存镜像地址，请重试。"; return }
+    guard written else { throw ServiceFailure(message: "未能保存镜像地址，请重试。") }
     savedMirror = value
-    mirror = value
-    status = value.isEmpty ? "已改回直接从 GitHub 下载。" : "镜像地址已保存。"
   }
 
   static func isValidMirror(_ value: String) -> Bool {
@@ -150,11 +157,8 @@ struct LocalSpeechModelsSection: View {
         TextField("https://镜像地址/", text: $manager.mirror)
           .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
           .accessibilityIdentifier("localModelMirror")
-        if manager.mirror.trimmingCharacters(in: .whitespacesAndNewlines) != manager.savedMirror {
-          Button("保存镜像地址") { manager.saveMirror() }
-            .buttonStyle(.borderless)
-            .accessibilityIdentifier("saveLocalModelMirror")
-        }
+          .onChange(of: manager.mirror) { _, _ in manager.mirrorChanged() }
+        SettingsAutosaveStatus(autosave: manager.mirrorAutosave).font(.footnote)
       }.padding(.vertical, 4)
       if !manager.status.isEmpty {
         Text(manager.status).font(.footnote).foregroundStyle(.secondary)
@@ -167,6 +171,7 @@ struct LocalSpeechModelsSection: View {
     }
     .disabled(disabled)
     .onAppear { manager.refresh() }
+    .flushesAutosave(manager.mirrorAutosave)
   }
 }
 

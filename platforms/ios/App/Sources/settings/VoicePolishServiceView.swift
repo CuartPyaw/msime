@@ -4,14 +4,18 @@ import SwiftUI
 struct VoicePolishServiceView: View {
   @Binding var service: VoicePolishService
   @State private var draft: VoicePolishService
+  /// The choice as last saved, so an edit typed back to it is not written again.
+  @State private var savedDraft: VoicePolishService
   @State private var token = ""
   @State private var status = ""
   @State private var testing = false
   @State private var operation: Task<Void, Never>?
+  @StateObject private var autosave = SettingsAutosave()
 
   init(service: Binding<VoicePolishService>) {
     _service = service
     _draft = State(initialValue: service.wrappedValue)
+    _savedDraft = State(initialValue: service.wrappedValue)
   }
 
   var body: some View {
@@ -19,14 +23,13 @@ struct VoicePolishServiceView: View {
       Section {
         Toggle("单独设置润色服务", isOn: $draft.separate)
           .accessibilityIdentifier("voicePolishSeparate")
-          .onChange(of: draft.separate) { separate in
-            // Going back to 「AI 设置」 needs nothing else, so it is saved at once; a separate service waits for 保存.
-            if !separate { save() }
-          }
       } footer: {
-        Text(draft.separate
-          ? "润色请求发给下面的服务，密钥单独存在本机钥匙串，不写入可同步的设置。"
-          : "润色使用“AI 设置”里保存的服务和密钥。")
+        VStack(alignment: .leading, spacing: 4) {
+          Text(draft.separate
+            ? "润色请求发给下面的服务，密钥单独存在本机钥匙串，不写入可同步的设置。"
+            : "润色使用“AI 设置”里保存的服务和密钥。")
+          SettingsAutosaveStatus(autosave: autosave)
+        }
       }
       if draft.separate {
         Section("服务") {
@@ -41,7 +44,7 @@ struct VoicePolishServiceView: View {
             .textInputAutocapitalization(.never).autocorrectionDisabled()
             .accessibilityIdentifier("voicePolishModel")
           if !draft.provider.models.isEmpty {
-            Picker("常用模型", selection: $draft.model) {
+            Picker("常用模型", selection: Binding(get: { draft.model }, set: { draft.model = $0; commit(now: true) })) {
               ForEach(draft.provider.models, id: \.self) { Text($0).tag($0) }
               if !draft.provider.models.contains(draft.model) { Text("自定义").tag(draft.model) }
             }
@@ -60,27 +63,37 @@ struct VoicePolishServiceView: View {
           }
           .disabled(testing)
           .accessibilityIdentifier("voicePolishTest")
-          Button { save() } label: {
-            Label("保存", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
-          }
-          .buttonStyle(.borderedProminent)
-          .accessibilityIdentifier("voicePolishSave")
         } footer: {
           if !status.isEmpty { Text(status).accessibilityIdentifier("voicePolishStatus") }
         }
       }
     }
     .navigationTitle("润色服务")
+    .onChange(of: draft) { old, new in
+      guard new != savedDraft || autosave.hasPending else { return }
+      // The switch and the provider are saved at once; typing in the address or model waits for a pause.
+      commit(now: old.separate != new.separate || old.provider != new.provider)
+    }
+    .onChange(of: token) { _, _ in commit(now: false) }
     .onDisappear { operation?.cancel() }
+    .flushesAutosave(autosave)
   }
 
-  private func save() {
-    do {
-      try draft.save(token: token.trimmingCharacters(in: .whitespacesAndNewlines))
+  /// Saves the page as it stands. A separate service is written only once its address and model are complete, so a half-typed address never replaces a working one; the key is saved with it and stays in the field, a blank one keeping the key already saved.
+  private func commit(now: Bool) {
+    if draft.separate {
+      do { _ = try draft.configuration.validatedURL() } catch {
+        autosave.reject(error.localizedDescription)
+        return
+      }
+    }
+    let value = draft, key = token.trimmingCharacters(in: .whitespacesAndNewlines)
+    let save = {
+      try value.save(token: key)
+      savedDraft = value
       service = VoicePolishService.load()
-      token = ""
-      status = draft.separate ? "已保存。" : ""
-    } catch { status = error.localizedDescription }
+    }
+    if now { autosave.saveNow(save) } else { autosave.schedule(save) }
   }
 
   /// Checks the endpoint, model and key as typed, before saving; a blank key uses the saved one.

@@ -12,6 +12,10 @@ struct TranslationProviderSettingsView: View {
   @State private var customKey = ""
   @State private var status: String?
   @State private var testing = false
+  /// What the shared document holds, so reading it in does not write it back; nil until it has been read.
+  @State private var savedProvider: TranslationProvider?
+  @State private var savedFields: [String] = []
+  @StateObject private var autosave = SettingsAutosave()
 
   var body: some View {
     Form {
@@ -20,6 +24,10 @@ struct TranslationProviderSettingsView: View {
           ForEach(TranslationProvider.allCases, id: \.self) { Text($0.title).tag($0) }
         }
         .accessibilityIdentifier("translationProviderPicker")
+        .onChange(of: provider) { _, next in
+          guard savedProvider != nil, next != savedProvider else { return }
+          autosave.saveNow { try save() }
+        }
       } footer: {
         Text("选择自己的翻译服务后，键盘把这一页的中文候选直接发给该服务，不经过水杉账号；凭据只保存在本设备的共享设置里。所选服务的凭据不完整时，键盘不会联网翻译，也不会改用其他服务。")
       }
@@ -59,8 +67,9 @@ struct TranslationProviderSettingsView: View {
         }
       }
       Section {
-        Button("保存") { save() }
-          .accessibilityIdentifier("translationProviderSave")
+        if credentialsIncomplete {
+          Text("凭据不完整，键盘暂不联网翻译。").font(.footnote).foregroundStyle(.secondary)
+        }
         if provider != .account && provider != .off {
           Button(testing ? "正在测试…" : "测试翻译「你好」") { test() }
             .disabled(testing)
@@ -69,6 +78,8 @@ struct TranslationProviderSettingsView: View {
         if let status {
           Text(status).font(.footnote).foregroundStyle(.secondary)
         }
+      } footer: {
+        SettingsAutosaveStatus(autosave: autosave)
       }
       Section {
         NavigationLink("自定义候选释义") { CustomTranslationsView() }
@@ -80,6 +91,23 @@ struct TranslationProviderSettingsView: View {
     .navigationTitle("翻译服务")
     .navigationBarTitleDisplayMode(.inline)
     .onAppear(perform: load)
+    .onChange(of: fields) { _, next in
+      guard savedProvider != nil, next != savedFields || autosave.hasPending else { return }
+      autosave.schedule { try save() }
+    }
+    .flushesAutosave(autosave)
+  }
+
+  /// Every credential and address on the page, compared to decide whether an edit needs saving.
+  private var fields: [String] {
+    [niutransAppID, niutransKey, tencentID, tencentKey, tencentRegion, customEndpoint, customKey]
+  }
+
+  private var credentialsIncomplete: Bool {
+    guard provider != .off, provider != .account else { return false }
+    var document: [String: Any] = [:]
+    write(into: &document)
+    return TranslationProviderPreference.route(in: document) == .none
   }
 
   private func load() {
@@ -96,6 +124,9 @@ struct TranslationProviderSettingsView: View {
     tencentRegion = region.isEmpty ? TranslationProviderPreference.defaultTencentRegion : region
     customEndpoint = custom["endpoint"] as? String ?? ""
     customKey = custom["api_key"] as? String ?? ""
+    savedProvider = provider
+    savedFields = fields
+    autosave.reset()
   }
 
   private func write(into document: inout [String: Any]) {
@@ -104,17 +135,12 @@ struct TranslationProviderSettingsView: View {
                                          custom: (customEndpoint, customKey), in: &document)
   }
 
-  private func save() {
+  /// Writes the whole page, so a provider switch also keeps the credentials typed so far.
+  private func save() throws {
     let saved = MetasequoiaInputSessionBridge.updateSharedPreferences { write(into: &$0) }
-    guard saved else { status = "保存失败，请稍后再试。"; return }
-    var document: [String: Any] = [:]
-    write(into: &document)
-    if provider == .off {
-      status = "已保存，键盘不再联网翻译。"
-    } else {
-      status = TranslationProviderPreference.route(in: document) == .none
-        ? "已保存，但凭据不完整，键盘暂不联网翻译。" : "已保存，键盘下次弹出时生效。"
-    }
+    guard saved else { throw ServiceFailure(message: "保存失败，请稍后再试。") }
+    savedProvider = provider
+    savedFields = fields
   }
 
   private func test() {
