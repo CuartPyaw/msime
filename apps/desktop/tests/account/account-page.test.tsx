@@ -271,6 +271,15 @@ test("iOS Apple sign-in stays behind the native account client boundary", async 
   expect(screen.queryByText(/token|nonce/i)).toBeNull();
 });
 
+test("an Apple-only backend without a native Apple client shows the empty login state", async () => {
+  const client = account({
+    providers: vi.fn().mockResolvedValue({ email: false, phone: false, apple: true }),
+  });
+  render(<AccountPage client={client} />);
+  expect(await screen.findByText("当前没有可用的验证码登录方式，请稍后重试。")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "使用 Apple 登录" })).toBeNull();
+});
+
 test("mobile profile card opens a back-stack page with account actions", async () => {
   window.history.replaceState({ msimeSettings: true, page: "account" }, "");
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });
