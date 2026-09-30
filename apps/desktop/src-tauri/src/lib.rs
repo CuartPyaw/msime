@@ -118,6 +118,7 @@ use std::path::PathBuf;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
 use tauri::Emitter;
 use tauri::Manager;
 
@@ -133,6 +134,8 @@ use shared::voice::voice_output;
     target_os = "windows"
 ))]
 use shared::voice::voice_sessions;
+
+const MAX_RUNTIME_OPTIONS_CANDIDATE_CAPACITY: usize = 5;
 
 #[tauri::command]
 fn supports_font_catalog() -> bool {
@@ -4472,7 +4475,8 @@ pub fn run() {
                         .filter(|path| path.is_absolute())
                 })
                 .or_else(|| {
-                    let mut candidates = Vec::new();
+                    let mut candidates =
+                        Vec::with_capacity(MAX_RUNTIME_OPTIONS_CANDIDATE_CAPACITY);
                     #[cfg(target_os = "windows")]
                     candidates.extend(
                         windows_server_state_directory()
