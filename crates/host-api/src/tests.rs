@@ -1009,6 +1009,84 @@ fn japanese_commands_apply_to_the_twenty_six_key_scheme() {
 }
 
 #[test]
+fn korean_scheme_crosses_the_host_boundary() {
+    let dir = tempfile::tempdir().unwrap();
+    let handle = test_host_preferences(
+        dir.path(),
+        Preferences {
+            scheme: InputScheme::Korean,
+            ..chinese_preferences()
+        },
+    );
+    read(msime_client_focus(handle, true));
+    for character in b"gk" {
+        read(msime_client_character(handle, *character, false));
+    }
+    let typed = read(msime_client_character(handle, b's', false));
+    assert_eq!(typed["value"]["handled"], true);
+    assert!(typed["value"]["commit"].is_null());
+    let view = &typed["value"]["view"];
+    assert_eq!(view["scheme"], 4);
+    assert_eq!(view["preedit"], "한");
+    assert_eq!(view["reading"], "한");
+    assert_eq!(view["editing_text"], "gks");
+    assert_eq!(view["caret_position"], 3);
+    assert_eq!(view["candidates"], json!([]));
+    assert_eq!(view["page_count"], 0);
+    assert_eq!(
+        read(msime_client_online_query(handle))["value"],
+        Value::Null
+    );
+
+    // The next syllable's first key commits the previous one in the same transition.
+    let next = read(msime_client_character(handle, b'r', false));
+    assert_eq!(next["value"]["handled"], true);
+    assert_eq!(next["value"]["commit"], "한");
+    assert_eq!(next["value"]["commit_context"]["scheme"], 4);
+    assert_eq!(next["value"]["view"]["reading"], "ㄱ");
+
+    // Shift selects the double consonant.
+    read(msime_client_command(handle, 0));
+    let double = read(msime_client_character(handle, b'R', true));
+    assert_eq!(double["value"]["view"]["local_mode"], "none");
+    assert_eq!(double["value"]["view"]["reading"], "ㄲ");
+
+    // Space commits the syllable and is left for the host to insert.
+    let space = read(msime_client_command(handle, 1));
+    assert_eq!(space["value"]["handled"], false);
+    assert_eq!(space["value"]["commit"], "ㄲ");
+    assert_eq!(space["value"]["view"]["editing_text"], "");
+    // Paging has nothing to page and leaves the key to the host.
+    let page = read(msime_client_command(handle, 100));
+    assert_eq!(page["value"]["handled"], false);
+
+    // Punctuation is half-width ASCII even with Chinese punctuation on and full-width output selected.
+    read(msime_client_set_character_width(handle, true));
+    for character in b"rk" {
+        read(msime_client_character(handle, *character, false));
+    }
+    let period = read(msime_client_punctuation_with_context(handle, b'.', 0));
+    assert_eq!(period["value"]["handled"], true);
+    assert_eq!(period["value"]["commit"], "가.");
+    let idle = read(msime_client_punctuation_with_context(handle, b',', 0));
+    assert_eq!(idle["value"]["handled"], false);
+    assert!(idle["value"]["commit"].is_null());
+    let arm = json!({"ascii": b'.', "commit": ".", "timestamp_ms": 1, "editor_generation": 1, "auto_closed_pair": false}).to_string();
+    let armed =
+        read(unsafe { msime_client_smart_punctuation_arm(handle, arm.as_ptr(), arm.len()) });
+    assert!(armed["value"]["repeat"].is_null());
+
+    // Leaving the client commits the open syllable instead of dropping it.
+    for character in b"rk" {
+        read(msime_client_character(handle, *character, false));
+    }
+    let left = read(msime_client_focus(handle, false));
+    assert_eq!(left["value"]["commit"], "가");
+    assert_eq!(left["value"]["view"]["editing_text"], "");
+    read(msime_client_destroy(handle));
+}
+
+#[test]
 fn handwriting_layout_is_exposed_only_after_pending_composition_finishes() {
     let dir = tempfile::tempdir().unwrap();
     let handle = test_host(dir.path());

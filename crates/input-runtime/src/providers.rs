@@ -8,7 +8,8 @@ use super::*;
 /// the actual network I/O through their injected transport and then submit the
 /// result to `Runtime::apply_online_candidate`.
 pub fn cloud_request_url(query: &OnlineQuery) -> Option<String> {
-    if !query.cloud_eligible || !query.cloud_candidates {
+    // Korean syllables are already the text; no cloud provider converts them.
+    if !query.cloud_eligible || !query.cloud_candidates || query.scheme == KOREAN_SCHEME {
         return None;
     }
     msime_client_core::cloud::candidates::build_google_url(&query.query_text, query.scheme == 3)
@@ -19,7 +20,7 @@ pub fn cloud_candidate_from_response(
     query: OnlineQuery,
     response: &[u8],
 ) -> Option<OnlineCandidate> {
-    if !query.cloud_eligible || !query.cloud_candidates {
+    if !query.cloud_eligible || !query.cloud_candidates || query.scheme == KOREAN_SCHEME {
         return None;
     }
     let text = msime_client_core::cloud::candidates::parse_google_response(response)?;

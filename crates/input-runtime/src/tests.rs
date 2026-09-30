@@ -1812,6 +1812,13 @@ fn cloud_request_requires_eligible_query() {
         .unwrap()
         .contains("inputtools.google.com"));
     let response = serde_json::json!(["SUCCESS", [["ni", ["你"]]]]).to_string();
+    // Korean never goes to a cloud provider, even with a query claiming eligibility.
+    let korean = OnlineQuery {
+        scheme: KOREAN_SCHEME,
+        ..query.clone()
+    };
+    assert!(cloud_request_url(&korean).is_none());
+    assert!(cloud_candidate_from_response(korean, response.as_bytes()).is_none());
     let result = cloud_candidate_from_response(query, response.as_bytes()).unwrap();
     assert_eq!(result.text, "你");
     assert_eq!(result.source, 0);
@@ -2946,6 +2953,143 @@ fn unicode_mode_digits_compose_a_code_point_rather_than_picking_a_candidate() {
         .candidates
         .iter()
         .any(|candidate| candidate.text == "中"));
+}
+
+/// Korean syllables commit themselves as the next one starts, and every way out of a syllable - Space, Enter, a digit, punctuation, leaving the client - commits it rather than dropping it. With no candidates, the navigation keys have nothing to do and go back to the host.
+#[test]
+fn korean_syllables_commit_through_the_runtime_without_candidates() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut options = real_engine_options(directory.path());
+    options.scheme = KOREAN_SCHEME;
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    let character = |runtime: &mut Runtime, value: u8| {
+        runtime
+            .dispatch(Action::Character {
+                value,
+                shift: value.is_ascii_uppercase(),
+            })
+            .unwrap()
+    };
+
+    let mut committed = String::new();
+    for value in *b"dkssud" {
+        let transition = character(&mut runtime, value);
+        assert!(transition.handled);
+        committed.push_str(transition.commit.as_deref().unwrap_or_default());
+    }
+    assert_eq!(committed, "안");
+    let view = runtime.view();
+    assert_eq!(view.scheme, KOREAN_SCHEME);
+    assert_eq!(runtime.scheme(), KOREAN_SCHEME);
+    assert_eq!(view.preedit, "녕");
+    assert_eq!(view.reading, "녕");
+    assert_eq!(view.editing_text, "sud");
+    assert!(view.candidates.is_empty());
+    assert_eq!(view.page_count, 0);
+    assert!(runtime.online_query().unwrap().is_none());
+    assert!(!runtime.punctuation_host_context_available(false));
+
+    // Candidate navigation has no list to move through and does not eat the key.
+    for action in [
+        Action::NextPage,
+        Action::PreviousPage,
+        Action::NextCandidate,
+        Action::PreviousCandidate,
+        Action::FirstCandidate,
+        Action::LastCandidate,
+    ] {
+        let transition = runtime.dispatch(action).unwrap();
+        assert!(!transition.handled);
+        assert!(transition.commit.is_none());
+        assert_eq!(transition.view.preedit, "녕");
+    }
+
+    // Space picks the highlighted candidate elsewhere; here it commits the syllable and passes through.
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(!space.handled);
+    assert_eq!(space.commit.as_deref(), Some("녕"));
+    assert_eq!(
+        space.commit_context.as_ref().map(|context| context.scheme),
+        Some(KOREAN_SCHEME)
+    );
+    assert_eq!(space.view.editing_text, "");
+
+    // A digit is not a candidate key: it commits the syllable and the host inserts it.
+    character(&mut runtime, b'r');
+    character(&mut runtime, b'k');
+    let digit = character(&mut runtime, b'1');
+    assert!(!digit.handled);
+    assert_eq!(digit.commit.as_deref(), Some("가"));
+
+    // Punctuation typed as a character goes the punctuation route and stays ASCII.
+    character(&mut runtime, b'r');
+    character(&mut runtime, b'k');
+    let period = character(&mut runtime, b'.');
+    assert!(period.handled);
+    assert_eq!(period.commit.as_deref(), Some("가."));
+    character(&mut runtime, b'r');
+    character(&mut runtime, b'k');
+    let comma = runtime.dispatch(Action::Punctuation(b',')).unwrap();
+    assert_eq!(comma.commit.as_deref(), Some("가,"));
+    let idle = runtime.dispatch(Action::Punctuation(b',')).unwrap();
+    assert!(!idle.handled && idle.commit.is_none());
+
+    // Enter commits and passes through; Escape discards.
+    character(&mut runtime, b'R');
+    character(&mut runtime, b'k');
+    let enter = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert!(!enter.handled);
+    assert_eq!(enter.commit.as_deref(), Some("까"));
+    character(&mut runtime, b'r');
+    let escape = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(escape.handled && escape.commit.is_none());
+
+    // Leaving the client commits the open syllable.
+    character(&mut runtime, b'g');
+    character(&mut runtime, b'k');
+    let left = runtime.focus(false).unwrap();
+    assert_eq!(left.commit.as_deref(), Some("하"));
+    assert_eq!(left.view.editing_text, "");
+    // Nothing composing: leaving commits nothing.
+    runtime.focus(true).unwrap();
+    assert!(runtime.focus(false).unwrap().commit.is_none());
+    // Attaching a new client discards a syllable left open in the previous one instead of writing it into the new client.
+    runtime.focus(true).unwrap();
+    character(&mut runtime, b'g');
+    character(&mut runtime, b'k');
+    let attached = runtime.focus(true).unwrap();
+    assert!(attached.commit.is_none());
+    assert_eq!(attached.view.editing_text, "");
+}
+
+/// A host that draws half-composed phrases itself still receives every finished Korean syllable as a commit: the syllable is text, not a piece of a phrase.
+#[test]
+fn korean_syllables_are_never_held_as_a_phrase_prefix() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut options = real_engine_options(directory.path());
+    options.scheme = KOREAN_SCHEME;
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    assert_eq!(runtime.set_phrase_preedit(true), None);
+    runtime.focus(true).unwrap();
+    let mut commits = Vec::new();
+    for value in *b"rksk" {
+        let transition = runtime
+            .dispatch(Action::Character {
+                value,
+                shift: false,
+            })
+            .unwrap();
+        assert!(transition.handled);
+        assert_eq!(transition.view.phrase_prefix, "");
+        commits.extend(transition.commit);
+    }
+    assert_eq!(commits, ["가"]);
+    assert_eq!(runtime.view().preedit, "나");
 }
 
 /// Without a settled model attached, the settle call is inert.

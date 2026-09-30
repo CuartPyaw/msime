@@ -51,6 +51,25 @@ fn records_graphemes_categories_and_sources_without_text() {
 }
 
 #[test]
+fn korean_commits_count_under_their_own_source() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = TypingStatisticsStore::new(directory.path());
+    store.set_enabled(true).unwrap();
+    let source: TypingSource = serde_json::from_str("\"korean\"").unwrap();
+    assert_eq!(source, TypingSource::Korean);
+    assert_eq!(
+        store
+            .record("안녕.", source, "2026-09-07", Some(9))
+            .unwrap(),
+        3
+    );
+    let value = store.load().unwrap();
+    assert_eq!(value.detail.sources["korean"], 3);
+    assert_eq!(value.detail.characters["otherLetter"], 2);
+    assert_eq!(value.detail.characters["punctuation"], 1);
+}
+
+#[test]
 fn migrates_legacy_totals_and_preserves_pause_on_reset() {
     let directory = tempfile::tempdir().unwrap();
     fs::write(
