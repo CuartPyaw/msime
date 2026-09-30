@@ -200,7 +200,8 @@ pub fn merge_alternative_segmentations(
 
 /// Append the rows whose word is not already present (QD:993-1004). A row repeated inside `rows` is kept once, as the reference's scan over the growing list does.
 pub fn append_unique_words(result: &mut Vec<WordItem>, rows: Vec<WordItem>) {
-    let mut seen: HashSet<String> = result.iter().map(|item| item.word.clone()).collect();
+    let mut seen = HashSet::with_capacity(result.len().saturating_add(rows.len()));
+    seen.extend(result.iter().map(|item| item.word.clone()));
     for item in rows {
         if seen.insert(item.word.clone()) {
             result.push(item);
