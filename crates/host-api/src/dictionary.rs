@@ -1878,7 +1878,7 @@ pub fn import_dictionary_words(
     let mut outcome = WordImport {
         added: 0,
         existing: 0,
-        rejected: Vec::new(),
+        rejected: Vec::with_capacity(words.len()),
     };
     for (index, word) in words.iter().enumerate() {
         let entry = match new_word_entry(options, kind, word) {
