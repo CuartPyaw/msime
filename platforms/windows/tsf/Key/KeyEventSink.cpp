@@ -915,6 +915,22 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
             return isTouchKeyboardSpecialKeys;
         }
 
+        // "/" and "@" open their modes on an empty composition instead of typing a mark: they start the composition, and the Server hands them to the Engine as its first character.
+        if (!isInputInProgress && candidateMode == CANDIDATE_NONE &&
+            Global::OpensLocalMode(wch, false,
+                                   isPunctuation != FALSE && Global::PunctuationLockMode.load(std::memory_order_relaxed) !=
+                                                                 Global::PunctuationLock::AlwaysEnglish,
+                                   Global::CommandModeEnabled.load(std::memory_order_relaxed),
+                                   Global::MentionModeEnabled.load(std::memory_order_relaxed)))
+        {
+            if (pKeyState)
+            {
+                pKeyState->Category = CATEGORY_COMPOSING;
+                pKeyState->Function = FUNCTION_INPUT;
+            }
+            return TRUE;
+        }
+
         //
         // The candidate or phrase list handles the keys through ITfKeyEventSink.
         //
@@ -1492,6 +1508,16 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
             // the beginning belongs to the application.
             isInputKey = false;
         }
+        // Match the normal path: "/" and "@" open their modes on an empty composition.
+        if (!isInputKey && shadow.inputLength == 0 && !shadow.candidateActive &&
+            Global::OpensLocalMode(*classifiedWch, false,
+                                   shadow.punctuationOpen && Global::PunctuationLockMode.load(std::memory_order_relaxed) !=
+                                                                 Global::PunctuationLock::AlwaysEnglish,
+                                   Global::CommandModeEnabled.load(std::memory_order_relaxed),
+                                   Global::MentionModeEnabled.load(std::memory_order_relaxed)))
+        {
+            isInputKey = true;
+        }
     }
 
     if (shadow.candidateActive && isInputKey)
@@ -1505,6 +1531,20 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
 
     if (shadow.imeOpen && shadow.inputLength > 0)
     {
+        // Match the normal path: V's digits and operators compose ahead of their paging and punctuation meanings, and a digit key printing anything else selects.
+        if (Global::IsExpressionModeComposition(shadow.rawInput.c_str(), shadow.rawInput.size(),
+                                                Global::ExpressionModeEnabled.load(std::memory_order_relaxed)))
+        {
+            switch (Global::ClassifyExpressionKey(*classifiedCode, *classifiedWch))
+            {
+            case Global::ExpressionKey::Input:
+                return setKeyState(CATEGORY_COMPOSING, FUNCTION_INPUT);
+            case Global::ExpressionKey::SelectByNumber:
+                return setKeyState(CATEGORY_CANDIDATE, FUNCTION_SELECT_BY_NUMBER);
+            case Global::ExpressionKey::Unclaimed:
+                break;
+            }
+        }
         const bool candidateKey = shadow.candidateActive;
         switch (*classifiedCode)
         {

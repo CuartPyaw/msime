@@ -641,7 +641,7 @@ struct PageLabel {
   wchar_t glyph;
 };
 
-constexpr std::array<PageLabel, 18> page_labels{{
+constexpr std::array<PageLabel, 19> page_labels{{
     {"themes", L"主题", 0xE790},
     {"candidate", L"候选窗口", 0xE8FD},
     {"toolbar", L"悬浮工具栏", 0xE7F4},
@@ -649,6 +649,7 @@ constexpr std::array<PageLabel, 18> page_labels{{
     {"expression", L"表达", 0xE8C1},
     {"shortcuts", L"快捷键", 0xEDA7},
     {"lexicon", L"词库", 0xE82D},
+    {"plugins", L"扩展", 0xEA86},
     {"osk", L"屏幕键盘", 0xE92E},
     {"voice", L"语音输入", 0xE720},
     {"hand", L"手写输入", 0xE929},
@@ -680,6 +681,8 @@ const wchar_t *shell_page_description(std::string_view id) {
     return L"查看打字字数、速度和常用输入方式的统计。统计只保存在本机。";
   if (id == "community")
     return L"浏览社区分享的皮肤和内容。";
+  if (id == "plugins")
+    return L"导入和选择按键音效、打字旋律与背景音乐，管理 / 指令表和 @ 名单。";
   return L"";
 }
 
@@ -2332,7 +2335,7 @@ private:
       build_about_page(page);
   }
 
-  // 账户与同步、云剪贴板、统计、社区 are pages of the shared app on every platform; this window opens them there.
+  // 账户与同步、云剪贴板、统计、社区、扩展 are pages of the shared app on every platform; this window opens them there.
   void build_shell_page(nav::Page const &model, StackPanel const &page) {
     const auto &label = page_label(model.id);
     auto group = add_group(page, L"");
@@ -2950,27 +2953,36 @@ private:
     add_row(keys, 0xE765, L"中英文切换键", L"在「输入」页选择",
             button_control(L"前往", [this] { navigate("typing", true); }));
 
-    const std::array<std::pair<const wchar_t *, const wchar_t *>, 8> modes{{
-        {L"quick_phrase", L"快捷短语(K 模式)"},
-        {L"date_time", L"日期与时间快捷输入(T 模式)"},
-        {L"unicode", L"Unicode 便捷录入(U 模式)"},
-        {L"emoji", L"Emoji 快捷输入(E 模式)"},
-        {L"kaomoji", L"颜文字快捷输入(M 模式)"},
-        {L"super_jianpin", L"超级简拼(J 模式)"},
-        {L"temporary_english", L"临时英文(Y 模式)"},
-        {L"temporary_japanese", L"临时日语(R 模式)"},
+    struct LocalMode {
+      const wchar_t *id;
+      const wchar_t *label;
+      bool default_on;
+    };
+    // V, / and @ are off until the user turns them on: each takes a key that used to type itself.
+    const std::array<LocalMode, 11> modes{{
+        {L"quick_phrase", L"快捷短语(K 模式)", true},
+        {L"date_time", L"日期与时间快捷输入(T 模式)", true},
+        {L"unicode", L"Unicode 便捷录入(U 模式)", true},
+        {L"emoji", L"Emoji 快捷输入(E 模式)", true},
+        {L"kaomoji", L"颜文字快捷输入(M 模式)", true},
+        {L"super_jianpin", L"超级简拼(J 模式)", true},
+        {L"temporary_english", L"临时英文(Y 模式)", true},
+        {L"temporary_japanese", L"临时日语(R 模式)", true},
+        {L"expression", L"计算与数字大写(V 模式)", false},
+        {L"command", L"快捷指令(/ 键)", false},
+        {L"mention", L"常用名单(@ 键)", false},
     }};
     std::vector<Check> checks;
-    for (const auto &[id, label] : modes) {
+    for (const auto &[id, label, default_on] : modes) {
       const std::wstring key = std::wstring(L"local_modes.") + id;
-      checks.push_back({label, document_.Boolean(key, true), [this, key](bool on) {
+      checks.push_back({label, document_.Boolean(key, default_on), [this, key](bool on) {
                           change([&](PreferencesDocument &doc) {
                             doc.SetBoolean(key, on);
                           }, false);
                         }});
     }
     auto local = add_group(page, L"快捷输入模式");
-    add_row(local, 0xE945, L"快捷输入模式", L"用引导字母进入对应的输入模式", nullptr,
+    add_row(local, 0xE945, L"快捷输入模式", L"用引导字母进入对应的输入模式；V、/、@ 只在拼音方案下没有输入时进入，/ 和 @ 还需中文标点", nullptr,
             checks_panel(std::move(checks), 250));
 
     auto reset = add_group(page, L"");

@@ -15,6 +15,7 @@
 #include "FloatingToolbarWindow.h"
 #include "FocusedSession.h"
 #include "FullscreenForeground.h"
+#include "SoundPackRoot.h"
 #include "MaintenanceHotkey.h"
 #include "ModeAuthority.h"
 #include "ModeMailbox.h"
@@ -484,6 +485,14 @@ msime::windows::TsfLocalConfig tsf_local_config(const nlohmann::json &preference
           .value("tsf", false);
   const auto lock = preferences.value("punctuation_lock", std::string("follow"));
   config.punctuation_lock = lock == "chinese" ? 1 : lock == "english" ? 2 : 0;
+  // The Engine opens V, "/" and "@" only in the pinyin schemes. The switches are left out of the stored document while off.
+  const auto scheme = preferences.value("scheme", std::string("quanpin"));
+  const bool pinyin = scheme == "quanpin" || scheme == "shuangpin";
+  const auto local_modes =
+      preferences.value("local_modes", nlohmann::json::object());
+  config.expression_mode = pinyin && local_modes.value("expression", false);
+  config.command_mode = pinyin && local_modes.value("command", false);
+  config.mention_mode = pinyin && local_modes.value("mention", false);
   return config;
 }
 
@@ -909,8 +918,10 @@ int wmain(int argc, wchar_t **argv) {
           std::lock_guard lock(*voice_config_mutex);
           *voice_config = std::move(next);
         };
+    auto session_options = prepared.at("value");
+    name_builtin_sound_packs(session_options, config.state_root);
     WindowsServer server(
-        options, prepared.at("value").dump(),
+        options, session_options.dump(),
         production
               ? production_key_handler([&character_set_clicks](bool desired) {
                 return character_set_clicks.submit(CharacterSetClick{desired});

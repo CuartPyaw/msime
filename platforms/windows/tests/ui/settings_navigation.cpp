@@ -34,7 +34,7 @@ bool launchable(const ShellTarget &target) {
 } // namespace
 int main() {
   try {
-    // The design's sidebar: 18 unique pages in 5 non-empty groups, in group order.
+    // The design's sidebar: 19 unique pages in 5 non-empty groups, in group order.
     std::set<std::string_view> ids;
     std::set<std::size_t> groups;
     std::size_t previous_group = 0;
@@ -45,7 +45,7 @@ int main() {
       previous_group = page.group;
       groups.insert(page.group);
     }
-    require(ids.size() == 18);
+    require(ids.size() == 19);
     require(groups.size() == page_group_count);
 
     // The cross-platform service pages open the shared app on a route it accepts; native pages carry no route; the download page only links out.
@@ -59,6 +59,9 @@ int main() {
     require(find_page("clip")->shell.panel == "cloud-clipboard");
     require(find_page("stats")->shell.page == "typing-statistics");
     require(find_page("community")->shell.page == "community");
+    // 扩展 opens the shared app's plugins page, next to the input pages it changes.
+    require(find_page("plugins")->shell.page == "plugins" &&
+            find_page("plugins")->group == find_page("lexicon")->group);
     require(find_page("download")->host == PageHost::Download);
     // MCP stays in this window's developer page and the core pages stay native.
     for (auto id : {"themes", "candidate", "typing", "expression", "shortcuts",
@@ -76,6 +79,8 @@ int main() {
                 shell_links::handwriting_panel)) == L"handwriting");
     require(msime::windows::shell_route_argument(request_for(
                 find_page("stats")->shell)) == L"settings:typing-statistics");
+    require(msime::windows::shell_route_argument(request_for(
+                find_page("plugins")->shell)) == L"settings:plugins");
 
     // Every settings category the shared routes know still opens a page here, and the ids the tray sends land where the features moved.
     const std::set<std::string_view> categories{
@@ -83,8 +88,8 @@ int main() {
         "appearance",  "input",        "expression",      "typing-statistics",
         "helpcode",    "shortcuts",    "dictionary",      "vocabulary",
         "skin",        "screen-keyboard", "handwriting",  "voice",
-        "ai",          "tools",        "floating-toolbar", "developer",
-        "help",        "about",        "feedback"};
+        "ai",          "tools",        "plugins",      "floating-toolbar",
+        "developer",   "help",         "about",        "feedback"};
     require(categories.size() == route_aliases.size());
     for (const auto &alias : route_aliases) {
       require(categories.count(alias.route) == 1);
@@ -103,6 +108,7 @@ int main() {
     require(page_for_route("expression") == "expression");
     require(page_for_route("download") == "download");
     require(page_for_route("developer") == "dev");
+    require(page_for_route("plugins") == "plugins");
     // A page id of this window opens itself; anything unknown falls back to the default page.
     for (const auto &page : pages)
       if (categories.count(page.id) == 0)

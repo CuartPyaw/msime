@@ -178,6 +178,10 @@ inline std::atomic_bool PairedPunctuationEnabled{true};
 inline std::atomic_bool MicrosoftShuangpinEnabled{false};
 inline std::atomic_bool JapaneseInputModeEnabled{false};
 inline std::atomic_bool KoreanInputModeEnabled{false};
+// The V, "/" and "@" local modes, off until the Server sends LocalModeTriggersChanged: while off their keys route exactly as before the modes existed.
+inline std::atomic_bool ExpressionModeEnabled{false};
+inline std::atomic_bool CommandModeEnabled{false};
+inline std::atomic_bool MentionModeEnabled{false};
 inline std::atomic_bool CapsLockEnabled{false};
 inline std::atomic_bool TsfDiagnosticLogEnabled{false};
 inline thread_local bool g_connected = false;

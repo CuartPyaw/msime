@@ -25,7 +25,7 @@ struct Page {
 inline constexpr std::size_t page_group_count = 5;
 
 // The design's sidebar, in its order and grouping (appearance, input, other input methods, cross-platform services, and the tail group).
-inline constexpr std::array<Page, 18> pages{{
+inline constexpr std::array<Page, 19> pages{{
     {"themes", 0, PageHost::Native, {}},
     {"candidate", 0, PageHost::Native, {}},
     {"toolbar", 0, PageHost::Native, {}},
@@ -33,6 +33,8 @@ inline constexpr std::array<Page, 18> pages{{
     {"expression", 1, PageHost::Native, {}},
     {"shortcuts", 1, PageHost::Native, {}},
     {"lexicon", 1, PageHost::Native, {}},
+    // Sound packs, music and command tables are imported and chosen in the shared app, which reads packs from a folder or archive the user picks; this window only opens it there.
+    {"plugins", 1, PageHost::Shell, {"", "plugins"}},
     {"osk", 2, PageHost::Native, {}},
     {"voice", 2, PageHost::Native, {}},
     {"hand", 2, PageHost::Native, {}},
@@ -77,7 +79,7 @@ struct RouteAlias {
 };
 
 // Every settings category the shared route vocabulary knows (client-core host_surface::SettingsCategory), mapped to the page that now holds it. An id keeps the meaning it has on every other host: `appearance` is the candidate window page and `skin` the theme page. The tray opens `skin`, `dictionary` and `about`, and the other desktop launchers use the same names.
-inline constexpr std::array<RouteAlias, 23> route_aliases{{
+inline constexpr std::array<RouteAlias, 24> route_aliases{{
     {"account", "account"},
     {"chat", "expression"},
     {"community", "community"},
@@ -96,6 +98,7 @@ inline constexpr std::array<RouteAlias, 23> route_aliases{{
     {"voice", "voice"},
     {"ai", "expression"},
     {"tools", "shortcuts"},
+    {"plugins", "plugins"},
     {"floating-toolbar", "toolbar"},
     {"developer", "dev"},
     {"help", "feedback"},

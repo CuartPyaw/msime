@@ -86,6 +86,23 @@ int main() {
     require(resolve_typing_source_from_transition(Json::object()) ==
             TypingSource::Unknown);
 
+    // The text V, "/" and "@" generate is not typing; anything without the field still is.
+    require(transition_counts_as_typing(Json::object()));
+    require(transition_counts_as_typing(
+        transition(0, "none", false, "xiaohe",
+                   Json{{"scheme", 0}, {"local_mode", "none"}})));
+    require(transition_counts_as_typing(
+        transition(0, "none", false, "xiaohe",
+                   Json{{"scheme", 0},
+                        {"local_mode", "none"},
+                        {"typing_statistics", true}})));
+    require(!transition_counts_as_typing(
+        transition(0, "none", false, "xiaohe",
+                   Json{{"scheme", 0},
+                        {"local_mode", "expression"},
+                        {"typing_statistics", false}})));
+    require(transition_counts_as_typing(transition(0, "none", false, "xiaohe")));
+
     const auto local = local_time_parts(0);
     require(local.has_value());
     require(local->day.size() == 10 && local->day[4] == '-' &&

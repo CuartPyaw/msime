@@ -106,6 +106,55 @@ int main() {
     // Outside Unicode mode a digit is a candidate shortcut, not an edit.
     REQUIRE(edit_kind(key('4', '4'), "none", true) == EditKind::None);
 
+    // Elsewhere the Engine's View.spelling_symbols decides: V's digits and operators are input, including the ones typed with Shift and the minus key that pages elsewhere.
+    constexpr std::string_view expression = "0123456789+-*/.()%^";
+    const auto spelled = [&](FanyImeNamedpipeData packet) {
+      return edit_kind(packet, "expression", true, false, {}, 0, false, expression);
+    };
+    REQUIRE(spelled(key('4', '4')) == EditKind::Character);
+    REQUIRE(spelled(key(0x64, '4')) == EditKind::Character);
+    REQUIRE(spelled(key(0xBD, '-')) == EditKind::Character);
+    REQUIRE(spelled(key(0xBB, '+', shift)) == EditKind::Character);
+    REQUIRE(spelled(key('8', '*', shift)) == EditKind::Character);
+    REQUIRE(spelled(key('9', '(', shift)) == EditKind::Character);
+    REQUIRE(spelled(key(0xBE, '.')) == EditKind::Character);
+    REQUIRE(spelled(key(0x6F, '/')) == EditKind::Character);
+    // A key the mode does not spell is not an edit: Shift+1's '!' is a selection, '=' and ',' keep their own routes.
+    REQUIRE(spelled(key('1', '!', shift)) == EditKind::None);
+    REQUIRE(spelled(key(0xBB, '=')) == EditKind::None);
+    REQUIRE(spelled(key(0xBC, ',')) == EditKind::None);
+    REQUIRE(spelled(key('4', '4', control)) == EditKind::None);
+    // On an empty pinyin composition the Engine lists "/" and "@" for the modes that are on; Shift+2's '@' is then the mode's key.
+    REQUIRE(edit_kind(key(0xBF, '/'), "none", false, false, {}, 0, false, "/@") ==
+            EditKind::Character);
+    REQUIRE(edit_kind(key('2', '@', shift), "none", false, false, {}, 0, false, "/@") ==
+            EditKind::Character);
+    REQUIRE(edit_kind(key('2', '@', shift), "none", false, false, {}, 0, false, "/") ==
+            EditKind::None);
+    REQUIRE(edit_kind(key(0xBF, '/'), "none", false) == EditKind::None);
+    // Unicode keeps its key-based rule whatever the symbols say.
+    REQUIRE(edit_kind(key('4', '$', shift), "unicode", true, false, {}, 0, false,
+                      "0123456789") == EditKind::None);
+
+    // Which digit keys pick a candidate. Ordinary modes: a bare digit.
+    REQUIRE(digit_selects_candidate("none", "", '1', 0));
+    REQUIRE(!digit_selects_candidate("none", "", '!', shift));
+    REQUIRE(digit_selects_candidate("emoji", "", '3', 0));
+    REQUIRE(digit_selects_candidate("none", "/@", '2', 0));
+    REQUIRE(!digit_selects_candidate("none", "/@", '@', shift));
+    // Unicode: Shift+digit, as before.
+    REQUIRE(digit_selects_candidate("unicode", "0123456789", '!', shift));
+    REQUIRE(!digit_selects_candidate("unicode", "0123456789", '1', 0));
+    // V: a digit is input; a digit key printing something the mode does not spell selects, with or without Shift, so layouts whose digit row needs Shift still reach the rows.
+    REQUIRE(!digit_selects_candidate("expression", expression, '1', 0));
+    REQUIRE(digit_selects_candidate("expression", expression, '!', shift));
+    REQUIRE(!digit_selects_candidate("expression", expression, '*', shift));
+    REQUIRE(!digit_selects_candidate("expression", expression, '%', shift));
+    REQUIRE(digit_selects_candidate("expression", expression, '&', 0));
+    REQUIRE(!digit_selects_candidate("expression", expression, '!', control));
+    // An unknown mode never selects.
+    REQUIRE(!digit_selects_candidate("unknown", "", '1', 0));
+
     // The preedit style preference maps by name and refuses anything else: a
     // typo must not silently become one of the three.
     REQUIRE(preference_tsf_preedit_style(nlohmann::json::object()) == TsfPreeditStyle::Local);

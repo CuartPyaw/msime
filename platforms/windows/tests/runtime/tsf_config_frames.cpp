@@ -41,7 +41,7 @@ int main() {
     auto frames = tsf_config_frames(config);
     // Every setting the TIP consumes gets a frame; it kept compiled defaults
     // because the Server encoded none of them.
-    require(frames.size() == 8);
+    require(frames.size() == 9);
     for (const auto &frame : frames)
       require(frame.size() == sizeof(FanyImeNamedpipeDataToTsfWorkerThread));
 
@@ -54,7 +54,8 @@ int main() {
         FanyImeWorkerReplyType::MicrosoftShuangpinChanged,
         FanyImeWorkerReplyType::InputModeChanged,
         FanyImeWorkerReplyType::TsfDiagnosticLogChanged,
-        FanyImeWorkerReplyType::PunctuationLockChanged};
+        FanyImeWorkerReplyType::PunctuationLockChanged,
+        FanyImeWorkerReplyType::LocalModeTriggersChanged};
     for (size_t i = 0; i < frames.size(); ++i)
       require(frame_type(frames[i]) == expected[i]);
 
@@ -121,6 +122,22 @@ int main() {
       config.punctuation_lock = lock;
       require(frame_text(tsf_config_frames(config)[7]) == L"0|s0d0l1");
     }
+
+    // The V, "/" and "@" switches travel as one frame of three flags in that order, all off until the Server says otherwise, so a TIP never routes a mode's keys the Engine will not open.
+    require(frame_text(tsf_config_frames(TsfLocalConfig{})[8]) == L"000");
+    config.expression_mode = true;
+    require(frame_text(tsf_config_frames(config)[8]) == L"100");
+    config.expression_mode = false;
+    config.command_mode = true;
+    require(frame_text(tsf_config_frames(config)[8]) == L"010");
+    config.command_mode = false;
+    config.mention_mode = true;
+    require(frame_text(tsf_config_frames(config)[8]) == L"001");
+    config.expression_mode = config.command_mode = true;
+    require(frame_text(tsf_config_frames(config)[8]) == L"111");
+    // The TIP drops every type above MaxKnown, so the new type has to be inside it.
+    require(FanyImeWorkerReplyType::LocalModeTriggersChanged <=
+            FanyImeWorkerReplyType::MaxKnown);
 
     // Caps Lock travels on its own frame rather than in the configuration set:
     // the Server owns the indicator because the TIP only sampled GetKeyState at

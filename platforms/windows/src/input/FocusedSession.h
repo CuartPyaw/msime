@@ -120,9 +120,11 @@ private:
   struct Commit {
     std::string text;
     TypingSource source = TypingSource::Unknown;
+    // False for the text the V, "/" and "@" modes generate; see transition_counts_as_typing.
+    bool typing = true;
   };
   std::optional<Commit> pending_commit() const;
-  // Records a commit that has been confirmed as delivered.
+  // Records a commit that has been confirmed as delivered, and plays its commit sound.
   void record_commit(const std::optional<Commit> &delivered);
   static std::string typing_statistics_directory(const std::string &options);
   FocusGate &gate_;

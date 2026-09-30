@@ -130,6 +130,15 @@ resolve_typing_source_from_transition(const nlohmann::json &transition) {
       view.value("shuangpin_profile", std::string("xiaohe")));
 }
 
+// Whether a commit counts as typing. The Engine marks the text its V, "/" and "@" modes generate (a result, an expanded command, a name from the list) as not typed, so it reaches neither the statistics nor their milestones. Without the field every commit counts, as every commit did before it existed.
+inline bool transition_counts_as_typing(const nlohmann::json &transition) {
+  const auto context = transition.find("commit_context");
+  if (context == transition.end() || !context->is_object())
+    return true;
+  const auto flag = context->find("typing_statistics");
+  return flag == context->end() || !flag->is_boolean() || flag->get<bool>();
+}
+
 // Resolved local calendar fields, or nothing when the conversion failed. The
 // day and hour axes both have to be the user's, and only this process knows
 // which timezone that is; a failure means the caller skips the record rather

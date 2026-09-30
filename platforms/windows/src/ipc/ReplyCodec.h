@@ -90,6 +90,10 @@ struct TsfLocalConfig {
   bool tsf_diagnostic_log = false;
   // 0 follow, 1 always Chinese, 2 always English.
   uint8_t punctuation_lock = 0;
+  // The local modes whose keys the TIP must route as composition input: Shift+V's digits and operators, and the "/" or "@" that opens a mode on an empty composition. Each is on only in a pinyin scheme, the only schemes the Engine opens them in.
+  bool expression_mode = false;
+  bool command_mode = false;
+  bool mention_mode = false;
 };
 // One frame per setting, in the order the reference pushes them.
 std::vector<std::vector<uint8_t>> tsf_config_frames(const TsfLocalConfig &config);

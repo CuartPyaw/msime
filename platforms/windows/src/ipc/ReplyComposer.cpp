@@ -356,7 +356,9 @@ std::optional<PendingReply> ReplyComposer::basic_key(
   const auto modifiers = PipeMetadata::key_modifiers(packet.modifiers_down);
   const bool digit = key >= '1' && key <= '9';
   if ((key == 0x20 && modifiers == 0) ||
-      (digit && modifiers == (mode == "unicode" ? 1u : 0u)))
+      (digit && digit_selects_candidate(
+                    mode, view.value("spelling_symbols", std::string{}),
+                    static_cast<uint32_t>(packet.wch), modifiers)))
     return dispatch(session, packet, epoch, ReplyPath::Selection, uiless);
   return std::nullopt;
 }
@@ -399,7 +401,8 @@ ReplyComposer::edit(ServerSession &session, const FanyImeNamedpipeData &packet,
                 before.value("microsoft_shuangpin", false),
                 before.at("editing_text").get<std::string>(),
                 before.at("caret_position").get<size_t>(),
-                before.value("scheme", 0u) == 3u);
+                before.value("scheme", 0u) == 3u,
+                before.value("spelling_symbols", std::string{}));
   if (kind == EditKind::None)
     return std::nullopt;
   auto result = session.key(packet, epoch);

@@ -1,5 +1,6 @@
 #include "ServerSession.h"
 #include "CandidateCompletionPolicy.h"
+#include "EditPolicy.h"
 #include "input/CandidateTextPolicy.h"
 #include "KeyEvent.h"
 #include "PunctuationPolicy.h"
@@ -37,6 +38,9 @@ ServerSession::~ServerSession() {
   // session. Ownership cannot be transferred to a pipe I/O worker.
   if (std::this_thread::get_id() != thread_)
     std::terminate();
+  // The player outlives every session, so music this session let play would otherwise go on with no input method in front of it.
+  if (music_active_)
+    (void)msime_client_music_set_active(session_, false);
   msime_client_string_free(msime_client_destroy(session_));
 }
 void ServerSession::check_thread() const {
@@ -153,11 +157,11 @@ KeyResult ServerSession::key(const FanyImeNamedpipeData &packet,
   const bool selection_digit = digit_key >= '1' && digit_key <= '9' &&
                                !(current.is_object() && current.value("scheme", 0u) == 4u);
   if (selection_digit && !current.is_null() &&
-      current.at("local_mode") != "unknown" &&
-      ((current.at("local_mode") == "unicode" && modifiers == 1) ||
-       (current.at("local_mode") != "unicode" && modifiers == 0))) {
-    // TSF selects by VK digit, regardless of layout-produced text. Unicode
-    // requires Shift; ordinary modes use unmodified digits. Use current IDs.
+      digit_selects_candidate(
+          current.at("local_mode").get<std::string>(),
+          current.value("spelling_symbols", std::string{}),
+          static_cast<uint32_t>(packet.wch), modifiers)) {
+    // TSF selects by VK digit. Unicode requires Shift, a digit the Engine spells (V) is input, and ordinary modes use unmodified digits; see digit_selects_candidate. Use current IDs.
     const auto slot = static_cast<size_t>(digit_key - '1');
     const auto &page = current.at("candidates");
     if (slot < page.size()) {
@@ -444,6 +448,9 @@ nlohmann::json ServerSession::update_preferences(uint64_t epoch,
   const auto document = nlohmann::json::parse(snapshot);
   traditional_output_ = document.at("preferences").value(
       "traditional_chinese_output", false);
+  // With nothing switched on the library starts no player, so it has not kept the earlier "active". Say it again, so music switched on while this client holds the focus starts now rather than at the next focus change.
+  if (music_active_)
+    (void)msime_client_music_set_active(session_, true);
   return result;
 }
 nlohmann::json ServerSession::page_candidate(uint64_t epoch, uint64_t session,
@@ -470,6 +477,19 @@ nlohmann::json ServerSession::page_candidate(uint64_t epoch, uint64_t session,
 nlohmann::json ServerSession::view() const {
   check_thread();
   return response(msime_client_view(session_));
+}
+bool ServerSession::key_sound(uint32_t key_class) {
+  check_thread();
+  return msime_client_key_sound(session_, key_class);
+}
+bool ServerSession::commit_sound() {
+  check_thread();
+  return msime_client_commit_sound(session_);
+}
+void ServerSession::set_music_active(bool active) {
+  check_thread();
+  (void)msime_client_music_set_active(session_, active);
+  music_active_ = active;
 }
 KeyResult ServerSession::punctuation(const FanyImeNamedpipeData &packet,
                                      uint64_t epoch) {

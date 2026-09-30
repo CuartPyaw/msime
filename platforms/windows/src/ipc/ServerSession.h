@@ -100,6 +100,11 @@ public:
                                 uint64_t generation, bool previous,
                                 unsigned steps);
   nlohmann::json view() const;
+  // Effect sounds, played by the shared library from this session's preferences. Each is a bounded queue post that never blocks and answers whether a sound was queued. Only the Server calls them: the TSF DLL links the same library into every process it is loaded into, and never starts its player.
+  bool key_sound(uint32_t key_class);
+  bool commit_sound();
+  // Whether background music may play: true while this client holds the focus. Remembered, so a preference update can repeat it and destroying the session stops music it started.
+  void set_music_active(bool active);
 
 private:
   void check_thread() const;
@@ -111,5 +116,6 @@ private:
   bool active_ = false;
   bool input_enabled_ = true;
   bool traditional_output_ = false;
+  bool music_active_ = false;
 };
 } // namespace msime::windows

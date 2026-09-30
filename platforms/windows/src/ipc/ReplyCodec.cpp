@@ -268,6 +268,12 @@ std::vector<std::vector<uint8_t>> tsf_config_frames(const TsfLocalConfig &config
                        static_cast<wchar_t>(config.smart_punctuation_direct_letter ? L'1' : L'0')};
   frames.push_back(
       worker_text_frame(FanyImeWorkerReplyType::PunctuationLockChanged, lock));
+  // Last, so the frames before it keep the positions older TIPs and tests know; a TIP that predates it ignores the unknown type.
+  const std::wstring triggers = {config.expression_mode ? L'1' : L'0',
+                                 config.command_mode ? L'1' : L'0',
+                                 config.mention_mode ? L'1' : L'0'};
+  frames.push_back(worker_text_frame(
+      FanyImeWorkerReplyType::LocalModeTriggersChanged, triggers));
   return frames;
 }
 
