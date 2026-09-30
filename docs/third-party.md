@@ -145,7 +145,7 @@ print(json.loads(f.read(n))["__metadata__"]["attribution"])
 | --- | --- | --- | --- |
 | `tauri-plugin-dialog` | 2.7 | Apache-2.0 OR MIT | 用各平台自己的打开对话框选择插件包文件夹或 `.zip` 文件（macOS 的 NSOpenPanel、Windows 的通用对话框、Linux 的 GTK 文件选择器），在主线程弹出并以设置窗口为父窗口。停在 2.7，因为 2.8 要求 tauri 2.12。带进 `rfd`（MIT，实际的原生对话框实现）与 `tauri-plugin-fs`（Apache-2.0 OR MIT，本插件的依赖，同样没有开放给网页）；它们用到的 `dunce`、`glob`、`schemars`、`serde_repr` 等原本就在锁文件里 |
 
-MPL-2.0 是文件级 copyleft，与本仓库的 GPL-3.0 兼容：这些 crate 未作修改，以二进制随包分发时附上许可证全文并指明源码位置（crates.io 上的对应版本）即可，`platforms/linux/collect-notices.py` 从 Cargo 依赖图收集的通知已覆盖它们。
+MPL-2.0 是文件级 copyleft，与本仓库的 GPL-3.0 兼容：这些 crate 未作修改，以二进制随包分发时附上许可证全文并指明源码位置（crates.io 上的对应版本）即可。Linux 与 Windows 由 `platforms/linux/collect-notices.py` 从 Cargo 依赖图收集的通知覆盖；macOS 的输入法包不走这个脚本，由 `resources/licenses/MPL-2.0.txt`（取自 `symphonia-core` 0.6.1 的 LICENSE）复制成 `Contents/Resources/Licenses/MPL-2.0.txt`，并在 `platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt` 里列出这些 crate 与源码位置，`platforms/macos/tests/settings/bundle_contents.py` 检查它在包里。
 
 ## 背单词词书（`resources/wordbook.lock.json`）
 
