@@ -1349,8 +1349,8 @@ pub fn migrate_apple_clipboard_history(root: &std::path::Path) -> Result<bool, S
     if legacy.len() > 50 {
         return Err("invalid legacy clipboard history".into());
     }
-    let mut ids = std::collections::HashSet::new();
-    let mut texts = std::collections::HashSet::new();
+    let mut ids = std::collections::HashSet::with_capacity(legacy.len());
+    let mut texts = std::collections::HashSet::with_capacity(legacy.len());
     let mut entries = Vec::with_capacity(legacy.len());
     for entry in legacy {
         let Some(timestamp_ms) = apple_date_to_unix_ms(entry.date) else {
@@ -1418,7 +1418,7 @@ fn migrate_harmony_clipboard_history(root: &std::path::Path) -> Result<bool, Str
     if legacy.len() > 50 {
         return Err("invalid legacy clipboard history".into());
     }
-    let mut texts = std::collections::HashSet::new();
+    let mut texts = std::collections::HashSet::with_capacity(legacy.len());
     let mut entries = Vec::with_capacity(legacy.len());
     for entry in legacy {
         if !entry.at.is_finite()
