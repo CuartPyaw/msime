@@ -597,7 +597,7 @@ fn release_focused_panels(app: &tauri::AppHandle) -> Result<PanelFocusRelease, H
         // The screen keyboard never accepts focus and stays available for typing.
         // Annotated because the rollback loop below calls a method on an element
         // before the `push` that would otherwise name the type.
-        let mut hidden: Vec<tauri::WebviewWindow> = Vec::new();
+        let mut hidden: Vec<tauri::WebviewWindow> = Vec::with_capacity(EDITABLE_PANEL_LABELS.len());
         for window in windows {
             let visible = window.is_visible().unwrap_or(false);
             if window.hide().is_err() {
