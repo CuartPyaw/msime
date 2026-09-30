@@ -1207,7 +1207,7 @@ private struct AICandidatePromptView: View {
   @State private var slot = AICandidatePreference.promptID(MetasequoiaInputSessionBridge.loadSharedPreferences())
   @State private var text = ""
   @State private var savedText = ""
-  @State private var status = ""
+  @StateObject private var autosave = SettingsAutosave()
 
   var body: some View {
     Form {
@@ -1223,22 +1223,28 @@ private struct AICandidatePromptView: View {
           .autocorrectionDisabled()
           .textInputAutocapitalization(.never)
           .accessibilityLabel("提示词内容").accessibilityIdentifier("aiCandidatePromptText")
+          .onChange(of: text) { _, _ in
+            guard text != savedText || autosave.hasPending else { return }
+            let slot = slot, content = text
+            autosave.schedule { try save(content, slot: slot) }
+          }
       } footer: {
-        Text(status.isEmpty ? "选中的提示词会随拼音和前文一起发给 AI 服务。留空时使用内置提示词，它要求服务只返回 JSON 形式的候选列表。" : status)
+        VStack(alignment: .leading, spacing: 4) {
+          Text("选中的提示词会随拼音和前文一起发给 AI 服务。留空时使用内置提示词，它要求服务只返回 JSON 形式的候选列表。")
+          SettingsAutosaveStatus(autosave: autosave)
+        }
       }
     }
     .navigationTitle("提示词")
-    .toolbar {
-      Button("保存") { save() }.disabled(text == savedText).accessibilityIdentifier("aiCandidatePromptSave")
-    }
     .onAppear { load(slot) }
-    .onChange(of: slot) { previous, next in
-      // Keep what was typed in the slot being left, then put the new slot in use.
-      if text != savedText { save(slot: previous) }
+    .onChange(of: slot) { _, next in
+      // Keep what was typed in the slot being left (the waiting save names that slot), then put the new slot in use.
+      autosave.flush()
       load(next)
-      save(slot: next)
+      let content = text
+      autosave.saveNow { try save(content, slot: next) }
     }
-    .onDisappear { if text != savedText { save() } }
+    .flushesAutosave(autosave)
   }
 
   private func load(_ slot: String) {
@@ -1246,15 +1252,13 @@ private struct AICandidatePromptView: View {
     savedText = text
   }
 
-  private func save() { save(slot: slot) }
-
-  private func save(slot: String) {
-    let content = text
+  private func save(_ content: String, slot: String) throws {
     let written = MetasequoiaInputSessionBridge.updateSharedPreferences { preferences in
       preferences["ai_assistant"] = AICandidatePreference.assistant(
         preferences["ai_assistant"] as? [String: Any], promptSlot: slot, text: content)
     }
-    if written { savedText = content; status = "" } else { status = "提示词未能保存，请稍后重试。" }
+    guard written else { throw ServiceFailure(message: "提示词未能保存，请稍后重试。") }
+    savedText = content
   }
 }
 
