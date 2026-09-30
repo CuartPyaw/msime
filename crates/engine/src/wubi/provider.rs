@@ -89,7 +89,7 @@ fn query_rows(connection: &Connection, code: &str) -> rusqlite::Result<Vec<WordI
     let mut statement = connection.prepare_cached(QUERY_SQL)?;
     let upper = prefix_upper_bound(code);
     let mut rows = statement.query((code, upper.as_str(), QUERY_LIMIT))?;
-    let mut candidates = Vec::new();
+    let mut candidates = Vec::with_capacity(QUERY_LIMIT as usize);
     while let Some(row) = rows.next()? {
         // The reference skipped rows whose key or value read back as NULL.
         let (ValueRef::Text(key), ValueRef::Text(value)) = (row.get_ref(0)?, row.get_ref(1)?)
