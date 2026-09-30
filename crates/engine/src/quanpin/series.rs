@@ -181,8 +181,18 @@ pub fn merge_alternative_segmentations(
     merged.extend(primary_full);
     merged.extend(alternatives);
     merged.sort_by_key(|item| std::cmp::Reverse(item.weight));
+    // Deduplicate the sorted rows by borrowed keys, then move the first occurrence of each word.
     let mut seen = HashSet::with_capacity(merged.len());
-    merged.retain(|item| seen.insert(item.word.clone()));
+    let unique = merged
+        .iter()
+        .map(|item| seen.insert(item.word.as_str()))
+        .collect::<Vec<_>>();
+    drop(seen);
+    merged = merged
+        .into_iter()
+        .zip(unique)
+        .filter_map(|(item, unique)| unique.then_some(item))
+        .collect();
 
     if promote {
         if let Some(at) = merged.iter().position(|item| item.word == best_word) {
