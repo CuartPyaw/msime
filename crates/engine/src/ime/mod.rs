@@ -50,6 +50,8 @@ pub struct ImeSession {
     state: CompositionState,
     profile: ShuangpinProfileKind,
     wubi_options: WubiInputOptions,
+    /// Mixed wubi only: a pinyin candidate was picked out of this composition, so the rest decodes as quanpin until the composition ends (product decision 2026-09-30, the intent of test_wubi_mixed_input_session.cpp:194-212). Cleared by `reset`, `switch_scheme`, turning mixed input off, and an emptied composition.
+    pinyin_tail: bool,
     autocorrect_types: u32,
     quanpin_helpcode: bool,
     shuangpin_helpcode: bool,
@@ -69,6 +71,7 @@ impl ImeSession {
             state: CompositionState::default(),
             profile,
             wubi_options: WubiInputOptions::default(),
+            pinyin_tail: false,
             autocorrect_types: 0,
             quanpin_helpcode: false,
             shuangpin_helpcode: false,
@@ -111,11 +114,19 @@ impl ImeSession {
         self.scheme = Scheme::new(scheme, self.profile);
         self.bind_wubi_scheme();
         self.state = CompositionState::default();
+        self.pinyin_tail = false;
     }
 
     pub fn reset(&mut self) {
         self.scheme.reset();
         self.state = CompositionState::default();
+        self.pinyin_tail = false;
+    }
+
+    /// A pinyin candidate was picked out of a mixed wubi composition: what is left keeps decoding as quanpin, never as wubi codes, until the composition ends. Nothing for any other scheme or with mixed input off.
+    pub fn keep_pinyin_tail(&mut self) {
+        self.pinyin_tail =
+            self.current_scheme_type() == SchemeType::Wubi && self.wubi_options.mixed_pinyin;
     }
 
     /// Host editing for whichever scheme is active; wubi also re-derives its length allowance from the mixed-pinyin option (ime_session.cpp:103-157, 199-238).
@@ -169,6 +180,7 @@ impl ImeSession {
 
     pub fn set_wubi_input_options(&mut self, options: WubiInputOptions) {
         self.wubi_options = options;
+        self.pinyin_tail &= options.mixed_pinyin;
         self.bind_wubi_scheme();
     }
 
@@ -295,9 +307,16 @@ impl ImeSession {
         QuanpinScheme::apply_literal_segmentation(request);
     }
 
-    /// Query the request's provider and, for wubi with mixed pinyin, append the quanpin rows for the same letters (ime_session.cpp:333-368). The quanpin request gets the session switches and the autocorrect suppression, so a correction the user refused by committing raw stays refused when the same letters arrive through mixed Wubi.
+    /// Query the request's provider and, for wubi with mixed pinyin, append the quanpin rows for the same letters (ime_session.cpp:333-368). The quanpin request gets the session switches and the autocorrect suppression, so a correction the user refused by committing raw stays refused when the same letters arrive through mixed Wubi. A pinyin tail skips the wubi table: those letters are the rest of a spelling, not a code.
     fn decode(&mut self, request: &QueryRequest) -> Decoded {
-        let candidates = self.registry.query(request);
+        let pinyin_tail = request.scheme == SchemeType::Wubi
+            && self.wubi_options.mixed_pinyin
+            && self.pinyin_tail;
+        let candidates = if pinyin_tail {
+            Vec::new()
+        } else {
+            self.registry.query(request)
+        };
         if request.scheme != SchemeType::Wubi {
             return Decoded {
                 candidates,

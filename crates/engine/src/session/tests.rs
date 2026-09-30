@@ -605,6 +605,112 @@ fn a_rejected_fixed_slot_write_reports_and_keeps_the_snapshot() {
     );
 }
 
+/// test_wubi_mixed_input_session.cpp's fixture plus `wo`, which both producers answer: 人 from the wubi table, 我 from quanpin.
+const WUBI_TAIL_FIXTURE: &str = "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_n VALUES('ni','n','你',10000);\
+CREATE TABLE tbl_1_w(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_w VALUES('wo','w','我',10000);\
+CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',10000),('ni''hao','nh','拟好',9000);\
+CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);\
+INSERT INTO wubi86 VALUES('wq','你好',10000),('wo','人',9000);";
+
+/// Mixed wubi with 你好 picked out of `nihaowo`, leaving `wo` composing.
+fn wubi_pinyin_tail(fixture: &Fixture) -> Session {
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Wubi;
+        options.wubi.mixed_pinyin = true;
+    });
+    type_text(&mut session, "nihaowo");
+    let result = session.select(index_of(&session, "你好"));
+    assert_eq!(result.commit.as_deref(), Some("你好"));
+    assert_eq!(session.snapshot().preedit, "wo");
+    session
+}
+
+fn schemes(session: &Session) -> Vec<(String, SchemeType)> {
+    session
+        .snapshot()
+        .candidates
+        .into_iter()
+        .map(|item| (item.word, item.scheme))
+        .collect()
+}
+
+/// Product decision 2026-09-30 (test_wubi_mixed_input_session.cpp:194-212): once a pinyin word is picked, the rest of the composition is the rest of a spelling and stays quanpin, even where the wubi table has a code for its letters.
+#[test]
+fn the_rest_after_a_pinyin_pick_stays_pinyin() {
+    let fixture = Fixture::new(WUBI_TAIL_FIXTURE);
+    let mut fresh = fixture.session_with(|options| {
+        options.scheme = SchemeType::Wubi;
+        options.wubi.mixed_pinyin = true;
+    });
+    type_text(&mut fresh, "wo");
+    assert_eq!(
+        schemes(&fresh).first(),
+        Some(&("人".to_owned(), SchemeType::Wubi)),
+        "outside a tail the table answers wo"
+    );
+
+    let mut session = wubi_pinyin_tail(&fixture);
+    assert_eq!(schemes(&session), [("我".to_owned(), SchemeType::Quanpin)]);
+    assert!(session.snapshot().answered_by_pinyin_fallback);
+    assert!(!session.snapshot().wubi_unique_four_code);
+    // Letters typed into the tail stay pinyin too.
+    type_text(&mut session, "ni");
+    assert_eq!(session.snapshot().preedit, "woni");
+    assert!(schemes(&session)
+        .iter()
+        .all(|(_, scheme)| *scheme == SchemeType::Quanpin));
+    // Committing the tail ends the composition, and the next code is the table's again.
+    session.command(Command::Cancel);
+    let mut session = wubi_pinyin_tail(&fixture);
+    let result = session.select(index_of(&session, "我"));
+    assert_eq!(result.commit.as_deref(), Some("我"));
+    assert!(session.snapshot().preedit.is_empty());
+    type_text(&mut session, "wo");
+    assert_eq!(
+        schemes(&session).first(),
+        Some(&("人".to_owned(), SchemeType::Wubi))
+    );
+}
+
+/// Backspace never goes through a reset, so the emptied composition itself has to end the tail; Cancel ends it too.
+#[test]
+fn an_emptied_or_cancelled_tail_gives_codes_back_to_the_wubi_table() {
+    let fixture = Fixture::new(WUBI_TAIL_FIXTURE);
+    let mut session = wubi_pinyin_tail(&fixture);
+    session.command(Command::Backspace);
+    session.command(Command::Backspace);
+    assert!(session.snapshot().preedit.is_empty());
+    type_text(&mut session, "wo");
+    assert_eq!(
+        schemes(&session).first(),
+        Some(&("人".to_owned(), SchemeType::Wubi))
+    );
+
+    let mut session = wubi_pinyin_tail(&fixture);
+    session.command(Command::Cancel);
+    type_text(&mut session, "wo");
+    assert_eq!(
+        schemes(&session).first(),
+        Some(&("人".to_owned(), SchemeType::Wubi))
+    );
+}
+
+/// Turning mixed input off ends the tail with it: switched back on, the same letters are a wubi code again.
+#[test]
+fn switching_mixed_input_off_ends_the_tail() {
+    let fixture = Fixture::new(WUBI_TAIL_FIXTURE);
+    let mut session = wubi_pinyin_tail(&fixture);
+    session.set_wubi_mixed_pinyin(false);
+    session.set_wubi_mixed_pinyin(true);
+    assert_eq!(
+        schemes(&session).first(),
+        Some(&("人".to_owned(), SchemeType::Wubi))
+    );
+}
+
 // ---- personal learning windows (set_clock) ----
 
 #[test]

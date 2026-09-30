@@ -310,6 +310,10 @@ impl InputSession {
             let rest = remove_consumed_leading_separators(&raw_without_helpcodes[consumed..]);
             let rest_with_cases =
                 remove_consumed_leading_separators(&cased_without_helpcodes[consumed..]);
+            if self.is_wubi() {
+                // The rest of a spelling the user is still in the middle of stays pinyin; the wubi table answering it would swap schemes underneath them.
+                self.engine.keep_pinyin_tail();
+            }
             self.engine.replace_active_raw_input(rest, rest_with_cases);
             self.online_requests.invalidate();
             self.update_mixed_candidates();

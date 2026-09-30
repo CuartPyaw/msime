@@ -1,7 +1,7 @@
 {
  "name": "wubi_mixed_tail_after_selection",
  "source": "tests/src/test_wubi_mixed_input_session.cpp:70-79; case :197-212",
- "note": "Reference ctest wubi_mixed_input_session fails against this build: overlay apply_engine_wubi_mixed_candidates.py appends quanpin rows after wubi rows and recomputes the table answer per keystroke, so a tail after selection can get wubi rows too. The overlay behaviour is the product intent and is what is recorded.",
+ "note": "product decision 2026-09-30 overrides the reference: the tail stays pinyin. After 你好 is picked out of nihaowq, the rest (wq) keeps decoding as quanpin until the composition ends, the intent of test_wubi_mixed_input_session.cpp:194-212 (its ctest failed against the recorded build, whose wubi_mixed_candidates overlay recomputed the table answer per keystroke and answered wq with the wubi rows 你好, 众人). Step 2 was rewritten to the quanpin answer, which this fixture leaves empty, as wubi_mixed_tail_quanpin_reference records.",
  "covers": [
   "wubi",
   "partial commit"
