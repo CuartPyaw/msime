@@ -217,9 +217,17 @@ pub fn status(
 
     // A selected book that is no longer in the library is reported as an empty queue rather than
     // as an error: the user deleted it, and the page should offer the picker instead of a failure.
-    let selected = selected_book(&library, resources, &settings.wordbook)?;
+    let imported = if settings.wordbook.is_empty() || builtin::is_builtin(&settings.wordbook) {
+        None
+    } else {
+        library.load(&settings.wordbook)?
+    };
+    let selected = builtins
+        .iter()
+        .find(|book| book.id == settings.wordbook)
+        .or(imported.as_ref());
 
-    let (queue, due, introducing, remaining) = match selected.as_ref() {
+    let (queue, due, introducing, remaining) = match selected {
         None => (Vec::new(), 0, 0, 0),
         Some(book) => {
             let built = build_queue(
