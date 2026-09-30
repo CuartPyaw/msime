@@ -101,6 +101,13 @@ FOUNDATION_EXPORT NSNotificationName const MSIMEClientSessionDidReplaceSnapshotN
 + (nullable NSDictionary *)candidateGlossRequest:(NSDictionary *)request resources:(NSString *)resources error:(NSError **)error;
 /// Apply on the originating session/thread only. A stale generation is ignored.
 - (nullable NSDictionary *)applyTranslations:(NSArray<NSDictionary *> *)translations generation:(uint64_t)generation error:(NSError **)error;
+/// Effect sounds and background music from this session's preferences.plugins, played by the host library on macOS (see msime_client_key_sound). These sit on the key path: they only queue a request, never block or read files, and answer whether one was queued. NO when nothing is switched on, the session is closed, or the platform does not play (iOS). Never call them for a key typed into a secure field.
+/// keyClass is 0 for any other key, 1 space, 2 enter, 3 backspace.
+- (BOOL)keySound:(uint32_t)keyClass;
+/// Call when a transition commits text; plays the commit sample or advances a melody that follows commits.
+- (BOOL)commitSound;
+/// YES while the input method is active in a field that is not secure; music plays only in between.
+- (BOOL)setMusicActive:(BOOL)active;
 - (nullable NSDictionary<NSString *, id> *)setCandidatePageSize:(uint8_t)size error:(NSError **)error;
 - (nullable NSDictionary<NSString *, id> *)updatePreferencesSnapshot:(NSDictionary<NSString *, id> *)snapshot error:(NSError **)error;
 - (nullable NSDictionary<NSString *, id> *)startVoiceWithError:(NSError **)error;
