@@ -114,6 +114,16 @@ const JAPANESE: SchemeDefinition = {
   glyph: "あ",
   badge: "26",
 };
+const KOREAN: SchemeDefinition = {
+  id: "KOREAN",
+  preferenceId: "korean",
+  engineScheme: "korean",
+  shuangpinProfile: null,
+  touchKeyboardLayout: "twenty_six_key",
+  title: "韩语 26 键",
+  glyph: "한",
+  badge: "26",
+};
 const HANDWRITING: SchemeDefinition = {
   id: "HANDWRITING",
   preferenceId: "handwriting",
@@ -147,6 +157,7 @@ export class KeyboardScheme {
   static readonly JAPANESE: SchemeDefinition = JAPANESE;
   static readonly HANDWRITING: SchemeDefinition = HANDWRITING;
   static readonly THOUGHTFUL_REPLY: SchemeDefinition = THOUGHTFUL_REPLY;
+  static readonly KOREAN: SchemeDefinition = KOREAN;
 
   /** Declaration order is the fixed order the pickers render. */
   static readonly SCHEMES: SchemeDefinition[] = [
@@ -161,6 +172,8 @@ export class KeyboardScheme {
     JAPANESE,
     HANDWRITING,
     THOUGHTFUL_REPLY,
+    // Appended, as the shared `TouchKeyboardScheme::ALL` appends it, so the existing cards keep their places.
+    KOREAN,
   ];
 
   static fromPreferenceId(value: string | null): SchemeDefinition | null {
@@ -279,7 +292,8 @@ export class KeyboardScheme {
       KeyboardScheme.isChineseScheme(currentLastChineseScheme) && currentLastChineseScheme !== null
         ? currentLastChineseScheme
         : "quanpin";
-    if (scheme.engineScheme !== "japanese") {
+    // Japanese and Korean replace the Chinese scheme without becoming one, so the one they replaced is what 中文 goes back to.
+    if (scheme.engineScheme !== "japanese" && scheme.engineScheme !== "korean") {
       lastChinese = scheme.engineScheme;
     }
     return {
@@ -305,6 +319,8 @@ export class KeyboardScheme {
         return "wubi";
       case 3:
         return "japanese";
+      case 4:
+        return "korean";
       default:
         return "quanpin";
     }

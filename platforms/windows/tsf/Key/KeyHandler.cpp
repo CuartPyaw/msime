@@ -17,6 +17,7 @@
 #include "../Utils/PerfTimer.h"
 #include "../HostRawCommit.h"
 #include "../HostCharacterResult.h"
+#include "../HostKoreanKey.h"
 #include "../KeyboardCancellation.h"
 #include "../../../../shared/input/CompositionDisplay.h"
 #include <limits>
@@ -243,6 +244,94 @@ HRESULT CMetasequoiaIME::_HandleHostRawCommit(TfEditCookie ec, _In_ ITfContext *
     if (status == msime::tsf::RawCommitStatus::Completed) return S_OK;
     if (status == msime::tsf::RawCommitStatus::Unhandled) return S_FALSE;
     return FAILED(writeResult) ? writeResult : E_FAIL;
+}
+
+HRESULT CMetasequoiaIME::_HandleSyllableCommit(TfEditCookie ec, _In_ ITfContext *pContext, UINT code, WCHAR wch,
+                                               bool replayKey)
+{
+    std::wstring text;
+    auto *host = _pCompositionProcessorEngine ? _pCompositionProcessorEngine->GetHostEngineAdapter() : nullptr;
+    if (host && host->valid())
+    {
+        std::string raw, error;
+        msime::tsf::EngineResult result;
+        if (host->command(MSIME_FINISH_COMPOSITION, &raw, &error) &&
+            msime::tsf::EngineSessionAdapter::parse_result(raw, &result, &error) && result.has_commit &&
+            !result.commit.empty() && result.commit.size() <= static_cast<size_t>((std::numeric_limits<int>::max)()))
+        {
+            const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, result.commit.data(),
+                                                   static_cast<int>(result.commit.size()), nullptr, 0);
+            if (length > 0)
+            {
+                text.assign(static_cast<size_t>(length), L'\0');
+                if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, result.commit.data(),
+                                        static_cast<int>(result.commit.size()), text.data(), length) != length)
+                    text.clear();
+            }
+        }
+    }
+    const bool keyText = msime::tsf::is_korean_text_key(wch);
+    GlobalIme::word_for_creating_word.clear();
+    GlobalIme::pending_create_word_preedit.clear();
+    // No commit from the host means focus or a scheme change already made it let go of the syllable. The composition still shows that syllable, so it is ended first, which leaves that text in the document as the commit, and the key's character goes in after it.
+    if (text.empty()) _HandleCompleteCommitFirst(ec, pContext);
+    if (keyText) text.push_back(wch);
+    if (!text.empty())
+    {
+        CStringRange range;
+        range.Set(text.c_str(), text.size());
+        const HRESULT hr = _AddCharAndFinalize(ec, pContext, &range);
+        if (FAILED(hr)) return hr;
+        _smartPunctuationShadowChar = text.back();
+        _smartPunctuationShadowValid = true;
+    }
+    _HandleCompleteCommitFirst(ec, pContext);
+    // A caret or editing key goes on to the application without reaching the Server, whose own session still holds the syllable. The routed clear a terminated composition sends keeps the two in step; keys with text reach the Server and end the syllable there themselves.
+    if (code != 0 && !keyText && Global::g_connected) SendHideCandidateWndEventToUIProcess();
+    if (replayKey && code != 0 && !keyText) _QueueKoreanSyllableKeyReplay(code);
+    return S_OK;
+}
+
+void CMetasequoiaIME::_QueueKoreanSyllableKeyReplay(UINT virtualKey)
+{
+    if (_msgWndHandle == nullptr || !msime::tsf::is_korean_caret_or_edit_key(virtualKey))
+    {
+        return;
+    }
+    const uint64_t focusToken = _CaptureFocusSessionToken();
+    if (focusToken == 0)
+    {
+        return;
+    }
+    // Posted rather than sent from inside the edit session, so the key reaches the application after the document holds the committed syllable.
+    _koreanKeyReplayFocusToken = focusToken;
+    if (!PostMessage(_msgWndHandle, WM_ReplayKoreanSyllableKey, static_cast<WPARAM>(virtualKey), 0))
+    {
+        _koreanKeyReplayFocusToken = 0;
+    }
+}
+
+void CMetasequoiaIME::_RunKoreanSyllableKeyReplay(UINT virtualKey)
+{
+    // A focus change since the commit means the key would land in another editor, so it is dropped.
+    if (_koreanKeyReplayFocusToken == 0 || !_IsFocusSessionCurrent(_koreanKeyReplayFocusToken) ||
+        !msime::tsf::is_korean_caret_or_edit_key(virtualKey))
+    {
+        return;
+    }
+    INPUT inputs[2] = {};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = static_cast<WORD>(virtualKey);
+    // Navigation and editing keys other than Tab and Enter live on the extended block; without the flag some applications read them as keypad keys.
+    if (virtualKey != VK_TAB && virtualKey != VK_RETURN)
+    {
+        inputs[0].ki.dwFlags = KEYEVENTF_EXTENDEDKEY;
+    }
+    inputs[0].ki.dwExtraInfo = KOREAN_SYLLABLE_SENDINPUT_EXTRA_INFO;
+    inputs[1] = inputs[0];
+    inputs[1].ki.dwFlags |= KEYEVENTF_KEYUP;
+    (void)SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
+    _InvalidateSmartPunctuationShadow();
 }
 
 //+---------------------------------------------------------------------------
@@ -595,6 +684,9 @@ HRESULT CMetasequoiaIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContex
         _HandleCompositionFinalize(ec, pContext, FALSE);
     }
 
+    // A composition this key did not start may be showing a syllable the host has since let go of (see the Korean check below).
+    const bool composingBeforeKey = _IsComposing() != FALSE;
+
     // Start the new (std::nothrow) compositon if there is no composition.
     if (!_IsComposing())
     {
@@ -638,6 +730,16 @@ HRESULT CMetasequoiaIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContex
     {
         std::string raw, error;
         msime::tsf::EngineResult result;
+        if (composingBeforeKey && Global::KoreanInputModeEnabled.load(std::memory_order_relaxed) && _IsComposing())
+        {
+            // The composition still shows a syllable the host has already let go of: focus moved, or an edit session that would have ended the composition was refused. That syllable is text now, so end the composition around it and let this letter start the next one after it.
+            std::string viewRaw, viewError;
+            msime::tsf::EngineResult current;
+            if (host->view(&viewRaw, &viewError) &&
+                msime::tsf::EngineSessionAdapter::parse_result(viewRaw, &current, &viewError) &&
+                current.view.editing_text.empty())
+                _HandleCompleteCommitFirst(ec, pContext);
+        }
         const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         if (wch > 0x7f)
             workerResult = S_FALSE;
@@ -807,7 +909,12 @@ HRESULT CMetasequoiaIME::_HandleCompositionInputWorker(_In_ CCompositionProcesso
     {
         CStringRange curReadingStr;
         std::wstring readingStr = readingStrings.GetAt(0)->ToWString();
-        const auto &preeditStyle = GlobalSettings::getTsfPreeditStyle();
+        // Korean always marks its composition inline: the syllable is Hangul the user is writing, not a reading, and hiding it would leave nothing on screen to show which jamo Backspace removes.
+        const std::string_view preeditStyle =
+            Global::KoreanInputModeEnabled.load(std::memory_order_relaxed) &&
+                    GlobalSettings::getTsfPreeditStyle() == GlobalSettings::TsfPreeditStyle::Empty
+                ? GlobalSettings::TsfPreeditStyle::Raw
+                : std::string_view(GlobalSettings::getTsfPreeditStyle());
 
         if (preeditStyle == GlobalSettings::TsfPreeditStyle::Empty)
         {
@@ -868,9 +975,13 @@ HRESULT CMetasequoiaIME::_HandleCompositionInputWorker(_In_ CCompositionProcesso
 
         const size_t preeditPrefixLength =
             preeditStyle == GlobalSettings::TsfPreeditStyle::Empty ? 0 : GlobalIme::word_for_creating_word.size();
-        const DWORD_PTR displayCaret = MapRawCaretToPreedit(pCompositionProcessorEngine->GetKeystrokeBuffer(),
-                                                            pCompositionProcessorEngine->GetCaretPosition(),
-                                                            curReadingStr.ToWString(), preeditPrefixLength);
+        // A Korean syllable has no caret inside it: the Engine ignores caret moves there, so the caret always follows the last jamo.
+        const DWORD_PTR displayCaret =
+            Global::KoreanInputModeEnabled.load(std::memory_order_relaxed)
+                ? curReadingStr.GetLength()
+                : MapRawCaretToPreedit(pCompositionProcessorEngine->GetKeystrokeBuffer(),
+                                       pCompositionProcessorEngine->GetCaretPosition(), curReadingStr.ToWString(),
+                                       preeditPrefixLength);
         pCompositionProcessorEngine->SetRenderedPreedit(curReadingStr.ToWString(), preeditPrefixLength);
 
         PerfTimer addComposingTimer;

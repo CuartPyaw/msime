@@ -1479,6 +1479,24 @@ fn remembered_chinese_scheme_roundtrips_without_changing_legacy_files() {
             .unwrap();
         assert_eq!(store.load().unwrap(), saved);
     }
+    // Korean keeps the scheme to return to the same way, and serialises as `korean`.
+    let saved = store
+        .save(
+            3,
+            Preferences {
+                scheme: InputScheme::Korean,
+                last_chinese_scheme: Some(ChineseScheme::Wubi),
+                ..Preferences::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(store.load().unwrap(), saved);
+    assert_eq!(
+        serde_json::to_value(&saved.preferences).unwrap()["scheme"],
+        "korean"
+    );
+    // Korean is not a scheme to return to.
+    assert!(serde_json::from_value::<ChineseScheme>("korean".into()).is_err());
     let mut invalid = serde_json::to_value(store.load().unwrap()).unwrap();
     invalid["preferences"]["last_chinese_scheme"] = "japanese".into();
     let bytes = serde_json::to_vec(&invalid).unwrap();

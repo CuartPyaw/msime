@@ -105,3 +105,29 @@ test("applies queued scheme changes to the latest draft", () => {
     selected: "wubi",
   });
 });
+
+test("selecting Korean remembers the Chinese scheme and uses the 26-key layout", () => {
+  const next = selectHomeTouchKeyboardScheme(
+    { ...preferences, scheme: "wubi", touch_keyboard_layout: "nine_key" },
+    "korean",
+  );
+
+  expect(next.scheme).toBe("korean");
+  expect(next.last_chinese_scheme).toBe("wubi");
+  expect(next.touch_keyboard_layout).toBe("twenty_six_key");
+  expect(next.touch_keyboard_schemes?.selected).toBe("korean");
+});
+
+test("switching from Japanese to Korean keeps the remembered Chinese scheme", () => {
+  const next = selectHomeTouchKeyboardScheme(
+    { ...preferences, scheme: "japanese", last_chinese_scheme: "shuangpin" },
+    "korean",
+  );
+
+  expect(next.last_chinese_scheme).toBe("shuangpin");
+});
+
+test("Korean is appended last to the stable scheme order", () => {
+  expect(allTouchKeyboardSchemes.at(-1)).toBe("korean");
+  expect(allTouchKeyboardSchemes).toHaveLength(12);
+});

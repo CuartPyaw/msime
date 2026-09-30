@@ -1,6 +1,6 @@
 #!/usr/bin/env xcrun swift
 
-// Renders the input menu's template TIFFs from the stroke in MSIMEClientInputMethodMenuIcon.svg: MSIMEClientInputMethodMenuIcon.tiff is the bare logo the bundle names, and each input mode gets the logo with a corner badge carrying its own character, 中, 日 or 英. With the bare logo on all three modes the menu bar and the system's Ctrl+Space switcher showed three identical icons, and nothing told the modes apart.
+// Renders the input menu's template TIFFs from the stroke in MSIMEClientInputMethodMenuIcon.svg: MSIMEClientInputMethodMenuIcon.tiff is the bare logo the bundle names, and each input mode gets the logo with a corner badge carrying its own character, 中, 日, 한 or 英. With the bare logo on every mode the menu bar and the system's Ctrl+Space switcher showed three identical icons, and nothing told the modes apart.
 //
 // The input menu draws this through HIToolbox rather than through NSImage, and that path reads the TIFF's
 // pages, not the DPI metadata of a single one: a lone 2x page is taken for a 32-point image, which the
@@ -79,20 +79,23 @@ func render(_ stroked: CGPath, badge: String?, pixels: Int, to url: URL) throws 
 }
 
 // 角标：右下角一块圆角方块，模式的字从方块里镂空出来。整张图仍是纯黑加 alpha 的模板图，所以角标跟着菜单一起着色，不带自己的颜色。方块四周再清出一圈空白，标志的笔画经过角落时不会和方块粘成一团。
-// The badge takes a little over half the tile: at the 16-pixel page that leaves the character about seven pixels tall, the smallest at which 中, 日 and 英 still read apart.
+// The badge takes a little over half the tile: at the 16-pixel page that leaves the character about seven pixels tall, the smallest at which 中, 日, 한 and 英 still read apart.
 let badgeSideFraction: CGFloat = 0.5
 let badgedLogoFraction: CGFloat = 0.7
 let badgeHaloFraction: CGFloat = 1.0 / 32
 let badgeCornerFraction: CGFloat = 0.22
 let badgeGlyphFraction: CGFloat = 0.78
 
-func badgeFont(size: CGFloat) -> CTFont {
-    // PingFang ships with every supported macOS; Hiragino Sans GB is the fallback the system itself uses for Simplified Chinese.
-    for name in ["PingFangSC-Semibold", "HiraginoSansGB-W6"] {
+func badgeFont(size: CGFloat, for character: String) -> CTFont {
+    // PingFang ships with every supported macOS; Hiragino Sans GB is the fallback the system itself uses for Simplified Chinese. Neither carries Hangul, so 한 comes from Apple SD Gothic Neo, the system's Korean face, at the matching weight. The first font that has every glyph wins, so the Chinese badges keep the font they were drawn with.
+    var unichars = Array(character.utf16)
+    var glyphs = [CGGlyph](repeating: 0, count: unichars.count)
+    for name in ["PingFangSC-Semibold", "HiraginoSansGB-W6", "AppleSDGothicNeo-SemiBold"] {
         let font = CTFontCreateWithName(name as CFString, size, nil)
-        if (CTFontCopyPostScriptName(font) as String) == name { return font }
+        if (CTFontCopyPostScriptName(font) as String) == name,
+           CTFontGetGlyphsForCharacters(font, &unichars, &glyphs, unichars.count) { return font }
     }
-    fatalError("no CJK font for the menu icon badge")
+    fatalError("no font for the menu icon badge \(character)")
 }
 
 func drawBadge(_ character: String, in cg: CGContext, side: CGFloat) {
@@ -108,7 +111,7 @@ func drawBadge(_ character: String, in cg: CGContext, side: CGFloat) {
     cg.setFillColor(NSColor.black.cgColor)
     cg.fillPath()
 
-    let font = badgeFont(size: badgeSide * badgeGlyphFraction)
+    let font = badgeFont(size: badgeSide * badgeGlyphFraction, for: character)
     var unichars = Array(character.utf16)
     var glyphs = [CGGlyph](repeating: 0, count: unichars.count)
     guard CTFontGetGlyphsForCharacters(font, &unichars, &glyphs, unichars.count),
@@ -158,4 +161,5 @@ try writeIcon(metasequoiaStroke(), named: "MSIMEClientInputMethodMenuIcon")
 // The input modes' icons, named in Info.plist.in beside each mode.
 try writeIcon(metasequoiaStroke(), badge: "中", named: "MSIMEClientInputMethodMenuIconChinese")
 try writeIcon(metasequoiaStroke(), badge: "日", named: "MSIMEClientInputMethodMenuIconJapanese")
+try writeIcon(metasequoiaStroke(), badge: "한", named: "MSIMEClientInputMethodMenuIconKorean")
 try writeIcon(metasequoiaStroke(), badge: "英", named: "MSIMEClientInputMethodMenuIconEnglish")

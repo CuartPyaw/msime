@@ -27,6 +27,11 @@ int main() {
     NSDictionary *japaneseNativeSnapshot = MSIMECloudAppearanceSnapshot(defaults);
     assert([japaneseNativeSnapshot[@"platform.macos.input_scheme"] isEqual:@0]);
     assert(MSIMEValidateCloudAppearance(japaneseNativeSnapshot));
+    // The fixed Apple cloud contract has no Korean entry either, so it keeps the same Chinese fallback.
+    [defaults setObject:@"korean" forKey:@"MSIMEClientInputScheme"];
+    NSDictionary *koreanNativeSnapshot = MSIMECloudAppearanceSnapshot(defaults);
+    assert([koreanNativeSnapshot[@"platform.macos.input_scheme"] isEqual:@0]);
+    assert(MSIMEValidateCloudAppearance(koreanNativeSnapshot));
     NSMutableDictionary *values = [initial mutableCopy];
     values[@"platform.macos.global_theme"] = @"custom";
     values[@"platform.macos.custom_theme_base"] = @"night";

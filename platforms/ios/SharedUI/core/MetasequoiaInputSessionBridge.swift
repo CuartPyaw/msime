@@ -459,6 +459,7 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
     switch selected {
     case .wubi: engineScheme = "wubi"
     case .japanese, .japaneseNineKey: engineScheme = "japanese"
+    case .korean: engineScheme = "korean"
     case .shuangpin, .ziranma, .microsoft, .shoudao: engineScheme = "shuangpin"
     case .quanpin, .nineKey, .handwriting, .thoughtfulReply: engineScheme = "quanpin"
     }
@@ -475,7 +476,8 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
     let selectedID = selected.sharedIdentifier
     let mapping: (inout [String: Any]) -> Void = { preferences in
       preferences["scheme"] = engineScheme
-      if engineScheme != "japanese" {
+      // `last_chinese_scheme` is the Chinese scheme to come back to, so neither Japanese nor Korean replaces it.
+      if engineScheme != "japanese" && engineScheme != "korean" {
         preferences["last_chinese_scheme"] = engineScheme
       }
       if let profile = selected.shuangpinProfile {
@@ -985,6 +987,8 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
   }
   func switchToWubi() -> MetasequoiaInputSnapshot { switchScheme("wubi", profile: nil) }
   func switchToJapanese() -> MetasequoiaInputSnapshot { switchScheme("japanese", profile: nil) }
+  /// Korean Hangul (Dubeolsik). Switching discards an open syllable, so callers finish the composition first.
+  func switchToKorean() -> MetasequoiaInputSnapshot { switchScheme("korean", profile: nil) }
 
   func editCandidate(at index: UInt, expectedWord: String, action: MetasequoiaCandidateAction) -> MetasequoiaInputSnapshot {
     guard let row = (try? currentCandidates())?[safe: Int(index)],

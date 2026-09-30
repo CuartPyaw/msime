@@ -1,4 +1,4 @@
-import { KeyboardGeometry } from './KeyboardGeometry';
+import { KeyboardGeometry } from "./KeyboardGeometry";
 
 /**
  * Which buttons the floating toolbar carries, how wide that makes it, and what each one says.
@@ -41,6 +41,8 @@ export interface ToolbarState {
   readonly temporaryEnglish: boolean;
   /** Japanese is a distinct input scheme; English still takes precedence when dedicated mode is on. */
   readonly japanese: boolean;
+  /** Korean, like Japanese, is a scheme of its own with its own face. */
+  readonly korean: boolean;
   /** Hardware Caps Lock takes precedence over the language face on desktop keyboards. */
   readonly capsLock: boolean;
   readonly chinesePunctuation: boolean;
@@ -67,6 +69,7 @@ export class FloatingToolbarLayout {
       english: false,
       temporaryEnglish: false,
       japanese: false,
+      korean: false,
       capsLock: false,
       chinesePunctuation: true,
       fullWidth: false,
@@ -140,7 +143,9 @@ export class FloatingToolbarLayout {
               ? "英"
               : state.japanese
                 ? "日"
-                : "中";
+                : state.korean
+                  ? "한"
+                  : "中";
       case ToolbarButton.PUNCTUATION:
         return state.chinesePunctuation ? "。" : ".";
       case ToolbarButton.FULL_WIDTH:

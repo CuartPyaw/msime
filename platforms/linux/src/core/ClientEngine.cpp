@@ -1072,8 +1072,10 @@ struct State {
       preferences["learning"] = false;
   }
 };
+// Japanese kana and Korean Hangul are not Chinese text, so the traditional-output conversion leaves both alone.
 bool script_conversion_applies(const Json &context) {
   return context.is_object() && context.value("scheme", 255) != 3 &&
+         context.value("scheme", 255) != 4 &&
          context.value("local_mode", "none") != "unicode";
 }
 std::string traditional_display(const State &s, const Json &context,
@@ -2393,11 +2395,9 @@ IBusProperty *candidate_actions(IBusEngine *engine) {
         !id.at("session").is_number_unsigned() || !id.at("generation").is_number_unsigned() ||
         !id.at("index").is_number_unsigned())
       continue;
-    // Engine only persists operations for local dictionary and English
-    // dictionary entries. Dynamic, local-mode and Japanese candidates have
-    // no user-dictionary identity to mutate.
+    // Engine only persists operations for local dictionary and English dictionary entries. Dynamic, local-mode, Japanese and Korean candidates have no user-dictionary identity to mutate.
     const auto source = candidate.value("source", 0);
-    if (scheme == 3 || (source != 0 && source != 1 && source != 4))
+    if (scheme == 3 || scheme == 4 || (source != 0 && source != 1 && source != 4))
       continue;
     editable_candidates = true;
     const auto slot = index + 1;
@@ -2507,9 +2507,8 @@ void schedule_candidate_properties(IBusEngine *engine) {
 }
 IBusProperty *input_mode_property(IBusEngine *engine) {
   const auto &s = state(engine);
-  const bool japanese_scheme = s.scheme_override
-                                   ? *s.scheme_override == "japanese"
-                                   : configured.at("preferences").value("scheme", "") == "japanese";
+  const auto scheme = s.scheme_override.value_or(
+      configured.at("preferences").value("scheme", std::string{}));
   auto *property = ibus_property_new(
       "InputMode", PROP_TYPE_TOGGLE,
       ibus_text_new_from_static_string("中文"), "",
@@ -2518,9 +2517,10 @@ IBusProperty *input_mode_property(IBusEngine *engine) {
       s.focused && !s.blocked, TRUE,
       s.input_enabled ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr);
   const char *symbol = "文";
-  switch (msime::linux_host::input_mode_indicator(s.input_enabled, japanese_scheme, s.caps_lock)) {
+  switch (msime::linux_host::input_mode_indicator(s.input_enabled, scheme, s.caps_lock)) {
   case msime::linux_host::InputModeIndicator::Chinese: symbol = "文"; break;
   case msime::linux_host::InputModeIndicator::Japanese: symbol = "日"; break;
+  case msime::linux_host::InputModeIndicator::Korean: symbol = "한"; break;
   case msime::linux_host::InputModeIndicator::English: symbol = "A"; break;
   case msime::linux_host::InputModeIndicator::CapsLock: symbol = "⇪"; break;
   }
@@ -2571,6 +2571,9 @@ void publish_mode(IBusEngine *engine, bool registration) {
   const bool japanese_scheme = s.scheme_override
                                    ? *s.scheme_override == "japanese"
                                    : configured.at("preferences").value("scheme", "") == "japanese";
+  const bool korean_scheme = s.scheme_override
+                                 ? *s.scheme_override == "korean"
+                                 : configured.at("preferences").value("scheme", "") == "korean";
   const auto mixed_input = configured.at("preferences").value(
       "mixed_input", Json::object());
   const auto mixed_input_value = [&](const char *key, bool fallback) {
@@ -2727,7 +2730,7 @@ void publish_mode(IBusEngine *engine, bool registration) {
       ibus_text_new_from_static_string("繁体输出"), "",
       ibus_text_new_from_static_string("将中文候选和上屏文本转换为繁体"),
       s.focused && !s.blocked && s.input_enabled && s.session &&
-          !japanese_scheme && !menu_save_pending,
+          !japanese_scheme && !korean_scheme && !menu_save_pending,
       TRUE, s.traditional_output ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED,
       nullptr);
   auto english = ibus_property_new(
@@ -3088,22 +3091,28 @@ void publish_mode(IBusEngine *engine, bool registration) {
   auto scheme = ibus_property_new(
       "Scheme", PROP_TYPE_MENU,
       ibus_text_new_from_static_string("输入方案"), "",
-      ibus_text_new_from_static_string("选择中文或日文输入方案"),
+      ibus_text_new_from_static_string("选择中文、日文或韩文输入方案"),
       s.focused && !s.blocked && !menu_save_pending, TRUE, PROP_STATE_UNCHECKED, nullptr);
   auto scheme_menu = ibus_prop_list_new();
   auto chinese = ibus_property_new(
       "Scheme/Chinese", PROP_TYPE_RADIO,
       ibus_text_new_from_static_string("中文"), "",
       ibus_text_new_from_static_string("使用当前中文方案"), !menu_save_pending, TRUE,
-      japanese_scheme ? PROP_STATE_UNCHECKED : PROP_STATE_CHECKED, nullptr);
+      japanese_scheme || korean_scheme ? PROP_STATE_UNCHECKED : PROP_STATE_CHECKED, nullptr);
   auto japanese = ibus_property_new(
       "Scheme/Japanese", PROP_TYPE_RADIO,
       ibus_text_new_from_static_string("日文"), "",
       ibus_text_new_from_static_string("使用日语罗马字方案"), !menu_save_pending, TRUE,
       japanese_scheme ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr);
+  auto korean = ibus_property_new(
+      "Scheme/Korean", PROP_TYPE_RADIO,
+      ibus_text_new_from_static_string("韩文"), "",
+      ibus_text_new_from_static_string("使用韩语两套式方案"), !menu_save_pending, TRUE,
+      korean_scheme ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr);
   ibus_prop_list_append(scheme_menu, chinese);
   ibus_prop_list_append(scheme_menu, japanese);
-  // Chinese/Japanese and the three Chinese schemes are two radio groups; without the rule ibus-ui-gtk3 joins them and marks only one of the two checked entries.
+  ibus_prop_list_append(scheme_menu, korean);
+  // Chinese/Japanese/Korean and the three Chinese schemes are two radio groups; without the rule ibus-ui-gtk3 joins them and marks only one of the two checked entries.
   ibus_prop_list_append(scheme_menu, menu_separator("Scheme/Separator"));
   const auto active_chinese_scheme = s.scheme_override.value_or(
       configured.at("preferences").value("last_chinese_scheme", std::string("quanpin")));
@@ -3114,7 +3123,7 @@ void publish_mode(IBusEngine *engine, bool registration) {
         (std::string("Scheme/") + (std::string(value) == "quanpin" ? "Quanpin" : std::string(value) == "shuangpin" ? "Shuangpin" : "Wubi")).c_str(), PROP_TYPE_RADIO,
         ibus_text_new_from_static_string(label), "",
         ibus_text_new_from_static_string("直接选择中文输入方案"), !menu_save_pending, TRUE,
-        !japanese_scheme && active_chinese_scheme == value
+        !japanese_scheme && !korean_scheme && active_chinese_scheme == value
             ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED,
         nullptr);
     ibus_prop_list_append(scheme_menu, item);
@@ -3443,17 +3452,21 @@ void render(IBusEngine *engine, const Json &view) {
   const auto composed = msime::linux_host::compose_phrase_preedit(
       view.value("phrase_prefix", std::string{}), text, caret);
   text = composed.text;
+  // A Korean syllable is text the user already wrote and has no candidate window to show it in, so it is always drawn inline with the caret after it, whatever the preedit style. IBus commits a preedit in COMMIT mode itself when the client loses focus, which is how the open syllable reaches the client being left (see focus_out).
+  const bool korean = view.value("scheme", 0) == 4 && !view.value("dedicated_english", false) &&
+                      view.value("local_mode", std::string("none")) == "none";
   // IBus counts the cursor in Unicode scalars, and the piece is not ASCII.
   auto preedit_text = ibus_text_new_from_string(text.c_str());
-  if (style != "empty")
+  if (style != "empty" || korean)
     underline_preedit(preedit_text, static_cast<guint>(
                                         msime::linux_host::utf8_scalar_count(text)));
   ibus_engine_update_preedit_text_with_mode(
       engine, preedit_text,
-      static_cast<guint>(style == "raw"
+      static_cast<guint>(style == "raw" && !korean
                              ? composed.caret_scalars
                              : msime::linux_host::utf8_scalar_count(text)),
-      style != "empty" && !text.empty(), IBUS_ENGINE_PREEDIT_CLEAR);
+      (style != "empty" || korean) && !text.empty(),
+      korean ? IBUS_ENGINE_PREEDIT_COMMIT : IBUS_ENGINE_PREEDIT_CLEAR);
   const auto &candidates = view.at("candidates");
   if (candidates.empty()) {
     auto &s = state(engine);
@@ -3676,7 +3689,13 @@ bool apply(IBusEngine *engine, char *raw, PunctuationPairMode pair_mode,
       s.last_smart_punctuation = 0;
       s.last_smart_punctuation_time = 0;
     }
-    if (state(engine).fullwidth)
+    // Korean commits are half-width ASCII punctuation beside Hangul, which the runtime already leaves unconverted; the host must not widen them either. The dedicated English mode keeps its own rules in every scheme, so its commits are widened as usual.
+    const auto &commit_context = result.contains("commit_context") ? result.at("commit_context") : Json(nullptr);
+    const bool korean_commit =
+        ((commit_context.is_object() && commit_context.value("scheme", 0) == 4) ||
+         result.at("view").value("scheme", 0) == 4) &&
+        !result.at("view").value("dedicated_english", false);
+    if (state(engine).fullwidth && !korean_commit)
       text = fullwidth_text(text);
     if (!text.empty()) {
       commit_text(engine, text);
@@ -3782,13 +3801,14 @@ void render_after_voice(IBusEngine *engine) {
   s.wave_overlay.reset();
   clear(engine);
 }
-// The scheme decides whether the traditional-output conversion applies. Without an Engine view (English mode) it comes from the configured scheme, so Japanese text is still left alone.
+// The scheme decides whether the traditional-output conversion applies. Without an Engine view (English mode) it comes from the configured scheme, so Japanese and Korean text is still left alone.
 Json voice_commit_context(const State &s) {
   if (s.view.is_object())
     return Json{{"scheme", s.view.value("scheme", 0)}, {"local_mode", "none"}};
   const auto scheme = s.scheme_override.value_or(
       configured.at("preferences").value("scheme", std::string("quanpin")));
-  return Json{{"scheme", scheme == "japanese" ? 3 : 0}, {"local_mode", "none"}};
+  return Json{{"scheme", scheme == "japanese" ? 3 : scheme == "korean" ? 4 : 0},
+              {"local_mode", "none"}};
 }
 void voice_cancel(IBusEngine *engine) {
   auto &s = state(engine);
@@ -4397,7 +4417,21 @@ void focus_out(IBusEngine *engine) {
     s.last_smart_punctuation_time = 0;
     s.smart_punctuation_rejected = 0;
     s.paired_tracker.clear();
-    if (s.session)
+    // Leaving the client commits an open Korean syllable. render() draws it in IBUS_ENGINE_PREEDIT_COMMIT mode, so IBus has already handed that preedit to the client being left; committing the runtime's copy here as well would type the syllable twice, or into the client that takes the focus next. The session still finishes it, so nothing of it is left composing.
+    const bool korean_composition =
+        s.session && s.view.is_object() && s.view.value("scheme", 0) == 4 &&
+        !s.view.value("dedicated_english", false) &&
+        s.view.value("local_mode", std::string("none")) == "none" &&
+        !s.view.value("editing_text", std::string{}).empty();
+    if (korean_composition) {
+      // The source is read from the view the syllable was typed under, before the focus result replaces it.
+      const auto source = typing_source(s);
+      const auto left = response(msime_client_focus(s.session, false));
+      // IBus writes the syllable as the preedit, not through commit_text, so it is counted here as typed text.
+      if (left.contains("commit") && left.at("commit").is_string())
+        record_typing_statistics(engine, left.at("commit").get<std::string>(), source);
+      s.view = left.at("view");
+    } else if (s.session)
       apply(engine, msime_client_focus(s.session, false));
     clear(engine);
     publish_mode(engine);
@@ -4624,6 +4658,7 @@ void property_activate(IBusEngine *engine, const gchar *name, guint value) {
        std::string(name) != "CandidateTheme/dark" &&
        std::string(name) != "Scheme/Chinese" &&
        std::string(name) != "Scheme/Japanese" &&
+       std::string(name) != "Scheme/Korean" &&
        property_name != "Scheme/Quanpin" &&
        property_name != "Scheme/Shuangpin" && property_name != "Scheme/Wubi" &&
        property_name.rfind("ShuangpinProfile/", 0) != 0) ||
@@ -5131,9 +5166,9 @@ void property_activate(IBusEngine *engine, const gchar *name, guint value) {
       return;
     }
     if (std::string(name) == "TraditionalOutput") {
-      if (s.scheme_override.value_or(
-              configured.at("preferences").value("scheme", "quanpin")) ==
-          "japanese")
+      const auto active_scheme = s.scheme_override.value_or(
+          configured.at("preferences").value("scheme", "quanpin"));
+      if (active_scheme == "japanese" || active_scheme == "korean")
         return;
       if (menu_save_pending || s.traditional_output == (value == PROP_STATE_CHECKED)) return;
       const auto directory = configured.value("preferences_directory", std::string{});
@@ -5343,11 +5378,12 @@ void property_activate(IBusEngine *engine, const gchar *name, guint value) {
     if (std::string(name).rfind("Scheme/", 0) == 0) {
       if (value != PROP_STATE_CHECKED || menu_save_pending) return;
       auto selected = property_name == "Scheme/Japanese" ? std::string("japanese")
+          : property_name == "Scheme/Korean" ? std::string("korean")
           : property_name == "Scheme/Quanpin" ? std::string("quanpin")
           : property_name == "Scheme/Shuangpin" ? std::string("shuangpin")
           : property_name == "Scheme/Wubi" ? std::string("wubi")
           : configured.at("preferences").value("last_chinese_scheme", std::string("quanpin"));
-      if (selected != "japanese" && selected != "quanpin" &&
+      if (selected != "japanese" && selected != "korean" && selected != "quanpin" &&
           selected != "shuangpin" && selected != "wubi") selected = "quanpin";
       if (s.scheme_override.value_or(
               configured.at("preferences").value("scheme", "quanpin")) == selected) return;
@@ -5931,7 +5967,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
     const auto configured_scheme = configured.at("preferences").value(
         "scheme", std::string("quanpin"));
     const auto active_scheme = s.scheme_override.value_or(configured_scheme);
-    if (active_scheme == "japanese")
+    if (active_scheme == "japanese" || active_scheme == "korean")
       return FALSE;
     if (menu_save_pending)
       return FALSE;
@@ -6019,8 +6055,13 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
     s.space_convert_preceding.clear();
   }
   bool handled = false;
+  // Korean types half-width ASCII punctuation and none of the Chinese punctuation helpers apply to it; its letters are jamo whose case Shift alone decides. See the MsimeCommand notes in msime_client.h. The dedicated English mode keeps its own rules in every scheme.
+  const bool korean_scheme =
+      !s.english_mode &&
+      s.scheme_override.value_or(configured.at("preferences").value(
+          "scheme", std::string("quanpin"))) == "korean";
   const auto fullwidth_idle_commit = [&](guint value) {
-    if (!s.fullwidth || value < 0x21 || value > 0x7e)
+    if (!s.fullwidth || korean_scheme || value < 0x21 || value > 0x7e)
       return false;
     const auto editing_text = s.view.value("editing_text", std::string{});
     const auto candidates = s.view.value("candidates", Json::array());
@@ -6208,12 +6249,8 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
         key == IBUS_Page_Down || key == IBUS_KP_Page_Down || key == IBUS_Tab ||
         key == IBUS_KP_Tab || key == IBUS_ISO_Left_Tab)
       s.paired_tracker.clear();
-    // Match Windows TSF: with CapsLock enabled, an uppercase letter at the
-    // beginning of a fresh composition belongs to the editor. IBus exposes
-    // the lock state in the modifier mask while preserving the uppercase
-    // keysym, so leave that stroke untouched instead of opening a pinyin
-    // composition.
-    if ((flags & IBUS_LOCK_MASK) && key >= 'A' && key <= 'Z' &&
+    // Match Windows TSF: with CapsLock enabled, an uppercase letter at the beginning of a fresh composition belongs to the editor. IBus exposes the lock state in the modifier mask while preserving the uppercase keysym, so leave that stroke untouched instead of opening a pinyin composition. Korean letters are jamo whatever CapsLock says, so they still compose.
+    if (!korean_scheme && (flags & IBUS_LOCK_MASK) && key >= 'A' && key <= 'Z' &&
         s.view.at("editing_text").get<std::string>().empty() &&
         s.view.at("candidates").empty())
       return;
@@ -6291,7 +6328,8 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
                                   key == IBUS_Right || key == IBUS_KP_Right;
     const auto active_editing = s.view.value("editing_text", std::string{});
     const auto active_candidates = s.view.value("candidates", Json::array());
-    if (ctrl_only && segment_edit_key &&
+    // A Korean syllable has no segments: a Ctrl chord finishes it below and stays the application's shortcut.
+    if (!korean_scheme && ctrl_only && segment_edit_key &&
         (!active_editing.empty() ||
          (active_candidates.is_array() && !active_candidates.empty()))) {
       const uint32_t segment_command =
@@ -6347,7 +6385,8 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
     if (msime::linux_host::navigation_key(key)) {
       const bool binding_enabled = s.navigation.command(
           key, (flags & IBUS_SHIFT_MASK) != 0).has_value();
-      if (!binding_enabled &&
+      // A Korean syllable never has a candidate page for a binding to act on, so the key always finishes it and goes to the application.
+      if ((!binding_enabled || korean_scheme) &&
           (!s.view.at("editing_text").get<std::string>().empty() ||
            !s.view.at("candidates").empty()))
         apply(engine, msime_client_command(s.session, MSIME_COMMIT_CANDIDATE));
@@ -6379,7 +6418,11 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
     if (flags &
         (IBUS_CONTROL_MASK | IBUS_MOD1_MASK | IBUS_MOD4_MASK | IBUS_SUPER_MASK |
          IBUS_META_MASK | IBUS_HYPER_MASK | IBUS_MOD5_MASK)) {
-      apply(engine, msime_client_command(s.session, MSIME_CANCEL));
+      // A Korean syllable is already text, so a shortcut finishes it rather than throwing it away.
+      if (korean_scheme && !s.view.at("editing_text").get<std::string>().empty())
+        apply(engine, msime_client_command(s.session, MSIME_FINISH_COMPOSITION));
+      else
+        apply(engine, msime_client_command(s.session, MSIME_CANCEL));
       return;
     }
     if (s.number_row_selection && !s.view.value("nine_key", false) &&
@@ -6429,7 +6472,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
             s.session, static_cast<uint8_t>(*keypad)));
         if (!handled && *keypad == '.') {
           auto text = std::string(".");
-          if (s.fullwidth)
+          if (s.fullwidth && !korean_scheme)
             text = fullwidth_text(text);
           commit_text(engine, text);
           handled = true;
@@ -6461,7 +6504,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
         s.paired_punctuation &&
         !msime::linux_host::paired_punctuation_excluded_client(
             s.focused_client);
-    if (s.chinese_punctuation && paired_punctuation_enabled &&
+    if (!korean_scheme && s.chinese_punctuation && paired_punctuation_enabled &&
         !(flags & (IBUS_CONTROL_MASK | IBUS_MOD1_MASK | IBUS_SUPER_MASK)) &&
         (key == IBUS_quotedbl ||
          (key == IBUS_apostrophe && editing_text.empty()))) {
@@ -6477,7 +6520,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
         ibus_engine_forward_key_event(engine, IBUS_Left, 0, 0);
       return;
     }
-    if (s.chinese_punctuation && paired_punctuation_enabled &&
+    if (!korean_scheme && s.chinese_punctuation && paired_punctuation_enabled &&
         !(flags & (IBUS_CONTROL_MASK | IBUS_MOD1_MASK | IBUS_SUPER_MASK)) &&
         (key == '(' || key == '[' || key == '<' || key == '{')) {
       const auto pair_mode = key == '{' ? PunctuationPairMode::Brace
@@ -6509,7 +6552,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
     // 记下的是一个 ASCII 标点字符，键值是无符号的。char 在此平台有符号，直接比较既
     // 触发 -Werror=sign-compare（新编译器上整个 IBus 宿主因此编不出来），也会让任何
     // 高位为 1 的字节提升成一个巨大的无符号数去和键值比。按 unsigned char 取值。
-    if (s.chinese_punctuation && s.smart_punctuation_repeat &&
+    if (!korean_scheme && s.chinese_punctuation && s.smart_punctuation_repeat &&
         static_cast<guint>(static_cast<unsigned char>(s.last_smart_punctuation)) == key &&
         s.last_smart_punctuation_time != 0 &&
         g_get_monotonic_time() - s.last_smart_punctuation_time <=
@@ -6533,7 +6576,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
         return;
         }
     }
-    if (s.chinese_punctuation && s.smart_punctuation &&
+    if (!korean_scheme && s.chinese_punctuation && s.smart_punctuation &&
         is_smart_punctuation_key(key) &&
         s.smart_punctuation_rejected != static_cast<char>(key) &&
         smart_punctuation_preceded_by_ascii_alphanumeric(s)) {
@@ -6634,14 +6677,15 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
       return;
     }
     const char ascii = static_cast<char>(key);
+    // An apostrophe inside a spelling is an Engine input character, except in Korean, where it is a mark that follows the open syllable like any other.
     if (key >= 0x21 && key <= 0x7e &&
         std::ispunct(static_cast<unsigned char>(ascii)) != 0 &&
-        (ascii != '\'' || !has_composition)) {
+        (ascii != '\'' || !has_composition || korean_scheme)) {
       // Engine is about to commit the Chinese mark for this key. Record what
       // the caret follows now, while the document still predates the commit;
       // a Space arriving next checks both characters before rewriting either.
       const bool arm_space_convert =
-          s.smart_punctuation && s.smart_punctuation_space_convert &&
+          !korean_scheme && s.smart_punctuation && s.smart_punctuation_space_convert &&
           s.chinese_punctuation &&
           msime::linux_host::is_space_conversion_key(ascii) &&
           !has_composition && !candidate_active;
@@ -6721,7 +6765,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
         handled = true;
         return;
       }
-      if (s.fullwidth && !has_composition && !candidate_active) {
+      if (s.fullwidth && !korean_scheme && !has_composition && !candidate_active) {
         commit_text(engine, "\xe3\x80\x80");
         handled = true;
         return;
@@ -6792,6 +6836,14 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
     }
     if (command != UINT32_MAX)
       handled = apply(engine, msime_client_command(s.session, command));
+    else if (korean_scheme && ((key >= 'a' && key <= 'z') || (key >= 'A' && key <= 'Z')))
+      // Shift decides the jamo (Shift+R is ㄲ, R alone ㄱ) and CapsLock does not, so the letter is sent in the case Shift gives it rather than the case of the keysym.
+      handled = apply(engine, msime_client_character(
+          s.session,
+          static_cast<uint8_t>((flags & IBUS_SHIFT_MASK)
+                                   ? g_ascii_toupper(static_cast<gchar>(key))
+                                   : g_ascii_tolower(static_cast<gchar>(key))),
+          (flags & IBUS_SHIFT_MASK) != 0));
     else if (key >= IBUS_KP_0 && key <= IBUS_KP_9)
       handled = apply(
           engine,
@@ -6814,7 +6866,10 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
       // same text while allowing IBus to deliver the original keyval.
       apply(engine, msime_client_command(s.session, MSIME_COMMIT_RAW));
       handled = false;
-    } else
+    } else if (korean_scheme && has_composition)
+      // Any other key ends a Korean syllable the way Space does: the syllable is kept and the key goes to the application.
+      apply(engine, msime_client_command(s.session, MSIME_FINISH_COMPOSITION));
+    else
       apply(engine, msime_client_command(s.session, MSIME_CANCEL));
     if (!handled) {
       guint fullwidth_value = key;
@@ -7285,7 +7340,7 @@ void save_menu_preference(IBusEngine *engine, MenuPreference preference, Json va
             break;
           case MenuPreference::InputScheme:
             snapshot["preferences"]["scheme"] = request.value;
-            if (request.value != "japanese")
+            if (request.value != "japanese" && request.value != "korean")
               snapshot["preferences"]["last_chinese_scheme"] = request.value;
             break;
           case MenuPreference::NineKey:

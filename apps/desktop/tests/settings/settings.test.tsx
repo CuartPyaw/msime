@@ -301,6 +301,7 @@ const touchSchemeLabels = [
   "日语 26 键",
   "手写",
   "高情商回复",
+  "韩语 26 键",
 ];
 const touchSchemeIds = [
   "quanpin",
@@ -314,6 +315,7 @@ const touchSchemeIds = [
   "japanese",
   "handwriting",
   "thoughtful_reply",
+  "korean",
 ];
 
 test("Android touch schemes follow Apple order and stay absent on hosts without the capability", async () => {
@@ -329,7 +331,7 @@ test("Android touch schemes follow Apple order and stay absent on hosts without 
       .getAllByRole("button")
       .map((button) => button.textContent?.replace("✓", "")),
   ).toEqual(touchSchemeLabels);
-  expect(within(group).getAllByRole("switch")).toHaveLength(11);
+  expect(within(group).getAllByRole("switch")).toHaveLength(12);
   enabled.unmount();
   render(<SettingsPage client={{ load: async () => initial, save: vi.fn() }} />);
   fireEvent.click(await screen.findByRole("button", { name: "输入" }));

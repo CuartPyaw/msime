@@ -370,7 +370,7 @@ bool toggle_stored_flag(const std::filesystem::path &directory,
     return false;
   }
 }
-// Select an input scheme through the revisioned store, keeping last_chinese_scheme the way the settings page does: a Chinese scheme is also the one Japanese returns to, and choosing Japanese remembers the scheme it replaces.
+// Select an input scheme through the revisioned store, keeping last_chinese_scheme the way the settings page does: a Chinese scheme is also the one Japanese and Korean return to, and choosing Japanese or Korean remembers the Chinese scheme it replaces. Moving between Japanese and Korean keeps the remembered one, because neither is a Chinese scheme the store would accept there.
 bool store_input_scheme(const std::filesystem::path &directory,
                         const std::string &scheme) {
   try {
@@ -393,7 +393,13 @@ bool store_input_scheme(const std::filesystem::path &directory,
             : std::string("quanpin");
     if (current == scheme)
       return true;
-    preferences["last_chinese_scheme"] = scheme == "japanese" ? current : scheme;
+    const auto chinese = [](const std::string &value) {
+      return value != "japanese" && value != "korean";
+    };
+    if (chinese(scheme))
+      preferences["last_chinese_scheme"] = scheme;
+    else if (chinese(current))
+      preferences["last_chinese_scheme"] = current;
     preferences["scheme"] = scheme;
     const auto serialized = snapshot.dump();
     std::unique_ptr<char, decltype(&msime_client_string_free)> saved(
@@ -471,6 +477,8 @@ msime::windows::TsfLocalConfig tsf_local_config(const nlohmann::json &preference
       preferences.value("shuangpin_profile", std::string("xiaohe")) == "microsoft";
   config.japanese_input_mode =
       preferences.value("scheme", std::string("quanpin")) == "japanese";
+  config.korean_input_mode =
+      preferences.value("scheme", std::string("quanpin")) == "korean";
   config.tsf_diagnostic_log =
       preferences.value("diagnostic_log", nlohmann::json::object())
           .value("tsf", false);
@@ -1601,10 +1609,7 @@ int wmain(int argc, wchar_t **argv) {
       }
       candidates.set_follow_cursor(
           follow_cursor->load(std::memory_order_acquire));
-      // The language button shows 'A' while Caps Lock is on, 日 in Japanese
-      // mode and an underlined "En" in the Engine's own English mode, so it
-      // has to follow all three. Showing 中 with Caps Lock on tells the user
-      // the wrong thing about what the next letter key will do.
+      // The language button shows 'A' while Caps Lock is on, 日 in Japanese mode, 한 in Korean mode and an underlined "En" in the Engine's own English mode, so it has to follow all of them. Showing 中 with Caps Lock on tells the user the wrong thing about what the next letter key will do.
       {
         ToolbarLanguageState language;
         language.caps_lock = caps_lock.load(std::memory_order_acquire);
@@ -1617,6 +1622,7 @@ int wmain(int argc, wchar_t **argv) {
         {
           std::lock_guard<std::mutex> lock(*tsf_config_mutex);
           language.japanese = tsf_config->japanese_input_mode;
+          language.korean = tsf_config->korean_input_mode;
         }
         toolbar.set_language_state(language);
       }

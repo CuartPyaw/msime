@@ -59,7 +59,7 @@ static void CheckMenu(NSMenu *menu, id controller) {
         @"selectChineseMode:", @"selectEnglishMode:", @"toggleDedicatedEnglishMode:", @"",
         @"selectSimplifiedOutput:", @"selectTraditionalOutput:", @"",
         @"toggleFullWidthInput:", @"toggleChinesePunctuation:", @"toggleCandidateTranslations:", @"",
-        @"*", @"selectInputScheme:", @"selectInputScheme:", @"selectInputScheme:", @"selectInputScheme:", @"",
+        @"*", @"selectInputScheme:", @"selectInputScheme:", @"selectInputScheme:", @"selectInputScheme:", @"selectInputScheme:", @"",
         @"toggleFloatingToolbar:", @"showEmoji:", @"showScreenKeyboard:", @"showHandwriting:",
         @"showVoicePanel", @"", @"*", @"showDictionary:", @"showAppearance:", @"showAbout:"
     ];
@@ -841,6 +841,9 @@ static void TestSharedInputPreferences() {
     [controller applySharedToolbarPreferences:@{@"scheme": @"japanese"}];
     assert([prefs.inputScheme isEqual:@"japanese"] && SelectedSchemeIndex(prefs) == 3 && saves == 0);
     assert([[prefs sharedPreferencesByMerging:shared][@"scheme"] isEqual:@"japanese"]);
+    [controller applySharedToolbarPreferences:@{@"scheme": @"korean"}];
+    assert([prefs.inputScheme isEqual:@"korean"] && SelectedSchemeIndex(prefs) == 4 && saves == 0);
+    assert([[prefs sharedPreferencesByMerging:shared][@"scheme"] isEqual:@"korean"]);
     [controller applySharedToolbarPreferences:shared];
     assert([prefs.inputScheme isEqual:@"shuangpin"] && SelectedSchemeIndex(prefs) == 1);
     SelectScheme(prefs, 2);
@@ -1771,6 +1774,19 @@ static void TestSystemInputModeReport(MSIMEAppearancePreferences *appearance) {
     assert([appearance.inputScheme isEqual:@"japanese"] && !appearance.englishMode && client.selectedModes.count == 0);
     [controller systemDidReportInputMode:MSIMEChineseInputModeID client:client];
     assert([appearance.inputScheme isEqual:@"shuangpin"] && !appearance.englishMode && client.selectedModes.count == 0);
+
+    // 한 does the same for korean, straight from 日 too, and 中 still goes back to the Chinese scheme both were entered from.
+    [controller systemDidReportInputMode:MSIMEKoreanInputModeID client:client];
+    assert([appearance.inputScheme isEqual:@"korean"] && [appearance.lastChineseScheme isEqual:@"shuangpin"] &&
+           !appearance.englishMode && client.selectedModes.count == 0);
+    [controller systemDidReportInputMode:MSIMEJapaneseInputModeID client:client];
+    [controller systemDidReportInputMode:MSIMEKoreanInputModeID client:client];
+    assert([appearance.inputScheme isEqual:@"korean"] && [appearance.lastChineseScheme isEqual:@"shuangpin"] &&
+           client.selectedModes.count == 0);
+    [controller systemDidReportInputMode:MSIMEEnglishInputModeID client:client];
+    assert([appearance.inputScheme isEqual:@"korean"] && appearance.englishMode && client.selectedModes.count == 0);
+    [controller systemDidReportInputMode:MSIMEChineseInputModeID client:client];
+    assert([appearance.inputScheme isEqual:@"shuangpin"] && !appearance.englishMode && client.selectedModes.count == 0);
     appearance.inputScheme = scheme;
     appearance.englishMode = english;
 }
@@ -2493,6 +2509,7 @@ static void RecordBaseDeactivation(id object, SEL selector, id sender) {
 - (void)updateEnglishInputMode:(BOOL)englishInputMode
          englishCandidateMode:(BOOL)englishCandidateMode
              japaneseInputMode:(BOOL)japaneseInputMode
+               koreanInputMode:(BOOL)koreanInputMode
                       capsLock:(BOOL)capsLock
           chinesePunctuationEnabled:(BOOL)chinesePunctuationEnabled
                    fullWidthEnabled:(BOOL)fullWidthEnabled
@@ -2500,6 +2517,7 @@ static void RecordBaseDeactivation(id object, SEL selector, id sender) {
     (void)englishInputMode;
     (void)englishCandidateMode;
     (void)japaneseInputMode;
+    (void)koreanInputMode;
     (void)capsLock;
     (void)chinesePunctuationEnabled;
     (void)fullWidthEnabled;
@@ -3186,6 +3204,75 @@ static void TestRealSessionComposition() {
     assert(client.insertions.count == 1 && [client.insertions[0] isEqual:@"んー"]);
     assert([japaneseSession closeWithError:&error] && !error);
 
+    // Korean composes Dubeolsik syllables in the marked text through the real Engine. Each key is the ASCII letter the user typed, cased by Shift alone.
+    NSMutableDictionary *koreanOptions = [options mutableCopy];
+    NSMutableDictionary *koreanPreferences = [options[@"preferences"] mutableCopy];
+    koreanPreferences[@"scheme"] = @"korean";
+    koreanOptions[@"preferences"] = koreanPreferences;
+    MSIMEClientSession *koreanSession = [[MSIMEClientSession alloc] initWithOptions:koreanOptions error:&error];
+    assert(koreanSession && !error);
+    // Focus answers with a transition; the controller keeps the view inside it, which is where the scheme it reads lives.
+    NSDictionary *koreanView = [koreanSession setFocused:YES error:&error][@"view"];
+    assert(koreanView && !error && [koreanView[@"scheme"] isEqual:@4]);
+    [controller setValue:koreanSession forKey:@"session"];
+    [controller setValue:koreanView forKey:@"view"];
+    // The syllable is drawn inline even when the preedit display preference hides the composition: there is no candidate window to show it instead.
+    [prefs applySharedInputPreferences:@{@"tsf_preedit_style": @"empty"}];
+    [client.insertions removeAllObjects];
+    client.document = @"";
+    client.selection = NSMakeRange(0, 0);
+    NSEvent *(^letter)(NSString *, unsigned short, NSEventModifierFlags) = ^NSEvent *(NSString *typed, unsigned short code, NSEventModifierFlags flags) {
+        return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:0
+                                 context:nil characters:typed charactersIgnoringModifiers:typed.lowercaseString isARepeat:NO keyCode:code];
+    };
+    for (NSArray *stroke in @[@[@"d", @2], @[@"k", @40], @[@"s", @1]])
+        assert([controller handleEvent:letter(stroke[0], [stroke[1] unsignedShortValue], 0) client:client]);
+    assert([client.marked isEqual:@"안"] && client.insertions.count == 0);
+    // The fourth key starts a new syllable, so the finished one is written out while the next composes.
+    assert([controller handleEvent:letter(@"s", 1, 0) client:client]);
+    assert(client.insertions.count == 1 && [client.insertions[0] isEqual:@"안"] && [client.marked isEqual:@"ㄴ"]);
+    assert([controller handleEvent:letter(@"u", 32, 0) client:client]);
+    assert([controller handleEvent:letter(@"d", 2, 0) client:client]);
+    assert([client.marked isEqual:@"녕"]);
+    // Caps Lock types the unshifted jamo, ㄱ rather than ㄲ, and does not hand the letter to the application.
+    assert([controller handleEvent:letter(@"R", 15, NSEventModifierFlagCapsLock) client:client]);
+    assert(client.insertions.count == 2 && [client.insertions[1] isEqual:@"녕"] && [client.marked isEqual:@"ㄱ"]);
+    // Space writes the syllable out and is still the application's to insert.
+    assert(![controller handleEvent:ModeKey(49, 0, NO) client:client]);
+    assert(client.insertions.count == 3 && [client.insertions[2] isEqual:@"ㄱ"] && client.marked.length == 0);
+    // Shift+R is ㄲ, not a temporary Japanese entry, and punctuation follows the syllable in one half-width commit.
+    assert([controller handleEvent:letter(@"R", 15, NSEventModifierFlagShift) client:client]);
+    assert([controller handleEvent:letter(@"k", 40, 0) client:client]);
+    assert([client.marked isEqual:@"까"]);
+    assert([controller handleEvent:comma client:client]);
+    assert(client.insertions.count == 4 && [client.insertions[3] isEqual:@"까,"] && client.marked.length == 0);
+    // With nothing composing the mark is the application's, ASCII whatever the Chinese punctuation switch says.
+    assert(![controller handleEvent:comma client:client]);
+    assert(client.insertions.count == 4);
+    // Backspace takes one jamo, Escape drops the syllable, and an idle Backspace belongs to the application.
+    assert([controller handleEvent:letter(@"r", 15, 0) client:client]);
+    assert([controller handleEvent:letter(@"k", 40, 0) client:client]);
+    NSEvent *backspace = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0
+                                           context:nil characters:@"\b" charactersIgnoringModifiers:@"\b" isARepeat:NO keyCode:51];
+    assert([controller handleEvent:backspace client:client]);
+    assert([client.marked isEqual:@"ㄱ"]);
+    NSEvent *escape = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0
+                                        context:nil characters:@"\e" charactersIgnoringModifiers:@"\e" isARepeat:NO keyCode:53];
+    assert([controller handleEvent:escape client:client]);
+    assert(client.marked.length == 0 && client.insertions.count == 4);
+    assert(![controller handleEvent:backspace client:client]);
+    // Enter writes the syllable out and still reaches the application as a newline.
+    assert([controller handleEvent:letter(@"r", 15, 0) client:client]);
+    assert([controller handleEvent:letter(@"k", 40, 0) client:client]);
+    assert(![controller handleEvent:enter client:client]);
+    assert(client.insertions.count == 5 && [client.insertions[4] isEqual:@"가"] && client.marked.length == 0);
+    // Leaving the client commits the open syllable to it instead of dropping it.
+    assert([controller handleEvent:letter(@"r", 15, 0) client:client]);
+    [controller apply:[koreanSession setFocused:NO error:&error]];
+    assert(!error && client.insertions.count == 6 && [client.insertions[5] isEqual:@"ㄱ"] && client.marked.length == 0);
+    [prefs applySharedInputPreferences:@{@"tsf_preedit_style": @"raw"}];
+    assert([koreanSession closeWithError:&error] && !error);
+
     MSIMERemoveTestPreferenceSuite(defaults, suite);
     assert([NSFileManager.defaultManager removeItemAtPath:root error:nil]);
 }
@@ -3666,20 +3753,20 @@ static void TestInputMode(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     CheckMenu(menu, controller);
     assert([menu itemAtIndex:0].state == NSControlStateValueOn);
     assert([menu itemAtIndex:1].state == NSControlStateValueOff);
-    assert(menu.numberOfItems == 27);
-    assert([[menu itemAtIndex:17].title isEqual:@"悬浮工具栏"]);
+    assert(menu.numberOfItems == 28);
+    assert([[menu itemAtIndex:18].title isEqual:@"悬浮工具栏"]);
     NSArray<NSString *> *toolTitles = @[@"水杉表情面板…", @"水杉屏幕键盘…", @"手写输入…", @"开始/结束语音输入"];
     NSArray<NSString *> *toolActions = @[@"showEmoji:", @"showScreenKeyboard:", @"showHandwriting:", @"showVoicePanel"];
     for (NSUInteger index = 0; index < toolTitles.count; ++index) {
-        NSMenuItem *tool = [menu itemAtIndex:18 + index];
+        NSMenuItem *tool = [menu itemAtIndex:19 + index];
         assert([tool.title isEqual:toolTitles[index]] && tool.action == NSSelectorFromString(toolActions[index]));
     }
-    assert([menu itemAtIndex:22].separatorItem);
-    assert([[menu itemAtIndex:24].title isEqual:@"词库…"] && [menu itemAtIndex:24].action == @selector(showDictionary:));
-    assert([[menu itemAtIndex:25].title isEqual:@"水杉输入法设置…"] &&
-           [menu itemAtIndex:25].action == @selector(showAppearance:));
-    assert([[menu itemAtIndex:26].title isEqual:@"关于水杉输入法…"] &&
-           [menu itemAtIndex:26].action == @selector(showAbout:));
+    assert([menu itemAtIndex:23].separatorItem);
+    assert([[menu itemAtIndex:25].title isEqual:@"词库…"] && [menu itemAtIndex:25].action == @selector(showDictionary:));
+    assert([[menu itemAtIndex:26].title isEqual:@"水杉输入法设置…"] &&
+           [menu itemAtIndex:26].action == @selector(showAppearance:));
+    assert([[menu itemAtIndex:27].title isEqual:@"关于水杉输入法…"] &&
+           [menu itemAtIndex:27].action == @selector(showAbout:));
     // The typing toggles mirror the toolbar's runtime state, show the chords handleEvent claims, and flip through the same paths.
     NSMenuItem *fullWidth = [menu itemAtIndex:7], *punctuation = [menu itemAtIndex:8], *translations = [menu itemAtIndex:9];
     assert([fullWidth.title isEqual:@"全角字符"] && [fullWidth.keyEquivalent isEqual:@" "] &&
@@ -3720,8 +3807,8 @@ static void TestInputMode(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     appearance.shuangpinProfile = @"ziranma";
     menu = controller.menu;
     assert([[menu itemAtIndex:11].title isEqual:@"输入方案"] && ![menu itemAtIndex:11].enabled);
-    NSArray<NSString *> *schemeTitles = @[@"全拼", @"双拼（自然码）", @"五笔 86", @"日语"];
-    NSArray<NSString *> *schemeIDs = @[@"quanpin", @"shuangpin", @"wubi", @"japanese"];
+    NSArray<NSString *> *schemeTitles = @[@"全拼", @"双拼（自然码）", @"五笔 86", @"日语", @"韩语"];
+    NSArray<NSString *> *schemeIDs = @[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"];
     for (NSUInteger index = 0; index < schemeIDs.count; ++index) {
         NSMenuItem *item = [menu itemAtIndex:12 + index];
         assert([item.title isEqual:schemeTitles[index]] && [item.representedObject isEqual:schemeIDs[index]]);
@@ -3730,12 +3817,15 @@ static void TestInputMode(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     [NSApp sendAction:@selector(selectInputScheme:) to:controller from:[menu itemAtIndex:14]];
     assert([appearance.inputScheme isEqual:@"wubi"]);
     assert([controller.menu itemAtIndex:14].state == NSControlStateValueOn && [controller.menu itemAtIndex:12].state == NSControlStateValueOff);
+    [NSApp sendAction:@selector(selectInputScheme:) to:controller from:[menu itemAtIndex:16]];
+    assert([appearance.inputScheme isEqual:@"korean"] && [appearance.lastChineseScheme isEqual:@"wubi"]);
+    assert([controller.menu itemAtIndex:16].state == NSControlStateValueOn && [controller.menu itemAtIndex:14].state == NSControlStateValueOff);
     appearance.inputScheme = scheme;
     appearance.shuangpinProfile = profile;
     // The theme submenu is the shared catalog, ticked at the current theme, whose name the parent row carries.
     NSString *globalTheme = appearance.globalTheme;
     appearance.globalTheme = @"system";
-    NSMenuItem *themeItem = [controller.menu itemAtIndex:23];
+    NSMenuItem *themeItem = [controller.menu itemAtIndex:24];
     const auto &catalog = msime::mac::ThemeCatalog();
     assert(themeItem.submenu.numberOfItems == (NSInteger)catalog.size());
     assert(([themeItem.title isEqual:[NSString stringWithFormat:@"主题（%@）", @(catalog[0].title.c_str())]]));
@@ -3746,7 +3836,7 @@ static void TestInputMode(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     }
     [NSApp sendAction:@selector(selectGlobalTheme:) to:controller from:[themeItem.submenu itemAtIndex:1]];
     assert([appearance.globalTheme isEqual:@(catalog[1].id.c_str())]);
-    themeItem = [controller.menu itemAtIndex:23];
+    themeItem = [controller.menu itemAtIndex:24];
     assert(([themeItem.title isEqual:[NSString stringWithFormat:@"主题（%@）", @(catalog[1].title.c_str())]]));
     assert([themeItem.submenu itemAtIndex:1].state == NSControlStateValueOn);
     // A theme with a mode of its own fixes the menus' mode as it fixes the candidate window's and the toolbar's, over an explicit menu theme.

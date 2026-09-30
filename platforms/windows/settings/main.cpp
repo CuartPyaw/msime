@@ -2706,10 +2706,10 @@ private:
   void build_typing_page(StackPanel const &page) {
     const auto scheme = document_.String(L"scheme", L"quanpin");
     auto schemes = add_group(page, L"输入方案");
-    add_row(schemes, 0xE765, L"输入方案", L"全拼、双拼、五笔或日语", segmented_control(
+    add_row(schemes, 0xE765, L"输入方案", L"全拼、双拼、五笔、日语或韩语", segmented_control(
         L"输入方案",
         {{L"quanpin", L"全拼"}, {L"shuangpin", L"双拼"}, {L"wubi", L"五笔"},
-         {L"japanese", L"日语"}},
+         {L"japanese", L"日语"}, {L"korean", L"韩语"}},
         scheme, [this](std::wstring const &next) { select_scheme(next); }));
     if (scheme == L"shuangpin" || indexing_)
       select_row(schemes, 0xE8AB, L"双拼方案", L"", L"shuangpin_profile",
@@ -2804,13 +2804,19 @@ private:
              L"mixed_input.kaomoji", false);
   }
 
-  // Choosing Japanese remembers the Chinese scheme it replaces, so switching back returns to it; choosing a Chinese scheme makes it the one remembered. The same rule as the tray (store_input_scheme in server_main.cpp).
+  // Choosing Japanese or Korean remembers the Chinese scheme it replaces, so switching back returns to it; choosing a Chinese scheme makes it the one remembered. Moving between Japanese and Korean keeps the remembered scheme, since neither is a Chinese scheme the store accepts there. The same rule as the tray (store_input_scheme in server_main.cpp).
   void select_scheme(std::wstring const &next) {
     const auto current = document_.String(L"scheme", L"quanpin");
     if (current == next)
       return;
+    const auto chinese = [](std::wstring const &value) {
+      return value != L"japanese" && value != L"korean";
+    };
     change([&](PreferencesDocument &doc) {
-      doc.SetString(L"last_chinese_scheme", next == L"japanese" ? current : next);
+      if (chinese(next))
+        doc.SetString(L"last_chinese_scheme", next);
+      else if (chinese(current))
+        doc.SetString(L"last_chinese_scheme", current);
       doc.SetString(L"scheme", next);
     }, true);
   }
@@ -2819,7 +2825,7 @@ private:
                      std::wstring const &prefix) {
     const bool enabled = document_.Boolean(prefix + L".enabled", false);
     bool_row(group, 0xE8CB, label + L"辅助码",
-             L"再输入的字母作为辅助码交给输入引擎，用于缩小候选。五笔、日语和本地输入模式不使用辅助码。",
+             L"再输入的字母作为辅助码交给输入引擎，用于缩小候选。五笔、日语、韩语和本地输入模式不使用辅助码。",
              prefix + L".enabled", false, true);
     select_row(group, 0xE8D2, label + L"辅助码方案", L"", prefix + L".schema",
                {{L"lantian", L"蓝天小雨点"}, {L"ziranma", L"自然码"},

@@ -118,6 +118,9 @@ pub struct Runtime<E: InputEngine = Session> {
 /// whose members really are alternative readings of the same key.
 pub(crate) const LATTICE_SOURCE: u8 = 8;
 
+/// `SchemeType::Korean`: Hangul syllables that compose in the preedit, with no candidates and no Chinese punctuation.
+pub const KOREAN_SCHEME: u8 = 4;
+
 /// Move the flagged elements to the end, keeping both groups in their existing order.
 #[cfg(test)]
 pub(crate) fn move_to_back<T>(items: &mut [T], moved: &[bool]) {
@@ -686,6 +689,11 @@ impl<E: InputEngine> Runtime<E> {
             .min(self.page_size)
     }
 
+    /// The Engine scheme ordinal of the applied state, without materializing a [`View`].
+    pub fn scheme(&self) -> u8 {
+        self.cached.scheme
+    }
+
     /// Whether punctuation may use the Engine's Chinese route for this applied state.
     /// This mirrors the host-facing mode checks without materializing a [`View`].
     pub fn punctuation_host_context_available(&self, english_mode: bool) -> bool {
@@ -693,6 +701,7 @@ impl<E: InputEngine> Runtime<E> {
             && !self.cached.dedicated_english
             && self.cached.local_mode == "none"
             && self.cached.scheme != 3
+            && self.cached.scheme != KOREAN_SCHEME
     }
 
     /// Copy only the state and candidate fields needed to plan translation requests. This avoids
@@ -1092,7 +1101,8 @@ impl<E: InputEngine> Runtime<E> {
         consumed: &str,
         result: &mut EngineResult,
     ) {
-        if !self.phrase_preedit {
+        // A Korean syllable that the next key finished is already final text, not a chosen piece of a phrase: it goes to the document even while the next syllable composes.
+        if !self.phrase_preedit || self.cached.scheme == KOREAN_SCHEME {
             return;
         }
         let composing = !self.cached.editing_text.is_empty();
@@ -1548,7 +1558,17 @@ impl<E: InputEngine> Runtime<E> {
         self.advance()?;
         // Invalidate the client before cancellation, including on engine failure.
         self.focused = false;
-        let result = self.engine.command(Command::Cancel);
+        // A Korean syllable is text the user already wrote, not a reading still to be converted, so leaving the client commits it; every other composition is cancelled. Attaching a client (`focused`) stays a pure reset: a syllable typed in the previous client must never be written into the new one.
+        let korean_composition = !focused
+            && self.cached.scheme == KOREAN_SCHEME
+            && !self.cached.dedicated_english
+            && self.cached.local_mode == "none"
+            && !self.cached.editing_text.is_empty();
+        let result = if korean_composition {
+            self.engine.finish(0)
+        } else {
+            self.engine.command(Command::Cancel)
+        };
         self.refresh()?;
         let mut result = result?;
         // Leaving the client cancels the composition, but a phrase piece being held back is text

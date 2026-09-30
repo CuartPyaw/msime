@@ -50,7 +50,8 @@ const JAPANESE: PunctuationEntry[] = [
 export class QuickPunctuationPolicy {
   /** Display faces paired with the ASCII input each one sends to the Engine. */
   static entries(dedicatedEnglish: boolean, scheme: number, localMode: string): PunctuationEntry[] {
-    if (dedicatedEnglish || localMode !== "none") {
+    // Korean (scheme 4) writes half-width ASCII punctuation, so its menu is the ASCII one.
+    if (dedicatedEnglish || localMode !== "none" || scheme === 4) {
       return ASCII;
     }
     return scheme === 3 ? JAPANESE : CHINESE;

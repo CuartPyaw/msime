@@ -15,6 +15,7 @@ mod helpcode;
 pub mod host;
 mod ime;
 mod japanese;
+mod korean;
 mod lattice;
 mod local;
 mod nine_key;

@@ -26,8 +26,10 @@
 namespace {
 BOOL gEnglishModeEnabled = YES;
 BOOL gJapaneseModeEnabled = YES;
+BOOL gKoreanModeEnabled = YES;
 BOOL Available(NSString *identifier) {
     if ([identifier isEqualToString:MSIMEJapaneseInputModeID]) return gJapaneseModeEnabled;
+    if ([identifier isEqualToString:MSIMEKoreanInputModeID]) return gKoreanModeEnabled;
     return [identifier isEqualToString:MSIMEChineseInputModeID] || gEnglishModeEnabled;
 }
 
@@ -41,23 +43,30 @@ void require(bool condition, const char *message) {
 
 int main() {
     @autoreleasepool {
-        require([MSIMEInputModeIDFor(NO, NO) isEqualToString:@"app.msime.inputmethod.MetasequoiaIME.Hans"] &&
-                    [MSIMEInputModeIDFor(YES, NO) isEqualToString:@"app.msime.inputmethod.MetasequoiaIME.Roman"] &&
-                    [MSIMEInputModeIDFor(NO, YES) isEqualToString:@"app.msime.inputmethod.MetasequoiaIME.Japanese"],
-                "The Chinese, English and Japanese states do not map to the modes Info.plist.in declares.");
-        require([MSIMEInputModeIDFor(YES, YES) isEqualToString:MSIMEEnglishInputModeID],
-                "English mode over the japanese scheme did not show 英.");
-        require(!MSIMEEnglishForInputModeID(MSIMEChineseInputModeID) && MSIMEEnglishForInputModeID(MSIMEEnglishInputModeID) &&
-                    !MSIMEEnglishForInputModeID(MSIMEJapaneseInputModeID),
-                "A mode identifier maps back to the wrong Chinese/English state.");
-        require(MSIMEJapaneseForInputModeID(MSIMEJapaneseInputModeID) && !MSIMEJapaneseForInputModeID(MSIMEChineseInputModeID) &&
-                    !MSIMEJapaneseForInputModeID(MSIMEEnglishInputModeID),
-                "A mode identifier maps back to the wrong scheme.");
+        require([MSIMEInputModeID(MSIMEInputModeFor(NO, @"quanpin")) isEqualToString:@"app.msime.inputmethod.MetasequoiaIME.Hans"] &&
+                    [MSIMEInputModeID(MSIMEInputModeFor(YES, @"quanpin")) isEqualToString:@"app.msime.inputmethod.MetasequoiaIME.Roman"] &&
+                    [MSIMEInputModeID(MSIMEInputModeFor(NO, @"japanese")) isEqualToString:@"app.msime.inputmethod.MetasequoiaIME.Japanese"] &&
+                    [MSIMEInputModeID(MSIMEInputModeFor(NO, @"korean")) isEqualToString:@"app.msime.inputmethod.MetasequoiaIME.Korean"],
+                "The Chinese, English, Japanese and Korean states do not map to the modes Info.plist.in declares.");
+        require(MSIMEInputModeFor(NO, @"shuangpin") == MSIMEInputMode::Chinese && MSIMEInputModeFor(NO, @"wubi") == MSIMEInputMode::Chinese &&
+                    MSIMEInputModeFor(NO, nil) == MSIMEInputMode::Chinese,
+                "A Chinese scheme did not show 中.");
+        require(MSIMEInputModeFor(YES, @"japanese") == MSIMEInputMode::English && MSIMEInputModeFor(YES, @"korean") == MSIMEInputMode::English,
+                "English mode over the japanese or korean scheme did not show 英.");
+        for (NSString *identifier in @[MSIMEChineseInputModeID, MSIMEEnglishInputModeID, MSIMEJapaneseInputModeID, MSIMEKoreanInputModeID])
+            require([MSIMEInputModeID(MSIMEInputModeForID(identifier)) isEqualToString:identifier],
+                    "A mode identifier does not map back to the mode it names.");
+        require(MSIMEInputModeForID(@"com.apple.keylayout.ABC") == MSIMEInputMode::Chinese,
+                "An unknown identifier did not read as the Chinese mode.");
+        require([MSIMESchemeForInputMode(MSIMEInputMode::Japanese) isEqualToString:@"japanese"] &&
+                    [MSIMESchemeForInputMode(MSIMEInputMode::Korean) isEqualToString:@"korean"] &&
+                    MSIMESchemeForInputMode(MSIMEInputMode::Chinese) == nil && MSIMESchemeForInputMode(MSIMEInputMode::English) == nil,
+                "A mode selects the wrong scheme.");
         require(MSIMEIsInputModeID(MSIMEChineseInputModeID) && MSIMEIsInputModeID(MSIMEEnglishInputModeID) &&
-                    MSIMEIsInputModeID(MSIMEJapaneseInputModeID) &&
+                    MSIMEIsInputModeID(MSIMEJapaneseInputModeID) && MSIMEIsInputModeID(MSIMEKoreanInputModeID) &&
                     !MSIMEIsInputModeID(@"com.apple.keylayout.ABC") && !MSIMEIsInputModeID(@"app.msime.inputmethod.MetasequoiaIME") &&
                     !MSIMEIsInputModeID(@42) && !MSIMEIsInputModeID(nil),
-                "Something other than this bundle's three modes was taken for one of them.");
+                "Something other than this bundle's four modes was taken for one of them.");
 
         MSIMESystemInputModeState state;
         InputModeRecordingClient *client = [InputModeRecordingClient new];
@@ -86,7 +95,7 @@ int main() {
 
         // setValue:forTag: with the English mode turns English on without selecting it back.
         require(MSIMEAdoptReportedInputMode(state, MSIMEEnglishInputModeID) &&
-                    MSIMEEnglishForInputModeID(MSIMEEnglishInputModeID),
+                    MSIMEInputModeForID(MSIMEEnglishInputModeID) == MSIMEInputMode::English,
                 "Reporting the English mode did not turn English on.");
         require(!MSIMESelectSystemInputMode(state, MSIMEEnglishInputModeID, client, Available) && client.selected.count == 2,
                 "Turning English on from a report called selectInputMode: back.");
@@ -136,6 +145,26 @@ int main() {
         gJapaneseModeEnabled = YES;
         MSIMEAdoptReportedInputMode(state, MSIMEChineseInputModeID);
 
+        // The korean scheme selects 한 once, and an install that has not registered the Korean mode shows 中 for it, as for Japanese.
+        const NSUInteger beforeKorean = client.selected.count;
+        require(MSIMESelectSystemInputMode(state, MSIMEKoreanInputModeID, client, Available) &&
+                    [client.selected.lastObject isEqualToString:MSIMEKoreanInputModeID] && client.selected.count == beforeKorean + 1 &&
+                    !client.echoAdopted,
+                "Switching to the korean scheme did not select the Korean mode, or its echo was adopted.");
+        require(!MSIMESelectSystemInputMode(state, MSIMEKoreanInputModeID, client, Available) && client.selected.count == beforeKorean + 1,
+                "Aligning to the Korean mode already shown asked the client again.");
+        MSIMEAdoptReportedInputMode(state, MSIMEEnglishInputModeID);
+        gKoreanModeEnabled = NO;
+        require(MSIMESelectSystemInputMode(state, MSIMEKoreanInputModeID, client, Available) &&
+                    [client.selected.lastObject isEqualToString:MSIMEChineseInputModeID] && client.selected.count == beforeKorean + 2 &&
+                    [state.current isEqualToString:MSIMEChineseInputModeID],
+                "An unavailable Korean mode did not fall back to the Chinese mode.");
+        require(MSIMEAdoptReportedInputMode(state, MSIMEKoreanInputModeID) &&
+                    !MSIMESelectSystemInputMode(state, MSIMEKoreanInputModeID, client, Available) && client.selected.count == beforeKorean + 2,
+                "A Korean mode the system reported as shown was replaced by the Chinese fallback.");
+        gKoreanModeEnabled = YES;
+        MSIMEAdoptReportedInputMode(state, MSIMEChineseInputModeID);
+
         // Leaving the input method clears the record, so picking the entry shown before leaving is adopted on the way back instead of being taken for an echo.
         require(MSIMEAdoptReportedInputMode(state, MSIMEEnglishInputModeID) && !MSIMEAdoptReportedInputMode(state, MSIMEEnglishInputModeID),
                 "The English report before leaving was not recorded.");
@@ -152,6 +181,6 @@ int main() {
                 "A client without selectInputMode: was recorded as switched.");
         require(!MSIMESelectSystemInputMode(state, MSIMEEnglishInputModeID, nil, Available), "A missing client was asked to switch.");
     }
-    std::puts("input mode identifiers keep the menu bar mode and the Chinese/English/Japanese state in step");
+    std::puts("input mode identifiers keep the menu bar mode and the Chinese/English/Japanese/Korean state in step");
     return 0;
 }

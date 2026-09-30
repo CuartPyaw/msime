@@ -21,7 +21,7 @@ export function withUnknown(
 /**
  * Speed counts prose characters. Digits, punctuation, emoji, and symbols are excluded so short
  * bursts such as phone numbers do not appear as typing speed. `otherLetter` includes kana, hangul,
- * and other scripts used by the Japanese input mode.
+ * and other scripts used by the Japanese and Korean input modes.
  */
 const speedCharacterKinds = ["han", "latin", "otherLetter"] as const;
 

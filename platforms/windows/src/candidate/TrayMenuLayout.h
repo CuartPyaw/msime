@@ -99,6 +99,8 @@ inline const char *tray_menu_scheme(TrayMenuCommand command) {
     return "wubi";
   if (command == TrayMenuCommand::SelectJapanese)
     return "japanese";
+  if (command == TrayMenuCommand::SelectKorean)
+    return "korean";
   return nullptr;
 }
 // Shortcuts the TIP binds itself (KeyEventSink.cpp and the preserved keys in CompositionProcessorEngine.cpp); they are fixed, unlike the CN/EN key.
@@ -153,14 +155,15 @@ tray_menu_items(const TrayMenuCapabilities &capabilities,
     items.push_back(std::move(item));
   };
   const bool japanese = state.scheme == "japanese";
+  const bool korean = state.scheme == "korean";
   const bool language_known = state.chinese.has_value();
   // In the Engine's English mode the TIP may still report Chinese, and the toolbar shows English then too.
   const bool english =
       language_known && (!*state.chinese || state.dedicated_english);
   header("水杉输入法");
   separator();
-  // Japanese is the non-English language of the Japanese scheme, as the toolbar's 日 button shows.
-  row(TrayMenuCommand::SelectChinese, japanese ? "日文" : "中文",
+  // Japanese and Korean are the non-English language of their schemes, as the toolbar's 日 and 한 buttons show.
+  row(TrayMenuCommand::SelectChinese, japanese ? "日文" : korean ? "韩文" : "中文",
       language_known, language_known && !english, state.language_hint);
   row(TrayMenuCommand::SelectEnglish, "英文", language_known, english);
   separator();
@@ -180,6 +183,7 @@ tray_menu_items(const TrayMenuCapabilities &capabilities,
       state.scheme == "shuangpin");
   row(TrayMenuCommand::SelectWubi, "五笔 86", true, state.scheme == "wubi");
   row(TrayMenuCommand::SelectJapanese, "日文", true, japanese);
+  row(TrayMenuCommand::SelectKorean, "韩文", true, korean);
   separator();
   // The host tools the shipped menu offered, kept reachable as one strip so the card still fits a small work area.
   tool(TrayMenuCommand::ToggleFloatingToolbar, "工具栏", 0xE7C4, L"栏",

@@ -11,11 +11,24 @@ void CMetasequoiaIME::_SyncHostContextFocus(_In_opt_ ITfContext *context)
     if (host && host->valid())
     {
         const bool changed = context && (!_hostFocusContext || !_IsSameComObject(context, _hostFocusContext));
+        bool koreanFinished = false;
         const bool success = _hostFocusState.update(context != nullptr, changed, [&](bool focused) {
             std::string raw, error;
-            return host->focus(focused, &raw, &error);
+            if (!host->focus(focused, &raw, &error)) return false;
+            msime::tsf::EngineResult result;
+            koreanFinished = msime::tsf::EngineSessionAdapter::parse_result(raw, &result, &error) &&
+                             result.has_commit && !result.commit.empty() && result.view.scheme == 4;
+            return true;
         });
         if (!success) context = nullptr;
+        // A focus change finishes a Korean syllable in the host instead of discarding it. The syllable is already on screen as the composition, so end that composition where it is, or the next letter would replace it.
+        if (koreanFinished && _IsComposing() && _pContext)
+        {
+            _KEYSTROKE_STATE keyState = {};
+            keyState.Category = CATEGORY_COMPOSING;
+            keyState.Function = FUNCTION_COMMIT_SYLLABLE;
+            (void)_InvokeKeyHandler(_pContext, 0, L'\0', 0, keyState, FANY_IME_NO_REQUEST_ID);
+        }
     }
     else context = nullptr;
     // Retain COM identity through transient NULL focus and pointer reuse.

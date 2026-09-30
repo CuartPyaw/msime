@@ -36,6 +36,22 @@ int main() {
                                                 result.view.editing_text.size()))
       return EXIT_FAILURE;
   }
+  // A Korean letter that starts a new syllable carries the finished one as its commit and the new composition in the same view: the reading is the Hangul to draw, the letters stay behind it, and the scheme tells the TIP which rules apply.
+  {
+    EngineResult korean;
+    const std::string syllable =
+        R"({"ok":true,"value":{"handled":true,"commit":"안","diagnostic":null,"view":{"preedit":"ㄴ","editing_text":"s","reading":"ㄴ","caret_position":1,"scheme":4,"candidates":[]}}})";
+    if (!EngineSessionAdapter::parse_result(syllable, &korean, &error) || !korean.handled ||
+        !korean.has_commit || korean.commit != "안" || korean.view.reading != "ㄴ" ||
+        korean.view.editing_text != "s" || korean.view.scheme != 4 || !korean.view.candidates.empty())
+      return EXIT_FAILURE;
+    if (!msime::input::composition_shows_reading(korean.view.reading, korean.view.caret,
+                                                 korean.view.editing_text.size()))
+      return EXIT_FAILURE;
+    // A view without the field is read as quanpin, the scheme every older host assumed.
+    if (result.view.scheme != 0)
+      return EXIT_FAILURE;
+  }
   if (EngineSessionAdapter::parse_result(
           R"({"ok":false,"error":"redacted"})", &result, &error))
     return EXIT_FAILURE;

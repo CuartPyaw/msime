@@ -64,6 +64,8 @@ struct Observation {
   bool preedit_visible = false;
   guint cursor = 0;
   guint preedit_cursor = 0;
+  // IBUS_ENGINE_PREEDIT_CLEAR or IBUS_ENGINE_PREEDIT_COMMIT: what IBus does with the preedit when the client loses focus.
+  guint preedit_mode = IBUS_ENGINE_PREEDIT_CLEAR;
   bool mode_registered = false;
   bool input_enabled = false;
   bool english_mode = false;
@@ -235,6 +237,8 @@ void signal(GDBusConnection *, const gchar *, const gchar *, const gchar *,
     gboolean visible;
     g_variant_get_child(parameters, 2, "b", &visible);
     seen.preedit_visible = visible;
+    if (g_variant_n_children(parameters) > 3)
+      g_variant_get_child(parameters, 3, "u", &seen.preedit_mode);
   }
   if (std::string(name) == "UpdateLookupTable") {
     seen.candidates.clear();
@@ -2869,6 +2873,53 @@ int main(int argc, char **argv) {
               return preferences.value("scheme", "japanese") == "quanpin";
             }),
             "Chinese scheme was not restored");
+    // Korean composes Dubeolsik jamo into a Hangul syllable drawn inline in COMMIT mode, so IBus hands it to the client being left on a focus change. Starting a new syllable commits the previous one, the keys that end a syllable commit it and still reach the application, and punctuation stays ASCII.
+    invoke("PropertyActivate",
+           g_variant_new("(su)", "Scheme/Korean", PROP_STATE_CHECKED));
+    require(wait_saved_preferences([](const nlohmann::json &preferences) {
+              return preferences.value("scheme", "quanpin") == "korean" &&
+                     preferences.value("last_chinese_scheme", "quanpin") == "quanpin";
+            }),
+            "Korean scheme was not persisted, or it replaced the last Chinese scheme");
+    {
+      const auto before = seen.committed;
+      require(key('d') && key('k') && key('s') && seen.preedit == "안" &&
+                  seen.preedit_visible && seen.preedit_cursor == 1 &&
+                  seen.preedit_mode == IBUS_ENGINE_PREEDIT_COMMIT &&
+                  !seen.lookup_visible && seen.committed == before,
+              "Korean syllable was not drawn inline in commit mode");
+      require(key('s') && seen.committed == before + "안" && seen.preedit == "ㄴ",
+              "A new Korean syllable did not commit the previous one");
+      require(key('u') && key('d') && seen.preedit == "녕",
+              "Korean vowel did not join the open syllable");
+      require(key(IBUS_BackSpace) && seen.preedit == "녀",
+              "Backspace did not remove one jamo");
+      require(!key(IBUS_space) && seen.committed == before + "안녀" &&
+                  !seen.preedit_visible,
+              "Space did not commit the Korean syllable and reach the application");
+      require(key('R', IBUS_SHIFT_MASK) && seen.preedit == "ㄲ",
+              "Shift+R did not type ㄲ");
+      require(key(IBUS_Escape) && !seen.preedit_visible &&
+                  seen.committed == before + "안녀",
+              "Escape did not discard the Korean syllable");
+      require(key('R', IBUS_LOCK_MASK) && seen.preedit == "ㄱ",
+              "CapsLock shifted a Korean jamo");
+      require(key('k') && key('.') && seen.committed == before + "안녀가." &&
+                  !seen.preedit_visible,
+              "A mark did not follow the Korean syllable in one commit");
+      require(!key('.') && !key('.') && seen.committed == before + "안녀가.",
+              "An idle Korean mark was not left to the application as ASCII");
+      require(key('r') && key('k') && !key('1') &&
+                  seen.committed == before + "안녀가.가" && !seen.preedit_visible,
+              "A digit did not end the Korean syllable");
+    }
+    invoke("Reset");
+    invoke("PropertyActivate",
+           g_variant_new("(su)", "Scheme/Chinese", PROP_STATE_CHECKED));
+    require(wait_saved_preferences([](const nlohmann::json &preferences) {
+              return preferences.value("scheme", "korean") == "quanpin";
+            }),
+            "Chinese scheme was not restored from Korean");
     invoke("PropertyActivate",
            g_variant_new("(su)", "Scheme/Wubi", PROP_STATE_CHECKED));
     require(wait_saved_preferences([](const nlohmann::json &preferences) {

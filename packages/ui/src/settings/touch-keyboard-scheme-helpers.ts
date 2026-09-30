@@ -11,7 +11,8 @@ export type TouchKeyboardScheme =
   | "japanese_nine_key"
   | "japanese"
   | "handwriting"
-  | "thoughtful_reply";
+  | "thoughtful_reply"
+  | "korean";
 export type TouchKeyboardSchemePreferences = {
   enabled: TouchKeyboardScheme[];
   selected?: TouchKeyboardScheme;
@@ -32,8 +33,11 @@ export function touchKeyboardSchemeTitle(preferences: Preferences): string {
       japanese: "日语 26 键",
       handwriting: "手写",
       thoughtful_reply: "高情商回复",
+      korean: "韩语 26 键",
     }[selected];
   }
+  // Korean has only the 26-key Dubeolsik keyboard, whatever layout the document carries.
+  if (preferences.scheme === "korean") return "韩语 26 键";
   if (preferences.touch_keyboard_layout === "handwriting") return "手写";
   if (preferences.touch_keyboard_layout === "nine_key")
     return preferences.scheme === "japanese" ? "日语 9 键" : "全拼 9 键";
@@ -55,6 +59,7 @@ export const touchKeyboardSchemeOptions: [TouchKeyboardScheme, string][] = [
   ["japanese", "日语 26 键"],
   ["handwriting", "手写"],
   ["thoughtful_reply", "高情商回复"],
+  ["korean", "韩语 26 键"],
 ];
 export const allTouchKeyboardSchemes = touchKeyboardSchemeOptions.map(([scheme]) => scheme);
 
@@ -66,9 +71,16 @@ export function inferredTouchKeyboardScheme(preferences: Preferences): TouchKeyb
     preferences.scheme === "shuangpin" ? preferences.shuangpin_profile : preferences.scheme;
   if (preferences.touch_keyboard_layout === "handwriting" && preferences.scheme === "quanpin")
     inferred = "handwriting";
-  else if (preferences.touch_keyboard_layout === "nine_key")
+  else if (preferences.touch_keyboard_layout === "nine_key" && preferences.scheme !== "korean")
     inferred = preferences.scheme === "japanese" ? "japanese_nine_key" : "nine_key";
   return enabled.includes(inferred) ? inferred : (enabled[0] ?? "quanpin");
+}
+
+/** The Chinese scheme a Japanese or Korean selection returns to; switching between those two keeps the one already remembered. */
+function rememberedChineseScheme(preferences: Preferences): Preferences["last_chinese_scheme"] {
+  return preferences.scheme === "japanese" || preferences.scheme === "korean"
+    ? preferences.last_chinese_scheme
+    : preferences.scheme;
 }
 
 export function selectTouchKeyboardScheme(
@@ -92,9 +104,16 @@ export function selectTouchKeyboardScheme(
     return {
       ...preferences,
       scheme: "japanese",
-      last_chinese_scheme:
-        preferences.scheme === "japanese" ? preferences.last_chinese_scheme : preferences.scheme,
+      last_chinese_scheme: rememberedChineseScheme(preferences),
       touch_keyboard_layout: selected === "japanese_nine_key" ? "nine_key" : "twenty_six_key",
+      touch_keyboard_schemes,
+    };
+  if (selected === "korean")
+    return {
+      ...preferences,
+      scheme: "korean",
+      last_chinese_scheme: rememberedChineseScheme(preferences),
+      touch_keyboard_layout: "twenty_six_key",
       touch_keyboard_schemes,
     };
   if (selected === "wubi")

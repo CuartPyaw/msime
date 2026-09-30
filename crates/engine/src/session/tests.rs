@@ -1945,3 +1945,209 @@ fn invalid_options_are_refused() {
     assert!(session.set_punctuation_lock(2).is_ok());
     assert!(!session.punctuation(b',').handled);
 }
+
+/// Types `keys` into a Korean session and returns what each key committed, asserting every letter is handled.
+fn type_korean(session: &mut Session, keys: &str) -> Vec<Option<String>> {
+    keys.bytes()
+        .map(|byte| {
+            let result = session.character(byte, byte.is_ascii_uppercase());
+            assert!(
+                result.handled,
+                "{:?} of {keys:?} was not handled",
+                byte as char
+            );
+            result.commit
+        })
+        .collect()
+}
+
+#[test]
+fn korean_syllables_compose_in_the_preedit_and_commit_themselves() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Korean);
+    let commits = type_korean(&mut session, "dkssud");
+    assert_eq!(
+        commits,
+        [None, None, None, Some("안".to_owned()), None, None]
+    );
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.scheme, SchemeType::Korean);
+    assert_eq!(snapshot.preedit, "녕");
+    assert_eq!(snapshot.normalized_segmentation, "녕");
+    assert_eq!(snapshot.raw_segmentation, "sud");
+    assert_eq!(snapshot.editing_text, "sud");
+    assert_eq!(snapshot.caret_position, 3);
+    assert!(snapshot.candidates.is_empty());
+    assert!(snapshot.candidate_sources.is_empty());
+    assert!(snapshot.candidate_answers_key.is_empty());
+    assert_eq!(snapshot.local_mode, LocalInputMode::None);
+    assert!(session.online_query().is_none());
+    assert!(session.segment_raw_boundaries().is_empty());
+
+    // 닭 + ㅏ splits the compound final: 달 is committed and 가 composes.
+    let commits = type_korean(&mut session, "gkekfrk");
+    assert_eq!(
+        commits.into_iter().flatten().collect::<Vec<_>>().concat(),
+        "녕하달"
+    );
+    assert_eq!(session.snapshot().preedit, "가");
+}
+
+#[test]
+fn korean_shift_types_double_consonants_and_never_enters_a_local_mode() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Korean);
+    // Shift+R is the quanpin entry into temporary Japanese; in Korean it is ㄲ.
+    assert!(session.character(b'R', true).handled);
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.local_mode, LocalInputMode::None);
+    assert_eq!(snapshot.preedit, "ㄲ");
+    type_korean(&mut session, "kT");
+    assert_eq!(session.snapshot().preedit, "깠");
+    assert_eq!(
+        type_korean(&mut session, "dO"),
+        [Some("깠".to_owned()), None]
+    );
+    assert_eq!(session.snapshot().preedit, "얘");
+}
+
+#[test]
+fn korean_backspace_removes_one_jamo_and_then_goes_to_the_host() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Korean);
+    type_korean(&mut session, "rhkfr");
+    let mut shown = vec![session.snapshot().preedit];
+    while !session.snapshot().preedit.is_empty() {
+        let result = session.command(Command::Backspace);
+        assert!(result.handled);
+        assert_eq!(result.commit, None);
+        shown.push(session.snapshot().preedit);
+    }
+    assert_eq!(shown, ["괅", "괄", "과", "고", "ㄱ", ""]);
+    // With nothing composed the host deletes the committed text itself.
+    assert!(!session.command(Command::Backspace).handled);
+
+    // A syllable that already left the composition is not reopened.
+    assert_eq!(
+        type_korean(&mut session, "rksk"),
+        [None, None, None, Some("가".to_owned())]
+    );
+    session.command(Command::Backspace);
+    assert_eq!(session.snapshot().preedit, "ㄴ");
+    session.command(Command::Backspace);
+    assert_eq!(session.snapshot().preedit, "");
+}
+
+#[test]
+fn korean_space_enter_and_caret_keys_commit_the_open_syllable_and_pass_through() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Korean);
+    for command in [
+        Command::CommitCandidate,
+        Command::CommitRaw,
+        Command::CommitReading,
+        Command::MoveLeft,
+        Command::MoveRight,
+        Command::MoveHome,
+        Command::MoveEnd,
+        Command::DeleteForward,
+    ] {
+        type_korean(&mut session, "gks");
+        let result = session.command(command);
+        assert!(!result.handled, "{command:?}");
+        assert_eq!(result.commit.as_deref(), Some("한"), "{command:?}");
+        assert_eq!(session.snapshot().preedit, "", "{command:?}");
+        assert_eq!(session.snapshot().editing_text, "", "{command:?}");
+        // Nothing is composing now, so the same key is the host's alone.
+        let idle = session.command(command);
+        assert!(!idle.handled && idle.commit.is_none(), "{command:?}");
+    }
+
+    // A standalone jamo is committed as it is shown.
+    type_korean(&mut session, "r");
+    assert_eq!(
+        session.command(Command::CommitCandidate).commit.as_deref(),
+        Some("ㄱ")
+    );
+
+    // Finish is the host's explicit flush: handled, with the syllable.
+    type_korean(&mut session, "rk");
+    let finished = session.finish(0);
+    assert!(finished.handled);
+    assert_eq!(finished.commit.as_deref(), Some("가"));
+
+    // Escape throws the open syllable away.
+    type_korean(&mut session, "rk");
+    let cancelled = session.command(Command::Cancel);
+    assert!(cancelled.handled && cancelled.commit.is_none());
+    assert_eq!(session.snapshot().preedit, "");
+
+    // The Japanese-only variant key does nothing here.
+    type_korean(&mut session, "rk");
+    assert!(!session.command(Command::CycleKanaVariant).handled);
+    assert_eq!(session.snapshot().preedit, "가");
+}
+
+#[test]
+fn korean_digits_and_spaces_commit_the_open_syllable_before_the_host_inserts_them() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Korean);
+    type_korean(&mut session, "rk");
+    for key in *b"1 " {
+        let result = session.character(key, false);
+        assert!(!result.handled);
+        assert_eq!(result.commit.as_deref(), Some("가"));
+        assert_eq!(session.snapshot().preedit, "");
+        let idle = session.character(key, false);
+        assert!(!idle.handled && idle.commit.is_none());
+        type_korean(&mut session, "rk");
+    }
+    // A candidate key has no candidate to pick.
+    assert!(!session.candidate_key(b'1').handled);
+    assert_eq!(session.snapshot().preedit, "가");
+}
+
+#[test]
+fn korean_punctuation_is_half_width_and_follows_the_open_syllable() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    // Chinese punctuation is on by default; Korean ignores it.
+    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Korean);
+    type_korean(&mut session, "dy");
+    // As a character the mark is left for the punctuation route, and the syllable keeps composing.
+    let typed = session.character(b'.', false);
+    assert!(!typed.handled && typed.commit.is_none());
+    assert_eq!(session.snapshot().preedit, "요");
+    let result = session.punctuation(b'.');
+    assert!(result.handled);
+    assert_eq!(result.commit.as_deref(), Some("요."));
+    assert_eq!(session.snapshot().preedit, "");
+    // With nothing open the host inserts the ASCII key itself.
+    for mark in *b",?!\"'" {
+        let idle = session.punctuation(mark);
+        assert!(!idle.handled && idle.commit.is_none());
+    }
+    type_korean(&mut session, "rk");
+    assert_eq!(session.punctuation(b'?').commit.as_deref(), Some("가?"));
+    type_korean(&mut session, "rk");
+    assert_eq!(session.punctuation(b'"').commit.as_deref(), Some("가\""));
+}
+
+#[test]
+fn korean_ignores_the_caret_and_switching_to_it_starts_empty() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    type_text(&mut session, "ni");
+    session.switch_scheme(SchemeType::Korean);
+    assert_eq!(session.snapshot().preedit, "");
+    type_korean(&mut session, "gks");
+    session.set_caret(Some(1));
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.caret_position, 3);
+    assert_eq!(snapshot.preedit, "한");
+    assert_eq!(session.prefix_end(), 3);
+    assert_eq!(session.pending_suffix(), "");
+    session.switch_scheme(SchemeType::Quanpin);
+    assert_eq!(session.snapshot().preedit, "");
+    type_text(&mut session, "ni");
+    assert!(words(&session).contains(&"你".to_owned()));
+}

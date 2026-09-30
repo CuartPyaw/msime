@@ -48,6 +48,23 @@ if rg -n 'VariantGroup|showJapaneseVariants' \
   echo "Android must not duplicate Engine-owned Japanese kana variant tables" >&2
   exit 1
 fi
+# Hangul composition is Engine state. Android labels the Dubeolsik keys and sends their ASCII letters; a syllable table here would be a second automaton that can drift from the Engine's.
+if ! rg -q '4 korean' "$repo_root/crates/host-api/include/msime_client.h" \
+  || ! rg -q 'KOREAN_SCHEME = 4;' \
+    "$repo_root/platforms/android/java/app/msime/android/policy/KoreanInputPolicy.java"; then
+  echo "Android KOREAN_SCHEME no longer matches the shared View.scheme ordinal" >&2
+  exit 1
+fi
+if rg -n -i '0xac00|44032|0x3131|12593' "$repo_root/platforms/android/java/app/msime/android"; then
+  echo "Android must not compose Hangul syllables itself; the Engine owns the Korean automaton" >&2
+  exit 1
+fi
+# The Korean inline composition is the Hangul in View.reading; editing_text holds only the key letters.
+if ! rg -q 'KoreanInputPolicy\.composing' \
+    "$repo_root/platforms/android/java/app/msime/android/core/MSIMEInputService.java"; then
+  echo "Android must mark the Korean composition through KoreanInputPolicy" >&2
+  exit 1
+fi
 # Hardware navigation must use the shared command numbers through one named policy. Keep the
 # service from growing another inline key-code table that can drift from the FFI mapping.
 if ! rg -q 'HardwareKeyPolicy\.commandFor' \
@@ -406,6 +423,9 @@ javac --release 17 -Xlint:all -Werror -cp "$android_jar" -d "$output_dir" \
   "$repo_root/platforms/android/tests/keyboard/JapaneseNineKeyActionsSmoke.java" \
   "$repo_root/platforms/android/tests/core/JapaneseVariantPolicySmoke.java" \
   "$repo_root/platforms/android/tests/core/JapaneseSpacePolicySmoke.java" \
+  "$repo_root/platforms/android/tests/keyboard/KoreanKeyboardLayoutSmoke.java" \
+  "$repo_root/platforms/android/tests/core/KoreanInputPolicySmoke.java" \
+  "$repo_root/platforms/android/tests/settings/QuickPunctuationPolicySmoke.java" \
   "$repo_root/platforms/android/tests/voice/HandwritingContractSmoke.java" \
   "$repo_root/platforms/android/tests/candidate/CandidateAppearanceSmoke.java" \
   "$repo_root/platforms/android/tests/candidate/CandidateGlossModelSmoke.java" \
@@ -494,6 +514,9 @@ java -cp "$output_dir" JapaneseNineKeyLayoutSmoke
 java -cp "$output_dir" JapaneseNineKeyActionsSmoke
 java -cp "$output_dir" JapaneseVariantPolicySmoke
 java -cp "$output_dir" JapaneseSpacePolicySmoke
+java -cp "$output_dir" KoreanKeyboardLayoutSmoke
+java -cp "$output_dir" KoreanInputPolicySmoke
+java -cp "$output_dir" QuickPunctuationPolicySmoke
 java -cp "$output_dir" HandwritingContractSmoke
 java -cp "$output_dir" CandidateAppearanceSmoke
 java -cp "$output_dir" CandidateGlossModelSmoke

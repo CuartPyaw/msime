@@ -1102,6 +1102,7 @@ fn local_account_preferences(
             InputScheme::Shuangpin => "shuangpin",
             InputScheme::Wubi => "wubi",
             InputScheme::Japanese => "japanese",
+            InputScheme::Korean => "korean",
         },
     );
     insert_string(
@@ -1321,6 +1322,7 @@ fn apply_local_account_preferences(
                 "shuangpin" => InputScheme::Shuangpin,
                 "wubi" => InputScheme::Wubi,
                 "japanese" => InputScheme::Japanese,
+                "korean" => InputScheme::Korean,
                 _ => return Err(AccountError::Invalid),
             };
         }

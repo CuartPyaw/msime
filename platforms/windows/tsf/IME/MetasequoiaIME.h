@@ -48,13 +48,17 @@ const DWORD WM_CancelVoiceComposition = WM_USER + 26;
 const DWORD WM_ApplyPunctuationLock = WM_USER + 27;
 const DWORD WM_CancelKeyboardComposition = WM_USER + 28;
 const DWORD WM_CommitCandidateAndContinue = WM_USER + 29;
+const DWORD WM_ReplayKoreanSyllableKey = WM_USER + 30;
 constexpr ULONG_PTR SMART_PUNCTUATION_SENDINPUT_EXTRA_INFO = 0x4D535050u;
 // Marker for caret movement synthesized by paired punctuation. Key sinks and
 // the bare-Shift hook must pass these events through to the host.
 constexpr ULONG_PTR PAIRED_PUNCTUATION_SENDINPUT_EXTRA_INFO = 0x4D535051u;
+// Marker for a caret or editing key replayed after a queued Korean syllable commit. Key sinks and the bare-Shift hook must pass these events through to the host.
+constexpr ULONG_PTR KOREAN_SYLLABLE_SENDINPUT_EXTRA_INFO = 0x4D535052u;
 constexpr bool IsSelfGeneratedSendInputExtraInfo(ULONG_PTR extraInfo)
 {
-    return extraInfo == SMART_PUNCTUATION_SENDINPUT_EXTRA_INFO || extraInfo == PAIRED_PUNCTUATION_SENDINPUT_EXTRA_INFO;
+    return extraInfo == SMART_PUNCTUATION_SENDINPUT_EXTRA_INFO || extraInfo == PAIRED_PUNCTUATION_SENDINPUT_EXTRA_INFO ||
+           extraInfo == KOREAN_SYLLABLE_SENDINPUT_EXTRA_INFO;
 }
 constexpr ULONGLONG SMART_PUNCTUATION_REPEAT_INTERVAL_MS = 2000;
 // How long a queued rewrite stays valid. Unlike the interval above this is not
@@ -182,6 +186,12 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     // key event handlers for composition/candidate/phrase common objects.
     HRESULT _HandleComplete(TfEditCookie ec, _In_ ITfContext *pContext);
     HRESULT _HandleHostRawCommit(TfEditCookie ec, _In_ ITfContext *pContext);
+    // Korean: commit the open syllable, then insert `wch` when it is printable ASCII. `code` is the key that ended the syllable, or 0 when no key did (focus or scheme change).
+    HRESULT _HandleSyllableCommit(TfEditCookie ec, _In_ ITfContext *pContext, UINT code, WCHAR wch,
+                                  bool replayKey = false);
+    // A caret or editing key that ended a Korean syllable behind the deferred-key barrier was eaten to keep its place in the queue; once the syllable is committed it is sent again through the input queue so the application still does its own work with it.
+    void _QueueKoreanSyllableKeyReplay(UINT virtualKey);
+    void _RunKoreanSyllableKeyReplay(UINT virtualKey);
     HRESULT _HandleCompleteCommitFirst(TfEditCookie ec, _In_ ITfContext *pContext);
     HRESULT _HandleCancel(TfEditCookie ec, _In_ ITfContext *pContext);
     HRESULT _HandleToogleIMEMode(TfEditCookie ec, _In_ ITfContext *pContext);
@@ -638,6 +648,7 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
         std::wstring previousWord;
     };
     std::vector<CreatingWordRestoreEntry> _creatingWordRestoreHistory;
+    uint64_t _koreanKeyReplayFocusToken = 0;
     int _pendingPairedCaretDelta = 0;
     uint64_t _pendingPairedCaretFocusToken = 0;
     ULONGLONG _pendingPairedCaretDeadline = 0;
@@ -675,6 +686,8 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     wchar_t _voiceCompositionAssembleGeneration = 0;
     bool _voiceCompositionAssembleActive = false;
     bool _voiceCompositionActive = false;
+    // Set while _TerminateComposition ends a composition itself, so a re-entrant OnCompositionTerminated can tell that ending from one the application made.
+    bool _terminatingOwnComposition = false;
     std::atomic<bool> _localSessionResetPending;
     std::atomic<UINT> _localSessionResetToken;
     bool _localResetEditSessionQueued;

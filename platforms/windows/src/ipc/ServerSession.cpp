@@ -80,6 +80,10 @@ void ServerSession::cancel_composition(uint64_t epoch) {
       !result.at("view").at("candidates").empty())
     throw std::logic_error("Shared host did not cancel composition");
 }
+nlohmann::json ServerSession::finish_composition(uint64_t epoch) {
+  check_active(epoch);
+  return response(msime_client_command(session_, MSIME_FINISH_COMPOSITION));
+}
 void ServerSession::reset_cache() {
   check_thread();
   (void)response(msime_client_reset_cache(session_));
@@ -145,7 +149,9 @@ KeyResult ServerSession::key(const FanyImeNamedpipeData &packet,
   // more candidates would have been worse, committing candidate 17 for a
   // letter press. Typing shuangpin through this path could not work at all,
   // and nothing noticed because these suites had never been run.
-  const bool selection_digit = digit_key >= '1' && digit_key <= '9';
+  // Korean has no candidates to choose: a digit is text that ends the syllable, which the Engine does when it receives it as a character.
+  const bool selection_digit = digit_key >= '1' && digit_key <= '9' &&
+                               !(current.is_object() && current.value("scheme", 0u) == 4u);
   if (selection_digit && !current.is_null() &&
       current.at("local_mode") != "unknown" &&
       ((current.at("local_mode") == "unicode" && modifiers == 1) ||
@@ -220,10 +226,11 @@ ServerSession::navigate(const FanyImeNamedpipeData &packet, uint64_t epoch,
   const auto current = view();
   if (current.at("editing_text").get<std::string>().empty())
     return std::nullopt;
-  // Japanese is a scheme (3), not a local mode; no local mode is ever named "japanese".
+  // Japanese (3) and Korean (4) are schemes, not local modes; no local mode is ever named after them. Both keep '-' and '=' as text rather than paging keys.
+  const auto scheme = current.value("scheme", 0u);
   action = navigation_action(packet, bindings,
                              current.at("local_mode").get<std::string>() == "unicode",
-                             current.value("scheme", 0u) == 3u);
+                             scheme == 3u || scheme == 4u);
   if (!action)
     return std::nullopt;
   auto result = action->command
@@ -500,8 +507,10 @@ ServerSession::word_character(const FanyImeNamedpipeData &packet,
   if (!input_enabled_)
     return std::nullopt;
   const auto current = view();
+  // Korean has no candidate to take a character from; its '-', '=', '[' and ']' are punctuation.
   if (current.at("local_mode") == "unknown" ||
       current.at("editing_text").get<std::string>().empty() ||
+      current.value("scheme", 0u) == 4u ||
       !word_character_edge(packet, binding, current.value("scheme", 0u) == 3u))
     return std::nullopt;
   std::string fallback;

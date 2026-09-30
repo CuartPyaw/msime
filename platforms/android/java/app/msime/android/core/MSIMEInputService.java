@@ -975,6 +975,7 @@ public final class MSIMEInputService extends InputMethodService {
             // 会把它画在组字与候选条的读音前面，两件事必须一起做：请求了却不画，用户已经选中的字
             // 既不在文档里也不在屏幕上（scripts/test-phrase-preedit-hosts.py 守的就是这一半状态）。
             options.put("phrase_preedit", true);
+            int drawnLayout = displayedTouchLayout(view);
             view = value(NativeClient.create(options.toString()));
             session = view.getLong("session");
             String resources = options.optString("resources", "");
@@ -986,6 +987,11 @@ public final class MSIMEInputService extends InputMethodService {
             view = value(NativeClient.setEnglishMode(session, dedicatedEnglish));
             applyCharacterWidth(fullWidthPreference);
             applyChinesePunctuation(chinesePunctuationPreference);
+            // The rows were drawn before the session existed, from no view at all; a scheme with its own surface (the Korean keycaps) has to replace them now that the view says which one applies.
+            if (displayedTouchLayout(view) != drawnLayout) {
+                letterCase.reset();
+                rebuildKeyRows();
+            }
             refreshEnglishSuggestions();
             render();
             message = "MSIME Preview";
@@ -1410,7 +1416,9 @@ public final class MSIMEInputService extends InputMethodService {
         // After the view is in place, because this replaces it with the runtime's answer.
         if (characterWidthChanged) applyCharacterWidth(nextFullWidthPreference);
         if (punctuationChanged) applyChinesePunctuation(nextChinesePunctuation);
-        if (displayedTouchLayout(view) != STANDARD_TOUCH_LAYOUT) letterCase.reset();
+        // A Shift latched on the Korean keycaps means a double consonant, so it must not outlive the surface it was set on.
+        if (rebuildLayout || !KeyboardLayout.carriesLetterCase(displayedTouchLayout(view)))
+            letterCase.reset();
         if (rebuildLayout) rebuildKeyRows();
         else if (geometryChanged) applyKeyboardGeometry();
         renderLayoutSettingsState();
@@ -1430,8 +1438,12 @@ public final class MSIMEInputService extends InputMethodService {
             // that is already fullwidth, and would put this host's own rule ahead of the shared one.
             commit = chineseOutput(commit, result.optJSONObject("commit_context"));
         }
-        String composing = PhrasePreeditPolicy.composing(
-            next.optString("phrase_prefix", ""), next.getString("editing_text"));
+        // Korean marks the composing Hangul, not the key letters editing_text holds; a transition may carry the syllable the key finished and the next one together, and the bridge writes the commit first.
+        String composing = KoreanInputPolicy.composing(
+            KoreanInputPolicy.active(next.optInt("scheme", -1),
+                next.optBoolean("dedicated_english", dedicatedEnglish)),
+            next.optString("phrase_prefix", ""), next.getString("editing_text"),
+            next.optString("reading", ""));
         if (connection != null
                 && !bridge.apply(sink(typingSource()), commit, composing)) {
             throw new JSONException("Editor rejected update");
@@ -1439,7 +1451,8 @@ public final class MSIMEInputService extends InputMethodService {
         view = next;
         showDiagnostic(result.isNull("diagnostic") ? null
             : result.optString("diagnostic", ""));
-        if (displayedTouchLayout(view) != STANDARD_TOUCH_LAYOUT) letterCase.reset();
+        if (rebuildLayout || !KeyboardLayout.carriesLetterCase(displayedTouchLayout(view)))
+            letterCase.reset();
         if (rebuildLayout) rebuildKeyRows();
         render();
         return result.getBoolean("handled");
@@ -1605,8 +1618,10 @@ public final class MSIMEInputService extends InputMethodService {
                     || snapshot.optLong("generation") != generation) return;
             request = CandidateGlossModel.request(generation,
                 snapshot.getJSONArray("candidates"));
-            // The account path's scheme gate: a Japanese composition is not glossed into other languages.
-            if ("none".equals(view.optString("local_mode", "none")) && view.optInt("scheme", -1) != 3) {
+            // The account path's scheme gate: a Japanese or Korean composition is not glossed into other languages.
+            int glossScheme = view.optInt("scheme", -1);
+            if ("none".equals(view.optString("local_mode", "none")) && glossScheme != 3
+                    && glossScheme != KoreanInputPolicy.KOREAN_SCHEME) {
                 for (String language : candidateOfflineTargets()) {
                     targetRequests.put(language, CandidateGlossModel.request(generation,
                         snapshot.getJSONArray("candidates"), language));
@@ -1690,7 +1705,8 @@ public final class MSIMEInputService extends InputMethodService {
         if (!candidateTranslationAccount || session == 0 || view == null
                 || candidateTranslationStore == null
                 || !"none".equals(view.optString("local_mode", "none"))) return;
-        if (view.optInt("scheme", -1) == 3) return;
+        int translationScheme = view.optInt("scheme", -1);
+        if (translationScheme == 3 || translationScheme == KoreanInputPolicy.KOREAN_SCHEME) return;
         JSONArray entries = view.optJSONArray("candidates");
         long generation = view.optLong("generation", -1);
         if (entries == null || entries.length() == 0 || generation < 0) return;
@@ -2101,6 +2117,16 @@ public final class MSIMEInputService extends InputMethodService {
             commitEnglishLiteral(key);
             return;
         }
+        if (koreanSchemeActive() && isAsciiLetter(key)) {
+            // Shift picks the double consonant or ㅒ ㅖ; the other keys send their lowercase letter, which types the same jamo.
+            char input = KoreanKeyboardLayout.input(key, letterCase.usesUppercase());
+            if (!character(input, Character.isUpperCase(input))) commitText(String.valueOf(input));
+            if (letterCase.consumeLetter()) {
+                rebuildKeyRows();
+                render();
+            }
+            return;
+        }
         if (entersHelpcode() && isAsciiLetter(key)) {
             character(Character.toUpperCase(key), true);
             if (letterCase.consumeLetter()) {
@@ -2262,6 +2288,11 @@ public final class MSIMEInputService extends InputMethodService {
         return view != null && view.optInt("scheme", -1) == 3;
     }
 
+    private boolean koreanSchemeActive() {
+        return view != null
+            && KoreanInputPolicy.active(view.optInt("scheme", -1), dedicatedEnglish);
+    }
+
     private boolean japaneseNineKeyActive() {
         return displayedTouchLayout(view) == JAPANESE_NINE_KEY_LAYOUT;
     }
@@ -2376,7 +2407,8 @@ public final class MSIMEInputService extends InputMethodService {
 
     private void updateAutomaticCapitalization() {
         if (!dedicatedEnglish) {
-            letterCase.reset();
+            // On the Korean keycaps Shift is the double consonant the user chose, not capitalisation, so an editor update must not drop it.
+            if (!koreanSchemeActive()) letterCase.reset();
             return;
         }
         CharSequence context = null;
@@ -2444,9 +2476,17 @@ public final class MSIMEInputService extends InputMethodService {
         commitText("\n");
     }
 
+    /**
+     * Whether the return key only confirms the composition. A Korean syllable is committed by Enter and the key still does its own work, so the key keeps its editor action there.
+     */
+    private boolean returnKeyConfirms() {
+        return view != null && !view.optString("editing_text", "").isEmpty()
+            && !koreanSchemeActive();
+    }
+
     /** The return key's face: accent-filled 确认 while composing, the function tint otherwise. */
     private KeyboardKeyRole returnKeyRole() {
-        boolean composing = view != null && !view.optString("editing_text", "").isEmpty();
+        boolean composing = returnKeyConfirms();
         return composing ? KeyboardKeyRole.RETURN : KeyboardKeyRole.ACCENT;
     }
 
@@ -2456,7 +2496,7 @@ public final class MSIMEInputService extends InputMethodService {
                 : info.imeOptions & EditorInfo.IME_MASK_ACTION;
         boolean disabled = info == null
                 || (info.imeOptions & EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0;
-        boolean composing = view != null && !view.optString("editing_text", "").isEmpty();
+        boolean composing = returnKeyConfirms();
         String title = ReturnKeyAction.title(action, disabled);
         // The shared design turns 换行 into an accent-filled 确认 while a composition is open,
         // because that is what the key does then: it commits the reading instead of a newline.
@@ -2684,7 +2724,8 @@ public final class MSIMEInputService extends InputMethodService {
                 && selectCandidateEdge(wordCharacterEdge)) return true;
         // Paging only means something while there is a candidate list. With nothing composed these
         // keys are the editor's: Tab moves focus, Page Down scrolls, and a comma is a comma.
-        if (hasEngineComposition()) {
+        // Korean has no candidate list: its punctuation follows the syllable, and Home/End end the syllable through HardwareKeyPolicy below and then move the caret.
+        if (hasEngineComposition() && !koreanSchemeActive()) {
             int navigationCommand = CandidateNavigationPolicy.commandFor(
                 keyCode, event.isShiftPressed(), candidateNavigation, japaneseSchemeActive());
             if (navigationCommand != CandidateNavigationPolicy.NONE) {
@@ -2702,6 +2743,7 @@ public final class MSIMEInputService extends InputMethodService {
             commitEnglishLiteral(unicode);
             return true;
         }
+        if (koreanSchemeActive()) unicode = KoreanInputPolicy.hardwareCharacter(unicode, event.isShiftPressed());
         boolean handled = unicode >= 32 && unicode <= 126
             && character(unicode, event.isShiftPressed());
         return handled || super.onKeyDown(keyCode, event);
@@ -2751,6 +2793,8 @@ public final class MSIMEInputService extends InputMethodService {
         if (session != 0 && view != null && !view.optString("editing_text").isEmpty()
                 && (newStart != composingEnd || newEnd != composingEnd)) {
             // Don't apply an empty composition over the editor's newly moved selection.
+            // A Korean syllable is already the final Hangul, marked inline; finishing the region below leaves it in the document, so it counts as typed.
+            if (koreanSchemeActive()) recordTypingStatistics(view.optString("reading", ""), typingSource());
             try { value(NativeClient.command(session, 3)); } catch (JSONException | LinkageError error) { fail(); }
             if (connection != null) bridge.abandon(sink(typingSource()));
             view = null;
@@ -3387,7 +3431,8 @@ public final class MSIMEInputService extends InputMethodService {
 
     /** Width for the text this host commits itself, which never passes through the runtime. */
     private String fullWidthOutput(String text) {
-        return FullWidthInputPolicy.output(text, fullWidthInput);
+        // Korean writes half-width ASCII whatever the width setting says, as the runtime does for its own Korean commits.
+        return FullWidthInputPolicy.output(text, fullWidthInput && !koreanSchemeActive());
     }
 
     /**
@@ -3465,7 +3510,9 @@ public final class MSIMEInputService extends InputMethodService {
     private boolean supportsLocalTools() {
         if (view == null) return false;
         int scheme = view.optInt("scheme", 0);
-        return !dedicatedEnglish && scheme != 2 && scheme != 3;
+        // Korean has no local modes: Shift+letter is a double consonant there.
+        return !dedicatedEnglish && scheme != 2 && scheme != 3
+            && scheme != KoreanInputPolicy.KOREAN_SCHEME;
     }
 
     private void showLocalInputMenu() {
@@ -5569,7 +5616,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     private boolean traditionalOutputToolAvailable() {
         int scheme = view == null ? -1 : view.optInt("scheme", -1);
-        return scheme != 3
+        return scheme != 3 && scheme != KoreanInputPolicy.KOREAN_SCHEME
             && canSaveChineseOutput();
     }
 
@@ -5696,7 +5743,7 @@ public final class MSIMEInputService extends InputMethodService {
     private boolean candidateManagementEnabled() {
         if (view == null || !view.optString("local_mode", "none").equals("none")) return false;
         int scheme = view.optInt("scheme", 0);
-        return scheme != 2 && scheme != 3;
+        return scheme != 2 && scheme != 3 && scheme != KoreanInputPolicy.KOREAN_SCHEME;
     }
 
     private void editCandidate(JSONObject id, CandidateManagementAction action) {
@@ -5744,7 +5791,8 @@ public final class MSIMEInputService extends InputMethodService {
 
     private boolean candidateGlossInsertionEnabled() {
         if (view == null || !"none".equals(view.optString("local_mode", "none"))) return false;
-        return view.optInt("scheme", 0) != 3;
+        int scheme = view.optInt("scheme", 0);
+        return scheme != 3 && scheme != KoreanInputPolicy.KOREAN_SCHEME;
     }
 
     private void insertCandidateGloss(int slot, JSONObject id, String text, String gloss) {
@@ -6509,6 +6557,8 @@ public final class MSIMEInputService extends InputMethodService {
         boolean localMode = view != null
             && !"none".equals(view.optString("local_mode", "none"));
         boolean shifted = letterCase.usesUppercase();
+        boolean koreanKeycaps = keyboardLayer == KeyboardLayout.Layer.LETTERS
+            && displayedTouchLayout(view) == KeyboardLayout.KOREAN_LAYOUT;
         // The face is the policy's job; the key itself always sends its canonical lowercase form.
         java.util.List<java.util.List<String>> rows = KeyboardLayout.rows(keyboardLayer);
         for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
@@ -6522,9 +6572,17 @@ public final class MSIMEInputService extends InputMethodService {
                 final String input = key;
                 String face = keyboardLayer == KeyboardLayout.Layer.SYMBOLS
                     ? ChineseSymbolFaces.face(key, sendsChinesePunctuation())
+                    : koreanKeycaps ? KoreanKeyboardLayout.face(key, shifted)
                     : LetterKeyFacePolicy.face(key, chineseMode, localMode, shifted);
                 Button keyButton;
-                if (keyboardLayer == KeyboardLayout.Layer.LETTERS) {
+                if (koreanKeycaps) {
+                    // Jamo keycaps over the same QWERTY letters: type() sends the letter, and the Engine composes the syllable.
+                    keyButton = keyboardKey(face, face, () -> type(input.charAt(0)));
+                    keyButton.setContentDescription(
+                        KoreanKeyboardLayout.accessibilityLabel(key, shifted));
+                    if (keyButton instanceof KeyboardPressButton press)
+                        press.setKeyboardRole(KeyboardKeyRole.KEY);
+                } else if (keyboardLayer == KeyboardLayout.Layer.LETTERS) {
                     ShuangpinHintButton hintButton = shuangpinKeyboardKey(
                         face, face, () -> type(input.charAt(0)));
                     keyButton = hintButton;
@@ -6533,7 +6591,7 @@ public final class MSIMEInputService extends InputMethodService {
                 } else {
                     keyButton = keyboardKey(face, face, () -> type(input.charAt(0)));
                 }
-                if (keyboardLayer == KeyboardLayout.Layer.LETTERS) {
+                if (keyboardLayer == KeyboardLayout.Layer.LETTERS && !koreanKeycaps) {
                     keyButton.setContentDescription(LetterKeyFacePolicy.accessibilityLabel(
                         input, chineseMode, localMode, shifted));
                     // 字母键读作「字母 Q」而不是「按键 Q」，所以描述推导一直把它判成 action 面，
@@ -7235,7 +7293,9 @@ public final class MSIMEInputService extends InputMethodService {
         // toolbar, and what the action row keeps is whatever KeyboardActionRow lists for the surface.
         LinearLayout controls = new LinearLayout(this);
         shiftButton = button(controls, "⇧", () -> {
-            if (!dedicatedEnglish && session != 0 && !helpcodeCompositionEligible()) {
+            // On the Korean keycaps Shift is the double consonant row, not the way into English.
+            if (!dedicatedEnglish && session != 0 && !helpcodeCompositionEligible()
+                    && !koreanSchemeActive()) {
                 toggleInputLanguage();
                 if (!dedicatedEnglish) return;
                 // Match Apple: the Shift that entered English starts from lowercase even if the
@@ -7680,12 +7740,15 @@ public final class MSIMEInputService extends InputMethodService {
             styleButton(scriptShortcutButton, true);
             int scheme = view == null
                 ? ((selectedScheme == KeyboardScheme.JAPANESE
-                    || selectedScheme == KeyboardScheme.JAPANESE_NINE_KEY) ? 3 : -1)
+                    || selectedScheme == KeyboardScheme.JAPANESE_NINE_KEY) ? 3
+                    : selectedScheme == KeyboardScheme.KOREAN ? KoreanInputPolicy.KOREAN_SCHEME : -1)
                 : view.optInt("scheme", -1);
             boolean japanese = scheme == 3;
-            scriptShortcutButton.setEnabled(!japanese && canSaveChineseOutput());
+            boolean korean = scheme == KoreanInputPolicy.KOREAN_SCHEME;
+            scriptShortcutButton.setEnabled(!japanese && !korean && canSaveChineseOutput());
             String label = traditionalChineseOutput ? "切换到简体" : "切换到繁体";
             String outputState = japanese ? "日语不使用简繁转换"
+                : korean ? "韩语不使用简繁转换"
                 : traditionalOutputSaving ? "正在保存"
                 : traditionalChineseOutput ? "繁体" : "简体";
             scriptShortcutButton.setContentDescription(
@@ -7738,7 +7801,7 @@ public final class MSIMEInputService extends InputMethodService {
             int shiftLayout = displayedTouchLayout(view);
             boolean keepsOwnGrid = shiftLayout == QUANPIN_NINE_KEY_LAYOUT
                 || shiftLayout == JAPANESE_NINE_KEY_LAYOUT;
-            shiftButton.setVisibility(shiftLayout != STANDARD_TOUCH_LAYOUT
+            shiftButton.setVisibility(!KeyboardLayout.carriesLetterCase(shiftLayout)
                 && (keepsOwnGrid || keyboardLayer == KeyboardLayout.Layer.LETTERS)
                 ? View.GONE : View.VISIBLE);
             shiftButton.setText(letterCase.keyText());
@@ -7746,7 +7809,9 @@ public final class MSIMEInputService extends InputMethodService {
             shiftButton.setActivated(letterCase.mode() == EnglishLetterCaseState.Mode.CAPS_LOCK);
             // The tinted function face in the letter row, and the filled accent only while it is on.
             styleButton(shiftButton, KeyboardKeyRole.ACCENT, skin);
-            String caseLabel = letterCase.accessibilityLabel(dedicatedEnglish || session == 0);
+            String caseLabel = shiftLayout == KeyboardLayout.KOREAN_LAYOUT
+                ? KoreanKeyboardLayout.SHIFT_LABEL
+                : letterCase.accessibilityLabel(dedicatedEnglish || session == 0);
             String caseValue = letterCase.accessibilityValue();
             shiftButton.setContentDescription(Build.VERSION.SDK_INT >= 30
                 ? caseLabel : caseLabel + "，" + caseValue);

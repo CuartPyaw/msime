@@ -85,6 +85,8 @@ struct TsfLocalConfig {
   bool paired_punctuation = true;
   bool microsoft_shuangpin = false;
   bool japanese_input_mode = false;
+  // Rides on the same input-mode frame as Japanese; the two schemes exclude each other.
+  bool korean_input_mode = false;
   bool tsf_diagnostic_log = false;
   // 0 follow, 1 always Chinese, 2 always English.
   uint8_t punctuation_lock = 0;

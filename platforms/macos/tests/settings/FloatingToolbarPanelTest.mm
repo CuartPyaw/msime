@@ -393,11 +393,30 @@ int main() {
         [panel updateEnglishInputMode:NO
                  englishCandidateMode:YES
                     japaneseInputMode:YES
+                      koreanInputMode:NO
                              capsLock:NO
                 chinesePunctuationEnabled:YES
                          fullWidthEnabled:NO
           traditionalChineseOutputEnabled:NO];
         assert([inputMode.title isEqualToString:@"En"]);
+        [panel updateEnglishInputMode:NO
+                 englishCandidateMode:NO
+                    japaneseInputMode:NO
+                      koreanInputMode:YES
+                             capsLock:NO
+                chinesePunctuationEnabled:YES
+                         fullWidthEnabled:NO
+          traditionalChineseOutputEnabled:NO];
+        assert([inputMode.title isEqualToString:@"한"]);
+        [panel updateEnglishInputMode:YES
+                 englishCandidateMode:NO
+                    japaneseInputMode:NO
+                      koreanInputMode:YES
+                             capsLock:NO
+                chinesePunctuationEnabled:YES
+                         fullWidthEnabled:NO
+          traditionalChineseOutputEnabled:NO];
+        assert([inputMode.title isEqualToString:@"英"]);
 
         FloatingToolbarTestDelegate *delegate = [FloatingToolbarTestDelegate new];
         panel.toolbarDelegate = delegate;

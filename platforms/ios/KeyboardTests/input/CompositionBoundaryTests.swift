@@ -28,6 +28,42 @@ final class CompositionBoundaryTests: XCTestCase {
     XCTAssertEqual(CompositionBoundaryPolicy.action(composing: true, scheme: .quanpin, boundary: .deactivate), .finishComposition)
   }
 
+  /// A Korean syllable is text already: Return commits it raw so the newline still follows, and every other boundary finishes it.
+  func testKoreanCommitsTheSyllableAtEveryBoundary() {
+    XCTAssertEqual(CompositionBoundaryPolicy.action(composing: false, scheme: .korean, boundary: .returnKey), .none)
+    XCTAssertEqual(CompositionBoundaryPolicy.action(composing: true, scheme: .korean, boundary: .returnKey), .commitRaw)
+    XCTAssertEqual(CompositionBoundaryPolicy.action(composing: true, scheme: .korean, boundary: .modeSwitch), .finishComposition)
+    XCTAssertEqual(CompositionBoundaryPolicy.action(composing: true, scheme: .korean, boundary: .deactivate), .finishComposition)
+
+    let bridge = MetasequoiaInputSessionBridge(stateRoot: state)
+    _ = bridge.switchToKorean()
+    for letter in "rk" { _ = bridge.handleCharacter(String(letter)) }
+    let returned = bridge.commitRaw()
+    XCTAssertFalse(returned.isHandled, "Return still types its newline after the syllable")
+    XCTAssertEqual(returned.commitText, "가")
+    XCTAssertTrue(returned.preedit.isEmpty)
+    for letter in "rk" { _ = bridge.handleCharacter(String(letter)) }
+    let finished = bridge.finishComposition()
+    XCTAssertTrue(finished.isHandled)
+    XCTAssertEqual(finished.commitText, "가")
+  }
+
+  /// Korean writes half-width ASCII marks whatever the Chinese punctuation switch and the width say.
+  func testKoreanPunctuationStaysAsciiAndHalfWidth() {
+    let bridge = MetasequoiaInputSessionBridge(stateRoot: state)
+    _ = bridge.switchToKorean()
+    bridge.setChinesePunctuation(true)
+    bridge.setCharacterWidth(fullwidth: true)
+    let idle = bridge.handlePunctuationWithContext(",", preceding: 0)
+    XCTAssertFalse(idle.isHandled, "the keyboard types an idle mark itself")
+    XCTAssertNil(idle.commitText)
+    for letter in "rk" { _ = bridge.handleCharacter(String(letter)) }
+    let marked = bridge.handlePunctuationWithContext(".", preceding: 0)
+    XCTAssertTrue(marked.isHandled)
+    XCTAssertEqual(marked.commitText, "가.")
+    XCTAssertTrue(marked.preedit.isEmpty)
+  }
+
   func testCommitRawKeepsTheTypedLetters() {
     let bridge = MetasequoiaInputSessionBridge(stateRoot: state)
     for letter in "nihao" { _ = bridge.handleCharacter(String(letter)) }

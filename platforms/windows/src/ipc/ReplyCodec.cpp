@@ -248,8 +248,10 @@ std::vector<std::vector<uint8_t>> tsf_config_frames(const TsfLocalConfig &config
       FanyImeWorkerReplyType::PairedPunctuationChanged, config.paired_punctuation));
   frames.push_back(worker_flag_frame(
       FanyImeWorkerReplyType::MicrosoftShuangpinChanged, config.microsoft_shuangpin));
-  frames.push_back(worker_flag_frame(FanyImeWorkerReplyType::InputModeChanged,
-                                     config.japanese_input_mode));
+  // "1" Japanese, "2" Korean, "0" a Chinese scheme. A DLL that predates Korean compares against "1" only, so it reads "2" as Chinese rather than as Japanese.
+  frames.push_back(worker_text_frame(
+      FanyImeWorkerReplyType::InputModeChanged,
+      config.japanese_input_mode ? L"1" : config.korean_input_mode ? L"2" : L"0"));
   frames.push_back(worker_flag_frame(
       FanyImeWorkerReplyType::TsfDiagnosticLogChanged, config.tsf_diagnostic_log));
   // Keep the first character compatible with the historical lock-only frame.

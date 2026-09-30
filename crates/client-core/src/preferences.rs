@@ -25,6 +25,8 @@ pub enum InputScheme {
     Shuangpin,
     Wubi,
     Japanese,
+    /// Korean Hangul on the Dubeolsik layout. The Engine ordinal is 4.
+    Korean,
 }
 
 /// Presentation layout for touch keyboard hosts. Desktop hosts preserve but ignore it.
@@ -340,10 +342,11 @@ pub enum TouchKeyboardScheme {
     Japanese,
     Handwriting,
     ThoughtfulReply,
+    Korean,
 }
 
 impl TouchKeyboardScheme {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Quanpin,
         Self::NineKey,
         Self::Xiaohe,
@@ -355,6 +358,7 @@ impl TouchKeyboardScheme {
         Self::Japanese,
         Self::Handwriting,
         Self::ThoughtfulReply,
+        Self::Korean,
     ];
 }
 
@@ -609,7 +613,7 @@ pub struct Preferences {
     /// The optional buttons on the touch keyboard's toolbar, the counterpart of the floating toolbar's component switches. The voice entry stays under `touch_voice_shortcut`.
     #[serde(default)]
     pub touch_toolbar: TouchToolbarPreferences,
-    /// Retained when the active scheme is Japanese. Absent in legacy documents.
+    /// Retained when the active scheme is Japanese or Korean. Absent in legacy documents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_chinese_scheme: Option<ChineseScheme>,
     #[serde(default)]

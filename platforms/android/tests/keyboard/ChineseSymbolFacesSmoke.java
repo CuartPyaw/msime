@@ -20,6 +20,8 @@ public final class ChineseSymbolFacesSmoke {
             "dedicated English mode uses ASCII faces");
         check(!ChineseSymbolFaces.shouldUseChineseFaces(false, 3, "none", true),
             "Japanese scheme uses ASCII faces");
+        check(!ChineseSymbolFaces.shouldUseChineseFaces(false, 4, "none", true),
+            "Korean scheme uses half-width ASCII faces whatever the Chinese punctuation switch says");
         check(!ChineseSymbolFaces.shouldUseChineseFaces(false, 0, "emoji", true),
             "local utility mode uses ASCII faces");
         // The user's own switch gates the faces too: a key that shows 。 and commits . is worse

@@ -16,6 +16,8 @@ export class InlinePreeditPolicy {
    * The preview text for one Engine view; empty means none should be shown.
    *
    * A held phrase piece leads the spelling, as the candidate window draws it, so the characters already picked stay visible in the document instead of vanishing until the phrase is committed. It stays visible on its own once a Ctrl+Backspace has emptied the reading, because it is still the composition.
+   *
+   * Korean is marked inline on every form factor and whatever the style says: the composing syllable is the text itself rather than a spelling of it, `editing` holds only its key letters, and a Korean keyboard that kept the syllable out of the document would show the user nothing where they are typing. Only an editor that takes no preview text goes without it.
    */
   static text(
     style: InlinePreeditStyle,
@@ -24,7 +26,11 @@ export class InlinePreeditPolicy {
     editing: string,
     preedit: string,
     phrasePrefix: string,
+    korean: boolean = false,
   ): string {
+    if (korean) {
+      return supported && editing.length > 0 ? preedit : "";
+    }
     if (
       !desktop ||
       !supported ||

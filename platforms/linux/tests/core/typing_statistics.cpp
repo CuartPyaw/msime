@@ -155,6 +155,10 @@ int main() {
          TypingSource::Wubi);
   assert(resolve_typing_source(3, false, false, "none", "xiaohe") ==
          TypingSource::Japanese);
+  assert(resolve_typing_source(4, false, false, "none", "xiaohe") ==
+         TypingSource::Korean);
+  assert(typing_source_id(TypingSource::Korean) ==
+         std::string_view("korean"));
   assert(resolve_typing_source(0, false, true, "none", "xiaohe") ==
          TypingSource::English);
   assert(resolve_typing_source(0, false, false, "temporary_japanese",

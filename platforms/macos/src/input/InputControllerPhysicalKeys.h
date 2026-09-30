@@ -154,6 +154,17 @@ constexpr bool IsPhysicalWordCharacterKey(unsigned short keyCode, bool brackets,
     return (keyCode == 27 && character == '-') || (keyCode == 24 && character == '=');
 }
 
+// The Engine's `SchemeType::Korean`, as it appears in a view's `scheme`.
+constexpr int KoreanScheme = 4;
+
+// Dubeolsik binds jamo to letters by case: Shift+Q/W/E/R/T/O/P type ㅃ ㅉ ㄸ ㄲ ㅆ ㅒ ㅖ, and every other letter types the same jamo either way. So the case the Engine receives is Shift's alone. AppKit folds Caps Lock into the typed character, and passing that on would turn r (ㄱ) into R (ㄲ) for a user who only left Caps Lock on. Anything that is not an ASCII letter comes back unchanged.
+constexpr char KoreanKeyLetter(char character, bool shift)
+{
+    if (character >= 'A' && character <= 'Z') character = static_cast<char>(character - 'A' + 'a');
+    else if (character < 'a' || character > 'z') return character;
+    return shift ? static_cast<char>(character - 'a' + 'A') : character;
+}
+
 // The Engine's `CandidateSource::Fallback`, as it appears in a view candidate's `source`.
 constexpr int CandidateSourceFallback = 9;
 

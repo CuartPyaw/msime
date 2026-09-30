@@ -180,12 +180,16 @@ impl InputSession {
             SchemeType::Quanpin => {
                 quanpin_raw_boundaries(raw_with_cases, &self.pinyin_segmentation_with_cases())
             }
-            SchemeType::Wubi | SchemeType::JapaneseRomaji => Vec::new(),
+            SchemeType::Wubi | SchemeType::JapaneseRomaji | SchemeType::Korean => Vec::new(),
         }
     }
 
-    /// Clamped to the editing text; recomputes the prefix candidates.
+    /// Clamped to the editing text; recomputes the prefix candidates. Korean has no caret inside its open syllable, so the caret stays at the end.
     pub(super) fn set_caret(&mut self, caret: Option<usize>) {
+        if self.is_korean() && !self.dedicated_english && self.local_mode == LocalInputMode::None {
+            self.caret = None;
+            return;
+        }
         let length = self.editing_text().len();
         self.caret = caret.map(|position| position.min(length));
         // Only the scheme composition decodes by caret; local and English lists do not depend on it.

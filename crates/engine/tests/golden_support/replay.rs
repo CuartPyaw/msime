@@ -310,6 +310,7 @@ fn scheme_from(name: &str) -> SchemeType {
         "shuangpin" => SchemeType::Shuangpin,
         "wubi" => SchemeType::Wubi,
         "japanese" => SchemeType::JapaneseRomaji,
+        "korean" => SchemeType::Korean,
         _ => panic!("unknown scheme {name}"),
     }
 }
@@ -787,7 +788,7 @@ mod tests {
     #[test]
     fn every_scenario_is_selected_in_name_order_without_a_filter() {
         let all = selected_scenarios_from(None);
-        assert_eq!(all.len(), 272);
+        assert_eq!(all.len(), 273);
         let mut sorted = all.clone();
         sorted.sort();
         assert_eq!(all, sorted);

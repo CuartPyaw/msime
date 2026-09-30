@@ -6,4 +6,5 @@ test("labels every supported input scheme", () => {
   expect(schemeTitle("shuangpin")).toBe("双拼");
   expect(schemeTitle("wubi")).toBe("五笔");
   expect(schemeTitle("japanese")).toBe("日语");
+  expect(schemeTitle("korean")).toBe("韩语");
 });

@@ -7,3 +7,5 @@ export const chineseInputSchemeOptions = [
 ] as const satisfies readonly { value: ChineseInputScheme; label: string }[];
 
 export const japaneseInputSchemeOptions = [{ value: "romaji", label: "罗马音" }] as const;
+
+export const koreanInputSchemeOptions = [{ value: "dubeolsik", label: "两套式" }] as const;

@@ -23,9 +23,10 @@ public final class QuickPunctuationPolicy {
 
     private QuickPunctuationPolicy() {}
 
-    /** Returns display faces and the ASCII input each entry sends to Engine. */
+    /** Returns display faces and the ASCII input each entry sends to Engine. Korean punctuation is half-width ASCII. */
     public static List<Entry> entries(boolean dedicatedEnglish, int scheme, String localMode) {
-        if (dedicatedEnglish || !"none".equals(localMode)) return ASCII;
+        if (dedicatedEnglish || !"none".equals(localMode)
+                || scheme == KoreanInputPolicy.KOREAN_SCHEME) return ASCII;
         return scheme == 3 ? JAPANESE : CHINESE;
     }
 }

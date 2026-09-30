@@ -116,7 +116,10 @@ void CMetasequoiaIME::_TerminateComposition(TfEditCookie ec, _In_ ITfContext *pC
         double clearDisplayAttrElapsedMs = clearDisplayAttrTimer.ElapsedMs();
 
         PerfTimer endCompositionTimer;
+        const bool wasTerminatingOwnComposition = _terminatingOwnComposition;
+        _terminatingOwnComposition = true;
         const HRESULT endResult = SafeEndComposition(terminatingComposition, ec);
+        _terminatingOwnComposition = wasTerminatingOwnComposition;
         if (FAILED(endResult) && _pComposition == terminatingComposition)
         {
             // if we fail to EndComposition, then we need to close the reverse reading window.

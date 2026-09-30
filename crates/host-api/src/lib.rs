@@ -35,6 +35,7 @@ use msime_input_runtime::UnixSocketProvider;
 use msime_input_runtime::{
     Action, AiAssistantProviderConfig, CandidateId, CharacterWidth, NineKeySpellingId,
     OnlineCandidate, OnlineQuery, Reranker, Runtime, SentenceModel, Transition, TranslationService,
+    KOREAN_SCHEME,
 };
 #[cfg(unix)]
 use msime_input_runtime::{EmojiPanelQuery, TranslationQuery};
@@ -447,8 +448,11 @@ impl HostSession {
                     .to_owned(),
             );
         }
-        // A replacement changes the view generation, never the completed commit.
-        if result.view.character_width == CharacterWidth::Fullwidth {
+        // A replacement changes the view generation, never the completed commit. Korean writes half-width ASCII punctuation and digits whatever the width switch says; the dedicated English mode keeps its own rules in every scheme, so its commits are widened as they are under a Chinese scheme.
+        let korean_text = result.view.scheme == KOREAN_SCHEME
+            && !result.view.dedicated_english
+            && result.view.local_mode == "none";
+        if result.view.character_width == CharacterWidth::Fullwidth && !korean_text {
             if let Some(c) = result.commit.as_mut() {
                 *c = c
                     .chars()
@@ -517,6 +521,7 @@ fn scheme_code(scheme: InputScheme) -> u8 {
         InputScheme::Shuangpin => 1,
         InputScheme::Wubi => 2,
         InputScheme::Japanese => 3,
+        InputScheme::Korean => 4,
     }
 }
 

@@ -203,6 +203,9 @@ impl InputSession {
         if self.local_mode != LocalInputMode::None {
             return self.handle_local_character(value);
         }
+        if self.is_korean() {
+            return self.handle_korean_character(value);
+        }
         if shift_only && !self.has_composition() && self.scheme().is_pinyin() {
             if let Some(mode) = self.local_mode_for_entry(value) {
                 self.enter_local_mode(mode, value);
@@ -303,12 +306,65 @@ impl InputSession {
         KeyResult::handled().with_diagnostic(self.update_local_candidates())
     }
 
+    /// Korean keys: every letter is a jamo and always handled, carrying the syllables it finished as a commit. Any other key leaves the scheme alone. Punctuation stays unhandled without touching the composition, because the punctuation route commits the open syllable ahead of the mark; a digit, a space or another symbol commits the open syllable and stays unhandled, so the host inserts the key after the commit.
+    fn handle_korean_character(&mut self, value: u8) -> KeyResult {
+        if !value.is_ascii_alphabetic() {
+            if !self.has_composition() {
+                self.reset_commit_context();
+                return KeyResult::unhandled();
+            }
+            if value.is_ascii_punctuation() {
+                return KeyResult::unhandled();
+            }
+            return self.commit_korean_composition();
+        }
+        self.engine.handle_key(SchemeKey::Letter(value));
+        let finished = self.engine.take_korean_commit();
+        self.update_mixed_candidates();
+        self.online_requests.invalidate();
+        if finished.is_empty() {
+            return KeyResult::handled();
+        }
+        self.chain.reset();
+        KeyResult::committed(finished)
+    }
+
+    /// The open Korean syllable goes to the host and the key that ended it does not: the result is unhandled, so Space, Enter, a caret key or a digit still does its own work after the commit, as in every Korean input method.
+    fn commit_korean_composition(&mut self) -> KeyResult {
+        let text = self.preedit();
+        self.reset_composition();
+        self.chain.reset();
+        KeyResult {
+            handled: false,
+            commit: Some(text),
+            diagnostic: None,
+        }
+    }
+
     /// input_session.cpp:294-406.
     pub fn handle_command(&mut self, command: Command) -> KeyResult {
         if !self.has_composition() {
             // With nothing composed every command is left to the host, which edits the text, moves the caret or inserts a newline, so the chain no longer ends where the host's text does.
             self.chain.reset();
             return KeyResult::unhandled();
+        }
+        // A Korean syllable has no candidates to choose and no caret inside it: the commit and caret commands all end it and hand the key back. Backspace, Cancel and the Japanese-only variant command take the shared paths below.
+        if self.is_korean()
+            && self.local_mode == LocalInputMode::None
+            && !self.dedicated_english
+            && matches!(
+                command,
+                Command::CommitCandidate
+                    | Command::CommitRaw
+                    | Command::CommitReading
+                    | Command::MoveLeft
+                    | Command::MoveRight
+                    | Command::MoveHome
+                    | Command::MoveEnd
+                    | Command::DeleteForward
+            )
+        {
+            return self.commit_korean_composition();
         }
         match command {
             Command::MoveLeft
@@ -362,6 +418,21 @@ impl InputSession {
 
     /// input_session.cpp:260-292.
     pub fn handle_punctuation(&mut self, value: u8) -> KeyResult {
+        // Korean writes half-width ASCII punctuation whatever the Chinese punctuation switches say. With a syllable open the mark follows it in one commit; with nothing open the host inserts the key itself.
+        if self.is_korean() && !self.dedicated_english && self.local_mode == LocalInputMode::None {
+            if !self.has_composition() {
+                self.reset_commit_context();
+                return KeyResult::unhandled();
+            }
+            let mut result = self.finish_composition(0);
+            self.chain.reset();
+            result.handled = true;
+            result
+                .commit
+                .get_or_insert_with(String::new)
+                .push(char::from(value));
+            return result;
+        }
         // Lock 1 forces Chinese, which is what an enabled session does anyway; only lock 2 changes anything here (core-session.md §15.8).
         let mark = if self.chinese_punctuation_enabled && self.punctuation_lock != 2 {
             self.punctuation.translate(value)
@@ -587,12 +658,16 @@ impl InputSession {
         self.engine.current_scheme_type() == SchemeType::JapaneseRomaji
     }
 
+    pub(super) fn is_korean(&self) -> bool {
+        self.engine.current_scheme_type() == SchemeType::Korean
+    }
+
     /// The helpcode switch of the session's scheme; other schemes have none.
     pub(super) fn helpcode_enabled(&self) -> bool {
         match self.scheme() {
             SchemeType::Quanpin => self.quanpin_helpcode_enabled,
             SchemeType::Shuangpin => self.shuangpin_helpcode_enabled,
-            SchemeType::Wubi | SchemeType::JapaneseRomaji => false,
+            SchemeType::Wubi | SchemeType::JapaneseRomaji | SchemeType::Korean => false,
         }
     }
 

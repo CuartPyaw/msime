@@ -18,6 +18,9 @@ final class SmartPunctuationTests: XCTestCase {
     XCTAssertEqual(KeyboardPunctuationContext.engineInput(for: "・", japanese: true), "/")
     XCTAssertEqual(KeyboardPunctuationContext.engineInput(for: "@", japanese: false), "@")
     XCTAssertNil(KeyboardPunctuationContext.engineInput(for: "……", japanese: false))
+    // Korean routes only ASCII keys; a Chinese mark from the symbol panel is typed as it is.
+    XCTAssertEqual(KeyboardPunctuationContext.engineInput(for: ".", japanese: false, korean: true), ".")
+    XCTAssertNil(KeyboardPunctuationContext.engineInput(for: "，", japanese: false, korean: true))
   }
 
   func testBridgeUsesSmartContextOnlyWhileEngineIsIdle() throws {

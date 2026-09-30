@@ -245,22 +245,21 @@ void RefreshPunctuationLockFromConfig()
     Global::PunctuationLockMode.store(ReadConfiguredPunctuationLock(), std::memory_order_relaxed);
 }
 
-BOOL ReadConfiguredJapaneseInputMode()
+namespace
 {
-    if (const auto preferences = ReadSharedPreferences())
-    {
-        return preferences->value("scheme", std::string{"quanpin"}) == "japanese";
-    }
+// The legacy config.toml `[input] mode`, lower-cased, or empty when the file or the key is missing.
+std::string ReadLegacyConfiguredInputMode()
+{
     const std::filesystem::path configPath = SharedConfigPath();
     if (configPath.empty())
     {
-        return FALSE;
+        return {};
     }
 
     std::ifstream input(configPath);
     if (!input)
     {
-        return FALSE;
+        return {};
     }
 
     bool inInputSection = false;
@@ -296,10 +295,24 @@ BOOL ReadConfiguredJapaneseInputMode()
         {
             continue;
         }
-        const std::string value = to_lower_copy(UnquoteTomlBasicString(TrimAscii(line.substr(eq + 1))));
-        return value == "japanese";
+        return to_lower_copy(UnquoteTomlBasicString(TrimAscii(line.substr(eq + 1))));
     }
-    return FALSE;
+    return {};
+}
+} // namespace
+
+std::string ReadConfiguredInputScheme()
+{
+    if (const auto preferences = ReadSharedPreferences())
+    {
+        return preferences->value("scheme", std::string{"quanpin"});
+    }
+    return ReadLegacyConfiguredInputMode();
+}
+
+BOOL ReadConfiguredJapaneseInputMode()
+{
+    return ReadConfiguredInputScheme() == "japanese";
 }
 
 SwitchLanguageHotkeys ReadConfiguredSwitchLanguageHotkeys()

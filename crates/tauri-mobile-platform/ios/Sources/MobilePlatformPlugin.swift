@@ -611,7 +611,7 @@ private struct IOSKeyboardPreferenceStore {
   static let maximumCustomSkinBytes = 800_000
   static let schemeOrder = [
     "quanpin", "nineKey", "shuangpin", "ziranma", "microsoft", "shoudao", "wubi",
-    "japaneseNineKey", "japanese", "handwriting", "thoughtfulReply",
+    "japaneseNineKey", "japanese", "korean", "handwriting", "thoughtfulReply",
   ]
   /// The global theme ids (`GlobalTheme::ALL` in client-core), the only values `globalTheme` may hold.
   static let themeOrder = ["system", "shuishan", "light", "paper", "night", "ink", "custom"]

@@ -69,7 +69,7 @@ const MAX_KEY_BYTES = 128;
 // document limit is the real bound, so one string may occupy almost the full 1 MiB envelope.
 const MAX_STRING_BYTES = MAX_JSON_BYTES;
 
-const SCHEMES = ["quanpin", "shuangpin", "wubi", "japanese"];
+const SCHEMES = ["quanpin", "shuangpin", "wubi", "japanese", "korean"];
 const SHUANGPIN_PROFILES = ["xiaohe", "ziranma", "shoudao", "microsoft"];
 const FREQUENCY_MODES = ["disabled", "pin", "halve", "linear", "promote"];
 const LAYOUTS = ["twenty_six_key", "nine_key", "handwriting"];
@@ -329,8 +329,12 @@ class Reader {
 
 /** `catalog::is_external_id`: a safe package folder name that is not a global theme id. */
 function externalSkinId(value: string): boolean {
-  return value.length > 0 && value.length <= 64 && /^[a-z0-9][a-z0-9._-]*$/.test(value)
-    && !GLOBAL_THEMES.includes(value);
+  return (
+    value.length > 0 &&
+    value.length <= 64 &&
+    /^[a-z0-9][a-z0-9._-]*$/.test(value) &&
+    !GLOBAL_THEMES.includes(value)
+  );
 }
 
 function choose(value: string, allowed: string[]): string {

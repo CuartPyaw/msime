@@ -63,7 +63,7 @@ pub struct CandidateSnapshot {
     pub session: u64,
     pub generation: u64,
     pub preedit: String,
-    /// Engine-owned kana reading for Japanese; empty for other schemes.
+    /// Engine-owned kana reading for Japanese, the composing Hangul for Korean; empty for other schemes.
     pub reading: String,
     pub candidates: Vec<Candidate>,
 }
@@ -104,7 +104,7 @@ pub struct View {
     /// its own caret by this string's length in whatever unit it measures.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub phrase_prefix: String,
-    /// Engine-owned kana reading for Japanese; empty for other schemes.
+    /// Engine-owned kana reading for Japanese, the composing Hangul for Korean (the text a host marks inline); empty for other schemes.
     pub reading: String,
     pub editing_text: String,
     /// Byte offset in Engine's ASCII editing_text, not an OS UTF-16 offset.

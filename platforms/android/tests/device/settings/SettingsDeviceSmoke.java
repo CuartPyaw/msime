@@ -105,7 +105,7 @@ public final class SettingsDeviceSmoke extends DeviceSmoke {
             js("Array.from(document.querySelectorAll('button')).find(button => button.textContent?.trim() === '输入').click(); true");
             awaitJs("!!(" + NINE_KEY_TOGGLE + ")");
             awaitJs("JSON.stringify(Array.from(document.querySelectorAll('.touch-keyboard-scheme-select')).map(button => button.textContent.replace('✓', '')))"
-                + " === JSON.stringify(['全拼 26 键','全拼 9 键','小鹤双拼','自然码双拼','微软双拼','首道双拼','86 五笔','日语 9 键','日语 26 键','手写','高情商回复'])");
+                + " === JSON.stringify(['全拼 26 键','全拼 9 键','小鹤双拼','自然码双拼','微软双拼','首道双拼','86 五笔','日语 9 键','日语 26 键','手写','高情商回复','韩语 26 键'])");
             if (!"true".equals(js("(" + QUANPIN_TOGGLE + ").checked")))
                 js("(" + QUANPIN_TOGGLE + ").click(); true");
             if (!"true".equals(js("(" + NINE_KEY_TOGGLE + ").checked")))

@@ -45,6 +45,8 @@ export interface HardwareKeyTarget {
   commitJapanese(): boolean;
   /** Finish the composition and type `character` after it. */
   commitThenType(character: number): void;
+  /** Finish the composition so its text is in the editor before the key that ended it reaches the application. */
+  finishBeforeKey(): void;
 }
 
 export class HardwareKeyDispatch {
@@ -55,7 +57,7 @@ export class HardwareKeyDispatch {
    * reached — and IGNORED is a key deliberately consumed without an effect, which is how a disabled
    * navigation binding stops being text rather than becoming a stray character.
    *
-   * Returns whether the key was consumed. Only a letter can come back unconsumed: the Engine declines an upper-case letter with nothing composed and, with fullwidth off, nothing else takes it; and a key that was claimed and then did nothing is a character the user typed and never saw.
+   * Returns whether the key was consumed. Only a letter can come back unconsumed: the Engine declines an upper-case letter with nothing composed and, with fullwidth off, nothing else takes it; and a key that was claimed and then did nothing is a character the user typed and never saw. The other exception is deliberate: a Korean syllable ended by Return, a caret key or Delete is committed and the key then goes on to the application.
    */
   static apply(
     decision: HardwareKeyDecision,
@@ -149,6 +151,9 @@ export class HardwareKeyDispatch {
       case HardwareKeyAction.COMMIT_THEN_TYPE:
         target.commitThenType(decision.character);
         break;
+      case HardwareKeyAction.COMMIT_THEN_RELEASE:
+        target.finishBeforeKey();
+        return false;
       default:
         break;
     }

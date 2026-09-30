@@ -42,6 +42,7 @@ pub(crate) fn local_account_preferences(
         "wubi" => ("wubi", None, false),
         "japanese" => ("japanese", None, false),
         "japaneseNineKey" => ("japanese", None, true),
+        "korean" => ("korean", None, false),
         _ => return Err(AccountError::Storage),
     };
     insert_string(&mut settings, "input.schema", schema);
@@ -197,6 +198,7 @@ impl IosPreferencePlan {
                     .into(),
                 )
             }
+            Some("korean") => Some("korean".into()),
             Some(_) => return Err(AccountError::Invalid),
         };
         let traditional_chinese_output =
@@ -358,8 +360,20 @@ fn touch_scheme(value: &str) -> Result<TouchKeyboardScheme, AccountError> {
         "japanese" => Ok(TouchKeyboardScheme::Japanese),
         "handwriting" => Ok(TouchKeyboardScheme::Handwriting),
         "thoughtfulReply" => Ok(TouchKeyboardScheme::ThoughtfulReply),
+        "korean" => Ok(TouchKeyboardScheme::Korean),
         _ => Err(AccountError::Invalid),
     }
+}
+
+/// Keep the Chinese scheme a Japanese or Korean selection returns to; switching between the two keeps the one already remembered.
+fn remember_chinese_scheme(preferences: &mut Preferences) {
+    let chinese = match preferences.scheme {
+        InputScheme::Quanpin => ChineseScheme::Quanpin,
+        InputScheme::Shuangpin => ChineseScheme::Shuangpin,
+        InputScheme::Wubi => ChineseScheme::Wubi,
+        InputScheme::Japanese | InputScheme::Korean => return,
+    };
+    preferences.last_chinese_scheme = Some(chinese);
 }
 
 fn select_touch_scheme(preferences: &mut Preferences, requested: TouchKeyboardScheme) {
@@ -393,14 +407,7 @@ fn select_touch_scheme(preferences: &mut Preferences, requested: TouchKeyboardSc
             preferences.touch_keyboard_layout = TouchKeyboardLayout::TwentySixKey;
         }
         TouchKeyboardScheme::Japanese | TouchKeyboardScheme::JapaneseNineKey => {
-            if preferences.scheme != InputScheme::Japanese {
-                preferences.last_chinese_scheme = Some(match preferences.scheme {
-                    InputScheme::Quanpin => ChineseScheme::Quanpin,
-                    InputScheme::Shuangpin => ChineseScheme::Shuangpin,
-                    InputScheme::Wubi => ChineseScheme::Wubi,
-                    InputScheme::Japanese => unreachable!(),
-                });
-            }
+            remember_chinese_scheme(preferences);
             preferences.scheme = InputScheme::Japanese;
             preferences.touch_keyboard_layout = if selected == TouchKeyboardScheme::JapaneseNineKey
             {
@@ -408,6 +415,11 @@ fn select_touch_scheme(preferences: &mut Preferences, requested: TouchKeyboardSc
             } else {
                 TouchKeyboardLayout::TwentySixKey
             };
+        }
+        TouchKeyboardScheme::Korean => {
+            remember_chinese_scheme(preferences);
+            preferences.scheme = InputScheme::Korean;
+            preferences.touch_keyboard_layout = TouchKeyboardLayout::TwentySixKey;
         }
         TouchKeyboardScheme::Wubi => {
             preferences.scheme = InputScheme::Wubi;

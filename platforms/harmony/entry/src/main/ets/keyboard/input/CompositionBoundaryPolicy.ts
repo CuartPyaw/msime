@@ -15,11 +15,13 @@ export class CompositionBoundaryPolicy {
     composing: boolean,
     japanese: boolean,
     boundary: CompositionBoundary,
+    korean: boolean = false,
   ): CompositionBoundaryAction {
     if (!composing) {
       return CompositionBoundaryAction.NONE;
     }
-    if (boundary === CompositionBoundary.DEACTIVATE || japanese) {
+    // A Korean syllable is text the user already wrote, like Japanese kana; its key letters are not something to commit instead.
+    if (boundary === CompositionBoundary.DEACTIVATE || japanese || korean) {
       return CompositionBoundaryAction.FINISH_COMPOSITION;
     }
     return CompositionBoundaryAction.COMMIT_RAW;

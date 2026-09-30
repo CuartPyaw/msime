@@ -26,9 +26,7 @@ pub struct PunctuationContext {
     pub lock: PunctuationLock,
 }
 
-/// Select the explicit ASCII route only when a host document decision is safe.
-/// Engine remains authoritative for composition, local/Japanese/English modes,
-/// and all punctuation not covered by the shared smart-punctuation contract.
+/// Select the explicit ASCII route only when a host document decision is safe. Engine remains authoritative for composition, local/Japanese/English modes, Korean (whose punctuation is always half-width ASCII), and all punctuation not covered by the shared smart-punctuation contract.
 pub fn route(context: PunctuationContext) -> PunctuationRoute {
     if context.has_composition || !context.host_context_available {
         return PunctuationRoute::Engine;

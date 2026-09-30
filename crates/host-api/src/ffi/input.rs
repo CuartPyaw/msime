@@ -265,13 +265,15 @@ pub unsafe extern "C" fn msime_client_smart_punctuation_arm(
                 .get(&handle)
                 .ok_or_else(|| "unknown session or wrong thread".to_owned())?;
             let smart = session.applied.smart_punctuation;
+            // The repeat gesture turns an ASCII mark into a Chinese one; Korean writes only ASCII marks, so it never arms there.
+            let korean = session.runtime.scheme() == KOREAN_SCHEME;
             let repeat = msime_client_core::punctuation::arm_repeat(
                 value.ascii,
                 &value.commit,
                 value.timestamp_ms,
                 value.editor_generation,
             )
-            .filter(|_| smart && session.applied.smart_punctuation_repeat);
+            .filter(|_| smart && session.applied.smart_punctuation_repeat && !korean);
             let space = msime_client_core::punctuation::arm_space_convert(
                 &value.commit,
                 value.auto_closed_pair,

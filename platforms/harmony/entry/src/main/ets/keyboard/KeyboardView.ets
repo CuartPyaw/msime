@@ -25,6 +25,8 @@ import {
 } from './input/JapaneseNineKeyLayout';
 import { JapaneseNineKeyActions } from './input/JapaneseNineKeyActions';
 import { JapaneseVariantPolicy } from './input/JapaneseVariantPolicy';
+import { DubeolsikLayout } from './input/DubeolsikLayout';
+import { KoreanCompositionPolicy } from './input/KoreanCompositionPolicy';
 import { CandidateManagementAction, ManagementAction } from './candidate/CandidateManagementAction';
 import { CandidateFontFamilyPolicy } from './candidate/CandidateFontFamilyPolicy';
 import { CandidateChipWidth } from './candidate/CandidateChipWidth';
@@ -692,6 +694,9 @@ struct KeyboardView {
    * 本地模式除外 —— 那里敲进去的就是字面的小写字母,键面写大写就是在骗人。
    */
   private letterFace(letter: string): string {
+    if (this.koreanFace()) {
+      return DubeolsikLayout.jamo(letter, this.caseMode !== LetterCaseMode.LOWERCASE);
+    }
     return LetterKeyFacePolicy.face(letter, !this.english, this.localMode !== 'none',
       this.caseMode !== LetterCaseMode.LOWERCASE);
   }
@@ -702,7 +707,26 @@ struct KeyboardView {
       this.engineScheme, this.localMode);
   }
 
+  /**
+   * Whether the letter keys are the Dubeolsik jamo keys: the Korean scheme, with neither English nor a local utility mode taking the letters.
+   *
+   * Read from the keyboard's own scheme rather than from what the Engine last reported, for the reason the kana grid is: the face has to change the moment Korean is picked, before anything has been typed.
+   */
+  private koreanFace(): boolean {
+    return KoreanCompositionPolicy.selected(this.scheme.engineScheme, this.english, this.localMode);
+  }
+
   private tapLetter(letter: string): void {
+    if (this.koreanFace()) {
+      // The Engine reads the jamo from the letter's case, so Shift is sent as an upper-case letter rather than as helpcode.
+      const shifted: boolean = this.caseMode !== LetterCaseMode.LOWERCASE;
+      KeyboardSession.shared.press(DubeolsikLayout.input(letter, shifted).charCodeAt(0), shifted);
+      if (this.caseMode === LetterCaseMode.SHIFTED) {
+        this.letterCase.reset();
+        this.caseMode = this.letterCase.mode();
+      }
+      return;
+    }
     // Shift means two different things depending on what is open. Over a pinyin composition an
     // uppercase letter is helpcode for the Engine, which is why the Engine is told the key was
     // shifted; with nothing composing it is only a capital, and in Chinese mode not even that.
@@ -1089,7 +1113,7 @@ struct KeyboardView {
   private selectScheme(candidate: SchemeDefinition): void {
     // The composition belongs to the scheme that was current when it was typed; carrying it into a
     // different one would reinterpret letters that were never meant that way.
-    KeyboardSession.shared.cancel();
+    this.leaveComposition();
     if (this.hasHandwritingContext()) {
       this.clearHandwriting();
     }
@@ -1116,6 +1140,17 @@ struct KeyboardView {
       === 'nine_key';
     KeyboardSession.shared.setNineKey(this.nineKey);
     this.show(candidate === KeyboardScheme.THOUGHTFUL_REPLY ? SURFACE_REPLY : SURFACE_NONE);
+  }
+
+  /**
+   * End the composition before the scheme or mode under it changes. A spelling is thrown away, since its letters mean nothing to the next scheme; an open Korean syllable is already the user's text, so it is committed instead.
+   */
+  private leaveComposition(): void {
+    if (KeyboardSession.shared.isKorean()) {
+      KeyboardSession.shared.finishComposition();
+    } else {
+      KeyboardSession.shared.cancel();
+    }
   }
 
   private toggleSymbolLayer(): void {
@@ -1189,7 +1224,7 @@ struct KeyboardView {
    * knows, so picking it moves the scheme underneath as well and says so on the card.
    */
   private selectEnglish(nineKey: boolean): void {
-    KeyboardSession.shared.cancel();
+    this.leaveComposition();
     if (this.hasHandwritingContext()) {
       this.clearHandwriting();
     }
@@ -1371,8 +1406,11 @@ struct KeyboardView {
   private activateReturn(): void {
     const dispatch: ReturnDispatch = ReturnKeyAction.dispatch(
       this.japanese, this.editing.length > 0, this.candidates.length,
-      KeyboardSession.shared.japaneseConversionActive());
-    if (dispatch === ReturnDispatch.COMMIT_HIGHLIGHTED) {
+      KeyboardSession.shared.japaneseConversionActive(), this.koreanFace());
+    if (dispatch === ReturnDispatch.FINISH_THEN_EDITOR) {
+      KeyboardSession.shared.finishBeforeKey();
+      KeyboardSession.shared.submit();
+    } else if (dispatch === ReturnDispatch.COMMIT_HIGHLIGHTED) {
       KeyboardSession.shared.commitHighlighted();
     } else if (dispatch === ReturnDispatch.COMMIT_READING) {
       KeyboardSession.shared.commitReading();
@@ -1386,6 +1424,11 @@ struct KeyboardView {
   }
 
   private activateSpace(): void {
+    if (this.koreanFace()) {
+      // Space ends the open syllable and is still a space, so the keyboard types it after the commit.
+      KeyboardSession.shared.commitThenType(0x20);
+      return;
+    }
     if (this.japanese && this.editing.length > 0
         && KeyboardSession.shared.convertJapanese()) {
       return;
@@ -1465,7 +1508,20 @@ struct KeyboardView {
   /** A symbol wears the face of what it will insert, which in Chinese is not the ASCII on the cap. */
   private symbolFace(symbol: string): string {
     const chinese: string | undefined = CHINESE_SYMBOL_FACES.get(symbol);
-    return !this.english && chinese !== undefined ? chinese : symbol;
+    // Korean punctuation is the ASCII on the cap.
+    return !this.english && !this.koreanFace() && chinese !== undefined ? chinese : symbol;
+  }
+
+  /**
+   * What a symbol-layer key does. A digit ends an open Korean syllable and is then typed after it, which the punctuation route cannot do: it takes marks only.
+   */
+  private tapSymbol(symbol: string): void {
+    const character: number = symbol.charCodeAt(0);
+    if (this.koreanFace() && KoreanCompositionPolicy.typesAfterCommit(character)) {
+      KeyboardSession.shared.commitThenType(character);
+      return;
+    }
+    KeyboardSession.shared.punctuation(character);
   }
 
   private symbolKey(symbol: string): KeyOptions {
@@ -1475,7 +1531,7 @@ struct KeyboardView {
       size: KeyboardMetrics.KEY_FONT_SIZE,
       emphasized: false,
       width: 0,
-      action: () => KeyboardSession.shared.punctuation(symbol.charCodeAt(0))
+      action: () => this.tapSymbol(symbol)
     };
   }
 
@@ -1525,7 +1581,7 @@ struct KeyboardView {
     // and the digit layer would go on reading ABC, DEF, GHI. The twenty-six key rows never needed it
     // because their two layers hold different characters.
     return `${this.english}:${this.caseMode}:${this.localMode}:${this.shuangpinProfile}:`
-      + `${this.engineScheme}:${this.symbols}:${this.skin.key()}`;
+      + `${this.engineScheme}:${this.scheme.preferenceId}:${this.symbols}:${this.skin.key()}`;
   }
 
   /**
@@ -1617,6 +1673,17 @@ struct KeyboardView {
   }
 
   private letterKey(letter: string): KeyOptions {
+    if (this.koreanFace()) {
+      return {
+        face: this.letterFace(letter),
+        // The jamo itself, which is what a screen reader set to Korean reads.
+        label: this.letterFace(letter),
+        size: KeyboardMetrics.KEY_FONT_SIZE,
+        emphasized: false,
+        width: 0,
+        action: () => this.tapLetter(letter)
+      };
+    }
     return {
       face: this.letterFace(letter),
       // Ported with the face policy and, until now, computed for nobody: the view attached no
@@ -2470,7 +2537,7 @@ struct KeyboardView {
       } else {
         Column() {
           this.fixedKey({
-            face: '，',
+            face: this.koreanFace() ? ',' : '，',
             label: KeyAccessibilityPolicy.punctuation(),
             size: KeyboardMetrics.KEY_FONT_SIZE,
             emphasized: false,
@@ -2490,7 +2557,7 @@ struct KeyboardView {
       this.fixedKey({
         // The face is the mode it is in, not the pair it toggles between: a key labelled 中/英
         // says nothing about which one is running.
-        face: this.english ? 'En' : '中',
+        face: this.english ? 'En' : (this.koreanFace() ? '한' : '中'),
         // Never the mode it is in: a label reading 中 would be the character, not the action.
         label: KeyAccessibilityPolicy.language(),
         size: KeyboardMetrics.SMALL_KEY_FONT_SIZE,
@@ -5315,9 +5382,8 @@ struct KeyboardView {
           ForEach(this.symbols ? SYMBOL_ROWS[1] : LETTER_ROWS[1], (key: string) => {
             this.flexibleKey(this.symbols ? this.symbolKey(key) : this.letterKey(key));
           }, (key: string) => key + this.faceKey())
-          if (!this.symbols) {
-            // Microsoft shuangpin spells ing with a semicolon, so the key has to be reachable from the
-            // letter rows rather than buried behind the symbol layout.
+          if (!this.symbols && !this.koreanFace()) {
+            // Microsoft shuangpin spells ing with a semicolon, so the key has to be reachable from the letter rows rather than buried behind the symbol layout. Dubeolsik has no jamo there, so Korean draws the row as nine keys.
             this.flexibleKey(this.letterKey(';'));
           }
         }

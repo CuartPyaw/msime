@@ -1149,7 +1149,9 @@ void CMetasequoiaIME::_RequestLocalSessionReset(_In_opt_ ITfContext *preferredCo
     {
         _KEYSTROKE_STATE keyState = {};
         keyState.Category = CATEGORY_COMPOSING;
-        keyState.Function = FUNCTION_CANCEL;
+        // A Korean syllable is text the user already wrote, so leaving the context commits it where every other composition is discarded.
+        keyState.Function = Global::KoreanInputModeEnabled.load(std::memory_order_relaxed) ? FUNCTION_COMMIT_SYLLABLE
+                                                                                           : FUNCTION_CANCEL;
         _localResetEditSessionQueued = true;
         _queuedLocalResetToken = resetToken;
         const HRESULT resetRequestHr =
@@ -2004,6 +2006,7 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
         else if (buf.msg_type == Global::DataToTsfWorkerThreadMsgType::InputModeChanged)
         {
             Global::JapaneseInputModeEnabled.store(buf.data[0] == L'1', std::memory_order_relaxed);
+            Global::KoreanInputModeEnabled.store(buf.data[0] == L'2', std::memory_order_relaxed);
             const HWND ownerWindow = pIME->_msgWndHandle;
             if (ownerWindow && IsWindow(ownerWindow))
             {
@@ -2437,9 +2440,26 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
             auto *engine = pIME->GetCompositionProcessorEngine();
             if (engine && engine->GetHostEngineAdapter() && engine->GetHostEngineAdapter()->valid())
             {
+                auto *host = engine->GetHostEngineAdapter();
+                const auto hostScheme = [host]() -> int {
+                    std::string raw, viewError;
+                    msime::tsf::EngineResult result;
+                    return host->view(&raw, &viewError) &&
+                                   msime::tsf::EngineSessionAdapter::parse_result(raw, &result, &viewError)
+                               ? static_cast<int>(result.view.scheme)
+                               : -1;
+                };
+                // A scheme switch discards the Engine's composition, but a Korean syllable is already on screen as text. Commit what the composition shows once the switch has happened, or the next key would replace it.
+                const bool koreanComposing = pIME->_IsComposing() && pIME->_pContext && hostScheme() == 4;
                 std::string ignored, error;
-                (void)engine->GetHostEngineAdapter()->reload_preferences(
-                    msime::tsf::default_state_directory(), &ignored, &error);
+                (void)host->reload_preferences(msime::tsf::default_state_directory(), &ignored, &error);
+                if (koreanComposing && hostScheme() != 4 && pIME->_IsComposing() && pIME->_pContext)
+                {
+                    _KEYSTROKE_STATE keyState = {};
+                    keyState.Category = CATEGORY_COMPOSING;
+                    keyState.Function = FUNCTION_COMMIT_SYLLABLE;
+                    (void)pIME->_InvokeKeyHandler(pIME->_pContext, 0, L'\0', 0, keyState, FANY_IME_NO_REQUEST_ID);
+                }
             }
             break;
         }
@@ -2861,6 +2881,10 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
             engine->SetPunctuationMode(pIME->_GetThreadMgr(), pIME->_GetClientId(), TRUE);
         }
         SendCurrentImeStatusSnapshot(pIME);
+        break;
+    }
+    case WM_ReplayKoreanSyllableKey: {
+        pIME->_RunKoreanSyllableKeyReplay(static_cast<UINT>(wParam));
         break;
     }
     case WM_PairedPunctuationCaretMove: {

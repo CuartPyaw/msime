@@ -63,7 +63,8 @@ inline bool candidate_removal_available(std::string_view text) {
 inline bool candidate_dictionary_removal_available(std::uint64_t scheme,
                                                    std::uint64_t source,
                                                    std::string_view text) {
-  if (scheme == 3 || (source != 0 && source != 1 && source != 4))
+  // Japanese (3) and Korean (4) have no user-dictionary entries to remove.
+  if (scheme == 3 || scheme == 4 || (source != 0 && source != 1 && source != 4))
     return false;
   const auto count = candidate_utf8_codepoint_count(text);
   // Windows permits deleting one-character English dictionary entries, while

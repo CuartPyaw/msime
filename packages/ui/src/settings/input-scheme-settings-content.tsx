@@ -45,7 +45,7 @@ export function InputSchemeSettingsContent({
   onMacosShuangpinKeymapChange,
   onMacosWubiAutoCommitUniqueChange,
 }: InputSchemeSettingsContentProps) {
-  const chineseSchemes = preferences.scheme !== "japanese";
+  const chineseSchemes = preferences.scheme !== "japanese" && preferences.scheme !== "korean";
   const content = (
     <>
       {!grouped && !hasTouchKeyboardSchemes && (

@@ -1798,9 +1798,7 @@ int main(int argc, char **argv) {
       state->close();
       state->clearPanel();
     }
-    // Cycling through the schemes has to leave a way back to Chinese: the
-    // shared settings page and the IBus host both offer "中文", and it returns
-    // to last_chinese_scheme. Leaving for Japanese must not overwrite it.
+    // Cycling through the schemes has to leave a way back to Chinese: the shared settings page and the IBus host both offer "中文", and it returns to last_chinese_scheme. Leaving for Japanese or Korean must not overwrite it.
     {
       const auto savedScheme = [&](const char *key) {
         const auto snapshot = response(msime_client_load_preferences(
@@ -1829,15 +1827,26 @@ int main(int argc, char **argv) {
       require(state->cycleScheme() && savedSchemeBecomes("scheme", "japanese") &&
                   savedSchemeBecomes("last_chinese_scheme", "wubi"),
               "Japanese leaves the last Chinese scheme alone");
+      require(state->cycleScheme() && state->view_.value("scheme", 0u) == 4 &&
+                  savedSchemeBecomes("scheme", "korean") &&
+                  savedSchemeBecomes("last_chinese_scheme", "wubi"),
+              "Korean leaves the last Chinese scheme alone");
+      require(state->modeIndicatorLabel() == "한", "the status area labels Korean input");
       // The 输入方案 menu picks a scheme directly and marks the one in use.
-      require(engine.scheme_menu_.actions().size() == 4, "scheme menu lists the four schemes");
-      require(engine.scheme_japanese_action_.isChecked(&ic) && !engine.scheme_quanpin_action_.isChecked(&ic),
+      require(engine.scheme_menu_.actions().size() == 5, "scheme menu lists the five schemes");
+      require(engine.scheme_korean_action_.isChecked(&ic) && !engine.scheme_japanese_action_.isChecked(&ic) &&
+                  !engine.scheme_quanpin_action_.isChecked(&ic),
               "scheme menu marks the scheme in use");
+      engine.scheme_japanese_action_.activate(&ic);
+      require(state->view_.value("scheme", 0u) == 3 && savedSchemeBecomes("scheme", "japanese") &&
+                  engine.scheme_japanese_action_.isChecked(&ic) && !engine.scheme_korean_action_.isChecked(&ic),
+              "scheme menu selects Japanese directly");
       engine.scheme_shuangpin_action_.activate(&ic);
       require(state->view_.value("scheme", 0u) == 1 && savedSchemeBecomes("scheme", "shuangpin") &&
                   savedSchemeBecomes("last_chinese_scheme", "shuangpin"),
               "scheme menu selects shuangpin directly");
-      require(engine.scheme_shuangpin_action_.isChecked(&ic) && !engine.scheme_japanese_action_.isChecked(&ic),
+      require(engine.scheme_shuangpin_action_.isChecked(&ic) && !engine.scheme_japanese_action_.isChecked(&ic) &&
+                  !engine.scheme_korean_action_.isChecked(&ic),
               "scheme menu follows the choice");
       engine.scheme_quanpin_action_.activate(&ic);
       require(state->view_.value("scheme", 0u) == 0 && savedSchemeBecomes("scheme", "quanpin"),
@@ -2066,6 +2075,63 @@ int main(int argc, char **argv) {
     require(key(FcitxKey_Escape), "cancel Japanese composition");
     state->close();
     state->clearPanel();
+    // Korean composes Dubeolsik jamo into a Hangul syllable drawn inline. Starting a new syllable commits the previous one, the keys that end a syllable commit it and still do their own work in the application, and punctuation stays ASCII.
+    {
+      options["preferences"]["scheme"] = "korean";
+      std::ofstream(path) << options.dump();
+      const auto press = [&](fcitx::KeySym sym, fcitx::KeyStates states = fcitx::KeyStates()) {
+        fcitx::KeyEvent event(&ic, fcitx::Key(sym, states));
+        engine.keyEvent(entry, event);
+        return event.accepted();
+      };
+      const auto preedit = [&] { return ic.inputPanel().clientPreedit().toString(); };
+      auto before = ic.committed;
+      require(press(FcitxKey_d) && press(FcitxKey_k) && press(FcitxKey_s), "Korean letters compose");
+      require(state->view_.at("scheme") == 4 && preedit() == "안" && ic.committed == before,
+              "the syllable is drawn inline while it composes");
+      require(state->view_.at("candidates").empty(), "Korean offers no candidates");
+      require(ic.inputPanel().clientPreedit().cursor() == static_cast<int>(std::string("안").size()),
+              "the caret follows the syllable");
+      require(press(FcitxKey_s) && ic.committed == before + "안" && preedit() == "ㄴ",
+              "starting a new syllable commits the previous one");
+      require(press(FcitxKey_u) && press(FcitxKey_d) && preedit() == "녕" &&
+                  state->view_.at("editing_text") == "sud",
+              "the open syllable keeps its key letters");
+      require(press(FcitxKey_BackSpace) && preedit() == "녀", "Backspace removes one jamo");
+      require(!press(FcitxKey_space) && ic.committed == before + "안녀" && preedit().empty(),
+              "Space commits the syllable and still reaches the application");
+      before = ic.committed;
+      require(press(FcitxKey_R, fcitx::KeyStates(fcitx::KeyState::Shift)) && preedit() == "ㄲ" &&
+                  state->view_.value("local_mode", std::string("none")) == "none",
+              "Shift+R types ㄲ rather than opening a local mode");
+      require(press(FcitxKey_Escape) && preedit().empty() && ic.committed == before, "Escape discards the syllable");
+      require(press(FcitxKey_R, fcitx::KeyStates(fcitx::KeyState::CapsLock)) && preedit() == "ㄱ",
+              "CapsLock does not shift a jamo");
+      require(press(FcitxKey_k) && press(FcitxKey_period) && ic.committed == before + "가." && preedit().empty(),
+              "a mark follows the open syllable in one commit");
+      before = ic.committed;
+      require(!press(FcitxKey_period) && !press(FcitxKey_period) && ic.committed == before,
+              "an idle mark is left to the application as ASCII, and repeating it never makes it Chinese");
+      require(press(FcitxKey_r) && press(FcitxKey_k) && !press(FcitxKey_1) && ic.committed == before + "가" &&
+                  preedit().empty(),
+              "a digit ends the syllable and reaches the application");
+      require(press(FcitxKey_r) && press(FcitxKey_k) && !press(FcitxKey_Return) && ic.committed == before + "가가",
+              "Enter commits the syllable and reaches the application");
+      require(press(FcitxKey_r) && press(FcitxKey_apostrophe) && ic.committed == before + "가가ㄱ'",
+              "an apostrophe is a mark after the syllable");
+      before = ic.committed;
+      require(press(FcitxKey_r) && press(FcitxKey_k) && !press(FcitxKey_c, fcitx::KeyStates(fcitx::KeyState::Ctrl)) &&
+                  ic.committed == before + "가" && preedit().empty(),
+              "a shortcut finishes the syllable instead of discarding it");
+      // Switching to another input method keeps what was typed.
+      require(press(FcitxKey_r) && press(FcitxKey_k), "Korean composes before the switch");
+      fcitx::InputContextEvent switched(&ic, fcitx::EventType::InputContextSwitchInputMethod);
+      engine.deactivate(entry, switched);
+      require(ic.committed == before + "가가", "switching input methods commits the open syllable");
+      engine.activate(entry, focus);
+      state->close();
+      state->clearPanel();
+    }
     std::filesystem::remove_all(directory);
     std::cout << "Fcitx5 native context tests passed\n";
   } catch (const std::exception &error) {

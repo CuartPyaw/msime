@@ -314,6 +314,11 @@ import {
 } from "../entry/src/main/ets/keyboard/FloatingToolbarLayout";
 import { FloatingToolbarDragPolicy } from "../entry/src/main/ets/keyboard/FloatingToolbarDragPolicy";
 import { InlinePreeditPolicy } from "../entry/src/main/ets/keyboard/input/InlinePreeditPolicy";
+import { DubeolsikLayout } from "../entry/src/main/ets/keyboard/input/DubeolsikLayout";
+import {
+  KOREAN_SCHEME,
+  KoreanCompositionPolicy,
+} from "../entry/src/main/ets/keyboard/input/KoreanCompositionPolicy";
 
 function selectedBarVisible(value: boolean | null): boolean {
   return value !== false;
@@ -2297,6 +2302,7 @@ group("shows Japanese input mode in the Harmony toolbar", () => {
     english: false,
     temporaryEnglish: false,
     japanese: true,
+    korean: false,
     capsLock: false,
     chinesePunctuation: true,
     fullWidth: false,
@@ -2306,6 +2312,7 @@ group("shows Japanese input mode in the Harmony toolbar", () => {
     english: true,
     temporaryEnglish: false,
     japanese: true,
+    korean: false,
     capsLock: false,
     chinesePunctuation: true,
     fullWidth: false,
@@ -2329,6 +2336,7 @@ group("shows Japanese input mode in the Harmony toolbar", () => {
       english: false,
       temporaryEnglish: false,
       japanese: true,
+      korean: false,
       capsLock: true,
       chinesePunctuation: true,
       fullWidth: false,
@@ -2341,6 +2349,7 @@ group("shows Japanese input mode in the Harmony toolbar", () => {
       english: false,
       temporaryEnglish: true,
       japanese: false,
+      korean: false,
       capsLock: false,
       chinesePunctuation: true,
       fullWidth: false,
@@ -2353,6 +2362,7 @@ group("shows Japanese input mode in the Harmony toolbar", () => {
       english: true,
       temporaryEnglish: true,
       japanese: true,
+      korean: false,
       capsLock: false,
       chinesePunctuation: true,
       fullWidth: false,
@@ -5177,6 +5187,7 @@ function recordingTarget(log: string[]): HardwareKeyTarget {
       return false;
     },
     commitThenType: (character: number) => log.push(`commitThenType ${character}`),
+    finishBeforeKey: () => log.push("finishBeforeKey"),
   };
 }
 
@@ -9629,6 +9640,282 @@ group("the 2in1 draws the composition inline as tsf_preedit_style says", () => {
     "an editor that keeps preview text out of its content is read as is",
   );
   check(InlinePreeditPolicy.beforePreview("好a", "") === "好a", "no preview, nothing removed");
+});
+
+console.log("Korean Dubeolsik");
+
+group("the Dubeolsik keys wear their jamo and send their letter in the case Shift gives", () => {
+  const rows: string[] = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+  const faces: string = rows
+    .map((row: string) =>
+      Array.from(row)
+        .map((letter: string) => DubeolsikLayout.jamo(letter, false))
+        .join(""),
+    )
+    .join(" ");
+  check(
+    faces === "ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ ㅁㄴㅇㄹㅎㅗㅓㅏㅣ ㅋㅌㅊㅍㅠㅜㅡ",
+    "the three rows are the standard layout",
+  );
+  const shifted: string = Array.from("qwertop")
+    .map((letter: string) => DubeolsikLayout.jamo(letter, true))
+    .join("");
+  check(shifted === "ㅃㅉㄸㄲㅆㅒㅖ", "Shift gives the five doubles and ㅒ ㅖ");
+  check(
+    DubeolsikLayout.jamo("k", true) === "ㅏ" && DubeolsikLayout.jamo("a", true) === "ㅁ",
+    "every other key keeps its jamo under Shift",
+  );
+  check(
+    DubeolsikLayout.input("r", true) === "R" && DubeolsikLayout.input("r", false) === "r",
+    "the Engine reads ㄲ from an upper-case R and ㄱ from a lower-case one",
+  );
+  check(
+    DubeolsikLayout.jamo(";", false) === ";",
+    "the semicolon has no jamo, which is why the Korean face drops that key",
+  );
+});
+
+group("Korean draws the syllable, not the key letters behind it", () => {
+  check(KOREAN_SCHEME === 4, "the Engine numbers Korean four");
+  check(KoreanCompositionPolicy.active(4, false, "none"), "the Korean scheme composes Hangul");
+  check(
+    !KoreanCompositionPolicy.active(4, true, "none") &&
+      !KoreanCompositionPolicy.active(4, false, "emoji") &&
+      !KoreanCompositionPolicy.active(3, false, "none"),
+    "English, a local mode or another scheme does not",
+  );
+  check(
+    KoreanCompositionPolicy.selected("korean", false, "none") &&
+      !KoreanCompositionPolicy.selected("korean", true, "none") &&
+      !KoreanCompositionPolicy.selected("japanese", false, "none"),
+    "the keyboard's own choice is Korean only outside English",
+  );
+  check(
+    KoreanCompositionPolicy.reading(true, "sud", "녕") === "녕",
+    "editing_text holds the letters of the open syllable; the strip draws the syllable",
+  );
+  check(KoreanCompositionPolicy.reading(true, "", "") === "", "nothing open draws nothing");
+  check(
+    KoreanCompositionPolicy.reading(false, "nihao", "ni hao") === "nihao",
+    "every other scheme keeps drawing its spelling",
+  );
+  check(
+    KoreanCompositionPolicy.typesAfterCommit(0x20) &&
+      KoreanCompositionPolicy.typesAfterCommit(0x35) &&
+      !KoreanCompositionPolicy.typesAfterCommit(0x2e),
+    "a space or digit is typed after the commit; a mark goes through the punctuation route",
+  );
+});
+
+group("the Korean scheme is one more card, and remembers the Chinese scheme it replaced", () => {
+  check(
+    KeyboardScheme.SCHEMES[KeyboardScheme.SCHEMES.length - 1] === KeyboardScheme.KOREAN &&
+      KeyboardScheme.SCHEMES.length === 12,
+    "appended last, as the shared twelve-entry picker has it",
+  );
+  check(
+    KeyboardScheme.fromPreferenceId("korean") === KeyboardScheme.KOREAN,
+    "the touch picker id is korean",
+  );
+  check(
+    KeyboardScheme.fromPreferences("korean", null, "twenty_six_key") === KeyboardScheme.KOREAN,
+    "the Engine scheme korean resolves to the Korean card",
+  );
+  check(
+    KeyboardScheme.fromPreferences("korean", null, "nine_key") === KeyboardScheme.KOREAN,
+    "and has no grid to resolve to",
+  );
+  const korean: PreferenceMapping = KeyboardScheme.mapping(KeyboardScheme.KOREAN, "wubi", null);
+  check(
+    korean.scheme === "korean" && korean.touchKeyboardLayout === "twenty_six_key",
+    "the preference scheme is korean on the letter layout",
+  );
+  check(korean.lastChineseScheme === "wubi", "and the Chinese scheme to go back to is kept");
+  check(
+    KeyboardScheme.mapping(KeyboardScheme.KOREAN, "korean", null).lastChineseScheme === "quanpin",
+    "korean is never itself a Chinese scheme to go back to",
+  );
+  check(KeyboardScheme.engineSchemeName(4) === "korean", "four is korean");
+  check(
+    !CandidateManagementAction.candidateActionsAvailable("korean", 0),
+    "Korean offers no dictionary actions",
+  );
+  check(
+    TypingStatisticsPolicy.source("korean", "xiaohe", false, false, "none") === "korean",
+    "Korean typing counts under its own source",
+  );
+  check(
+    !ChineseOutputPolicy.applies(false, 4, "none"),
+    "Hangul is never converted to Traditional Chinese",
+  );
+  const punctuation: PunctuationEntry[] = QuickPunctuationPolicy.entries(false, 4, "none");
+  check(
+    punctuation.every((entry: PunctuationEntry) => entry.face === entry.input),
+    "the quick punctuation menu is ASCII",
+  );
+});
+
+group("Korean ends a syllable as text at every boundary", () => {
+  check(
+    CompositionBoundaryPolicy.action(true, false, CompositionBoundary.MODE_SWITCH, true) ===
+      CompositionBoundaryAction.FINISH_COMPOSITION,
+    "switching mode commits the syllable",
+  );
+  check(
+    ReturnKeyAction.dispatch(false, true, 0, false, true) === ReturnDispatch.FINISH_THEN_EDITOR,
+    "Return commits the syllable and still does its editor work",
+  );
+  check(
+    ReturnKeyAction.dispatch(false, false, 0, false, true) === ReturnDispatch.EDITOR,
+    "with nothing open Return is the editor's",
+  );
+  check(
+    InlinePreeditPolicy.text("raw", false, true, "gks", "한", "", true) === "한",
+    "the syllable is marked inline on a phone too",
+  );
+  check(
+    InlinePreeditPolicy.text("empty", true, true, "gks", "한", "", true) === "한",
+    "and whatever the desktop spelling style says",
+  );
+  check(
+    InlinePreeditPolicy.text("raw", false, false, "gks", "한", "", true) === "",
+    "an editor without preview text gets none",
+  );
+  check(
+    InlinePreeditPolicy.text("raw", true, true, "", "", "", true) === "",
+    "nothing open marks nothing",
+  );
+  check(
+    FloatingToolbarLayout.face(ToolbarButton.INPUT_MODE, {
+      english: false,
+      temporaryEnglish: false,
+      japanese: false,
+      korean: true,
+      capsLock: false,
+      chinesePunctuation: false,
+      fullWidth: false,
+      traditional: false,
+    }) === "한",
+    "the toolbar names Korean",
+  );
+});
+
+group("account sync carries the Korean scheme", () => {
+  const values = localAccountPreferences({ scheme: "korean" }, syncFeedback);
+  check(values["input.schema"] === "korean", "korean is uploaded as itself");
+  const applied = applyAccountPreferences(
+    { scheme: "quanpin" },
+    { revision: 1, settings: { "input.schema": "korean" } },
+    fullPreferenceSchema(),
+    syncFeedback,
+  );
+  check(applied.preferences.scheme === "korean", "and applied from another device");
+});
+
+group("a hardware keyboard on Korean composes letters and hands the rest back in order", () => {
+  const key = (over: Record<string, unknown> = {}): HardwareKey => ({
+    keyCode: 2017,
+    unicodeChar: 0x72,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    logoKey: false,
+    ...over,
+  });
+  const route = (hardware: HardwareKey, composing: boolean): HardwareKeyDecision =>
+    HardwareKeyRouter.route(
+      hardware,
+      composing,
+      true,
+      false,
+      undefined,
+      false,
+      false,
+      "disabled",
+      false,
+      PLAIN_SPELLING,
+      true,
+      false,
+      true,
+    );
+  const letter: HardwareKeyDecision = route(key(), false);
+  check(
+    letter.action === HardwareKeyAction.COMPOSE && letter.character === 0x72,
+    "a letter starts a syllable",
+  );
+  check(
+    route(key({ unicodeChar: 0x52, shiftKey: true }), false).character === 0x52,
+    "Shift+R reaches the Engine as R, which is ㄲ rather than a local mode",
+  );
+  check(
+    HardwareKeyRouter.normalizeLetterCase(key({ unicodeChar: 0x52 }), false).unicodeChar === 0x72,
+    "with Caps Lock kept out of the case, a plain R is ㄱ",
+  );
+  check(
+    route(key({ keyCode: 2044, unicodeChar: 0x2e }), false).action === HardwareKeyAction.RELEASE,
+    "idle punctuation is the application's ASCII, fullwidth or not",
+  );
+  check(
+    route(key({ keyCode: 2050, unicodeChar: 0x20 }), false).action === HardwareKeyAction.RELEASE,
+    "and so is an idle space",
+  );
+  check(
+    route(key({ keyCode: 2044, unicodeChar: 0x2e }), true).action === HardwareKeyAction.PUNCTUATION,
+    "a mark after an open syllable commits both through the Engine",
+  );
+  const space: HardwareKeyDecision = route(key({ keyCode: 2050, unicodeChar: 0x20 }), true);
+  check(
+    space.action === HardwareKeyAction.COMMIT_THEN_TYPE && space.character === 0x20,
+    "Space commits the syllable and is typed after it",
+  );
+  check(
+    route(key({ keyCode: 2001, unicodeChar: 0x31 }), true).action ===
+      HardwareKeyAction.COMMIT_THEN_TYPE,
+    "a digit picks nothing: it commits the syllable and is typed",
+  );
+  check(
+    route(key({ keyCode: 2055, unicodeChar: 0 }), true).action === HardwareKeyAction.BACKSPACE,
+    "Backspace takes back one jamo",
+  );
+  check(
+    route(key({ keyCode: 2070, unicodeChar: 0 }), true).action === HardwareKeyAction.CANCEL,
+    "Escape discards the syllable",
+  );
+  for (const code of [2054, 2015, 2081, 2071, 2049, 2012]) {
+    check(
+      route(key({ keyCode: code, unicodeChar: 0 }), true).action ===
+        HardwareKeyAction.COMMIT_THEN_RELEASE,
+      `key ${code} commits the syllable and then does its own work`,
+    );
+  }
+  check(
+    route(key({ keyCode: 2014, unicodeChar: 0, ctrlKey: true }), true).action ===
+      HardwareKeyAction.COMMIT_THEN_RELEASE,
+    "so does Ctrl+Left",
+  );
+  check(
+    route(key({ keyCode: 2047, unicodeChar: 0, shiftKey: true }), true).action ===
+      HardwareKeyAction.RELEASE,
+    "a Shift on its own leaves the syllable open for the double consonant it is about to type",
+  );
+  check(
+    route(key({ keyCode: 2019, unicodeChar: 0x63, ctrlKey: true }), true).action ===
+      HardwareKeyAction.RELEASE,
+    "and any other chord is the application's",
+  );
+  check(
+    route(key({ keyCode: 2054, unicodeChar: 0 }), false).action === HardwareKeyAction.RELEASE,
+    "with nothing open every non-letter key is released",
+  );
+  const log: string[] = [];
+  check(
+    !HardwareKeyDispatch.apply(
+      { action: HardwareKeyAction.COMMIT_THEN_RELEASE, character: 0, index: 0 },
+      false,
+      recordingTarget(log),
+    ) && log.join(",") === "finishBeforeKey",
+    "the commit is written first and the key is then handed back",
+  );
 });
 
 // The account bridge deliberately models the asynchronous device HTTP API. Give its immediate

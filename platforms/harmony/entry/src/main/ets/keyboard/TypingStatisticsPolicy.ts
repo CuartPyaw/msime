@@ -13,6 +13,7 @@ export class TypingStatisticsPolicy {
     if (scheme === "quanpin") return nineKey ? "nineKey" : "quanpin";
     if (scheme === "wubi") return "wubi";
     if (scheme === "japanese") return "japanese";
+    if (scheme === "korean") return "korean";
     if (scheme === "shuangpin") {
       if (profile === "ziranma") return "ziranma";
       if (profile === "microsoft") return "microsoft";

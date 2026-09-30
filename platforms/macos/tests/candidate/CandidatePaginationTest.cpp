@@ -84,6 +84,13 @@ int main() {
             "classic wheel pages once per notch regardless of line acceleration");
     require(ConsumeCandidateWheelDelta(wheel, 0.0, false, false, false, 40.0) == 0, "zero classic delta does not page");
     static_assert(msime::mac::CandidateWheelPreciseNotch > 0.0);
+    static_assert(msime::mac::KoreanKeyLetter('r', false) == 'r' && msime::mac::KoreanKeyLetter('R', false) == 'r',
+                  "Caps Lock must not turn a Korean key into its shifted jamo");
+    static_assert(msime::mac::KoreanKeyLetter('r', true) == 'R' && msime::mac::KoreanKeyLetter('R', true) == 'R',
+                  "Shift decides the case of a Korean key");
+    static_assert(msime::mac::KoreanKeyLetter('1', true) == '1' && msime::mac::KoreanKeyLetter('.', false) == '.' &&
+                      msime::mac::KoreanKeyLetter(' ', true) == ' ',
+                  "Only letters are recased for Korean");
     require(msime::mac::JapaneseSpaceCommitsFallback(1, msime::mac::CandidateSourceFallback),
             "a lone Fallback row (bare Shift+R) is committed by Japanese Space instead of arming a conversion");
     require(!msime::mac::JapaneseSpaceCommitsFallback(1, 0) &&

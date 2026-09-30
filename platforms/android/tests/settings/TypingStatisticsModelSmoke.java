@@ -15,7 +15,7 @@ public final class TypingStatisticsModelSmoke {
         return new TypingStatisticsModel(true, 120, "90d",
             Map.of("2026-09-18", 20L, "2026-09-20", 100L),
             Map.of("han", 70L, "latin", 20L, "punctuation", 10L),
-            Map.of("nineKey", 60L, "english", 20L, "voice", 10L, "handwriting", 10L),
+            Map.of("nineKey", 50L, "korean", 10L, "english", 20L, "voice", 10L, "handwriting", 10L),
             Map.of("2026-09-20", Map.of("han", 70L)),
             Map.of("2026-09-20", Map.of("nineKey", 60L)));
     }
@@ -52,11 +52,14 @@ public final class TypingStatisticsModelSmoke {
         check(TypingStatisticsModel.sum(kinds) == model.total(), "kinds sum to the total");
 
         List<Slice> schemes = model.slices(Section.SCHEME, null);
-        check(schemes.size() == 15 && "quanpin".equals(schemes.get(0).id()), "schemes are ordered");
+        check(schemes.size() == 16 && "quanpin".equals(schemes.get(0).id()), "schemes are ordered");
+        check("korean".equals(schemes.get(8).id()) && "韩语".equals(schemes.get(8).title())
+            && schemes.get(8).count() == 10, "Korean is its own source, after Japanese");
         check(TypingStatisticsModel.sum(schemes) == model.total(), "schemes sum to the total");
 
         List<Slice> modes = model.slices(Section.MODE, null);
-        check(count(modes, "chinese") == 60, "the pinyin schemes fold into one Chinese mode");
+        check(count(modes, "chinese") == 50, "the pinyin schemes fold into one Chinese mode");
+        check(count(modes, "korean") == 10, "Korean is its own mode rather than Chinese");
         check(count(modes, "english") == 20 && count(modes, "voice") == 10, "modes read their own");
         check(count(modes, "handwriting") == 10,
             "handwriting is its own mode rather than being dropped");
