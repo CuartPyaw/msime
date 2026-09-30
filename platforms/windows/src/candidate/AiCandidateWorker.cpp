@@ -275,6 +275,7 @@ AiCandidateWorker::fetch(const std::string &query,
         !parsed.at("value").is_array())
       return {};
     std::vector<std::string> candidates;
+    candidates.reserve(limit);
     for (const auto &entry : parsed.at("value")) {
       if (!entry.is_string())
         continue;
