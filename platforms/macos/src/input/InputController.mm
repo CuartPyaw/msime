@@ -2362,8 +2362,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     NSString *directory = request[@"directory"];
     if (!hasResources && !directory.isAbsolutePath) { _glossResults = @[]; return; }
     NSArray *learnedItems = [self learnedTranslationItems:request[@"candidates"] results:nil];
-    // The request leaves the generation out so a page whose content did not change compares equal; the reader still needs the one it was read for, captured here.
-    NSNumber *generation = [_session translationQueryWithError:nil][@"generation"] ?: @0;
+    // The request leaves the generation out so a page whose content did not change compares equal; the reader still needs the one it was read for, captured here from the same query the request was built from, so a synchronization pass asks the session once.
+    NSNumber *generation = [self serviceSnapshotQuery][@"generation"] ?: @0;
     NSMutableDictionary *read = [request mutableCopy];
     read[@"generation"] = generation;
     if (!_glossQueue) { _glossQueue = [NSOperationQueue new]; _glossQueue.maxConcurrentOperationCount = 1; _glossQueue.qualityOfService = NSQualityOfServiceUtility; }
@@ -2448,8 +2448,8 @@ static CGFloat MSIMEPreeditSlotWidth(void *) { return MSIMEPreeditCaretGap; }
     NSString *resources = [_session.hostOptions[@"resources"] copy];
     if (![resources isKindOfClass:NSString.class] || !resources.isAbsolutePath) { _targetGlossResults = @{}; return; }
     // A queue of its own: cancelCandidateGloss drains the English queue whenever the English request changes, which would otherwise drop this read and leave the request without results.
-    // As for the English read, the generation is captured here rather than carried in the request.
-    NSNumber *generation = [_session translationQueryWithError:nil][@"generation"] ?: @0;
+    // As for the English read, the generation is captured here rather than carried in the request, from the query the request was built from.
+    NSNumber *generation = [self serviceSnapshotQuery][@"generation"] ?: @0;
     NSMutableDictionary *read = [request mutableCopy];
     read[@"generation"] = generation;
     if (!_targetGlossQueue) { _targetGlossQueue = [NSOperationQueue new]; _targetGlossQueue.maxConcurrentOperationCount = 1; _targetGlossQueue.qualityOfService = NSQualityOfServiceUtility; }

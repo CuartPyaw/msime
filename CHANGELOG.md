@@ -79,7 +79,7 @@
 - 语音服务 `local` 改为基于 sherpa-onnx 的设备端识别，六个平台共用同一份模型目录与设置页。运行时 sherpa-onnx v1.13.8 按平台由 `resources/voice-runtime.lock.json` 固定 SHA-256，`scripts/fetch_voice_runtime.py` 校验后取回，宿主在首次识别时动态加载，缺少运行时的包照常启动、只把本地识别标为不可用。
 - 模型目录 `resources/local-asr-models.json` 提供三个模型：默认的中英流式 X-ASR（边说边出字，自带标点），支持中英日韩粤的 SenseVoice-Small，以及仅桌面提供、约 1 GB 的 Fun-ASR-Nano。模型不随包分发，在设置页按需下载，逐文件校验长度与 SHA-256，完整就位后才写入 `msime-model.json`，下载可取消，也可配置 HTTPS 镜像（`voice_input.asr_model_mirror`）。
 - 用户词库里自己添加的拼音词条作为热词：X-ASR 与 Fun-ASR-Nano 原生使用，SenseVoice 在识别后按拼音做近音替换（`client-core::voice::hotwords`，含 zh/z、n/l、an/ang 等模糊对）。
-- `voice_input.asr_model_path` 接受已安装的模型目录或 Whisper 模型文件，Unix、Windows 盘符、UNC 等绝对路径写法在任何系统上都能通过校验，同一份偏好文件跨平台读取不再被拒。
+- `voice_input.asr_model_path` 接受已安装的模型目录，Unix、Windows 盘符、UNC 等绝对路径写法在任何系统上都能通过校验，同一份偏好文件跨平台读取不再被拒。
 - 宿主接口新增 `msime_client_voice_hotwords`、`msime_client_voice_hotword_correct`、`msime_client_voice_local_models`、`msime_client_voice_local_model_install`、`msime_client_voice_local_model_cancel` 与 `msime_client_voice_local_model_remove`。
 - `msime-voice-local` 辅助进程通过标准输入输出上的 JSON 行协议识别，macOS 与 Linux 的输入法进程由它加载模型，自身不常驻数百 MB 的模型；空闲 120 秒释放模型，空闲 10 分钟退出。协议见 `shared/voice/README.md`，许可证见[第三方组件清单](docs/third-party.md)。
 - 识别全程不联网，只有下载模型时访问 GitHub Releases 或所配置的镜像，见[网络请求与数据流向](PRIVACY.md)。

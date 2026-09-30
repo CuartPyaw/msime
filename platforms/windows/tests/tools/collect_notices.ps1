@@ -8,10 +8,10 @@ try {
     [IO.File]::WriteAllText($license, 'synthetic dependency copyright')
     $supplement = Join-Path $root 'extra.txt'
     [IO.File]::WriteAllText($supplement, 'synthetic extra notice')
-    # Collect-Notices.ps1 reads the notices committed beside the data and code they cover.
-    $repositoryNotices = @('resources/dictionary/NOTICE.md', 'resources/helpcodes/ENGINE-NOTICE.md',
-        'resources/helpcodes/NOTICE.md', 'resources/handwriting/HandwritingModel-LICENSE.txt',
-        'resources/handwriting/Zinnia-LICENSE.txt', 'platforms/windows/third_party/miniaudio/LICENSE',
+    # Collect-Notices.ps1 reads the notices committed beside the data and code they cover, and the handwriting model's licence where scripts/fetch_handwriting_model.py puts it.
+    $repositoryNotices = @('resources/licenses/msime-engine-dictionary-NOTICE.md', 'resources/helpcodes/ENGINE-NOTICE.md',
+        'resources/helpcodes/NOTICE.md', 'target/handwriting-model/HandwritingModel-LICENSE.txt',
+        'resources/licenses/Zinnia-LICENSE.txt', 'platforms/windows/third_party/miniaudio/LICENSE',
         'crates/client-core/data/opencc/LICENSE')
     foreach ($relative in $repositoryNotices) {
         $path = Join-Path $root $relative
@@ -50,17 +50,23 @@ try {
     }
     & $entry -RepoRoot $root -DependencyPrefixes @($prefix) -SupplementalNotices @($supplement)
     if ([IO.File]::ReadAllText($output) -ne $first) { throw 'Notice generation is not deterministic' }
-    $dictionaryNotice = Join-Path $root 'resources/dictionary/NOTICE.md'
-    foreach ($failure in @('notice', 'license', 'voice')) {
+    $dictionaryNotice = Join-Path $root 'resources/licenses/msime-engine-dictionary-NOTICE.md'
+    $handwritingNotice = Join-Path $root 'target/handwriting-model/HandwritingModel-LICENSE.txt'
+    foreach ($failure in @('notice', 'license', 'handwriting', 'voice')) {
         # A missing repository notice is refused; the file is restored before the next case.
         if ($failure -eq 'notice') { Remove-Item -LiteralPath $dictionaryNotice }
         if ($failure -eq 'license') {
-            [IO.File]::WriteAllText($dictionaryNotice, 'synthetic committed notice resources/dictionary/NOTICE.md')
+            [IO.File]::WriteAllText($dictionaryNotice, 'synthetic committed notice resources/licenses/msime-engine-dictionary-NOTICE.md')
             [IO.File]::WriteAllText($license, '')
+        }
+        # The handwriting model's licence has to be fetched before notices are collected.
+        if ($failure -eq 'handwriting') {
+            [IO.File]::WriteAllText($license, 'synthetic dependency copyright')
+            Remove-Item -LiteralPath $handwritingNotice
         }
         # A package carrying the speech runtime without its license is refused as well.
         if ($failure -eq 'voice') {
-            [IO.File]::WriteAllText($license, 'synthetic dependency copyright')
+            [IO.File]::WriteAllText($handwritingNotice, 'synthetic committed notice target/handwriting-model/HandwritingModel-LICENSE.txt')
             Remove-Item -LiteralPath (Join-Path $root 'platforms/linux/data/licenses/onnxruntime-MIT.txt')
         }
         $rejected = $false

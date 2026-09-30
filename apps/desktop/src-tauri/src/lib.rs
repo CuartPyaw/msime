@@ -102,7 +102,7 @@ use std::collections::HashMap;
     test
 ))]
 use std::fs;
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::io::Write;
 #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
 use std::os::unix::fs::FileTypeExt;

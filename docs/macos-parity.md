@@ -69,7 +69,7 @@
 
 上段“覆盖引擎仅有的两个位”后来被固定 Windows 来源的 Engine 提交推翻。目标锁定的共享 Engine 确实比早期来源锁更新，但 Windows 来源随后在 `3c2f3ae3`、`34c69fbe`、`c064cc64`、`49d0bf58`、`94abc08e`、`6673155c`、`3ee2ecdb` 上继续演进了全拼纠错：新增漏字/多字边、k-best 歧义切分、编辑代价分层、“纠错头 + 简拼尾”、ü 拼写别名标记、双拼置顶键修复以及热路径缓存。这说明“inventory 已登记”或“某一时点 Engine 更新”都不能替代逐提交行为核对。
 
-真实锁定词库给出了可重跑的缺口证据：改动前 `gau` 只返回“噶”，没有进入 `gua/gai` 纠错；`hauzh` 只返回“哈”，没有形成 `hua'zh`。迁移后 `gau` 的便宜换位读音 `gua` 整组稳定领先昂贵邻键读音 `gai`，`hauzh` 可得到“华中”等候选。实现仍在 Engine 边界内：严格上下文 overlay 移植固定来源算法，大型纠错表由同一固定来源生成器从 Engine 自身合法音节表重建；patch 与生成器均进入 `engine-lock.json` 的内容摘要，冷 checkout 能得到相同源码。共享桥接的合成词库回归同时覆盖 `gau` 分层、`hauzh` 组合、`shng` 漏字、`sshang` 多字和 `nue` 别名轻标记；真实词库示例另行固定产品数据上的排序与候选。
+真实锁定词库给出了可重跑的缺口证据：改动前 `gau` 只返回“噶”，没有进入 `gua/gai` 纠错；`hauzh` 只返回“哈”，没有形成 `hua'zh`。迁移后 `gau` 的便宜换位读音 `gua` 整组稳定领先昂贵邻键读音 `gai`，`hauzh` 可得到“华中”等候选。实现仍在 Engine 边界内：严格上下文 overlay 移植固定来源算法，大型纠错表由同一固定来源生成器从 Engine 自身合法音节表重建；patch 与生成器均进入 `engine-lock.json` 的内容摘要，冷 checkout 能得到相同源码。（2026-09-30 起 overlay、生成器与锁都已删除，同一套纠错规则在 `crates/engine/src/pinyin/autocorrect.rs` 里于首次使用时生成。）共享桥接的合成词库回归同时覆盖 `gau` 分层、`hauzh` 组合、`shng` 漏字、`sshang` 多字和 `nue` 别名轻标记；真实词库示例另行固定产品数据上的排序与候选。
 
 ### 固定 Windows 来源的中英混输默认值（2026-09-22）
 
@@ -87,7 +87,7 @@
 | --- | --- | --- |
 | `PreferencesWindowController.mm/.h` | 78 | 原生设置窗口。目标的设置面在 Tauri，按指令不该有对应物 |
 | `DictionaryInstaller.mm` | 18 | 词库安装。下沉到引擎与共享 Rust |
-| `MetasequoiaInputController.mm` | 15 | 目标也有的文件，**逐条核对见下** |
+| `MetasequoiaInputController.mm` | 15 | 目标当时也有同名文件，**逐条核对见下**（那份是从未参与构建的直连适配器，2026-09-30 随 C++ Engine 删除；下面的对应物都在产品控制器 `platforms/macos/src/input/InputController.mm`） |
 | `PersonalDictionaryView.mm`、`PersonalDictionaryStore.mm/.h` | 14 | 原生个人词库界面与存储。目标是 Tauri 词库页 + 共享词库 ABI，且为超集 |
 | `InputBehaviorPreferences.h`、`CandidateAppearancePreferences.h`、`CandidatePageSize.h`、`LocalInputModePreferences.h`、`FloatingToolbarPreferences.h`、`CandidateTranslationLanguage.h` | 16 | 原生偏好读写器。目标的偏好在共享层，由 `platforms/macos/tests/settings/preference_coverage.py` 双向校验 |
 | `FloatingToolbarPanel.mm` | 4 | **逐条核对见下** |
@@ -131,9 +131,9 @@
 曾经挂着的两条跨平台取舍，各自归位如下：
 
 - **语音整理的请求预算**：是 macOS 缺口，已修（#3224）。目标此前沿用 Windows 的 3 秒总预算，而来源实测 3 秒下整理「永远来不及返回」并使用 30 秒；配合 `HTTPVoiceRequest.mm` 吞掉失败的写法，结果是转写已经发给服务商、清理后的答案每次都被丢弃、界面毫无提示。现在预算是带默认值的参数，默认仍是 Windows 的 3 秒，只有 macOS 显式传 30 秒——Windows 行为一字未动。代价也一并写在提交里：整理与转写在同一条路径上，慢的服务会推迟文字上屏本身，这与来源的取舍相同，且好过「发出去再把回答扔掉」。
-- **离线释义的查询顺序**：**不是 macOS 迁移缺口**。`msime_client_candidate_gloss_request` 是所有宿主共用的 C ABI，`candidate_glosses_with_user` 的顺序在 macOS、Windows、Linux、HarmonyOS 上完全一致，macOS 并不落后于本产品的任何宿主。与来源的差异是整个产品层面的一个刻意选择：引擎把顺序设计成构造参数（custom_translations → 随包 → 联网缓存），来源直接用四参数构造，而目标另开 `translation-glosses.db` 先查，并由 `crates/engine-bridge/src/tests.rs` 的 `unsafe_learned_glosses_fall_back_to_packaged_values` 明确断言「learned 优先于随包」。
+- **离线释义的查询顺序**：**不是 macOS 迁移缺口**。`msime_client_candidate_gloss_request` 是所有宿主共用的 C ABI，`candidate_glosses_with_user` 的顺序在 macOS、Windows、Linux、HarmonyOS 上完全一致，macOS 并不落后于本产品的任何宿主。与来源的差异是整个产品层面的一个刻意选择：引擎把顺序设计成构造参数（custom_translations → 随包 → 联网缓存），来源直接用四参数构造，而目标另开 `translation-glosses.db` 先查，并由 `crates/engine/src/host/tests.rs` 的 `unsafe_learned_glosses_fall_back_to_packaged_values`（原在已删除的 `crates/engine-bridge/src/tests.rs`） 明确断言「learned 优先于随包」。
 
-  此处此前记过一条「用户手写的释义会被自动学来的盖过、需要引擎侧改动」——**那是错的**，实测推翻：不改一行桥接代码，用户写的条目就已经排在最前。路径值得写下来：`translation-glosses.db` 与设置页写的 `custom_translations.txt` 同在用户目录下，而 `EnglishDictionary` 在没有显式 translations 路径时会读取数据库旁边的 sidecar，于是 learned 那个对象本身就带着用户手写的条目，`query_*_gloss` 又先查 custom。所以优先级是「两个文件恰好同目录」带来的涌现性质：挪动其中任何一个，或给 learned 传一个显式 translations 路径，都会把用户的释义静默降到最后。`crates/engine-bridge/src/tests.rs` 的 `hand_written_glosses_outrank_learned_and_packaged_ones` 现在固定住了这一条。
+  此处此前记过一条「用户手写的释义会被自动学来的盖过、需要引擎侧改动」——**那是错的**，实测推翻：不改一行桥接代码，用户写的条目就已经排在最前。路径值得写下来：`translation-glosses.db` 与设置页写的 `custom_translations.txt` 同在用户目录下，而 `EnglishDictionary` 在没有显式 translations 路径时会读取数据库旁边的 sidecar，于是 learned 那个对象本身就带着用户手写的条目，`query_*_gloss` 又先查 custom。所以优先级是「两个文件恰好同目录」带来的涌现性质：挪动其中任何一个，或给 learned 传一个显式 translations 路径，都会把用户的释义静默降到最后。`crates/engine/src/host/tests.rs` 的 `hand_written_glosses_outrank_learned_and_packaged_ones`（原在已删除的 `crates/engine-bridge/src/tests.rs`） 现在固定住了这一条。
 
 另有一条记录需要收紧。#3182 把「以词定字占用的键不参与翻页」写成宿主侧要处理的一个可达状态，实际不是：`crates/client-core/src/preferences.rs` 的 `validate()` 在 `word_character.enabled` 与对应翻页键同时为真时返回 `ConflictingKeyBindings`，而保存（`preferences.validate()?`）和读取（`snapshot.preferences.validate()?`）两条路径都会调用它——带着这个组合的偏好文件根本加载不进来，设置页也存不下去，`key_conflict` 就是它在界面上的那句提示。所以宿主里那段排除是防御，不是在修一个用户能走到的状态；两个布尔项看着独立，共享层已经把互斥钉死了。
 

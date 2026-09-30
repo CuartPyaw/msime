@@ -1,11 +1,6 @@
 //! 调频 ranks a pick against everything visible, and the basis comes from weight order.
 //!
-//! One candidate list mixes several dictionary keys - a re-segmentation puts 吉安 (`ji'an`) inside
-//! the `jian` list - and the comparison set used to be walled off by syllable count, which capped
-//! 吉安's learnable weight far below 见's and left it immovable however often it was picked. The
-//! wall existed because the midpoint arithmetic assumed weight order and the displayed order is
-//! not that. Sorting the set by weight restores the assumption at its source and lets the wall
-//! come down. See `scripts/apply_engine_frequency_comparison_set.py`.
+//! One candidate list mixes several dictionary keys - a re-segmentation puts 吉安 (`ji'an`) inside the `jian` list - and the comparison set used to be walled off by syllable count, which capped 吉安's learnable weight far below 见's and left it immovable however often it was picked. The wall existed because the midpoint arithmetic assumed weight order and the displayed order is not that. Sorting the set by weight restores the assumption at its source and lets the wall come down; `adjust_candidate_ranking` in `src/user_dictionary/ranking.rs`.
 use msime_engine::host::{prepare_options, Session};
 
 fn climb(

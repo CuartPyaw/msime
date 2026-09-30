@@ -249,6 +249,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             examined += 1;
 
             runtime.dispatch(Action::Command(Command::Cancel))?;
+            // Cancel keeps the committed context and seeding appends to it; clearing first is what makes the context each kept case records the one it was actually harvested against.
+            runtime.clear_context();
             runtime.seed_context(&context);
             for byte in pinyin.bytes() {
                 runtime.dispatch(Action::Character {

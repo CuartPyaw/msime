@@ -12,18 +12,21 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $RepoRoot 'target/wind
 if (-not [IO.Path]::IsPathRooted($OutputDirectory)) { throw 'Notice output directory must be absolute' }
 $documents = [Collections.Generic.List[string]]::new()
 $documents.Add("MSIME third-party notice collection`nThis collection is not a license-completeness or redistribution-authorization assessment. Nested third-party archives, Rust/frontend and other distribution-specific notices must also be supplied and reviewed.`n")
-# Notices committed with the data and code they cover. The input engine is the repository's own Rust crate under the root LICENSE, which the package carries as LICENSE.txt, so it has no separate entry.
+# Notices committed with the data and code they cover, plus the handwriting model's LGPL-2.1 text, which scripts/fetch_handwriting_model.py downloads with the model into target/handwriting-model as resources/handwriting-model.lock.json pins. The input engine is the repository's own Rust crate under the root LICENSE, which the package carries as LICENSE.txt, so it has no separate entry.
 foreach ($notice in @(
-    @('resources/dictionary/NOTICE.md', 'Dictionary data (msime.db, english.db, others.db, bigram.bin, trigram.bin)'),
+    @('resources/licenses/msime-engine-dictionary-NOTICE.md', 'Dictionary data (msime.db, english.db, others.db, bigram.bin, trigram.bin)'),
     @('resources/helpcodes/ENGINE-NOTICE.md', 'Helpcode tables (lantian, ziranma, shouyou2_0, shouyouplus, xiaohe)'),
     @('resources/helpcodes/NOTICE.md', 'Helpcode table (jiajia)'),
-    @('resources/handwriting/HandwritingModel-LICENSE.txt', 'Tegaki Simplified Chinese handwriting model (handwriting-zh_CN.model), LGPL-2.1'),
-    @('resources/handwriting/Zinnia-LICENSE.txt', 'zinnia, whose recognizer the host library ports, BSD License'),
+    @('target/handwriting-model/HandwritingModel-LICENSE.txt', 'Tegaki Simplified Chinese handwriting model (handwriting-zh_CN.model), LGPL-2.1'),
+    @('resources/licenses/Zinnia-LICENSE.txt', 'zinnia, whose recognizer the host library ports, BSD License'),
     @('platforms/windows/third_party/miniaudio/LICENSE', 'miniaudio (Server microphone capture and cue sounds)'),
     @('crates/client-core/data/opencc/LICENSE', 'OpenCC dictionaries, BYVoid/OpenCC @ 26753884f1984add422f3b0249ccee8613deaff6'))) {
     $relative = $notice[0]
     $noticePath = Join-Path $RepoRoot $relative
-    if (-not (Test-Path -LiteralPath $noticePath -PathType Leaf)) { throw "Missing repository notice: $relative" }
+    if (-not (Test-Path -LiteralPath $noticePath -PathType Leaf)) {
+        if ($relative.StartsWith('target/handwriting-model/')) { throw "Missing handwriting model notice: $relative; run scripts/fetch_handwriting_model.py" }
+        throw "Missing repository notice: $relative"
+    }
     $content = Get-Content -LiteralPath $noticePath -Raw
     if (-not $content) { throw "Empty repository notice: $relative" }
     $documents.Add("===== $($notice[1]) ($relative) =====`n$content`n")

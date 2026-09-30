@@ -138,10 +138,10 @@ set(MSIME_LEGAL_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Licenses")
 file(MAKE_DIRECTORY "${MSIME_LEGAL_DIRECTORY}")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../LICENSE" "${MSIME_LEGAL_DIRECTORY}/GPL-3.0.txt" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/Licenses/THIRD_PARTY_NOTICES.txt" "${MSIME_LEGAL_DIRECTORY}/THIRD_PARTY_NOTICES.txt" COPYONLY)
-# The dictionary data in the pinned release, the helpcode notice kept with the Engine's helpcode tables, and zinnia, whose recognizer crates/engine/src/handwriting ports and host-api links in. The first and last are the copies the Linux package installs.
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../linux/data/licenses/msime-engine-dictionary-NOTICE.md" "${MSIME_LEGAL_DIRECTORY}/msime-engine-dictionary-NOTICE.md" COPYONLY)
+# The dictionary data in the pinned release, the helpcode notice kept with the Engine's helpcode tables, and zinnia, whose recognizer crates/engine/src/handwriting ports and host-api links in. The first and last come from resources/licenses, the copies every platform ships.
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/msime-engine-dictionary-NOTICE.md" "${MSIME_LEGAL_DIRECTORY}/msime-engine-dictionary-NOTICE.md" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/helpcodes/ENGINE-NOTICE.md" "${MSIME_LEGAL_DIRECTORY}/msime-engine-helpcode-NOTICE.md" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../linux/data/licenses/Zinnia-LICENSE.txt" "${MSIME_LEGAL_DIRECTORY}/Zinnia-LICENSE.txt" COPYONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/Zinnia-LICENSE.txt" "${MSIME_LEGAL_DIRECTORY}/Zinnia-LICENSE.txt" COPYONLY)
 # The on-device speech runtime staged into Contents/Frameworks below. The upstream archive carries no license file, so the texts come from the copies the other desktops ship: sherpa-onnx's beside its vendored C header, ONNX Runtime's pinned under platforms/linux.
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/voice/third_party/sherpa-onnx/LICENSE" "${MSIME_LEGAL_DIRECTORY}/sherpa-onnx-Apache-2.0.txt" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../linux/data/licenses/onnxruntime-MIT.txt" "${MSIME_LEGAL_DIRECTORY}/onnxruntime-MIT.txt" COPYONLY)
@@ -750,6 +750,12 @@ target_compile_options(voice-provider-settings-keys-test PRIVATE -fobjc-arc -Wal
 target_link_libraries(voice-provider-settings-keys-test PRIVATE "-framework AppKit" "-framework Security"
   "-framework CoreAudio" "-framework AudioToolbox")
 add_test(NAME voice-provider-settings-keys COMMAND voice-provider-settings-keys-test)
+add_executable(voice-provider-settings-validation-test tests/voice/VoiceSettingsTests.mm
+  src/voice/VoiceProviderSettings.mm)
+target_compile_options(voice-provider-settings-validation-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(voice-provider-settings-validation-test PRIVATE "-framework AppKit" "-framework Security"
+  "-framework CoreAudio" "-framework AudioToolbox")
+add_test(NAME voice-provider-settings-validation COMMAND voice-provider-settings-validation-test)
 add_executable(voice-polish-request-test tests/voice/VoicePolishRequestTest.mm src/voice/HTTPVoiceRequest.mm)
 target_compile_options(voice-polish-request-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(voice-polish-request-test PRIVATE msime-voice-providers "-framework Foundation")

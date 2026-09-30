@@ -741,7 +741,7 @@ pub struct VoiceInputPreferences {
     pub asr_endpoint: String,
     #[serde(default)]
     pub asr_model: String,
-    /// Absolute path to the on-device model the `local` provider runs: either an installed model directory (one containing `msime-model.json`, see `voice::local_models`) or a Whisper model file. Nothing is uploaded and no endpoint or token applies. Any absolute form the host OS uses is accepted, since the same document is read on Windows.
+    /// Absolute path to the installed model directory the `local` provider runs (one containing `msime-model.json`, see `voice::local_models`). Nothing is uploaded and no endpoint or token applies. Only the path's shape is checked here, since the same document is read on every OS: any absolute form the host OS uses is accepted, and the recognizer finds its files only through `msime-model.json`, so a path without one is a missing model rather than an invalid document. A document from a build that also took a single model file therefore still loads.
     #[serde(default)]
     pub asr_model_path: String,
     /// Optional `https://` prefix placed in front of every local model download URL (ghproxy-style), for networks where GitHub release downloads are slow or blocked. Empty downloads from the catalog URLs as they are.
@@ -1672,7 +1672,7 @@ fn default_shuangpin_helpcode() -> HelpcodePreferences {
     }
 }
 
-/// Persisted recognition provider identifiers. Hosts expose only the providers they implement: `system` is the platform speech adapter, not a cloud profile, and `local` is an on-device model (an installed sherpa-onnx model directory or a Whisper model file) named by `asr_model_path`, which needs a host built with the recognizer behind it.
+/// Persisted recognition provider identifiers. Hosts expose only the providers they implement: `system` is the platform speech adapter, not a cloud profile, and `local` is an installed on-device sherpa-onnx model directory named by `asr_model_path`, which needs a host built with the recognizer behind it.
 pub const ASR_PROVIDERS: [&str; 8] = [
     "doubao",
     "siliconflow",
@@ -1748,10 +1748,7 @@ impl Preferences {
     /// same promise has to be kept from the other direction: start at `Default` and carry the
     /// service configuration across.
     ///
-    /// The endpoint, provider and model travel with the token rather than resetting beside it. A
-    /// key left pointing at a default endpoint is worse than either keeping the pair or clearing
-    /// it, because nothing on the page says the two no longer belong together. `asr_model_path`
-    /// travels for the same reason: it is a file the user went and found.
+    /// The endpoint, provider and model travel with the token rather than resetting beside it. A key left pointing at a default endpoint is worse than either keeping the pair or clearing it, because nothing on the page says the two no longer belong together. `asr_model_path` travels for the same reason: it is a model the user went and downloaded.
     ///
     /// `fuzzy_pinyin.seeded` is not a setting at all -- it records that the one-time seeding has
     /// happened -- so clearing it would silently re-seed rules the user had turned off.

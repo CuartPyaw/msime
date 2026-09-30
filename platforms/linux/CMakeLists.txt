@@ -540,6 +540,8 @@ if(MSIME_ENGINE_RESOURCES)
     install(FILES "${MSIME_ENGINE_RESOURCE_FILE}"
             DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/resources")
   endforeach()
+  # Earlier releases installed dict_pinyin.dat, the C++ Engine's system dictionary, into this directory. The lock no longer pins it and the hosts reject a resource directory holding anything the lock does not name, so an install over such a prefix removes it, as the Windows installer does in DataDir on upgrade. Packages need no help: the package manager drops what the new package no longer carries.
+  install(CODE "file(REMOVE \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_DATADIR}/msime-client/resources/dict_pinyin.dat\")")
   # Keep the reviewed lock beside the installed bundle as provenance metadata;
   # it is not copied into the runtime directory because the Engine verifier
   # requires that directory to contain exactly the pinned artifacts.
@@ -711,13 +713,13 @@ if(NOT MSIME_ENABLE_FCITX5)
   message(STATUS "跳过：Fcitx5 插件；请安装 Fcitx5 开发包（Fcitx5Core 5.0.20+），"
                  "或在配置时传入 -DMSIME_ENABLE_FCITX5=ON")
 endif()
-# License and third-party notices, the Linux counterpart of the macOS bundle's Resources/Licenses. Every install redistributes the code compiled into the host library, so plain `cmake --install` gets them as well, not only packages. The project license is `copyright` here (GPL-3.0.txt on macOS); it also covers the input engine (crates/engine), which is this project's code. What the engine carries from elsewhere keeps its own notice: zinnia, whose recognizer crates/engine/src/handwriting ports; the provenance of the dictionary data msime-linux-setup downloads, carried verbatim from msime-engine as data/licenses/msime-engine-dictionary-NOTICE.md; and the helpcode tables' provenance, which applies whenever a resource directory provides them.
+# License and third-party notices, the Linux counterpart of the macOS bundle's Resources/Licenses. Every install redistributes the code compiled into the host library, so plain `cmake --install` gets them as well, not only packages. The project license is `copyright` here (GPL-3.0.txt on macOS); it also covers the input engine (crates/engine), which is this project's code. What the engine carries from elsewhere keeps its own notice: zinnia, whose recognizer crates/engine/src/handwriting ports; the provenance of the dictionary data msime-linux-setup downloads, carried verbatim from msime-engine as resources/licenses/msime-engine-dictionary-NOTICE.md, the copy every platform ships; and the helpcode tables' provenance, which applies whenever a resource directory provides them.
 set(MSIME_NOTICE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/../../LICENSE"
   "${CMAKE_CURRENT_SOURCE_DIR}/data/THIRD_PARTY_NOTICES.txt"
-  "${CMAKE_CURRENT_SOURCE_DIR}/data/licenses/msime-engine-dictionary-NOTICE.md"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/msime-engine-dictionary-NOTICE.md"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/helpcodes/ENGINE-NOTICE.md"
-  "${CMAKE_CURRENT_SOURCE_DIR}/data/licenses/Zinnia-LICENSE.txt"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/Zinnia-LICENSE.txt"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../crates/client-core/data/opencc/LICENSE")
 # `copyright` is the name Debian policy requires for the package license.
 set(MSIME_NOTICE_NAMES

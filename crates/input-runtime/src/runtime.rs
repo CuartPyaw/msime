@@ -580,6 +580,14 @@ impl<E: InputEngine> Runtime<E> {
         self.remember_commit(text);
     }
 
+    /// Forget the committed text that candidates are ranked against, which [`Runtime::seed_context`] fills.
+    ///
+    /// [`Runtime::seed_context`] appends, exactly as a commit does, and cancelling a composition keeps what was committed before it. A harness that seeds a different context per case therefore has to clear it first, or every case is ranked against the tail of all the cases before it. The Engine's rescoring context is cleared with it, so both rankers start from the same empty sentence. The Engine's committed-word context is left alone: seeding never adds to it, so there is nothing of the seed's there to forget, unlike [`Runtime::focus`], which also ends real commits.
+    pub fn clear_context(&mut self) {
+        self.ai_context.clear();
+        self.engine.set_rescoring_context("");
+    }
+
     /// Switch the Engine's digit interpretation only after the host finishes composition.
     /// Move the caret used by Engine prefix decoding. `None` restores end-of-composition behavior.
     pub fn set_caret(&mut self, caret: Option<usize>) -> Result<(), RuntimeError> {

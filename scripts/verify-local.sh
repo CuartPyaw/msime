@@ -476,6 +476,31 @@ macos_configured() {
   [ -f "$MSIME_MACOS_BUILD/build.ninja" ] || [ -f "$MSIME_MACOS_BUILD/Makefile" ]
 }
 
+# Rebuild the Rust host library the configured macOS build actually links, which is MSIME_HOST_LIBRARY in its cache and not necessarily target/debug: platforms/macos/README.md configures target/macos-isolated against target/macos-cargo. Nothing else in this script builds that copy, so without this a host-api ABI change failed the macOS compile with undefined symbols until someone rebuilt it by hand. A library outside target/ is built the way the README builds it, with the same deployment flags, because the cc build scripts fingerprint CFLAGS and CXXFLAGS and a different set would rebuild the C objects there on every alternation between the two. The README's CMAKE_PREFIX_PATH is left out: nothing in msime-host-api's build graph reads it. One inside target/ is built without them, like every other cargo step here that writes there, for the same reason.
+build_macos_host_library() {
+  local library profile_dir cargo_dir profile
+  library=$(sed -n 's/^MSIME_HOST_LIBRARY:[A-Z]*=//p' "$MSIME_MACOS_BUILD/CMakeCache.txt" 2>/dev/null | head -1)
+  if [ -z "$library" ]; then
+    echo "macos: $MSIME_MACOS_BUILD/CMakeCache.txt names no MSIME_HOST_LIBRARY"
+    return 1
+  fi
+  profile_dir=$(dirname "$library")
+  # CMake's default is platforms/macos/../../target/debug/..., so the directory is resolved rather than compared as text. It is created first because deleting a broken artefact directory and letting it rebuild is the documented repair (AGENTS.md), and that must not turn into a failed stage.
+  cargo_dir=$(mkdir -p "$(dirname "$profile_dir")" 2>/dev/null && cd "$(dirname "$profile_dir")" && pwd -P) || {
+    echo "macos: cannot create $(dirname "$profile_dir")"
+    return 1
+  }
+  # Cargo writes the dev profile to debug/; every other profile to a directory of its own name.
+  profile=$(basename "$profile_dir")
+  [ "$profile" = debug ] && profile=dev
+  if [ "$cargo_dir" = "$(cd target 2>/dev/null && pwd -P)" ]; then
+    cargo build -p msime-host-api --locked --profile "$profile" 2>&1 | tail -2
+  else
+    CFLAGS="-mmacosx-version-min=13.0" CXXFLAGS="-mmacosx-version-min=13.0" CMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+      CARGO_TARGET_DIR="$cargo_dir" cargo build -p msime-host-api --locked --profile "$profile" 2>&1 | tail -2
+  fi
+}
+
 # The one dependency that configure refuses without. It was recorded as absent from this machine
 # and it was not - the same wrong call as the container runtime, the Android SDK, Xcode and DevEco,
 # and this is the target platform, so a skip here costs more than any of them. Look where a copy
@@ -496,8 +521,7 @@ macos_sparkle_root() {
 if [ "$apple_host" -eq 1 ] && ! macos_configured; then
   if sparkle_root=$(macos_sparkle_root); then
     note "configure: macos"
-    # The workspace stage above checks rather than builds, so the static library configure insists
-    # on may not exist yet even though everything needed to produce it does.
+    # The workspace stage above checks rather than builds, so the static library configure insists on may not exist yet even though everything needed to produce it does. This only has to make it exist; the compile stage below rebuilds whichever library the configured build links.
     [ -f target/debug/libmsime_host_api.a ] ||
       cargo build -p msime-host-api >/dev/null 2>&1 ||
       echo "macos: could not build msime-host-api"
@@ -512,8 +536,13 @@ fi
 
 note "compile: macos"
 if macos_configured; then
-  cmake --build "$MSIME_MACOS_BUILD" --parallel 2>&1 | grep -E "error:|symbol\(s\) not found" | head -5
-  cmake --build "$MSIME_MACOS_BUILD" --parallel >/dev/null 2>&1 || fail "macos build"
+  if build_macos_host_library; then
+    cmake --build "$MSIME_MACOS_BUILD" --parallel 2>&1 | grep -E "error:|symbol\(s\) not found" | head -5
+    cmake --build "$MSIME_MACOS_BUILD" --parallel >/dev/null 2>&1 || fail "macos build"
+  else
+    # Linking against the stale copy would only report its missing symbols as a macOS break.
+    fail "cargo build -p msime-host-api (macos host library)"
+  fi
 else
   echo "skipped: $MSIME_MACOS_BUILD not configured"
 fi

@@ -284,7 +284,7 @@ Apple 的 `AppIconSettingsView` 和 Android 的同名入口在共享页面上是
 - 新增 C ABI 的整条链路通了。词库页显示「规格 desktop」「词库版本 e92a9c7c64e2」，与 `resources/desktop-dictionary.lock.json` 的 `source_commit` 前十二位一致——从 `msime_client_dictionary_manifest` 经 NAPI、ArkTS 桥、`registerJavaScriptProxy` 到共享 React 卡片，每一跳都真的走通了。
 - 引擎资源暂存正常：`staged /data/storage/el2/base/haps/entry/files/engine`。第一次跑打出 `no packaged resources at /engine` 是因为漏了 `stage-resources.sh`，不是代码问题；补上 180 MB 的已验证词库后即正常。
 
-**键盘作为系统输入法在模拟器上完整跑通了。** 在社区页的搜索框里打 `nihao`，组合行显示 `nihao`，候选栏给出 `1 你好`，点选后 `你好` 进入输入框——按键经 ArkTS、NAPI、`crates/host-api` 的 C ABI、`input-runtime`、`engine-bridge` 一路到 C++ Engine 并带着随包词库返回，整条链路真的走通。回车键读的是编辑器自己的动作：搜索框上显示「前往」，组合进行中变成「选定」，组合结束又变回「前往」。
+**键盘作为系统输入法在模拟器上完整跑通了。** 在社区页的搜索框里打 `nihao`，组合行显示 `nihao`，候选栏给出 `1 你好`，点选后 `你好` 进入输入框——按键经 ArkTS、NAPI、`crates/host-api` 的 C ABI、`input-runtime`、`engine-bridge` 一路到 C++ Engine 并带着随包词库返回，整条链路真的走通（这是当时的链路；C++ Engine 与 `engine-bridge` 已由 `crates/engine` 取代，`input-runtime` 现在直接调用它）。回车键读的是编辑器自己的动作：搜索框上显示「前往」，组合进行中变成「选定」，组合结束又变回「前往」。
 
 **这里有一个必须写下来的操作事实：输入法要在 `FULL_EXPERIENCE_MODE` 下才会被框架驱动。** `ime -e <bundle>` 的默认是 `-b`，也就是 `BASIC_MODE`；在那个模式下 `ime -s` 会成功、`ime -g` 会报告本输入法是当前输入法、`app.msime.client:inputMethod` 进程也会起来，但编辑器获得焦点时框架打的是 `ShowKeyboardImplWithoutLock, panel not create` 与 `OnInputStart, entry is nullptr`，而本扩展的 ArkTS 一行日志都没有——`onCreate` 从未运行。表现就是键盘完全不出现，且看不出任何错误。换成 `ime -e <bundle> -f` 之后，同一次点击立刻打出 `attached to editor: pattern=0 enter=2`，面板正常呈现。做过一次对照：同一个输入框、同一次点击，华为系统输入法在我们处于 BASIC_MODE 时照常弹出，所以这不是模拟器、WebView 或该字段的问题。
 

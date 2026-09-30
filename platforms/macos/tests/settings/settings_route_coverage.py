@@ -32,11 +32,12 @@ def main() -> int:
         return 2
     root = Path(sys.argv[1])
 
-    ui = (root / "packages/ui/src/index.tsx").read_text(encoding="utf-8")
+    registry = "packages/ui/src/settings/settings-page-registry.ts"
+    ui = (root / registry).read_text(encoding="utf-8")
     # The navigation entries, which are what the user actually sees down the side of the window.
     pages = re.findall(r'\{\s*id:\s*"([a-z-]+)",\s*title:\s*"[^"]+",\s*icon:', ui)
     if not pages:
-        print("could not read the settings navigation from packages/ui/src/index.tsx", file=sys.stderr)
+        print(f"could not read the settings navigation from {registry}", file=sys.stderr)
         return 1
 
     # Former page ids the shared UI still accepts, each mapped to the page that now holds its contents.

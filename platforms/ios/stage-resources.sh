@@ -8,6 +8,8 @@ source_dir=${1:?usage: stage-resources.sh <verified-resource-directory> [offline
 source_dir=$(cd "$source_dir" && pwd)
 destination="$repo_root/target/ios/EngineResources"
 artifacts=$(cargo run --quiet -p msime-client-core --example verify_resources --locked -- "$source_dir")
+# Rebuilt as one unit, as on macOS: a directory staged for an earlier lock keeps files the current lock no longer names, and the verifier below refuses them.
+rm -rf "$destination"
 mkdir -p "$destination"
 while IFS= read -r artifact; do
   cp "$source_dir/$artifact" "$destination/$artifact"

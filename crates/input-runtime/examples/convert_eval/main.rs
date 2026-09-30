@@ -227,6 +227,8 @@ fn run(
 
     for case in cases {
         runtime.dispatch(Action::Command(Command::Cancel))?;
+        // Cancel keeps the committed context and seeding appends to it, so without this every case would be ranked against the tail of the contexts of all the cases before it.
+        runtime.clear_context();
         runtime.seed_context(&case.context);
         for byte in case.input.bytes() {
             runtime.dispatch(Action::Character {

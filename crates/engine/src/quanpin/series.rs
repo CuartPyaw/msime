@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn alternative_best_is_promoted_only_from_beyond_the_first_page() {
-        // xian: 西安 sits at 16 on weight, so it is lifted to index 1 (apply_engine_alternative_segmentation_page.py:22-26).
+        // xian: 西安 sits at 16 on weight, beyond the first page, so it is lifted to index 1.
         let primary: Vec<WordItem> = (0..16)
             .map(|i| row("xian", &format!("先{i}"), 10_000 - i))
             .collect();

@@ -43,9 +43,8 @@ try {
         'THIRD_PARTY_NOTICES.txt',
         'LICENSE',
         'target/release/msime-desktop.exe',
-        'resources/handwriting/handwriting-zh_CN.model',
-        'resources/handwriting/HandwritingModel-LICENSE.txt',
-        'resources/handwriting/provenance.json',
+        'target/handwriting-model/handwriting-zh_CN.model',
+        'target/handwriting-model/HandwritingModel-LICENSE.txt',
         'resources/helpcodes/helpcode.txt',
         'resources/helpcodes/NOTICE.md'
     )) { Write-Fixture $file }
@@ -115,7 +114,6 @@ try {
                          'server_exe/msime-client-prepare.pdb',
                          'server_exe/handwriting/handwriting-zh_CN.model',
                          'server_exe/handwriting/HandwritingModel-LICENSE.txt',
-                         'server_exe/handwriting/provenance.json',
                          'app_data/helpcodes/helpcode.txt', 'THIRD_PARTY_NOTICES.txt', 'LICENSE.txt')) {
         if (-not (Test-Path (Join-Path $installer $file))) { throw "Missing packaged file: $file" }
     }
@@ -221,12 +219,12 @@ try {
             throw 'Explicit shell inherited unrelated native symbols'
         }
     }
-    foreach ($name in @('handwriting-zh_CN.model', 'HandwritingModel-LICENSE.txt', 'provenance.json')) {
+    foreach ($name in @('handwriting-zh_CN.model', 'HandwritingModel-LICENSE.txt')) {
         if (-not (Test-Path (Join-Path $installer "server_exe/handwriting/$name"))) {
             throw "Light package lost handwriting resource: $name"
         }
     }
-    $notice = Join-Path $fixture 'resources/handwriting/HandwritingModel-LICENSE.txt'
+    $notice = Join-Path $fixture 'target/handwriting-model/HandwritingModel-LICENSE.txt'
     Remove-Item -LiteralPath $notice
     $rejected = $false
     try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture } catch { $rejected = $true }

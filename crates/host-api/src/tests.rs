@@ -2782,7 +2782,10 @@ fn mobile_clipboard_rejects_symlinked_legacy_ancestors() {
     .unwrap();
     let response =
         read(unsafe { msime_client_mobile_clipboard_history(request.as_ptr(), request.len()) });
-    assert_eq!(response["ok"], false);
+    assert_eq!(
+        response["error"],
+        "clipboard migration path is a symbolic link"
+    );
     assert_eq!(std::fs::read(&outside_history).unwrap(), fixture);
 
     let clear = serde_json::to_vec(&json!({
@@ -2792,7 +2795,10 @@ fn mobile_clipboard_rejects_symlinked_legacy_ancestors() {
     .unwrap();
     let response =
         read(unsafe { msime_client_mobile_clipboard_history(clear.as_ptr(), clear.len()) });
-    assert_eq!(response["ok"], false);
+    assert_eq!(
+        response["error"],
+        "clipboard migration path is a symbolic link"
+    );
     assert_eq!(std::fs::read(&outside_history).unwrap(), fixture);
 
     std::fs::remove_file(root.path().join("Clipboard")).unwrap();
@@ -2806,7 +2812,10 @@ fn mobile_clipboard_rejects_symlinked_legacy_ancestors() {
     let response = read(unsafe {
         msime_client_mobile_clipboard_history(harmony_request.as_ptr(), harmony_request.len())
     });
-    assert_eq!(response["ok"], false);
+    assert_eq!(
+        response["error"],
+        "clipboard migration path is a symbolic link"
+    );
 }
 
 #[test]
@@ -3856,7 +3865,7 @@ fn paired_book_title_auto_close_balance_is_narrow_and_owned() {
 
 #[test]
 fn unpaired_punctuation_keeps_quote_alternation_and_book_title_nesting() {
-    // With paired completion off (or in an excluded host) nothing supplies the closing half, so the Engine's own alternation and nesting are the only way to type it - the reference's GetPunctuation does both regardless of the setting. See `scripts/apply_engine_punctuation_alternation.py`.
+    // With paired completion off (or in an excluded host) nothing supplies the closing half, so the Engine's own alternation and nesting are the only way to type it - the reference's GetPunctuation does both regardless of the setting.
     let dir = tempfile::tempdir().unwrap();
     let handle = test_host(dir.path());
     assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
@@ -3880,7 +3889,7 @@ fn unpaired_punctuation_keeps_quote_alternation_and_book_title_nesting() {
     // An unmatched closing mark leaves the depth at zero, so the next pair opens with 《 again.
     assert_eq!(marks(b"><>"), ["》", "《", "》"]);
 
-    // The state belongs to the session, not to the setting: turning pairing on mid-quote does not reset it, as the reference's toggle is never reset by the switch either. Paired-on output is unchanged by the overlay.
+    // The state belongs to the session, not to the setting: turning pairing on mid-quote does not reset it, as the reference's toggle is never reset by the switch either. With pairing on, the same state carries over: the next quote closes the one left open and a book-title mark nests inside the open 《.
     assert_eq!(marks(b"\"<"), ["“", "《"]);
     assert_eq!(
         read(msime_client_set_paired_punctuation(handle, true))["ok"],

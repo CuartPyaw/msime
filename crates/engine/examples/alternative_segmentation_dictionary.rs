@@ -1,12 +1,6 @@
 //! The alternative-segmentation slot lifts what cannot be seen, and leaves alone what can.
 //!
-//! `xian` reads either `xian` or `xi'an`, and one slot near the top of the list is kept for the
-//! best word of the other reading so 西安 - position 16 on weight alone - is reachable without
-//! paging. The slot used to claim any such word below index 1, which meant it also reordered words
-//! already on the first page: it put 提案 ahead of 田 for `tian`, and, worse, it re-pinned any word
-//! the user had promoted, because frequency ranks by weight and the slot recognises the heaviest
-//! word of a reading group. Picking such a word once moved it to second place and nothing moved it
-//! afterwards. See `scripts/apply_engine_alternative_segmentation_page.py`.
+//! `xian` reads either `xian` or `xi'an`, and one slot near the top of the list is kept for the best word of the other reading so 西安 - position 16 on weight alone - is reachable without paging. The slot used to claim any such word below index 1, which meant it also reordered words already on the first page: it put 提案 ahead of 田 for `tian`, and, worse, it re-pinned any word the user had promoted, because frequency ranks by weight and the slot recognises the heaviest word of a reading group. Picking such a word once moved it to second place and nothing moved it afterwards. The slot now takes only a word that sits beyond the first page, so a word already visible keeps the rank it earned; `merge_alternative_segmentations` in `src/quanpin/series.rs`.
 use msime_engine::host::{prepare_options, Session};
 
 fn first_page(

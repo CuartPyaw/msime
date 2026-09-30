@@ -212,7 +212,10 @@ private final class AccountFixture: URLProtocol, @unchecked Sendable {
     await BackendClipboardEntry.open(account: session, present: { clipboardAccount = $0 }, signIn: { signInRequests += 1 })
     try require(clipboardAccount == nil && signInRequests == 1)
     var windowClosures = 0
-    let model = MacAccountModel(client: client, account: session, closeAccountWindows: { windowClosures += 1 })
+    // The default anonymous session lives in the real App Group container, which an unsigned harness may not create and must never read or discard, so this model gets an empty in-memory one.
+    let model = MacAccountModel(client: client, account: session,
+                                anonymousAccount: BackendAccountSession(api: client, storage: MemoryCredentials()),
+                                closeAccountWindows: { windowClosures += 1 }, discardAnonymous: {})
     model.load(); try await finished(model)
     try require(model.providers["email"] == true && model.user == nil)
     model.channel = "phone"; model.target = "+10000000000"

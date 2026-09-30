@@ -2825,6 +2825,27 @@ fn committed_text_reaches_the_engine_rescoring_context() {
 }
 
 #[test]
+fn clearing_the_context_starts_the_next_seed_from_nothing() {
+    let mut runtime = Runtime::new(recording_engine(), 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime.seed_context("第一句");
+    // Cancel keeps what was committed, which is why a per-case seed needs the explicit clear.
+    runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert_eq!(runtime.ai_context, "第一句");
+
+    runtime.clear_context();
+    assert!(runtime.ai_context.is_empty());
+    assert_eq!(runtime.engine.contexts.last().map(String::as_str), Some(""));
+
+    runtime.seed_context("第二句");
+    assert_eq!(runtime.ai_context, "第二句");
+    assert_eq!(
+        runtime.engine.contexts.last().map(String::as_str),
+        Some("第二句")
+    );
+}
+
+#[test]
 fn a_replacement_engine_inherits_the_committed_text() {
     let mut runtime = Runtime::new(recording_engine(), 5).unwrap();
     runtime.focus(true).unwrap();

@@ -93,7 +93,7 @@ int main() {
         assert([[session typeASCII:',' shift:NO error:&error][@"handled"] isEqual:@NO]);
         assert([session setChinesePunctuationEnabled:YES error:&error]);
         assert([[session typeASCII:',' shift:NO error:&error][@"commit"] isEqual:@"，"]);
-        // With paired completion off (the macOS host also sends this for an excluded app) no host supplies the closing half, so the Engine alone alternates quotes and nests book titles, as the reference does regardless of the setting. See scripts/apply_engine_punctuation_alternation.py.
+        // With paired completion off (the macOS host also sends this for an excluded app) no host supplies the closing half, so the Engine alone alternates quotes and nests book titles, as the reference does regardless of the setting (crates/engine/src/punctuation.rs).
         assert([session setPairedPunctuationEnabled:NO error:&error]);
         const struct { uint8_t key; NSString *mark; } unpaired[] = {
             {'"', @"“"}, {'"', @"”"}, {'"', @"“"}, {'"', @"”"}, {'\'', @"‘"}, {'\'', @"’"},
@@ -119,7 +119,7 @@ int main() {
         assert(error);
         [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
 
-        // An incomplete or unmatched special-mode input shows its raw text as the one Fallback candidate (source 9), and Space commits it, bare Y/R included, as in the reference's PrepareCandidateList. See scripts/apply_engine_local_mode_fallback.py. Temporary English and Japanese stay off unless their resource files exist, so this session gets placeholders.
+        // An incomplete or unmatched special-mode input shows its raw text as the one Fallback candidate (source 9), and Space commits it, bare Y/R included, as in the reference's PrepareCandidateList (add_local_fallback_candidate in crates/engine/src/session/candidates.rs). Temporary English and Japanese stay off unless their resource files exist, so this session gets placeholders.
         NSString *localRoot = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
         NSMutableDictionary *localOptions = [options mutableCopy];
         for (NSString *name in @[@"resources", @"user_data", @"cache", @"dictionaries"]) {
