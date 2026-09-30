@@ -26,6 +26,8 @@ const ZH_EN_SQL: &str = "SELECT english_gloss FROM zh_en_glosses WHERE chinese=?
 const ENGLISH_WORDS_DDL: &str = "CREATE TABLE english_words(word TEXT COLLATE BINARY NOT NULL,display TEXT NOT NULL,weight INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(word,display)) WITHOUT ROWID;";
 const GLOSS_TABLES_DDL: &str = "CREATE TABLE IF NOT EXISTS en_zh_glosses(english TEXT COLLATE BINARY PRIMARY KEY,chinese_gloss TEXT NOT NULL) WITHOUT ROWID;CREATE TABLE IF NOT EXISTS zh_en_glosses(chinese TEXT COLLATE BINARY PRIMARY KEY,english_gloss TEXT NOT NULL) WITHOUT ROWID;PRAGMA user_version=3;";
 const GLOSS_BUSY_TIMEOUT: Duration = Duration::from_millis(250);
+/// The reference never set a busy timeout on its read connections (english_dictionary.cpp:325,371), so SQLite's default of none applied: a locked file answers "no rows" at once instead of stalling the keystroke. rusqlite would otherwise wait 5 s.
+const READ_BUSY_TIMEOUT: Duration = Duration::ZERO;
 
 pub struct EnglishDictionary {
     connection: Option<Connection>,
@@ -85,7 +87,7 @@ impl EnglishDictionary {
         let Ok(mut rows) = statement.query((prefix, upper_bound.as_str(), sql_limit(limit))) else {
             return Vec::new();
         };
-        let mut candidates = Vec::new();
+        let mut candidates = Vec::with_capacity(limit);
         loop {
             match rows.next() {
                 Ok(Some(row)) => {
@@ -285,11 +287,13 @@ fn open_read_only(path: &Path) -> Option<Connection> {
     if path.as_os_str().is_empty() {
         return None;
     }
-    Connection::open_with_flags(
+    let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-    .ok()
+    .ok()?;
+    connection.busy_timeout(READ_BUSY_TIMEOUT).ok()?;
+    Some(connection)
 }
 
 /// The first row's gloss, "" for none, or `None` when the gloss tables cannot be prepared. Both are prepared together, so a store with only one of them answers neither, as in the reference (english_dictionary.cpp:345-361).
@@ -370,6 +374,35 @@ mod tests {
             .unwrap()
             .query_row("PRAGMA user_version", (), |row| row.get(0))
             .unwrap()
+    }
+
+    /// english_dictionary.cpp:325,371 set no busy timeout on the read connections, so a file another connection holds locked answers "no rows" at once instead of stalling the keystroke for rusqlite's default 5 s.
+    #[test]
+    fn a_locked_dictionary_answers_empty_at_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = english_db(directory.path(), &[("hello", "hello", 10)], &[], &[]);
+        let gloss_directory = tempfile::tempdir().unwrap();
+        let gloss_path = gloss_directory.path().join("translation-glosses.db");
+        assert!(upsert_gloss(&gloss_path, false, "hello", "你好"));
+        let dictionary = EnglishDictionary::open(&path, None, Some(&gloss_path));
+        assert_eq!(dictionary.query_prefix("hel", 5).len(), 1);
+        assert_eq!(dictionary.query_chinese_gloss("hello"), "你好");
+        let english_lock = Connection::open(&path).unwrap();
+        english_lock.execute_batch("BEGIN EXCLUSIVE;").unwrap();
+        let gloss_lock = Connection::open(&gloss_path).unwrap();
+        gloss_lock.execute_batch("BEGIN EXCLUSIVE;").unwrap();
+        let start = std::time::Instant::now();
+        assert!(dictionary.query_prefix("hel", 5).is_empty());
+        assert_eq!(dictionary.query_chinese_gloss("hello"), "");
+        assert!(
+            start.elapsed() < Duration::from_millis(1_000),
+            "locked lookups took {:?}",
+            start.elapsed()
+        );
+        english_lock.execute_batch("ROLLBACK;").unwrap();
+        gloss_lock.execute_batch("ROLLBACK;").unwrap();
+        assert_eq!(dictionary.query_prefix("hel", 5).len(), 1);
+        assert_eq!(dictionary.query_chinese_gloss("hello"), "你好");
     }
 
     #[test]

@@ -94,9 +94,16 @@ impl QuanpinEngine {
         }
         let segments = split_segments(&request.segmentation);
         match segments.first() {
-            Some(first) if first.len() == 1 => {
-                self.dictionary.expand_initial_candidates(first, candidates)
-            }
+            Some(first) if first.len() == 1 => self.dictionary.expand_initial_candidates(
+                &request.raw_input,
+                &request.segmentation,
+                request_autocorrect_mask(
+                    request.enable_quanpin_autocorrect_transposition,
+                    request.enable_quanpin_autocorrect_neighbor,
+                ),
+                first,
+                candidates,
+            ),
             _ => false,
         }
     }
@@ -239,5 +246,54 @@ mod tests {
         assert!(!engine.expand_initial_candidates(&request("ni"), &mut rows));
         assert!(engine.expand_initial_candidates(&single, &mut rows));
         assert_eq!(rows.len(), 30);
+    }
+
+    /// With the keyboard model loaded the trimmed context is part of the series slot: an online row is read back only under the context it was stored with, and a store lands in the slot of the last query's context. Fails if `query` stops passing the request's context to the dictionary. Needs the keyboard model in `MSIME_EVAL_RESOURCES`.
+    #[test]
+    fn online_rows_follow_the_reranker_context_slot() {
+        let model =
+            match crate::lattice::neural::test_model_path(crate::assets::NEURAL_MODEL_KEYBOARD) {
+                Ok(model) => model,
+                Err(reason) => {
+                    eprintln!("skipped: {reason}");
+                    return;
+                }
+            };
+        let fixture = fixture();
+        std::fs::copy(
+            &model,
+            fixture.paths.resource(crate::assets::NEURAL_MODEL_KEYBOARD),
+        )
+        .expect("model copy");
+        let mut engine = QuanpinEngine::new(&fixture.paths);
+        let mut typed = request("nihao");
+        typed.sentence_association = crate::types::SentenceAssociationOptions {
+            neural_keyboard: true,
+            ..crate::types::SentenceAssociationOptions::default()
+        };
+        let mut query = |engine: &mut QuanpinEngine, context: &str| {
+            typed.rescoring_context = context.into();
+            let rows = engine.query(&typed, None);
+            (typed.clone(), rows)
+        };
+
+        let (asked, _) = query(&mut engine, "上文");
+        assert!(engine.insert_online_words(
+            &asked,
+            &["甲".to_string()],
+            CandidateSource::AiSuggestion
+        ));
+        assert!(words(&query(&mut engine, "上文").1).contains(&"甲"));
+        assert!(!words(&query(&mut engine, "另一段上文").1).contains(&"甲"));
+        assert!(words(&query(&mut engine, "上文").1).contains(&"甲"));
+
+        let (asked, _) = query(&mut engine, "别处");
+        assert!(engine.insert_online_words(
+            &asked,
+            &["乙".to_string()],
+            CandidateSource::AiSuggestion
+        ));
+        assert!(words(&query(&mut engine, "别处").1).contains(&"乙"));
+        assert!(!words(&query(&mut engine, "上文").1).contains(&"乙"));
     }
 }

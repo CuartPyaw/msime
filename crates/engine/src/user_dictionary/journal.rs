@@ -211,12 +211,16 @@ pub fn ensure_schema(connection: &Connection) -> Result<()> {
 /// Open the journal and drop pinyin upserts with weight below 1, left by the old rebalance staircase (J:521-533).
 pub fn ensure_user_database(path: &Path) -> Result<()> {
     let journal = open_journal(path)?;
-    // Drop ranking rows left by the old rebalance staircase so installer replay cannot bury shipped frequencies such as 先/xian under negative weights. The reference ignores this statement's result (J:528-531): replay skips those rows anyway, so a busy journal must not fail the operation that asked for the journal.
-    let _ = journal.execute(
+    drop_stale_pinyin_upserts(&journal);
+    Ok(())
+}
+
+/// Drop ranking rows left by the old rebalance staircase so installer replay cannot bury shipped frequencies such as 先/xian under negative weights. The reference ignores this statement's result (J:528-531): replay skips those rows anyway, so a busy journal must not fail the operation that asked for the journal.
+pub(crate) fn drop_stale_pinyin_upserts(connection: &Connection) {
+    let _ = connection.execute(
         "DELETE FROM user_dictionary_operations WHERE dictionary='pinyin' AND operation='upsert' AND weight < 1",
         [],
     );
-    Ok(())
 }
 
 /// Invalidate every thread's cached journal connection, release the personal n-gram stores and the local-mode connections. Call before deleting or replacing a data directory.

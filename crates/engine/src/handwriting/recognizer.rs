@@ -1,10 +1,13 @@
 //! Offline recognition of one handwritten character: the C++ `metasequoia::handwriting::Recognizer` (`handwriting.cpp`) and the bridge entry that fed it (`bridge.cpp` `handwriting_recognize`), over a Rust port of zinnia.
 //!
-//! The reference constructed a recognizer, and so re-mapped the model, on every call. Here a model is parsed once per path and kept for the life of the process: host-api classifies each character cell of a written line separately, and the model is a packaged file that does not change while the host runs. A failed load is not remembered, so a model installed later is picked up.
+//! The reference constructed a recognizer, and so re-mapped the model, on every call. Here a model is mapped and parsed once per path and kept for the life of the process: host-api classifies each character cell of a written line separately, and re-parsing the labels for every cell is wasted work. The mapping is read-only, as zinnia's was, so the weights stay clean, file-backed pages the system can evict; it is sound because the model is a packaged file installed by replacement and never edited in place while the host runs. A failed load is not remembered, so a model installed later is picked up.
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
+
+use memmap2::Mmap;
 
 use super::features::{self, InkStroke};
 use super::model::Model;
@@ -48,6 +51,7 @@ pub fn handwriting_recognize(
     recognize(&model, &strokes[..=used], width, height)
 }
 
+#[allow(unsafe_code)]
 fn load(path: &Path) -> Result<Arc<Model>> {
     let mut models = MODELS
         .lock()
@@ -55,8 +59,10 @@ fn load(path: &Path) -> Result<Arc<Model>> {
     if let Some(model) = models.get(path) {
         return Ok(Arc::clone(model));
     }
-    let bytes = std::fs::read(path).map_err(|_| EngineError::failed(CANNOT_OPEN))?;
-    let model = Arc::new(Model::parse(&bytes).map_err(|_| EngineError::failed(CANNOT_OPEN))?);
+    let file = File::open(path).map_err(|_| EngineError::failed(CANNOT_OPEN))?;
+    // SAFETY: a mapping is only sound while nothing changes the file underneath it. The model is a packaged, read-only file installed by replacement and never written in place (module doc), so the mapped inode keeps its bytes for as long as the map lives.
+    let bytes = unsafe { Mmap::map(&file) }.map_err(|_| EngineError::failed(CANNOT_OPEN))?;
+    let model = Arc::new(Model::parse(bytes).map_err(|_| EngineError::failed(CANNOT_OPEN))?);
     models.insert(path.to_owned(), Arc::clone(&model));
     Ok(model)
 }
@@ -134,7 +140,7 @@ fn ink(strokes: &[Vec<(f32, f32)>], width: f32, height: f32) -> Result<Option<Ve
 
 #[cfg(test)]
 mod tests {
-    use super::super::model::tests::encode;
+    use super::super::model::tests::{encode, parse};
     use super::*;
 
     /// The reference test's pen trajectory for 中 on a 160 by 155 canvas, the central vertical last.
@@ -152,7 +158,7 @@ mod tests {
     }
 
     fn tiny_model() -> Model {
-        Model::parse(&encode(&[
+        parse(&encode(&[
             ("甲", 0.0, &[(0, 1.0)]),
             ("x", 0.0, &[(0, 2.0)]),
             ("乙", 0.0, &[(0, 0.5)]),
@@ -224,7 +230,7 @@ mod tests {
         // Only the bias feature matches, so the scores are the weights: x 2.0, 甲 1.0, 乙 0.5; the CJK labels are then moved first.
         let ordered = recognize(&tiny_model(), &zhong(), 160.0, 155.0).unwrap();
         assert_eq!(ordered, vec!["甲", "乙", "x"]);
-        let empty = Model::parse(&encode(&[])).unwrap();
+        let empty = parse(&encode(&[])).unwrap();
         assert_eq!(
             message(recognize(&empty, &zhong(), 160.0, 155.0)),
             RECOGNITION_FAILED
@@ -342,6 +348,32 @@ mod tests {
             .collect();
         let moved = handwriting_recognize(path.to_str().unwrap(), &moved, 400.0, 155.0).unwrap();
         assert!(moved.iter().any(|candidate| candidate == "中"), "{moved:?}");
+    }
+
+    /// A model is mapped once per path: a second load returns the same `Arc`, and the cached model still answers after its file is unlinked, since the mapping keeps the inode.
+    #[test]
+    fn a_model_is_mapped_once_per_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("once.model");
+        std::fs::write(&path, encode(&[("甲", 0.0, &[(0, 1.0)])])).unwrap();
+        let first = load(&path).unwrap();
+        let second = load(&path).unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            handwriting_recognize(path.to_str().unwrap(), &zhong(), 160.0, 155.0).unwrap(),
+            vec!["甲"]
+        );
+        // A directory is not a model.
+        assert_eq!(
+            message(handwriting_recognize(
+                directory.path().to_str().unwrap(),
+                &zhong(),
+                160.0,
+                155.0
+            )),
+            CANNOT_OPEN
+        );
     }
 
     #[test]

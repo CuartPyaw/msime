@@ -578,8 +578,8 @@ fn single_letters_are_capped_until_expanded() {
         .all(|item| item.pinyin == "n" && item.canonical_pinyin == "ni"));
 
     let mut shown = capped.clone();
-    assert!(!dictionary.expand_initial_candidates("ni", &mut shown));
-    assert!(dictionary.expand_initial_candidates("n", &mut shown));
+    assert!(!dictionary.expand_initial_candidates("n", "n", NONE, "ni", &mut shown));
+    assert!(dictionary.expand_initial_candidates("n", "n", NONE, "n", &mut shown));
     assert_eq!(shown.len(), 30);
     assert_eq!(shown[29].word, "n29");
     assert_eq!(
@@ -588,13 +588,13 @@ fn single_letters_are_capped_until_expanded() {
         "the series slot holds the expansion"
     );
     assert!(
-        !dictionary.expand_initial_candidates("n", &mut shown),
+        !dictionary.expand_initial_candidates("n", "n", NONE, "n", &mut shown),
         "an expanded list is not capped any more"
     );
 
     let mut short = query(&mut dictionary, "m", "m", NONE);
     assert_eq!(short.len(), 1);
-    assert!(!dictionary.expand_initial_candidates("m", &mut short));
+    assert!(!dictionary.expand_initial_candidates("m", "m", NONE, "m", &mut short));
 }
 
 #[test]
@@ -736,8 +736,9 @@ fn sentence_alternatives_toggle_rebuilds_the_lists() {
     assert!(all > one);
 }
 
+/// neural-association.patch:2667-2682: an association change resets the caches, so an online row cached before a lattice off/on round trip is gone after it, as in shuangpin.
 #[test]
-fn association_switches_select_their_own_series_slot() {
+fn association_switch_resets_the_series_cache() {
     let fixture = Fixture::new();
     fixture
         .insert("ping", "平", 1000)
@@ -751,6 +752,15 @@ fn association_switches_select_their_own_series_slot() {
         ..lattice_on
     };
     let has_sentence = |items: &[WordItem]| items.iter().any(|item| item.sentence_association);
+    let cloud = |dictionary: &mut QuanpinDictionary| {
+        assert!(dictionary.insert_online_words(
+            "pingguo",
+            "ping'guo",
+            NONE,
+            &["苹果".to_string()],
+            CandidateSource::CloudSuggestion
+        ));
+    };
 
     assert!(has_sentence(&query(
         &mut dictionary,
@@ -758,12 +768,10 @@ fn association_switches_select_their_own_series_slot() {
         "ping'guo",
         NONE
     )));
-    assert!(dictionary.insert_online_words(
-        "pingguo",
-        "ping'guo",
-        NONE,
-        &["苹果".to_string()],
-        CandidateSource::CloudSuggestion
+    cloud(&mut dictionary);
+    assert!(contains(
+        &query(&mut dictionary, "pingguo", "ping'guo", NONE),
+        "苹果"
     ));
 
     dictionary.set_sentence_association(lattice_off);
@@ -774,15 +782,21 @@ fn association_switches_select_their_own_series_slot() {
     );
     assert!(!contains(&off, "苹果"));
 
-    // Without a model the context is not part of the slot, so a commit keeps every list.
     dictionary.set_sentence_association(lattice_on);
-    dictionary.set_rescoring_context("我想吃");
     let back = query(&mut dictionary, "pingguo", "ping'guo", NONE);
     assert!(has_sentence(&back));
     assert!(
-        contains(&back, "苹果"),
-        "switching back finds the earlier slot with its online row"
+        !contains(&back, "苹果"),
+        "the round trip dropped the cached online row"
     );
+
+    // Without a model the context is not part of the slot, so a commit keeps every list.
+    cloud(&mut dictionary);
+    dictionary.set_rescoring_context("我想吃");
+    assert!(contains(
+        &query(&mut dictionary, "pingguo", "ping'guo", NONE),
+        "苹果"
+    ));
 }
 
 /// The engine emits the keyboard model's row only. A desktop host installs the desktop model in the resource bundle's `settled-model` sibling and the input runtime runs it as its settled reranker; even a copy inside the bundle itself never reaches a query here, since no engine switch names it.
@@ -822,4 +836,91 @@ fn only_the_keyboard_model_answers_a_query() {
         words(&rows)
     );
     assert_eq!(count(CandidateSource::NeuralDesktop), 0);
+}
+
+fn fuzzy_fixture() -> Fixture {
+    let fixture = Fixture::new();
+    fixture
+        .insert("zhong'guo", "中国", 1_000_000)
+        .insert("zong'guo", "宗国", 10);
+    fixture
+}
+
+/// A warm fuzzy query reads the `fuzzy:<rules>:<segmentation>` slot instead of expanding the fuzzy paths again: a marker row planted there comes back.
+#[test]
+fn warm_fuzzy_queries_reuse_the_fuzzy_slot() {
+    let fixture = fuzzy_fixture();
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    let all = FuzzyPinyinOptions {
+        rules: fuzzy_rule::ALL,
+    };
+    let cold = dictionary.query("zongguo", "zong'guo", NONE, all);
+    assert!(contains(&cold, "中国"), "{:?}", words(&cold));
+    let slot = format!("fuzzy:{}:zong'guo", fuzzy_rule::ALL);
+    let mut cached = dictionary.series_cache.get(&slot).expect("fuzzy slot");
+    let mut marker = cached[0].clone();
+    marker.word = "哨兵".to_string();
+    cached.push(marker);
+    dictionary.series_cache.insert(slot, cached);
+    let warm = dictionary.query("zongguo", "zong'guo", NONE, all);
+    assert!(contains(&warm, "哨兵"), "{:?}", words(&warm));
+}
+
+/// test_fuzzy_pinyin.cpp:265-270: two hundred warm fuzzy queries stay well inside the reference's five-second budget.
+#[test]
+fn two_hundred_warm_fuzzy_queries_stay_under_budget() {
+    let fixture = fuzzy_fixture();
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    let all = FuzzyPinyinOptions {
+        rules: fuzzy_rule::ALL,
+    };
+    assert!(contains(
+        &dictionary.query("zongguo", "zong'guo", NONE, all),
+        "中国"
+    ));
+    let started = std::time::Instant::now();
+    for _ in 0..200 {
+        assert!(contains(
+            &dictionary.query("zongguo", "zong'guo", NONE, all),
+            "中国"
+        ));
+    }
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+/// QD:89-99, the quanpin side of `a_changed_personal_model_drops_the_scored_series`: once the tables change under the personal model, reading it reloads, the version moves, and the series scored with the old model is dropped.
+#[test]
+fn a_changed_personal_model_drops_the_scored_series() {
+    use crate::user_dictionary::ngram_store::PersonalNgramStore;
+    let fixture = Fixture::new();
+    fixture
+        .insert("ni", "你", 10000)
+        .insert("ni", "拟", 9000)
+        .insert("hao", "好", 10000)
+        .insert("hao", "号", 9000);
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    let before = query(&mut dictionary, "nihao", "", NONE);
+    let store = PersonalNgramStore::for_journal(&fixture.journal());
+    let version = store.version();
+    let journal = rusqlite::Connection::open(fixture.journal()).unwrap();
+    crate::user_dictionary::journal::ensure_schema(&journal).unwrap();
+    journal
+        .execute_batch("INSERT INTO personal_bigram VALUES(char(1),'拟',400),('拟','号',400);INSERT INTO personal_trigram VALUES(char(1),'拟','号',400);")
+        .unwrap();
+    store.invalidate_for_tests();
+    let after = query(&mut dictionary, "nihao", "", NONE);
+    assert!(
+        store.version() > version,
+        "the query did not reload the model"
+    );
+    assert!(
+        contains(&after, "拟号") && !contains(&before, "拟号"),
+        "the answer scored with the old model was kept: {:?} then {:?}",
+        words(&before),
+        words(&after)
+    );
 }

@@ -54,7 +54,7 @@ fn read(connection: &Connection, prefix: &str, limit: usize) -> rusqlite::Result
             ))
         },
     )?;
-    let mut candidates = Vec::new();
+    let mut candidates = Vec::with_capacity(limit);
     for row in rows {
         // A NULL key or value is skipped and a NULL weight reads as 0, as `sqlite3_column_*` did.
         if let (Some(key), Some(value), weight) = row? {

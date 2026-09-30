@@ -438,3 +438,57 @@ fn a_loaded_model_keys_the_series_cache_by_context() {
     typed.rescoring_context = "上文".into();
     assert!(words(&engine.query(&typed, None)).contains(&"甲"));
 }
+
+/// SD:89-99: series answers scored with the personal model are dropped once the tables changed under it. The version is compared only after reading the model, which is what reloads it; a bare version read would keep the stale answer.
+#[test]
+fn a_changed_personal_model_drops_the_scored_series() {
+    use crate::user_dictionary::ngram_store::PersonalNgramStore;
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_n VALUES('ni','n','你',10000),('ni','n','拟',9000);CREATE TABLE tbl_1_h(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_h VALUES('hao','h','好',10000),('hao','h','号',9000);",
+    );
+    let xiaohe = profile(ShuangpinProfileKind::Xiaohe);
+    let mut dictionary = super::dictionary::ShuangpinDictionary::new(xiaohe, &fixture.paths);
+    let segmentation = super::utils::pinyin_segmentation("nihc", xiaohe);
+    let before = dictionary.generate_series("nihc", &segmentation, "");
+    let store = PersonalNgramStore::for_journal(&fixture.paths.user(assets::USER_JOURNAL));
+    let version = store.version();
+    let journal = Connection::open(fixture.paths.user(assets::USER_JOURNAL)).unwrap();
+    crate::user_dictionary::journal::ensure_schema(&journal).unwrap();
+    journal
+        .execute_batch("INSERT INTO personal_bigram VALUES(char(1),'拟',400),('拟','号',400);INSERT INTO personal_trigram VALUES(char(1),'拟','号',400);")
+        .unwrap();
+    store.invalidate_for_tests();
+    let after = dictionary.generate_series("nihc", &segmentation, "");
+    assert!(
+        store.version() > version,
+        "the query did not reload the model"
+    );
+    assert!(
+        words(&after).contains(&"拟号") && !words(&before).contains(&"拟号"),
+        "the answer scored with the old model was kept: {:?} then {:?}",
+        words(&before),
+        words(&after)
+    );
+}
+
+/// neural-association.patch:3080-3095: an association change resets the caches, so a cached online row does not survive a lattice off/on round trip; quanpin behaves the same (`association_switch_resets_the_series_cache`).
+#[test]
+fn association_switch_resets_the_series_cache() {
+    let fixture = Fixture::new(HELPCODE_FILTER);
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let mut typed = request("nihc", false);
+    engine.query(&typed, None);
+    assert!(engine.insert_online_words(
+        &typed,
+        &["甲".to_string()],
+        CandidateSource::CloudSuggestion
+    ));
+    assert!(words(&engine.query(&typed, None)).contains(&"甲"));
+    typed.sentence_association = SentenceAssociationOptions {
+        word_lattice: false,
+        ..SentenceAssociationOptions::default()
+    };
+    assert!(!words(&engine.query(&typed, None)).contains(&"甲"));
+    typed.sentence_association = SentenceAssociationOptions::default();
+    assert!(!words(&engine.query(&typed, None)).contains(&"甲"));
+}

@@ -119,7 +119,7 @@ fn read(
 ) -> rusqlite::Result<Vec<(String, i64)>> {
     let mut statement = connection.prepare_cached(sql)?;
     let mut seen = HashSet::new();
-    let mut entries = Vec::new();
+    let mut entries = Vec::with_capacity(limit.saturating_mul(prefixes.len()));
     for prefix in prefixes {
         let upper_bound = format!("{prefix}\x7f");
         let rows = statement.query_map(

@@ -74,8 +74,22 @@ pub struct PersonalDictionaryPage {
 pub fn validate_personal_dictionary_entry(
     entry: &PersonalDictionaryEntry,
 ) -> Result<PersonalDictionaryEntry> {
+    validate_entry(entry, MAX_ENTRY_WEIGHT)
+}
+
+/// The same checks for a row being edited or removed. It is one the list returned and is matched exactly against the journal, and English frequency learning lifts a user's own word past `MAX_ENTRY_WEIGHT` without a ceiling (J:1027-1031), so only the floor applies to its weight. The reference refused such a row (personal_dictionary.cpp:11-12), which left it impossible to edit or remove.
+pub(crate) fn validate_existing_entry(
+    entry: &PersonalDictionaryEntry,
+) -> Result<PersonalDictionaryEntry> {
+    validate_entry(entry, i64::MAX)
+}
+
+fn validate_entry(
+    entry: &PersonalDictionaryEntry,
+    max_weight: i64,
+) -> Result<PersonalDictionaryEntry> {
     let invalid = |message: &str| Err(EngineError::invalid(message));
-    if !(1..=MAX_ENTRY_WEIGHT).contains(&entry.weight) {
+    if !(1..=max_weight).contains(&entry.weight) {
         return invalid(WEIGHT_OUT_OF_RANGE);
     }
     if entry.key.is_empty()
@@ -160,7 +174,7 @@ pub fn edit_personal_dictionary(
         return Err(failed(ENTRY_REQUIRED));
     }
     let old = previous
-        .map(validate_personal_dictionary_entry)
+        .map(validate_existing_entry)
         .transpose()
         .map_err(as_failure)?;
     let new = replacement
@@ -372,17 +386,30 @@ fn apply_personal_edit(
     remove: bool,
 ) -> rusqlite::Result<bool> {
     let (key, value, weight) = (entry.key.as_str(), entry.value.as_str(), entry.weight);
+    let (key_bytes, value_bytes) = (key.as_bytes(), value.as_bytes());
     let applied = match entry.kind {
-        PersonalDictionaryKind::Pinyin => apply_pinyin(connection, key, value, remove, weight)?,
+        PersonalDictionaryKind::Pinyin => {
+            apply_pinyin(connection, key_bytes, value_bytes, remove, weight)?
+        }
         PersonalDictionaryKind::Wubi => {
-            apply_simple(connection, "wubi86", key, value, remove, weight)?
+            apply_simple(connection, "wubi86", key_bytes, value_bytes, remove, weight)?
         }
-        PersonalDictionaryKind::QuickPhrase => {
-            apply_simple(connection, "quick_parases", key, value, remove, weight)?
-        }
-        PersonalDictionaryKind::English => {
-            apply_english(connection, key, value, remove, weight, value)?
-        }
+        PersonalDictionaryKind::QuickPhrase => apply_simple(
+            connection,
+            "quick_parases",
+            key_bytes,
+            value_bytes,
+            remove,
+            weight,
+        )?,
+        PersonalDictionaryKind::English => apply_english(
+            connection,
+            key_bytes,
+            value_bytes,
+            remove,
+            weight,
+            value_bytes,
+        )?,
     };
     if !applied {
         return Ok(false);
@@ -807,6 +834,50 @@ mod tests {
                 entry(PersonalDictionaryKind::QuickPhrase, "dh", "电\u{fffd}", 5),
             ]
         );
+    }
+
+    /// English frequency learning lifts a user's own word by `max(listed)+1000` with no ceiling (ranking.rs, J:1027-1031) and keeps it user-inserted, so the listed row can carry a weight above `MAX_ENTRY_WEIGHT`. That row must still be editable and removable: only the replacement is held to the ceiling.
+    #[test]
+    fn a_learned_english_word_above_the_ceiling_stays_editable() {
+        use PersonalDictionaryKind::English;
+        let root = tempfile::tempdir().unwrap();
+        let paths = fixture(root.path());
+        let word = entry(English, "foo", "foo", 10);
+        edit_personal_dictionary(&paths, None, Some(&word), "").unwrap();
+        let learned = 20_000_001_000_i64;
+        let journal = open_database(
+            &paths.user(assets::USER_JOURNAL),
+            OpenFlags::SQLITE_OPEN_READ_WRITE,
+        )
+        .unwrap();
+        journal
+            .execute(
+                crate::user_dictionary::journal::UPSERT_JOURNAL_SQL,
+                params!["english", "foo", "foo", learned, "foo"],
+            )
+            .unwrap();
+        drop(journal);
+        let listed = personal_dictionary_entries(&paths, 0, 10, false)
+            .unwrap()
+            .entries
+            .into_iter()
+            .find(|entry| entry.key == "foo")
+            .unwrap();
+        assert_eq!(listed.weight, learned);
+        let reweighted = entry(English, "foo", "foo", 500);
+        edit_personal_dictionary(&paths, Some(&listed), Some(&reweighted), "").unwrap();
+        let listed = personal_dictionary_entries(&paths, 0, 10, false)
+            .unwrap()
+            .entries;
+        assert_eq!(listed, vec![reweighted.clone()]);
+        edit_personal_dictionary(&paths, Some(&reweighted), None, "").unwrap();
+        assert!(personal_dictionary_entries(&paths, 0, 10, false)
+            .unwrap()
+            .entries
+            .is_empty());
+        // The replacement keeps the ceiling.
+        let too_heavy = entry(English, "bar", "bar", MAX_ENTRY_WEIGHT + 1);
+        assert!(edit_personal_dictionary(&paths, None, Some(&too_heavy), "").is_err());
     }
 
     #[test]

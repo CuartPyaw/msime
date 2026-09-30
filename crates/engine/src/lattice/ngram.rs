@@ -1,6 +1,6 @@
 //! `bigram.bin` / `trigram.bin` (MSNG v1, quanpin.md §12.1, data-formats.md §7). The files are copied into a generation through `<name>.incoming` and renamed into place, never written in place, so a table read once stays the table of that generation.
 //!
-//! The table is mapped read-only, as ngram_table.cpp:108 did (MapViewOfFile on Windows, :131-133), so its pages are clean and file-backed: the system can evict them under memory pressure, which the iOS keyboard extension's limit needs, instead of holding two 12 MB tables of dirty heap per generation. This is the one `unsafe` block of the crate (decisions.md: memmap2 for bigram.bin/trigram.bin), and it rests on the generation contract above. Like the reference, a table stays mapped for the life of the process once loaded.
+//! The table is mapped read-only, as ngram_table.cpp:108 did (MapViewOfFile on Windows, :131-133), so its pages are clean and file-backed: the system can evict them under memory pressure, which the iOS keyboard extension's limit needs, instead of holding two 12 MB tables of dirty heap per generation. The `unsafe` map (decisions.md: memmap2 for bigram.bin/trigram.bin; `japanese::decoder` and `handwriting::recognizer` map their packaged models the same way) rests on the generation contract above. Like the reference, a table stays mapped for the life of the process once loaded.
 
 use std::collections::HashMap;
 use std::fs::File;

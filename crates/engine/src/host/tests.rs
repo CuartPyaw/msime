@@ -212,6 +212,46 @@ fn hand_written_glosses_outrank_learned_and_packaged_ones() {
     );
 }
 
+/// The user's own `custom_translations.txt` outranks every automatic gloss even before any online gloss was saved, which is when `translation-glosses.db` first appears; the file Settings writes must not wait for that store.
+#[test]
+fn hand_written_glosses_apply_without_a_learned_store() {
+    let resources = tempfile::tempdir().unwrap();
+    let user = tempfile::tempdir().unwrap();
+    Connection::open(resources.path().join("english.db"))
+        .unwrap()
+        .execute_batch(&format!(
+            "{ENGLISH_SCHEMA} INSERT INTO zh_en_glosses VALUES('测试','packaged gloss');
+             INSERT INTO en_zh_glosses VALUES('hello','打招呼');"
+        ))
+        .unwrap();
+    std::fs::write(
+        user.path().join("custom_translations.txt"),
+        "测试\thand written gloss\nhello\t你好\n",
+    )
+    .unwrap();
+    let resources_path = resources.path().to_str().unwrap();
+    let user_path = user.path().to_str().unwrap();
+    let candidates = vec![("测试".into(), 0), ("hello".into(), 4)];
+    assert!(!user.path().join("translation-glosses.db").exists());
+    assert_eq!(
+        candidate_glosses_with_user(resources_path, user_path, &candidates).unwrap(),
+        vec!["hand written gloss", "你好"]
+    );
+    // The macOS learned-gloss path asks for the user overlay alone.
+    assert_eq!(
+        candidate_glosses_with_user("", user_path, &candidates).unwrap(),
+        vec!["hand written gloss", "你好"]
+    );
+    assert!(!user.path().join("translation-glosses.db").exists());
+    let empty = tempfile::tempdir().unwrap();
+    assert_eq!(
+        candidate_glosses_with_user("", empty.path().to_str().unwrap(), &candidates)
+            .unwrap_err()
+            .to_string(),
+        crate::diagnostics::CANDIDATE_GLOSS_UNAVAILABLE
+    );
+}
+
 #[test]
 fn unsafe_learned_glosses_fall_back_to_packaged_values() {
     let resources = tempfile::tempdir().unwrap();
@@ -935,6 +975,64 @@ fn incomplete_pinyin_raw_commit_is_learned_as_an_english_word() {
     assert_eq!(english_word_count(&value, "xyz"), 1);
 }
 
+/// bridge.cpp:1332-1359: Enter in any local mode learns the committed letters as an English word. Local modes are entered only from the pinyin schemes, whose segmentation is empty while one is active, so the incomplete-pinyin rule would learn the word too; this pins the outcome the two rules share.
+#[test]
+fn local_mode_raw_commit_is_learned_as_an_english_word() {
+    let dir = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let mut session = Session::new(&value).unwrap();
+    assert!(session.character(b'Y', true).unwrap().handled);
+    type_text(&mut session, b"rustacean");
+    assert_eq!(session.snapshot().unwrap().local_mode, "temporary_english");
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert!(result.has_commit);
+    assert_eq!(result.commit, "rustacean");
+    assert_eq!(result.diagnostic, "");
+    assert_eq!(english_word_count(&value, "rustacean"), 1);
+}
+
+/// bridge.cpp:1345-1348: in temporary Japanese the word is learned with its `R` trigger put back in front, so the letters typed in that mode stay apart from the same letters typed as English.
+#[test]
+fn temporary_japanese_raw_commit_learns_with_the_r_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let mut session = Session::new(&value).unwrap();
+    assert!(session.character(b'R', true).unwrap().handled);
+    type_text(&mut session, b"kk");
+    assert_eq!(session.snapshot().unwrap().local_mode, "temporary_japanese");
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert!(result.has_commit);
+    assert!(!result.commit.starts_with('R'), "{:?}", result.commit);
+    assert!(
+        result.commit.bytes().all(|byte| byte.is_ascii_alphabetic()),
+        "{:?}",
+        result.commit
+    );
+    assert_eq!(result.diagnostic, "");
+    let learned = format!("r{}", result.commit).to_ascii_lowercase();
+    assert_eq!(english_word_count(&value, &learned), 1);
+    assert_eq!(english_word_count(&value, &result.commit), 0);
+}
+
+/// bridge.cpp:1349-1357: a local-mode commit that is not an English word (here the Unicode mode's hex digits) is still committed; the failed learning is reported beside it rather than undoing it.
+#[test]
+fn unlearnable_local_mode_raw_commit_reports_the_diagnostic_but_still_commits() {
+    let dir = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let mut session = Session::new(&value).unwrap();
+    assert!(session.character(b'U', true).unwrap().handled);
+    type_text(&mut session, b"4e2d");
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert!(result.handled && result.has_commit);
+    assert!(!result.commit.is_empty());
+    assert_eq!(
+        result.diagnostic,
+        crate::diagnostics::ENGLISH_WORD_NOT_LEARNED
+    );
+    assert_eq!(result.diagnostic, "English word could not be learned.");
+    assert!(session.snapshot().unwrap().preedit.is_empty());
+}
+
 #[test]
 fn host_argument_checks_use_the_bridge_errors() {
     let dir = tempfile::tempdir().unwrap();
@@ -1221,6 +1319,25 @@ fn helpcode_fixture(root: &Path, extra_sql: &str, helpcodes: &str) -> EngineOpti
     options
 }
 
+/// helpcode_utils.cpp:57-67: a table that exists but cannot be read gives an empty keymap, so the host still gets a session, only without helpcode annotations.
+#[test]
+fn an_unreadable_helpcode_table_still_creates_the_session() {
+    let root = tempfile::tempdir().unwrap();
+    let options = helpcode_fixture(root.path(), "", "");
+    let table = Path::new(&options.resources).join("helpcodes/zrm_helpcode_big_unique.txt");
+    std::fs::remove_file(&table).unwrap();
+    std::fs::create_dir(&table).unwrap();
+    let mut session = Session::new(&options).expect("an unreadable table failed the session");
+    type_text(&mut session, b"nihao");
+    let view = session.snapshot().unwrap();
+    assert!(!view.candidates.is_empty());
+    assert!(
+        view.candidate_annotations.iter().all(String::is_empty),
+        "{:?}",
+        view.candidate_annotations
+    );
+}
+
 #[test]
 fn helpcode_display_toggle_keeps_candidates_and_filtering_enabled() {
     let root = tempfile::tempdir().unwrap();
@@ -1360,6 +1477,80 @@ fn dropping_a_session_writes_its_queued_personal_context() {
     assert_eq!(count, 2);
 }
 
+/// test_personal_context_input_session.cpp:816-827: a journal that cannot be written keeps the commit and reports the personal context, without any of the input text. Frequency learning is off so its own diagnostic cannot take the slot first.
+#[test]
+fn a_failed_personal_context_write_keeps_the_commit_with_a_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.learning = true;
+    value.frequency_mode = "disabled".into();
+    for directory in [&value.resources, &value.dictionaries] {
+        Connection::open(Path::new(directory).join("msime.db"))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO tbl_1_n VALUES('ni','n','甲',300),('ni','n','丙',100);
+                 CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
+                 CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);",
+            )
+            .unwrap();
+    }
+    std::fs::create_dir(Path::new(&value.user_data).join("msime_user.db")).unwrap();
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"ni");
+    let snapshot = session.snapshot().unwrap();
+    let index = snapshot
+        .candidates
+        .iter()
+        .position(|candidate| candidate == "甲")
+        .unwrap_or_else(|| panic!("甲 is not offered: {:?}", snapshot.candidates));
+    let result = session.select(index).unwrap();
+    assert!(result.handled && result.has_commit);
+    assert_eq!(result.commit, "甲");
+    assert_eq!(
+        result.diagnostic,
+        crate::diagnostics::PERSONAL_CONTEXT_NOT_PERSISTED
+    );
+    assert!(!result.diagnostic.contains('甲') && !result.diagnostic.contains("ni"));
+}
+
+/// local_database.cpp:34-38,63-66 opened msime's generation dictionary once per local-mode query, so nothing held it after the sessions were gone. A reset or snapshot restore replaces `msime.db` at the same path once every session is dropped (Windows needs the handle closed to rename it), and the next session must read the new file.
+#[test]
+fn local_mode_reads_follow_a_dictionary_replaced_after_the_sessions_are_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let dictionary = |path: &Path, phrase: &str| {
+        Connection::open(path)
+            .unwrap()
+            .execute_batch(&format!(
+                "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
+                 CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO quick_parases VALUES('kx','{phrase}',10);"
+            ))
+            .unwrap();
+    };
+    let main = Path::new(&value.dictionaries).join("msime.db");
+    dictionary(&Path::new(&value.resources).join("msime.db"), "旧短语");
+    dictionary(&main, "旧短语");
+    let phrases = || {
+        let mut session = Session::new(&value).unwrap();
+        assert!(session.character(b'K', true).unwrap().handled);
+        type_text(&mut session, b"kx");
+        let snapshot = session.snapshot().unwrap();
+        assert_eq!(snapshot.local_mode, "quick_phrase");
+        snapshot.candidates
+    };
+    assert!(phrases().contains(&"旧短语".to_owned()));
+    let staged = dir.path().join("replacement.db");
+    dictionary(&staged, "新短语");
+    std::fs::rename(&staged, &main).unwrap();
+    let candidates = phrases();
+    assert!(
+        candidates.contains(&"新短语".to_owned()) && !candidates.contains(&"旧短语".to_owned()),
+        "the replaced dictionary is still read: {candidates:?}"
+    );
+}
+
 /// user_dictionary_journal.cpp:445-452: the reference opened msime's journal per call, so no thread kept it open. A one-shot call releases its thread's cached journal on return, a dropped session releases it too, and a live session keeps it for the keystroke path.
 #[test]
 fn journal_handles_are_released_when_a_thread_is_done_with_them() {
@@ -1427,6 +1618,7 @@ fn a_session_dropped_while_its_thread_exits_does_not_abort() {
             )
             .unwrap();
     }
+    let journal = Path::new(&value.user_data).join("msime_user.db");
     std::thread::spawn(move || {
         // The map is registered before the journal cache, so thread exit destroys the cache first.
         HELD.with(|held| {
@@ -1447,4 +1639,14 @@ fn a_session_dropped_while_its_thread_exits_does_not_abort() {
     })
     .join()
     .unwrap();
+    // The drop during thread exit wrote the queued pick, not merely survived.
+    let written: i64 = Connection::open(&journal)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM personal_bigram WHERE previous=char(1) AND word='拟好'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(written, 1);
 }

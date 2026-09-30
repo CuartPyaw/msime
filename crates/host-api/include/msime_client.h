@@ -709,6 +709,8 @@ char *msime_client_mcp_status(const uint8_t *request, size_t length);
 /* Write the msime entry into one assistant's configuration, keeping every other key. JSON request {options,client:"claude_desktop"|"cursor",replace:bool}. Returns "added"|"replaced"|"unchanged"; a different msime entry fails with mcp_entry_exists unless replace is set. Writes a file: use a worker thread. */
 char *msime_client_mcp_install(const uint8_t *request, size_t length);
 char *msime_client_destroy(uint64_t session);
+/* Write the selection counts held by every session on the calling thread and all queued personal-context learning, without ending any session. Call from the host's will-terminate hook (e.g. NSApplicationWillTerminateNotification) on the thread that owns the sessions; the C++ Engine did this from atexit. Returns null on success. */
+char *msime_client_flush_all(void);
 /* value must be NULL or a still-owned pointer returned by this library. */
 void msime_client_string_free(char *value);
 

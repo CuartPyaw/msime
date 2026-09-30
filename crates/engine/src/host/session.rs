@@ -1,7 +1,7 @@
 //! The bridge's `Session` wrapper over the engine session (api-contract §1a, §2, §5): ASCII checks, command numbering with `CommitRawWithoutLearning`, the raw-commit learning policy, the flattened snapshot and the online query snapshot.
 
 use std::marker::PhantomData;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -10,6 +10,7 @@ use crate::assets;
 use crate::diagnostics;
 use crate::error::{EngineError, Result};
 use crate::helpcode::{compute_helpcodes, load_helpcode_keymap, SharedKeymap};
+use crate::local::database::LocalDatabaseLease;
 use crate::pinyin::segment::is_complete_pinyin_input;
 use crate::types::{
     CandidateEdge, CandidateSource, KeyResult, LocalInputMode, OnlineQuery, SchemeType,
@@ -100,6 +101,8 @@ pub struct Session {
     helpcode_keymap: Option<SharedKeymap>,
     helpcode_enabled: bool,
     show_helpcode: bool,
+    /// The generation and resource directories the local-mode queries read; dropped after `inner`, so the last session to go closes their cached connections.
+    _local_databases: LocalDatabaseLease,
     _thread_confined: PhantomData<Rc<()>>,
 }
 
@@ -127,6 +130,10 @@ impl Session {
             helpcode_keymap,
             helpcode_enabled: options.helpcode,
             show_helpcode: options.show_helpcode,
+            _local_databases: LocalDatabaseLease::new([
+                PathBuf::from(&options.dictionaries),
+                PathBuf::from(&options.resources),
+            ]),
             _thread_confined: PhantomData,
         })
     }
@@ -448,7 +455,7 @@ impl Session {
     }
 }
 
-/// The C++ registered `PersonalNgramStore::flush_all` with `atexit` (personal_ngram_store.cpp:255), so context learned in the last ~2 s reached the journal when the host quit. Rust runs no destructors for statics and `atexit` needs unsafe, so the session writes its journal's queue when the host drops it, which every host does on deactivation and shutdown; a host that exits without dropping its sessions calls `flush_personal_learning` instead.
+/// The C++ registered `PersonalNgramStore::flush_all` with `atexit` (personal_ngram_store.cpp:255), so context learned in the last ~2 s reached the journal when the host quit. Rust runs no destructors for statics and `atexit` needs unsafe, so the session writes its journal's queue when the host drops it, which hosts do on deactivation and shutdown. A host that can exit without dropping its sessions (macOS `[NSApp terminate:]` runs `exit()`) calls `flush_personal_learning`, through host-api's `msime_client_flush_all`, from its will-terminate hook instead.
 impl Drop for Session {
     fn drop(&mut self) {
         let journal = runtime_paths(&self.options).user(assets::USER_JOURNAL);

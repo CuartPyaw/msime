@@ -18,9 +18,9 @@ pub use crate::{close_cached_databases, flush_personal_learning};
 pub use dictionary::{
     dictionary_edit, dictionary_edit_bundled, dictionary_entries, dictionary_export_entries,
     dictionary_state_revision, dictionary_table_entries, dictionary_validate,
-    replay_user_dictionary, reset_learned_data, stage_dictionary_state, DictionaryEntry,
-    DictionaryKind, DictionaryPage, DictionaryStateRecord, DictionaryTableEntry,
-    DictionaryTablePage, SnapshotReadError,
+    dictionary_validate_previous, replay_user_dictionary, reset_learned_data,
+    stage_dictionary_state, DictionaryEntry, DictionaryKind, DictionaryPage, DictionaryStateRecord,
+    DictionaryTableEntry, DictionaryTablePage, SnapshotReadError,
 };
 pub use glosses::{
     candidate_glosses, candidate_glosses_with_user, candidate_target_glosses, english_completions,

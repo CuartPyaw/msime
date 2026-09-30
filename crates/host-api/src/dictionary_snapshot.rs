@@ -668,6 +668,8 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
     let replacement_session = Session::new(staged).map_err(|_| "snapshot engine unavailable")?;
     // Windows cannot rename SQLite files while the probe keeps them open.
     drop(replacement_session);
+    // The same step `reset_learned_data` takes before it replaces files in place: write the queued personal context into the journal that is about to become the backup, then close every cached journal, personal-context and local-mode connection, so nothing in this process keeps reading or writing the files being moved out (Windows would also refuse to move them).
+    msime_engine::close_cached_databases();
     let suffix = format!(".msime-snapshot-old-{handle}");
     let pairs = [
         (&active.user_data, &staged.user_data),
@@ -705,6 +707,8 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
     );
     let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::with_capacity(pairs.len());
     let rollback = |moved: &[(std::path::PathBuf, std::path::PathBuf)]| {
+        // Anything opened on a moved file while the swap ran would outlive its move back.
+        msime_engine::close_cached_databases();
         for (from, to) in moved.iter().rev() {
             let _ = std::fs::rename(to, from);
         }
@@ -779,6 +783,8 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
             moved.push((path, destination));
         }
     }
+    // A reader that opened a file while the swap ran holds the old one; the next access opens the restored files.
+    msime_engine::close_cached_databases();
     for backup in &backups {
         let _ = std::fs::remove_dir_all(backup);
     }

@@ -160,17 +160,36 @@ impl ImeSession {
 
     /// Candidates for a raw prefix through a scratch scheme of the current type, leaving the live composition alone (caret-prefix decoding, overlays.md §7.6).
     pub fn query_raw_candidates(&mut self, raw: &str, raw_with_cases: &str) -> Vec<WordItem> {
+        let request = self.raw_request(raw, raw_with_cases);
+        if !request.valid {
+            return Vec::new();
+        }
+        self.decode(&request).candidates
+    }
+
+    /// `expand_initial_candidates` for a list `query_raw_candidates` returned for the same raw prefix.
+    pub fn expand_raw_initial_candidates(
+        &mut self,
+        raw: &str,
+        raw_with_cases: &str,
+        candidates: &mut Vec<WordItem>,
+    ) -> bool {
+        let request = self.raw_request(raw, raw_with_cases);
+        request.valid
+            && self
+                .registry
+                .expand_initial_candidates(&request, candidates)
+    }
+
+    /// The request a scratch scheme of the current type builds for `raw`, with the session's switches applied.
+    fn raw_request(&self, raw: &str, raw_with_cases: &str) -> QueryRequest {
         let mut scratch = Scheme::new(self.current_scheme_type(), self.profile);
         if let Some(wubi) = scratch.as_wubi_mut() {
             wubi.set_mixed_pinyin_allowed(self.wubi_options.mixed_pinyin);
             wubi.set_extended_length_allowed(self.wubi_options.mixed_pinyin);
         }
         scratch.set_raw_input(raw, raw_with_cases);
-        let request = self.prepare_request(&scratch);
-        if !request.valid {
-            return Vec::new();
-        }
-        self.decode(&request).candidates
+        self.prepare_request(&scratch)
     }
 
     pub fn set_helpcode_keymap(&mut self, keymap: Option<SharedKeymap>) {
