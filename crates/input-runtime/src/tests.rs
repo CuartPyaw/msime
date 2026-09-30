@@ -3056,6 +3056,181 @@ fn the_desktop_switch_gates_the_settled_rerank() {
     assert!(runtime.view().generation > generation);
 }
 
+/// A sentence model whose next-character distribution ignores the context: the final layer norm has zero gain, so every position's hidden state is its bias, and the tied embedding turns that into the same logits each time. Characters listed in `favoured` get a high logit and the rest of `characters` a low one, so the model prefers any candidate spelled with the favoured characters and nothing else about it is left to chance.
+fn favouring_model(characters: &[char], favoured: &[char]) -> SentenceModel {
+    const CONTEXT: usize = 16;
+    let vocabulary: Vec<String> = ["<pad>", "<unk>", "<bos>"]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(characters.iter().map(char::to_string))
+        .collect();
+    let logits: Vec<f32> = [0.0, -8.0, 0.0]
+        .into_iter()
+        .chain(
+            characters
+                .iter()
+                .map(|c| if favoured.contains(c) { 8.0 } else { -8.0 }),
+        )
+        .collect();
+    let config = format!(
+        r#"{{"vocab":{},"n_layer":0,"n_head":1,"n_embd":1,"context":{CONTEXT},"dropout":0.0}}"#,
+        vocabulary.len()
+    );
+    let tensors: [(&str, usize, Vec<f32>); 4] = [
+        ("tok.weight", vocabulary.len(), logits),
+        ("pos.weight", CONTEXT, vec![0.0; CONTEXT]),
+        ("ln_f.weight", 1, vec![0.0]),
+        ("ln_f.bias", 1, vec![1.0]),
+    ];
+    let mut header = serde_json::Map::new();
+    header.insert(
+        "__metadata__".into(),
+        serde_json::json!({
+            "format": "chinese-ime-lm",
+            "version": "1",
+            "precision": "f32",
+            "config": config,
+            "vocab": serde_json::to_string(&vocabulary).unwrap(),
+        }),
+    );
+    let mut data = Vec::new();
+    for (name, rows, values) in tensors {
+        let start = data.len();
+        data.extend(values.iter().flat_map(|value| value.to_le_bytes()));
+        header.insert(
+            name.into(),
+            serde_json::json!({"dtype": "F32", "shape": [rows, 1], "data_offsets": [start, data.len()]}),
+        );
+    }
+    // The 1-D tensors are declared with their real shape.
+    header["ln_f.weight"]["shape"] = serde_json::json!([1]);
+    header["ln_f.bias"]["shape"] = serde_json::json!([1]);
+    let header = serde_json::to_vec(&serde_json::Value::Object(header)).unwrap();
+    let mut bytes = (header.len() as u64).to_le_bytes().to_vec();
+    bytes.extend_from_slice(&header);
+    bytes.extend_from_slice(&data);
+    SentenceModel::load(&bytes).unwrap()
+}
+
+/// The Wubi mixed-pinyin list for `dyn`: the exact code hit 态, a longer code's row 太快 (dynn), and a pinyin fallback row that corrected dyn to dun. `answered_by_pinyin_fallback` stands in for a list with no Wubi rows at all.
+struct WubiMixedEngine {
+    scheme: u8,
+    answered_by_pinyin_fallback: bool,
+    reading: String,
+}
+
+impl WubiMixedEngine {
+    const WORDS: [&'static str; 3] = ["态", "太快", "顿"];
+}
+
+impl InputEngine for WubiMixedEngine {
+    fn snapshot(&self) -> Result<EngineSnapshot, RuntimeError> {
+        let words: Vec<String> = if self.reading.is_empty() {
+            Vec::new()
+        } else {
+            Self::WORDS.iter().map(|word| (*word).to_owned()).collect()
+        };
+        let count = words.len();
+        Ok(EngineSnapshot {
+            scheme: self.scheme,
+            nine_key: false,
+            nine_key_spellings: Vec::new(),
+            candidate_codes: ["dyn", "dynn", "dun"]
+                .into_iter()
+                .take(count)
+                .map(str::to_owned)
+                .collect(),
+            candidate_annotations: vec![String::new(); count],
+            candidate_sources: vec![0; count],
+            candidate_positions: vec![0; count],
+            candidate_corrected: [false, false, true].into_iter().take(count).collect(),
+            candidate_answers_key: vec![true; count],
+            microsoft_shuangpin: false,
+            shuangpin_profile: "xiaohe".into(),
+            answered_by_pinyin_fallback: self.answered_by_pinyin_fallback && count > 0,
+            wubi_unique_four_code: false,
+            local_mode: "none".into(),
+            dedicated_english: false,
+            preedit: self.reading.clone(),
+            reading: String::new(),
+            editing_text: self.reading.clone(),
+            caret_position: self.reading.len(),
+            segment_raw_boundaries: Vec::new(),
+            candidates: words,
+        })
+    }
+    fn character(&mut self, value: u8, _shift: bool) -> Result<EngineResult, RuntimeError> {
+        self.reading.push(value as char);
+        Ok(empty_result(true))
+    }
+    fn command(&mut self, _command: Command) -> Result<EngineResult, RuntimeError> {
+        let composing = !self.reading.is_empty();
+        self.reading.clear();
+        Ok(empty_result(composing))
+    }
+    fn select(&mut self, index: usize) -> Result<EngineResult, RuntimeError> {
+        self.reading.clear();
+        Ok(EngineResult {
+            handled: true,
+            has_commit: true,
+            commit: Self::WORDS[index].to_owned(),
+            diagnostic: String::new(),
+        })
+    }
+    fn finish(&mut self, index: usize) -> Result<EngineResult, RuntimeError> {
+        self.select(index)
+    }
+    fn punctuation(&mut self, _value: u8) -> Result<EngineResult, RuntimeError> {
+        Ok(empty_result(false))
+    }
+    fn select_edge(
+        &mut self,
+        index: usize,
+        _edge: CandidateEdge,
+    ) -> Result<EngineResult, RuntimeError> {
+        self.select(index)
+    }
+}
+
+fn typed_dyn_with_reranker(scheme: u8, answered_by_pinyin_fallback: bool) -> Vec<String> {
+    let mut runtime = Runtime::new(
+        WubiMixedEngine {
+            scheme,
+            answered_by_pinyin_fallback,
+            reading: String::new(),
+        },
+        5,
+    )
+    .unwrap();
+    let model = favouring_model(&['态', '太', '快', '顿'], &['太', '快']);
+    runtime.set_reranker(Some(Reranker::new(std::sync::Arc::new(model))));
+    runtime.focus(true).unwrap();
+    for value in *b"dyn" {
+        runtime
+            .dispatch(Action::Character {
+                value,
+                shift: false,
+            })
+            .unwrap();
+    }
+    runtime
+        .view()
+        .candidates
+        .iter()
+        .map(|candidate| candidate.text.clone())
+        .collect()
+}
+
+/// Typing `dyn` under Wubi with mixed pinyin showed 太快 above 态: the corrected pinyin row took the dictionary exemption away from the whole list and the model promoted the longer code's row. A list the Wubi table answered keeps the Engine's order.
+#[test]
+fn a_wubi_list_keeps_the_exact_code_hit_first_under_the_reranker() {
+    assert_eq!(typed_dyn_with_reranker(2, false), ["态", "太快", "顿"]);
+    // The same list under a pinyin scheme is reranked, so the model would promote 太快 if Wubi let it.
+    assert_eq!(typed_dyn_with_reranker(0, false), ["太快", "态", "顿"]);
+    // A Wubi code only the pinyin fallback answered is pinyin, and is reranked like pinyin.
+    assert_eq!(typed_dyn_with_reranker(2, true), ["太快", "态", "顿"]);
+}
+
 fn withholding_runtime(offered: usize, withheld: usize, page_size: u8) -> Runtime<Fixture> {
     Runtime::new(
         Fixture {
