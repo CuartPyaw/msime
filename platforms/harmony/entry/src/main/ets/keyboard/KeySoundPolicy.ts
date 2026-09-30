@@ -197,6 +197,13 @@ export class KeySoundPolicy {
   }
 
   /**
+   * Whether key-downs are silent in this state: in a password field, so the rhythm of a password is never heard, and in English mode, as on every desktop host (Windows hears only the keys its input method composes). The English candidate mode composes its keys, so it sounds them, as Windows does.
+   */
+  static keysSilent(password: boolean, english: boolean, englishCandidates: boolean): boolean {
+    return password || (english && !englishCandidates);
+  }
+
+  /**
    * The sound class of a key-down, or -1 for a key that makes no sound.
    *
    * Space, Enter and Backspace have their own samples; any other key that types a character sounds as a key. Modifier chords, modifiers on their own and navigation keys are silent: they are shortcuts and movement, not typing, and a sound on Ctrl+C would be noise.
@@ -332,17 +339,10 @@ export class KeySoundPolicy {
     return `${semitone}:${file}`;
   }
 
-  /** Whether a sample is a WAV file, which this host renders natively and can pitch; anything else is Ogg, played as it is. The extension is the one client-core checked against the header bytes. */
+  /**
+   * Whether this host plays a sample: WAV only, which it decodes natively under the pack bound, both from the header and while decoding, before SoundPool sees the result. Anything else is Ogg, which only SoundPool could decode, whole and with nothing bounding how long the decoded sound is, so an Ogg sample stays silent here. The extension is the one client-core checked against the header bytes.
+   */
   static isWav(file: string): boolean {
     return file.toLowerCase().endsWith(".wav");
-  }
-
-  /** Whether a length the media service reports for a sample is within the pack bound. An unknown or unreadable length is refused rather than trusted. */
-  static durationAllowed(duration: string | undefined, maxMillis: number): boolean {
-    if (duration === undefined) {
-      return false;
-    }
-    const millis: number = Number(duration);
-    return Number.isFinite(millis) && millis > 0 && millis <= maxMillis;
   }
 }

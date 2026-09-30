@@ -4847,7 +4847,7 @@ export class KeyboardSession implements HardwareKeyTarget {
    * The sound of a hardware key-down, on a 2in1 with key sounds on. Never in a password field: the rhythm of a password is what a key sound would give away.
    */
   hardwareKeySound(keyCode: number, unicodeChar: number, ctrl: boolean, alt: boolean, logo: boolean): void {
-    if (this.traits.password) {
+    if (KeySoundPolicy.keysSilent(this.traits.password, this.isEnglish(), this.isEnglishCandidates())) {
       return;
     }
     const keyClass: number = KeySoundPolicy.keyClass(keyCode, unicodeChar, ctrl, alt, logo);

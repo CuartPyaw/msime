@@ -10680,6 +10680,13 @@ group("key sounds follow the desktop player's settings and pack rules", () => {
     "50 is half amplitude, as on the desktop",
   );
   check(KeySoundPolicy.gain({ ...on, volume: 0 }) === 0, "0 is silent");
+  check(!KeySoundPolicy.keysSilent(false, false, false), "Chinese mode sounds its keys");
+  check(KeySoundPolicy.keysSilent(true, false, false), "a password field is silent");
+  check(KeySoundPolicy.keysSilent(false, true, false), "English mode is silent, as on the desktop");
+  check(
+    !KeySoundPolicy.keysSilent(false, true, true),
+    "the English candidate mode composes its keys and sounds them",
+  );
 
   check(KeySoundPolicy.keyClass(2050, 0x20, false, false, false) === KeySoundClass.SPACE, "space");
   check(KeySoundPolicy.keyClass(2054, 0, false, false, false) === KeySoundClass.ENTER, "enter");
@@ -10805,13 +10812,7 @@ group("key sounds follow the desktop player's settings and pack rules", () => {
 
   check(
     KeySoundPolicy.isWav("/a/B.WAV") && !KeySoundPolicy.isWav("/a/b.ogg"),
-    "WAV is told by extension",
-  );
-  check(KeySoundPolicy.durationAllowed("1500", 1500), "exactly the bound is allowed");
-  check(!KeySoundPolicy.durationAllowed("1501", 1500), "a millisecond over is refused");
-  check(
-    !KeySoundPolicy.durationAllowed(undefined, 1500) && !KeySoundPolicy.durationAllowed("x", 1500),
-    "an unknown length is refused rather than trusted",
+    "WAV is told by extension, and an Ogg sample is not played: nothing here could bound its decoded length",
   );
   check(
     KeySoundPolicy.cueKey("/a.wav", -2) !== KeySoundPolicy.cueKey("/a.wav", 2),

@@ -1,7 +1,7 @@
 /**
  * Key sounds, the typing melody, commit and achievement sounds on a 2in1, played through SoundPool.
  *
- * The desktop hosts play these through host-api, which does not link an audio stack on HarmonyOS, so this host plays the same packs itself. What a pack holds comes from `msime_client_key_sound_pack`, which answers with the files client-core's validation accepted; which of them an event plays is `KeySoundPolicy`, the desktop player's rules. A WAV sample is decoded natively (`keySoundRenderNotes`, miniaudio) under the pack's length bound and written back out once per pitch it is played at, so SoundPool only ever decodes files this host wrote, and a melody's notes are pitched the way the desktop pitches them. An Ogg sample has its length read by the media service first and is played as it is: nothing here decodes Vorbis, so an Ogg melody plays every note at the sample's own pitch.
+ * The desktop hosts play these through host-api, which does not link an audio stack on HarmonyOS, so this host plays the same packs itself. What a pack holds comes from `msime_client_key_sound_pack`, which answers with the files client-core's validation accepted; which of them an event plays is `KeySoundPolicy`, the desktop player's rules. A WAV sample is decoded natively (`keySoundRenderNotes`, miniaudio) under the pack's length bound and written back out once per pitch it is played at, so SoundPool only ever decodes files this host wrote, and a melody's notes are pitched the way the desktop pitches them. An Ogg sample stays silent: nothing here decodes Vorbis, and SoundPool would decode it whole with nothing bounding its length.
  *
  * Nothing is created until a sound is switched on, and nothing here can stop a key from typing. A pack that will not load says so once and stays silent; SoundPool failing to play turns the sounds off until the settings change. The pool mixes with whatever else is playing rather than pausing it: SoundPool plays short sounds in mixing mode for the music stream usage, unlike the voice recording's CONCURRENCY_PAUSE_OTHERS session.
  */
@@ -234,26 +234,19 @@ export class KeySoundPlayer {
     return response.value;
   }
 
-  /** Render or check one sample and hand it to SoundPool. A sample that will not prepare leaves that one sound silent and says why. */
+  /** Render one sample and hand its notes to SoundPool. A sample that will not prepare leaves that one sound silent and says why. */
   private async prepare(generation: number, pool: media.SoundPool, request: KeySoundSampleRequest,
     directory: string, maxMillis: number): Promise<void> {
     try {
-      if (KeySoundPolicy.isWav(request.file)) {
-        const notes: string[] =
-          await client.keySoundRenderNotes(request.file, request.semitones, directory, maxMillis);
-        for (let index: number = 0; index < notes.length && generation === this.generation; index++) {
-          await this.loadFile(generation, pool, notes[index],
-            [KeySoundPolicy.cueKey(request.file, request.semitones[index])]);
-        }
+      if (!KeySoundPolicy.isWav(request.file)) {
+        KeyboardLog.error('sound pack sample refused: HarmonyOS plays WAV samples only');
         return;
       }
-      if (!(await this.lengthAllowed(request.file, maxMillis))) {
-        KeyboardLog.error('sound pack sample refused: longer than the pack bound or of unknown length');
-        return;
-      }
-      if (generation === this.generation) {
-        await this.loadFile(generation, pool, request.file, request.semitones.map((semitone: number): string =>
-          KeySoundPolicy.cueKey(request.file, semitone)));
+      const notes: string[] =
+        await client.keySoundRenderNotes(request.file, request.semitones, directory, maxMillis);
+      for (let index: number = 0; index < notes.length && generation === this.generation; index++) {
+        await this.loadFile(generation, pool, notes[index],
+          [KeySoundPolicy.cueKey(request.file, request.semitones[index])]);
       }
     } catch (error) {
       KeyboardLog.error(`sound pack sample unavailable: ${describeError(error)}`);
@@ -296,23 +289,6 @@ export class KeySoundPlayer {
     this.loading.delete(sound);
     this.completed.delete(sound);
     fs.closeSync(file);
-  }
-
-  /** Whether the media service reads the sample as no longer than the pack bound, before SoundPool decodes it. */
-  private async lengthAllowed(path: string, maxMillis: number): Promise<boolean> {
-    const file: fs.File = fs.openSync(path, fs.OpenMode.READ_ONLY);
-    try {
-      const extractor: media.AVMetadataExtractor = await media.createAVMetadataExtractor();
-      try {
-        extractor.fdSrc = { fd: file.fd, offset: 0, length: fs.statSync(file.fd).size };
-        const metadata: media.AVMetadata = await extractor.fetchMetadata();
-        return KeySoundPolicy.durationAllowed(metadata.duration, maxMillis);
-      } finally {
-        await extractor.release();
-      }
-    } finally {
-      fs.closeSync(file);
-    }
   }
 
   /** Rendered notes belong to one load; the next load, or none, starts from an empty directory. */
