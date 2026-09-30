@@ -67,7 +67,7 @@ pub fn pinyin_segmentation(input: &str, profile: &ShuangpinProfile) -> String {
         return input.to_string();
     }
     let bytes = input.as_bytes();
-    let mut pieces: Vec<&[u8]> = Vec::new();
+    let mut result = String::with_capacity(bytes.len() * 2);
     let mut position = 0;
     while position < bytes.len() {
         let width = if takes_two_keys(bytes, position, profile) {
@@ -75,16 +75,18 @@ pub fn pinyin_segmentation(input: &str, profile: &ShuangpinProfile) -> String {
         } else {
             1
         };
-        pieces.push(&bytes[position..position + width]);
+        if !result.is_empty() {
+            result.push('\'');
+        }
+        for &byte in &bytes[position..position + width] {
+            if !result.is_empty() || byte != b'\'' {
+                result.push(char::from(byte));
+            }
+        }
         position += width;
     }
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for piece in pieces {
-        result.push('\'');
-        result.extend(piece.iter().map(|&byte| char::from(byte)));
-    }
-    // The reference strips leading `'` only; its trailing strip read past the end and never fired, and no trailing `'` is ever produced. A chunk containing `'` (the single-helpcode reread of a delimited input) can lead with more than one.
-    result.trim_start_matches('\'').to_string()
+    // A chunk containing `'` can be reread for single-helpcode matching. Its leading delimiters are stripped, while delimiters after the first key stay in the output.
+    result
 }
 
 /// Even length and every chunk exactly two keys (:221-234).
@@ -219,6 +221,8 @@ mod tests {
         assert_eq!(pinyin_segmentation("", xiaohe()), "");
         // A delimited input read as one chunk (the single-helpcode tail) treats `'` as a key that forms nothing.
         assert_eq!(pinyin_segmentation("ni'hck", xiaohe()), "ni'''hc'k");
+        assert_eq!(pinyin_segmentation("''ni", xiaohe()), "ni");
+        assert_eq!(pinyin_segmentation("ni''hc", xiaohe()), "ni'''''hc");
     }
 
     #[test]
