@@ -5408,9 +5408,10 @@ public:
     if (current == ProgramFileState::Current || current == shown) return;
     shown = current;
     msime_linux_diagnostic_write(current == ProgramFileState::Replaced ? "addon_replaced_notice" : "addon_removed_notice");
+    const auto restart = msime::linux_host::fcitx5_restart_command();
     state.ic_.inputPanel().setAuxUp(fcitx::Text(current == ProgramFileState::Replaced
-        ? "水杉输入法已升级：执行 fcitx5 -r 或注销后重新登录即可使用新版本"
-        : "水杉输入法已卸载：执行 fcitx5 -r 或注销后重新登录即可完成卸载"));
+        ? "水杉输入法已升级：执行 " + restart + " 或注销后重新登录即可使用新版本"
+        : "水杉输入法已卸载：执行 " + restart + " 或注销后重新登录即可完成卸载"));
     state.ic_.updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
   }
   // Keys still reach the application: the addon never filters an event it could not route, so the user can keep typing while the hint is up. Only activation may open the settings window; a key never does, because a window that appears mid-typing can take the keyboard focus and swallow what follows.

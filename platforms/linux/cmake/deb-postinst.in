@@ -34,10 +34,15 @@ while read -r uid name _; do
       systemctl --user -M "$uid@" try-restart "$unit" </dev/null >/dev/null 2>&1 || true
     done
     if [ -n "$notify" ] && [ -n "$upgrade" ]; then
-      systemd-run --user -M "$uid@" --collect --quiet notify-send -a 水杉输入法 -i msime-linux "水杉输入法已升级" "重启输入法后生效：IBus 执行 ibus restart，Fcitx5 执行 fcitx5 -r，或注销后重新登录" </dev/null >/dev/null 2>&1 || true
+      # Omarchy runs fcitx5 as a user service with Restart=always; fcitx5 -r there starts a second copy outside the unit that fights the unit's own for the bus name, so its users are told to restart the unit.
+      fcitx5_restart="fcitx5 -r"
+      if systemctl --user -M "$uid@" is-active --quiet omarchy-fcitx5.service </dev/null >/dev/null 2>&1; then
+        fcitx5_restart="systemctl --user restart omarchy-fcitx5.service"
+      fi
+      systemd-run --user -M "$uid@" --collect --quiet notify-send -a 水杉输入法 -i msime-linux "水杉输入法已升级" "重启输入法后生效：IBus 执行 ibus restart，Fcitx5 执行 $fcitx5_restart，或注销后重新登录" </dev/null >/dev/null 2>&1 || true
     fi
   else
-    echo "msime-client: could not reach the systemd user manager of ${name:-uid $uid}; that user should restart its services: systemctl --user daemon-reload && systemctl --user try-restart @MSIME_USER_SERVICE_LIST@; and the input method: ibus restart (IBus) or fcitx5 -r (Fcitx5), or log out and back in" >&2
+    echo "msime-client: could not reach the systemd user manager of ${name:-uid $uid}; that user should restart its services: systemctl --user daemon-reload && systemctl --user try-restart @MSIME_USER_SERVICE_LIST@; and the input method: ibus restart (IBus), fcitx5 -r (Fcitx5) or systemctl --user restart omarchy-fcitx5.service (Fcitx5 on Omarchy), or log out and back in" >&2
   fi
 done <<EOF
 $users
