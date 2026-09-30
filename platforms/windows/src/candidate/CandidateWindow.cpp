@@ -676,25 +676,18 @@ void CandidateWindow::paint() {
   if (!decoration_image_.empty() && decoration_offset_ > 0.0f) {
     D2D1_SIZE_F natural{};
     if (auto *bitmap = device_.GetBitmapFromFile(decoration_image_, &natural)) {
-      const float drawn_width = static_cast<float>(decoration_width_);
-      // Keep the image's own aspect ratio: a package gives a width, not a box,
-      // so deriving the height is what stops the artwork being squashed.
-      const float drawn_height =
-          natural.width > 0.0f ? drawn_width * (natural.height / natural.width)
-                               : decoration_offset_;
-      // Placed along the card's top edge as the manifest aligns it, as the settings preview places it.
-      const float left = candidate_decoration_left(
-          decoration_align_, static_cast<float>(frame.card_left),
-          static_cast<float>(frame.card_left + frame.card_width),
-          static_cast<float>(metrics.pad_x), drawn_width);
-      const float right = left + drawn_width;
-      const float bottom = static_cast<float>(shadow_insets_.top) +
-                           decoration_offset_ +
-                           static_cast<float>(metrics.pad_y);
-      const float top = (std::max)(static_cast<float>(shadow_insets_.top),
-                                   bottom - drawn_height);
-      target->DrawBitmap(bitmap, D2D1_RECT_F{left, top, right, bottom}, 1.0f,
-                         D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+      // A package gives a width, not a box: the height follows the image's own aspect ratio, and artwork too tall for the band plus the pad_y overlap shrinks uniformly instead of being squashed. Placed along the card's top edge as the manifest aligns it, as the settings preview places it.
+      if (const auto rect = candidate_decoration_rect(
+              decoration_align_, static_cast<float>(frame.card_left),
+              static_cast<float>(frame.card_left + frame.card_width),
+              static_cast<float>(frame.card_top),
+              static_cast<float>(metrics.pad_x),
+              static_cast<float>(metrics.pad_y), decoration_offset_,
+              static_cast<float>(decoration_width_), natural.width,
+              natural.height))
+        target->DrawBitmap(
+            bitmap, D2D1_RECT_F{rect->left, rect->top, rect->right, rect->bottom},
+            1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
     }
   }
   // The Fluent top row: the preedit in the accent colour at semibold on the left, the page indicator and the previous and next arrows in the secondary colour on the right.
