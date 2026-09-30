@@ -29,9 +29,9 @@ DictionarySessionLease::DictionarySessionLease(NSURL *user)
                                                       error:nil])
         throw std::runtime_error("Cannot create dictionary session directory");
     sessions_ = open([user URLByAppendingPathComponent:@"dictionary-sessions.lock"].fileSystemRepresentation,
-                     O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+                     O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
     gate_ = open([user URLByAppendingPathComponent:@"dictionary-publication.lock"].fileSystemRepresentation,
-                 O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+                 O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
     if (sessions_ < 0 || gate_ < 0 || Lock(sessions_, LOCK_SH) != 0)
     {
         if (sessions_ >= 0)

@@ -12,6 +12,70 @@
 int main() {
     @autoreleasepool {
         using metasequoia::apple::DictionarySessionLease;
+        NSURL *symlinkRoot = [NSURL fileURLWithPath:[NSTemporaryDirectory()
+                                                       stringByAppendingPathComponent:NSUUID.UUID.UUIDString]];
+        NSURL *outside = [NSURL fileURLWithPath:[NSTemporaryDirectory()
+                                                   stringByAppendingPathComponent:NSUUID.UUID.UUIDString]];
+        assert([NSFileManager.defaultManager createDirectoryAtURL:symlinkRoot
+                                         withIntermediateDirectories:YES
+                                                          attributes:nil
+                                                               error:nil]);
+        assert([NSFileManager.defaultManager createDirectoryAtURL:outside
+                                         withIntermediateDirectories:YES
+                                                          attributes:nil
+                                                               error:nil]);
+        NSURL *outsideLock = [outside URLByAppendingPathComponent:@"outside.lock"];
+        assert([@"synthetic-lock-target" writeToURL:outsideLock atomically:YES encoding:NSUTF8StringEncoding error:nil]);
+        NSURL *linkedSessions = [symlinkRoot URLByAppendingPathComponent:@"dictionary-sessions.lock"];
+        assert([NSFileManager.defaultManager createSymbolicLinkAtURL:linkedSessions
+                                               withDestinationURL:outsideLock
+                                                              error:nil]);
+        bool rejected = false;
+        try {
+            DictionarySessionLease rejectedLease(symlinkRoot);
+        } catch (const std::exception &) {
+            rejected = true;
+        }
+        assert(rejected);
+        NSString *unchanged = [NSString stringWithContentsOfURL:outsideLock
+                                                          encoding:NSUTF8StringEncoding
+                                                             error:nil];
+        assert([unchanged isEqualToString:@"synthetic-lock-target"]);
+        assert([NSFileManager.defaultManager removeItemAtURL:symlinkRoot error:nil]);
+        assert([NSFileManager.defaultManager removeItemAtURL:outside error:nil]);
+
+        NSURL *gateRoot = [NSURL fileURLWithPath:[NSTemporaryDirectory()
+                                                   stringByAppendingPathComponent:NSUUID.UUID.UUIDString]];
+        NSURL *gateOutside = [NSURL fileURLWithPath:[NSTemporaryDirectory()
+                                                       stringByAppendingPathComponent:NSUUID.UUID.UUIDString]];
+        assert([NSFileManager.defaultManager createDirectoryAtURL:gateRoot
+                                         withIntermediateDirectories:YES
+                                                          attributes:nil
+                                                               error:nil]);
+        assert([NSFileManager.defaultManager createDirectoryAtURL:gateOutside
+                                         withIntermediateDirectories:YES
+                                                          attributes:nil
+                                                               error:nil]);
+        NSURL *outsideGate = [gateOutside URLByAppendingPathComponent:@"outside.lock"];
+        assert([@"synthetic-gate-target" writeToURL:outsideGate atomically:YES encoding:NSUTF8StringEncoding error:nil]);
+        NSURL *linkedGate = [gateRoot URLByAppendingPathComponent:@"dictionary-publication.lock"];
+        assert([NSFileManager.defaultManager createSymbolicLinkAtURL:linkedGate
+                                               withDestinationURL:outsideGate
+                                                              error:nil]);
+        rejected = false;
+        try {
+            DictionarySessionLease rejectedLease(gateRoot);
+        } catch (const std::exception &) {
+            rejected = true;
+        }
+        assert(rejected);
+        unchanged = [NSString stringWithContentsOfURL:outsideGate
+                                               encoding:NSUTF8StringEncoding
+                                                  error:nil];
+        assert([unchanged isEqualToString:@"synthetic-gate-target"]);
+        assert([NSFileManager.defaultManager removeItemAtURL:gateRoot error:nil]);
+        assert([NSFileManager.defaultManager removeItemAtURL:gateOutside error:nil]);
+
         NSURL *root = [NSURL fileURLWithPath:[NSTemporaryDirectory()
                                                  stringByAppendingPathComponent:NSUUID.UUID.UUIDString]];
         {
