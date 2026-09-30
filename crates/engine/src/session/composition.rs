@@ -511,6 +511,21 @@ impl InputSession {
 
     /// input_session.cpp:775-793.
     pub(super) fn candidate_annotations(&self) -> Vec<String> {
+        // Rows the engine generated are not spelled by pinyin, so a helpcode would say nothing about them; a command row shows its command's title instead.
+        if self.local_mode.generates_text() {
+            return self
+                .candidates()
+                .iter()
+                .map(|item| match self.local_mode {
+                    LocalInputMode::Command => self
+                        .queries
+                        .command_title(&item.pinyin)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    _ => String::new(),
+                })
+                .collect();
+        }
         let enabled = self.helpcode_enabled();
         let uppercase_all = self.scheme() == SchemeType::Quanpin;
         let keymap = self.helpcode_keymap.as_deref();

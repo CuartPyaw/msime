@@ -89,6 +89,8 @@ pub struct View {
     pub answered_by_pinyin_fallback: bool,
     /// Authoritative Engine mode, never inferred from displayed text.
     pub local_mode: String,
+    /// The non-letter characters the Engine takes as input in this state: the active local mode's spelling (digits and operators in `expression`, digits in `unicode`), or with nothing composed the keys that open a mode (`/`, `@`). A host sends these as characters, and treats a digit listed here as input rather than a candidate shortcut; the runtime already routes them away from punctuation.
+    pub spelling_symbols: String,
     /// Authoritative Engine English mode, independent of temporary local modes.
     pub dedicated_english: bool,
     pub session: u64,
@@ -119,6 +121,8 @@ pub struct View {
 pub struct OutputContext {
     pub scheme: u8,
     pub local_mode: String,
+    /// Whether the host counts this commit in typing statistics. False for text the Engine generated in the expression, command and mention modes, which the user did not type out.
+    pub typing_statistics: bool,
 }
 
 #[derive(Debug, Serialize)]

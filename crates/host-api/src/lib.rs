@@ -361,6 +361,9 @@ impl HostSession {
         options.local_super_jianpin = snapshot.preferences.local_modes.super_jianpin;
         options.local_temporary_english = snapshot.preferences.local_modes.temporary_english;
         options.local_temporary_japanese = snapshot.preferences.local_modes.temporary_japanese;
+        options.local_expression = snapshot.preferences.local_modes.expression;
+        options.local_command = snapshot.preferences.local_modes.command;
+        options.local_mention = snapshot.preferences.local_modes.mention;
         options.sentence_association =
             engine_sentence_association(&snapshot.preferences.sentence_association);
         // Unconditional, because `Runtime::crop_alternative_readings` runs whether or not a model is
@@ -606,6 +609,11 @@ impl HostOptions {
             local_super_jianpin: self.preferences.local_modes.super_jianpin,
             local_temporary_english: self.preferences.local_modes.temporary_english,
             local_temporary_japanese: self.preferences.local_modes.temporary_japanese,
+            local_expression: self.preferences.local_modes.expression,
+            local_command: self.preferences.local_modes.command,
+            local_mention: self.preferences.local_modes.mention,
+            command_table: Vec::new(),
+            mention_entries: Vec::new(),
             sentence_association: engine_sentence_association(
                 &self.preferences.sentence_association,
             ),
@@ -1212,7 +1220,12 @@ fn dispatch(handle: u64, action: Action) -> *mut c_char {
                 .runtime
                 .dispatch(action)
                 .map_err(|e| e.to_string())?;
-            if result.commit.is_some() {
+            // Text the Engine generated (a calculator result, a command, a mention) was picked, not typed, and stays out of the statistics the way it stays out of learning.
+            let counts_as_typing = result
+                .commit_context
+                .as_ref()
+                .is_none_or(|context| context.typing_statistics);
+            if result.commit.is_some() && counts_as_typing {
                 if let Some(position) = position {
                     session.count_selection(position);
                 }

@@ -4,17 +4,20 @@ use std::collections::HashSet;
 
 use crate::assets;
 use crate::dictionary::english::EnglishDictionary;
+use crate::local::command::{command_title, query_command, usable_command_table};
 use crate::local::date_time::{query_date_time, LocalDateTime};
 use crate::local::emoji::{query_emoji, query_kaomoji, MIXED_RESULT_LIMIT, MODE_RESULT_LIMIT};
+use crate::local::expression::query_expression;
 use crate::local::jianpin::{query_jianpin, result_limit};
+use crate::local::mention::{query_mentions, usable_mentions};
 use crate::local::quick_phrase::query_quick_phrases;
 use crate::local::unicode::query_unicode;
 use crate::local::LocalQueryResult;
 use crate::paths::RuntimePaths;
 use crate::shuangpin::profile::profile;
 use crate::types::{
-    CandidateSource, EnglishInputOptions, LocalInputMode, MixedExpressiveOptions, SchemeType,
-    ShuangpinProfileKind, WordItem,
+    CandidateSource, CommandTableEntry, EnglishInputOptions, LocalInputMode, MentionEntry,
+    MixedExpressiveOptions, SchemeType, ShuangpinProfileKind, WordItem,
 };
 
 pub const MIXED_ENGLISH_LIMIT: usize = 5;
@@ -24,6 +27,10 @@ pub struct CandidateQueries {
     paths: RuntimePaths,
     profile: ShuangpinProfileKind,
     english: Option<EnglishDictionary>,
+    /// The host's command table, usable rows only.
+    command_table: Vec<CommandTableEntry>,
+    /// The host's mention list, usable entries only.
+    mentions: Vec<MentionEntry>,
 }
 
 impl CandidateQueries {
@@ -32,7 +39,24 @@ impl CandidateQueries {
             paths: paths.clone(),
             profile,
             english: None,
+            command_table: Vec::new(),
+            mentions: Vec::new(),
         }
+    }
+
+    /// Keeps the rows `/` mode can use and drops the rest.
+    pub fn set_command_table(&mut self, table: &[CommandTableEntry]) {
+        self.command_table = usable_command_table(table);
+    }
+
+    /// Keeps the entries `@` mode can use and drops the rest.
+    pub fn set_mentions(&mut self, entries: &[MentionEntry]) {
+        self.mentions = usable_mentions(entries);
+    }
+
+    /// The title of a `/` mode row, by the trigger its `pinyin` holds.
+    pub fn command_title(&self, trigger: &str) -> Option<&str> {
+        command_title(trigger, &self.command_table)
     }
 
     /// The English dictionary, opened on first use from the generation copy with the resource translations sidecar and the learned-gloss store (candidate_queries.cpp:197-207). The store is a user file because the generation copy is replaced on every new generation and would lose what is written into it; it is `translation-glosses.db` rather than the contract's `gloss_cache.db` because that is the file the host writes and users have (data-formats.md §1.4, §11).
@@ -93,6 +117,9 @@ impl CandidateQueries {
             ),
             LocalInputMode::TemporaryEnglish => rows(self.temporary_english(code)),
             LocalInputMode::TemporaryJapanese => rows(engine_candidates.to_vec()),
+            LocalInputMode::Expression => rows(query_expression(code)),
+            LocalInputMode::Command => rows(query_command(code, now, &self.command_table)),
+            LocalInputMode::Mention => rows(query_mentions(code, &self.mentions)),
         }
     }
 

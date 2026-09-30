@@ -207,6 +207,11 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         local_super_jianpin: true,
         local_temporary_english: true,
         local_temporary_japanese: true,
+        local_expression: false,
+        local_command: false,
+        local_mention: false,
+        command_table: Vec::new(),
+        mention_entries: Vec::new(),
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
@@ -2573,6 +2578,44 @@ fn selection_statistics_reach_the_store_at_focus_out() {
     assert_eq!(store.load().unwrap().selections.total(), 3);
     read(msime_client_destroy(handle));
     assert_eq!(store.load().unwrap().selections.total(), 3);
+}
+/// A result of the expression mode is picked, not typed: the preference opens the mode through the host, and the pick is kept out of the selection statistics as it is kept out of learning.
+#[test]
+fn generated_mode_selections_stay_out_of_selection_statistics() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut preferences = chinese_preferences();
+    preferences.local_modes.expression = true;
+    let store = TypingStatisticsStore::new(dir.path().join("user"));
+    store.set_enabled(true).unwrap();
+    let handle = test_host_with_pinyin_fixture(dir.path(), preferences);
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    let entered = read(msime_client_character(handle, b'V', true));
+    assert_eq!(entered["value"]["view"]["local_mode"], "expression");
+    assert_eq!(
+        entered["value"]["view"]["spelling_symbols"],
+        "0123456789+-*/.()%^"
+    );
+    let mut view = Value::Null;
+    for byte in b"1+2" {
+        view = read(msime_client_character(handle, *byte, false))["value"]["view"].clone();
+    }
+    let generation = view["generation"].as_u64().unwrap();
+    let selected = read(msime_client_select(handle, generation, 1));
+    assert_eq!(selected["value"]["commit"], "1+2=3");
+    assert_eq!(
+        selected["value"]["commit_context"]["local_mode"],
+        "expression"
+    );
+    assert_eq!(
+        selected["value"]["commit_context"]["typing_statistics"],
+        false
+    );
+    commit_candidate_by_position(handle, 1);
+    assert_eq!(read(msime_client_focus(handle, false))["ok"], true);
+    let selections = store.load().unwrap().selections;
+    assert_eq!(selections.ranks[1], 1);
+    assert_eq!(selections.total(), 1);
+    read(msime_client_destroy(handle));
 }
 #[test]
 fn selection_statistics_reach_the_store_when_the_session_is_destroyed() {

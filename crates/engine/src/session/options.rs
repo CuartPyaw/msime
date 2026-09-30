@@ -2,9 +2,9 @@
 
 use crate::paths::RuntimePaths;
 use crate::types::{
-    CandidateSource, EnglishInputOptions, FrequencyAdjustmentOptions, FuzzyPinyinOptions,
-    LocalInputMode, LocalModeOptions, MixedExpressiveOptions, SchemeType,
-    SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
+    CandidateSource, CommandTableEntry, EnglishInputOptions, FrequencyAdjustmentOptions,
+    FuzzyPinyinOptions, LocalInputMode, LocalModeOptions, MentionEntry, MixedExpressiveOptions,
+    SchemeType, SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
 };
 
 /// Everything a session is built with. `learning_undo` is gone with the feature.
@@ -37,6 +37,10 @@ pub struct SessionOptions {
     pub sentence_association: SentenceAssociationOptions,
     /// Committed text the neural sentence models condition on; `Session::set_rescoring_context` updates it live.
     pub rescoring_context: String,
+    /// The `/` mode's commands beyond the built-in ones; `Session::set_command_table` replaces it live.
+    pub command_table: Vec<CommandTableEntry>,
+    /// The `@` mode's names and places; `Session::set_mention_entries` replaces it live.
+    pub mention_entries: Vec<MentionEntry>,
 }
 
 impl SessionOptions {
@@ -64,6 +68,8 @@ impl SessionOptions {
             personal_context: true,
             sentence_association: SentenceAssociationOptions::default(),
             rescoring_context: String::new(),
+            command_table: Vec::new(),
+            mention_entries: Vec::new(),
         }
     }
 }
@@ -73,6 +79,8 @@ impl SessionOptions {
 pub struct SessionSnapshot {
     pub scheme: SchemeType,
     pub local_mode: LocalInputMode,
+    /// The non-letter characters `character` takes in this state: the active local mode's `spelling_symbols`, or while nothing is composed the keys that open the `/` and `@` modes. A host or runtime that would send one of these as punctuation sends it as a character instead.
+    pub spelling_symbols: String,
     pub preedit: String,
     pub raw_segmentation: String,
     pub normalized_segmentation: String,

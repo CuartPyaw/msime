@@ -1146,6 +1146,15 @@ pub struct LocalModePreferences {
     pub super_jianpin: bool,
     pub temporary_english: bool,
     pub temporary_japanese: bool,
+    /// `V` on an empty composition: calculator, Chinese numerals and dates. Off by default and in documents written before it existed, because Shift+V used to type a capital V.
+    #[serde(default)]
+    pub expression: bool,
+    /// `/` on an empty composition: built-in and installed commands. Off by default, because `/` used to type a mark.
+    #[serde(default)]
+    pub command: bool,
+    /// `@` on an empty composition: the local mention list. Off by default, because `@` used to type itself.
+    #[serde(default)]
+    pub mention: bool,
 }
 
 impl Default for LocalModePreferences {
@@ -1159,6 +1168,9 @@ impl Default for LocalModePreferences {
             super_jianpin: true,
             temporary_english: true,
             temporary_japanese: true,
+            expression: false,
+            command: false,
+            mention: false,
         }
     }
 }

@@ -19,7 +19,8 @@ use crate::diagnostics;
 use crate::error::{EngineError, Result};
 use crate::nine_key::NineKeySession;
 use crate::types::{
-    CandidateEdge, CandidateSource, Command, KeyResult, LocalInputMode, OnlineQuery, SchemeType,
+    CandidateEdge, CandidateSource, Command, CommandTableEntry, KeyResult, LocalInputMode,
+    MentionEntry, OnlineQuery, SchemeType,
 };
 
 pub use clock::Clock;
@@ -248,6 +249,16 @@ impl Session {
         self.input.reset_cache();
     }
 
+    /// Replace the `/` mode's command table; rows it cannot use are dropped. A diagnostic only if the open command list could not be refreshed.
+    pub fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Option<String> {
+        self.input.set_command_table(table)
+    }
+
+    /// Replace the `@` mode's list; entries it cannot use are dropped.
+    pub fn set_mention_entries(&mut self, entries: &[MentionEntry]) -> Option<String> {
+        self.input.set_mention_entries(entries)
+    }
+
     /// Forget the committed-word context (focus or application change, host-inserted text).
     pub fn reset_context(&mut self) {
         self.input.reset_commit_context();
@@ -313,6 +324,7 @@ impl Session {
         SessionSnapshot {
             scheme: input.scheme(),
             local_mode: input.local_mode,
+            spelling_symbols: input.spelling_symbols(),
             preedit,
             raw_segmentation: input.raw_segmentation(),
             normalized_segmentation: input.normalized_segmentation(),

@@ -788,6 +788,55 @@ fn local_mode_defaults_and_each_switch_roundtrip() {
 }
 
 #[test]
+fn generated_local_modes_are_off_by_default_and_in_older_documents() {
+    let defaults = LocalModePreferences::default();
+    assert!(!defaults.expression && !defaults.command && !defaults.mention);
+
+    // A document from before the three switches existed still loads, with them off and the rest as written.
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let mut legacy = serde_json::to_value(PreferencesSnapshot::default()).unwrap();
+    let local_modes = legacy["preferences"]["local_modes"]
+        .as_object_mut()
+        .unwrap();
+    for key in ["expression", "command", "mention"] {
+        assert!(local_modes.remove(key).is_some(), "{key}");
+    }
+    local_modes.insert("unicode".into(), false.into());
+    let bytes = serde_json::to_vec(&legacy).unwrap();
+    fs::write(store.path(), &bytes).unwrap();
+    let loaded = store.load().unwrap().preferences.local_modes;
+    assert_eq!(
+        loaded,
+        LocalModePreferences {
+            unicode: false,
+            ..LocalModePreferences::default()
+        }
+    );
+    assert_eq!(fs::read(store.path()).unwrap(), bytes);
+
+    for (revision, key) in ["expression", "command", "mention"].iter().enumerate() {
+        let mut value = serde_json::to_value(Preferences::default()).unwrap();
+        value["local_modes"][*key] = true.into();
+        let saved = store
+            .save(revision as u64, serde_json::from_value(value).unwrap())
+            .unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded, saved);
+        let modes = loaded.preferences.local_modes;
+        assert_eq!(
+            [modes.expression, modes.command, modes.mention],
+            [*key == "expression", *key == "command", *key == "mention"]
+        );
+    }
+
+    // The fields stay closed to anything else.
+    let mut unknown = serde_json::to_value(Preferences::default()).unwrap();
+    unknown["local_modes"]["calculator"] = true.into();
+    assert!(serde_json::from_value::<Preferences>(unknown).is_err());
+}
+
+#[test]
 fn appearance_preferences_legacy_defaults_and_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let store = PreferencesStore::new(dir.path());

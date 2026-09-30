@@ -32,6 +32,8 @@
 | `wana_kana` | 4 | MIT | 日语罗马字转假名（`crates/engine/src/japanese/romaji.rs`） |
 | `cpal` | 0.18 | Apache-2.0 | `host-api` 的麦克风采集（iOS 与 HarmonyOS 不链接）。Linux 上经 ALSA 的 `libasound` 访问声卡，构建需要 `libasound2-dev` 与 `pkg-config` |
 | `rubato` | 5 | MIT OR Apache-2.0 | 把采集到的音频重采样到识别所需的采样率 |
+| `exmex` | 0.21 | MIT OR Apache-2.0 | V模式的算式求值（`crates/engine/src/local/expression.rs`），只注册四则运算、`%` 取余和 `^` 乘方。它带进 `regex` 与 `smallvec`，两者原本就在锁文件里 |
+| `chinese-number`（关闭默认特性，只开 `std`、`number-to-chinese`） | 0.8 | MIT | V模式把数字写成中文小写、大写与金额（同一文件）。传递依赖 `chinese-variant`（MIT）、`enum-ordinalize`（MIT）、`num-bigint`（MIT OR Apache-2.0） |
 
 ## 随包资源（`resources/desktop-dictionary.lock.json`）
 

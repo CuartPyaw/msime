@@ -78,8 +78,11 @@ impl InputSession {
     }
 
     pub(super) fn update_local_candidates(&mut self) -> Option<String> {
-        // Only the date/time mode reads the wall clock; the other modes would pay a local-offset lookup per key for nothing.
-        let now = if self.local_mode == LocalInputMode::DateTime {
+        // Only the date/time and command modes read the wall clock; the other modes would pay a local-offset lookup per key for nothing.
+        let now = if matches!(
+            self.local_mode,
+            LocalInputMode::DateTime | LocalInputMode::Command
+        ) {
             self.local_now()
         } else {
             LocalDateTime::default()

@@ -16,15 +16,16 @@ use crate::helpcode::{is_supported_helpcode_schema, load_helpcode_keymap, Shared
 use crate::ime::queries::CandidateQueries;
 use crate::ime::ImeSession;
 use crate::local::date_time::LocalDateTime;
+use crate::local::GENERATED_MODE_INPUT_LIMIT;
 use crate::paths::RuntimePaths;
 use crate::punctuation::PunctuationPolicy;
 use crate::quanpin::QuanpinEngine;
 use crate::shuangpin::profile::profile;
 use crate::shuangpin::ShuangpinProfile;
 use crate::types::{
-    CandidateSource, Command, EnglishInputOptions, FrequencyAdjustmentOptions, KeyResult,
-    LocalInputMode, LocalModeOptions, MixedExpressiveOptions, SchemeKey, SchemeType,
-    ShuangpinProfileKind, WordItem, WubiInputOptions,
+    CandidateSource, Command, CommandTableEntry, EnglishInputOptions, FrequencyAdjustmentOptions,
+    KeyResult, LocalInputMode, LocalModeOptions, MentionEntry, MixedExpressiveOptions, SchemeKey,
+    SchemeType, ShuangpinProfileKind, WordItem, WubiInputOptions,
 };
 use crate::user_dictionary::ngram_store::PersonalNgramStore;
 use crate::user_dictionary::removal::learn_entered_english_word;
@@ -163,6 +164,8 @@ impl InputSession {
         session.frequency = options.frequency;
         session.english_options = options.english;
         session.set_local_mode_options(options.local_modes);
+        session.queries.set_command_table(&options.command_table);
+        session.queries.set_mentions(&options.mention_entries);
         session.expressive_options = options.expressive;
         session.set_wubi_input_options(options.wubi);
         session.set_personal_context_enabled(options.personal_context);
@@ -207,10 +210,15 @@ impl InputSession {
         if self.is_korean() {
             return self.handle_korean_character(value);
         }
-        if shift_only && !self.has_composition() && self.scheme().is_pinyin() {
-            if let Some(mode) = self.local_mode_for_entry(value) {
-                self.enter_local_mode(mode, value);
-                return KeyResult::handled();
+        if !self.has_composition() && self.scheme().is_pinyin() {
+            let entry = if shift_only {
+                self.local_mode_for_entry(value)
+            } else {
+                None
+            }
+            .or_else(|| self.local_mode_for_symbol(value));
+            if let Some(mode) = entry {
+                return KeyResult::handled().with_diagnostic(self.enter_local_mode(mode, value));
             }
         }
 
@@ -297,6 +305,17 @@ impl InputSession {
             LocalInputMode::QuickPhrase | LocalInputMode::DateTime => value.is_ascii_lowercase(),
             LocalInputMode::Unicode => {
                 value.is_ascii_hexdigit() || (value == b'+' && self.local_preedit == "U")
+            }
+            LocalInputMode::Expression => {
+                self.local_preedit.len() < GENERATED_MODE_INPUT_LIMIT
+                    && self
+                        .local_mode
+                        .spelling_symbols()
+                        .as_bytes()
+                        .contains(&value)
+            }
+            LocalInputMode::Command | LocalInputMode::Mention => {
+                self.local_preedit.len() < GENERATED_MODE_INPUT_LIMIT && value.is_ascii_lowercase()
             }
             LocalInputMode::None => return KeyResult::unhandled(),
         };
@@ -417,8 +436,17 @@ impl InputSession {
         self.select_candidate(usize::from(value - b'1'))
     }
 
-    /// input_session.cpp:260-292.
+    /// input_session.cpp:260-292. `/` and `@` never open their modes here: a runtime finishes the composition before it asks for the mark, so an empty composition at this point does not mean the key was typed with nothing composed. They open through `handle_character`, which the runtime reaches first.
     pub fn handle_punctuation(&mut self, value: u8) -> KeyResult {
+        // A spelling symbol of the active mode is part of the input, not a mark that ends it.
+        if self
+            .local_mode
+            .spelling_symbols()
+            .as_bytes()
+            .contains(&value)
+        {
+            return self.handle_character(value, false);
+        }
         // Korean writes half-width ASCII punctuation whatever the Chinese punctuation switches say. With a syllable open the mark follows it in one commit; with nothing open the host inserts the key itself.
         if self.is_korean() && !self.dedicated_english && self.local_mode == LocalInputMode::None {
             if !self.has_composition() {
@@ -453,6 +481,40 @@ impl InputSession {
         text.push_str(mark);
         result.commit = Some(text);
         result
+    }
+
+    /// `SessionSnapshot::spelling_symbols`.
+    pub fn spelling_symbols(&self) -> String {
+        if self.dedicated_english {
+            return String::new();
+        }
+        if self.local_mode != LocalInputMode::None {
+            return self.local_mode.spelling_symbols().to_owned();
+        }
+        if self.has_composition() || !self.scheme().is_pinyin() {
+            return String::new();
+        }
+        (*b"/@")
+            .into_iter()
+            .filter(|key| self.local_mode_for_symbol(*key).is_some())
+            .map(char::from)
+            .collect()
+    }
+
+    /// Replaces the `/` mode's command table, refreshing the list on screen when that mode is open.
+    pub fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Option<String> {
+        self.queries.set_command_table(table);
+        (self.local_mode == LocalInputMode::Command)
+            .then(|| self.update_local_candidates())
+            .flatten()
+    }
+
+    /// Replaces the `@` mode's list, refreshing the list on screen when that mode is open.
+    pub fn set_mention_entries(&mut self, entries: &[MentionEntry]) -> Option<String> {
+        self.queries.set_mentions(entries);
+        (self.local_mode == LocalInputMode::Mention)
+            .then(|| self.update_local_candidates())
+            .flatten()
     }
 
     pub fn has_composition(&self) -> bool {
@@ -759,12 +821,27 @@ impl InputSession {
                 LocalInputMode::TemporaryJapanese,
                 options.temporary_japanese,
             ),
+            b'V' => (LocalInputMode::Expression, options.expression),
             _ => return None,
         };
         enabled.then_some(mode)
     }
 
-    fn enter_local_mode(&mut self, mode: LocalInputMode, letter: u8) {
+    /// The symbol keys that open a mode with nothing composed. Only while Chinese punctuation is in force: with ASCII punctuation the key is the literal character the user chose.
+    fn local_mode_for_symbol(&self, value: u8) -> Option<LocalInputMode> {
+        if !self.chinese_punctuation_enabled || self.punctuation_lock == 2 {
+            return None;
+        }
+        let options = self.local_mode_options;
+        let (mode, enabled) = match value {
+            b'/' => (LocalInputMode::Command, options.command),
+            b'@' => (LocalInputMode::Mention, options.mention),
+            _ => return None,
+        };
+        enabled.then_some(mode)
+    }
+
+    fn enter_local_mode(&mut self, mode: LocalInputMode, letter: u8) -> Option<String> {
         if mode == LocalInputMode::TemporaryJapanese {
             self.temporary_original_scheme = Some(self.scheme());
             self.engine.switch_scheme(SchemeType::JapaneseRomaji);
@@ -773,7 +850,12 @@ impl InputSession {
         self.local_preedit = (letter as char).to_string();
         self.local_candidates.clear();
         self.chain.reset();
+        // The command and mention lists are worth showing before a letter narrows them.
+        if matches!(mode, LocalInputMode::Command | LocalInputMode::Mention) {
+            return self.update_local_candidates();
+        }
         self.add_local_fallback_candidate();
+        None
     }
 
     /// The `R` preedit and rows follow the Japanese engine after every edit.
@@ -875,5 +957,8 @@ fn local_mode_enabled(options: LocalModeOptions, mode: LocalInputMode) -> bool {
         LocalInputMode::SuperJianpin => options.super_jianpin,
         LocalInputMode::TemporaryEnglish => options.temporary_english,
         LocalInputMode::TemporaryJapanese => options.temporary_japanese,
+        LocalInputMode::Expression => options.expression,
+        LocalInputMode::Command => options.command,
+        LocalInputMode::Mention => options.mention,
     }
 }

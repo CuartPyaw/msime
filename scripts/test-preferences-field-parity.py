@@ -34,6 +34,12 @@ RUST_ONLY = {
         # Direct2D only and offers no choice to make.
         "ui_backend",
     },
+    "LocalModePreferences": {
+        # The V, / and @ modes are wired through the Engine, the runtime and host-api first; their switches join the 实用功能 group together with the host digit routing that makes them usable, and these three entries leave with that change.
+        "expression",
+        "command",
+        "mention",
+    },
 }
 
 

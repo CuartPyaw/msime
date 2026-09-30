@@ -38,6 +38,8 @@ struct Fixture {
     positions: Vec<u8>,
     /// What the Engine reports as the reading, which the Japanese scheme sets to the converted kana. Empty means no reading.
     reading: String,
+    /// What the Engine reports it takes as characters rather than punctuation.
+    spelling_symbols: String,
 }
 
 #[cfg(unix)]
@@ -656,6 +658,7 @@ impl InputEngine for Fixture {
                 && self.text.len() == 4
                 && self.words.len() == 1,
             local_mode: self.local_mode.clone(),
+            spelling_symbols: self.spelling_symbols.clone(),
             dedicated_english: self.dedicated_english,
             preedit: self.text.clone(),
             reading: self.reading.clone(),
@@ -915,6 +918,7 @@ fn runtime() -> Runtime<Fixture> {
             remaining_after_select: None,
             positions: Vec::new(),
             reading: String::new(),
+            spelling_symbols: String::new(),
         },
         5,
     )
@@ -968,6 +972,7 @@ fn several_candidates_from_one_provider_take_their_seat_as_a_group() {
                 remaining_after_select: None,
                 positions: Vec::new(),
                 reading: String::new(),
+                spelling_symbols: String::new(),
             },
             9,
         )
@@ -1088,6 +1093,7 @@ fn promoted_english_candidate_keeps_the_first_seat_with_cloud_and_ai() {
                 remaining_after_select: None,
                 positions: Vec::new(),
                 reading: String::new(),
+                spelling_symbols: String::new(),
             },
             9,
         )
@@ -1211,6 +1217,7 @@ fn a_chosen_phrase_piece_waits_for_the_rest_of_the_phrase() {
                 remaining_after_select: remaining.map(str::to_owned),
                 positions: Vec::new(),
                 reading: String::new(),
+                spelling_symbols: String::new(),
             },
             5,
         )
@@ -1312,6 +1319,7 @@ fn a_phrase_piece_survives_the_reading_being_deleted() {
             remaining_after_select: Some("p".into()),
             positions: Vec::new(),
             reading: String::new(),
+            spelling_symbols: String::new(),
         },
         5,
     )
@@ -1410,6 +1418,7 @@ impl InputEngine for PhraseEngine {
             answered_by_pinyin_fallback: false,
             wubi_unique_four_code: false,
             local_mode: "none".into(),
+            spelling_symbols: String::new(),
             dedicated_english: false,
             preedit: self.reading.clone(),
             reading: String::new(),
@@ -1679,6 +1688,7 @@ fn candidate_codes_follow_candidates_in_page_and_complete_snapshots() {
             remaining_after_select: None,
             positions: Vec::new(),
             reading: String::new(),
+            spelling_symbols: String::new(),
         },
         2,
     )
@@ -2907,6 +2917,11 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine::host::EngineOpti
         local_super_jianpin: true,
         local_temporary_english: true,
         local_temporary_japanese: true,
+        local_expression: false,
+        local_command: false,
+        local_mention: false,
+        command_table: Vec::new(),
+        mention_entries: Vec::new(),
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
@@ -3090,6 +3105,107 @@ fn korean_syllables_are_never_held_as_a_phrase_prefix() {
     }
     assert_eq!(commits, ["가"]);
     assert_eq!(runtime.view().preedit, "나");
+}
+
+fn generated_mode_runtime(directory: &std::path::Path) -> Runtime {
+    let mut options = real_engine_options(directory);
+    options.local_expression = true;
+    options.local_command = true;
+    options.local_mention = true;
+    options.mention_entries = vec![msime_engine::host::MentionEntry {
+        text: "张三".into(),
+        key: "zhang'san".into(),
+    }];
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+fn character(runtime: &mut Runtime, value: u8) -> Transition {
+    runtime
+        .dispatch(Action::Character {
+            value,
+            shift: value.is_ascii_uppercase(),
+        })
+        .unwrap()
+}
+
+// The operators of the expression mode arrive as punctuation on hosts that classify Shift+= and Shift+8 that way. The runtime finishes a composition before it translates punctuation, which here would commit the half-typed expression; the Engine's `spelling_symbols` is what routes them back to the Engine as characters.
+#[test]
+fn expression_operators_sent_as_punctuation_extend_the_expression() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = generated_mode_runtime(directory.path());
+    let entered = character(&mut runtime, b'V');
+    assert_eq!(entered.view.local_mode, "expression");
+    assert_eq!(entered.view.spelling_symbols, "0123456789+-*/.()%^");
+    character(&mut runtime, b'1');
+    for (action, value) in [
+        (Action::Punctuation(b'+'), b'2'),
+        (Action::PunctuationAscii(b'*'), b'3'),
+        (Action::Punctuation(b'('), b'4'),
+    ] {
+        let transition = runtime.dispatch(action).unwrap();
+        assert!(transition.handled && transition.commit.is_none());
+        assert_eq!(transition.view.local_mode, "expression");
+        // A digit is input here, never a candidate shortcut.
+        let transition = character(&mut runtime, value);
+        assert!(transition.commit.is_none(), "{value} picked a candidate");
+    }
+    runtime.dispatch(Action::Punctuation(b')')).unwrap();
+    assert_eq!(runtime.view().editing_text, "V1+2*3(4)");
+    assert!(runtime.online_query().unwrap().is_none());
+
+    // A mark the mode does not spell with still ends the composition.
+    runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    character(&mut runtime, b'V');
+    for value in *b"2*3" {
+        character(&mut runtime, value);
+    }
+    assert_eq!(runtime.view().candidates[0].text, "6");
+    let committed = runtime.dispatch(Action::Punctuation(b',')).unwrap();
+    assert_eq!(committed.commit.as_deref(), Some("6，"));
+    let context = committed.commit_context.unwrap();
+    assert_eq!(context.local_mode, "expression");
+    assert!(!context.typing_statistics);
+    assert_eq!(committed.view.local_mode, "none");
+}
+
+#[test]
+fn slash_and_at_open_their_modes_only_with_nothing_composed() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = generated_mode_runtime(directory.path());
+    assert_eq!(runtime.view().spelling_symbols, "/@");
+
+    // The explicit punctuation route opens the mode as the character route does.
+    let opened = runtime.dispatch(Action::Punctuation(b'/')).unwrap();
+    assert!(opened.handled && opened.commit.is_none());
+    assert_eq!(opened.view.local_mode, "command");
+    assert!(opened.view.spelling_symbols.is_empty());
+    assert!(!opened.view.candidates.is_empty());
+    runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+
+    let opened = character(&mut runtime, b'@');
+    assert_eq!(opened.view.local_mode, "mention");
+    assert_eq!(opened.view.candidates[0].text, "张三");
+    let committed = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(committed.commit.as_deref(), Some("张三"));
+    assert!(!committed.commit_context.unwrap().typing_statistics);
+
+    // A literal ASCII mark the host chose after weighing the surrounding text never opens a mode.
+    let literal = runtime.dispatch(Action::PunctuationAscii(b'/')).unwrap();
+    assert_eq!(literal.view.local_mode, "none");
+
+    // With a composition `/` is punctuation: the composition is committed with the mark after it.
+    for value in *b"ab" {
+        character(&mut runtime, value);
+    }
+    assert!(runtime.view().spelling_symbols.is_empty());
+    let finished = runtime.dispatch(Action::Punctuation(b'/')).unwrap();
+    let commit = finished.commit.unwrap();
+    assert!(commit.ends_with('/'), "{commit:?}");
+    assert_eq!(finished.view.local_mode, "none");
+    assert!(finished.commit_context.unwrap().typing_statistics);
 }
 
 /// Without a settled model attached, the settle call is inert.
@@ -3294,6 +3410,7 @@ impl InputEngine for WubiMixedEngine {
             answered_by_pinyin_fallback: self.answered_by_pinyin_fallback && count > 0,
             wubi_unique_four_code: false,
             local_mode: "none".into(),
+            spelling_symbols: String::new(),
             dedicated_english: false,
             preedit: self.reading.clone(),
             reading: String::new(),
@@ -3397,6 +3514,7 @@ fn withholding_runtime(offered: usize, withheld: usize, page_size: u8) -> Runtim
             remaining_after_select: None,
             positions: Vec::new(),
             reading: String::new(),
+            spelling_symbols: String::new(),
         },
         page_size,
     )

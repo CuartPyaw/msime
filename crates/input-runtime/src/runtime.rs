@@ -661,6 +661,7 @@ impl<E: InputEngine> Runtime<E> {
             shuangpin_profile: self.cached.shuangpin_profile.clone(),
             answered_by_pinyin_fallback: self.cached.answered_by_pinyin_fallback,
             local_mode: self.cached.local_mode.clone(),
+            spelling_symbols: self.cached.spelling_symbols.clone(),
             dedicated_english: self.cached.dedicated_english,
             session: self.session,
             generation: self.generation,
@@ -1150,6 +1151,7 @@ impl<E: InputEngine> Runtime<E> {
             commit_context: result.has_commit.then(|| OutputContext {
                 scheme: self.cached.scheme,
                 local_mode: self.cached.local_mode.clone(),
+                typing_statistics: local_mode_counts_as_typing(&self.cached.local_mode),
             }),
             handled: result.handled,
             commit: result.has_commit.then_some(result.commit),
@@ -1519,6 +1521,7 @@ impl<E: InputEngine> Runtime<E> {
                     answered_by_pinyin_fallback: true,
                     wubi_unique_four_code: false,
                     local_mode: "unknown".into(),
+                    spelling_symbols: String::new(),
                     dedicated_english: false,
                     preedit: String::new(),
                     reading: String::new(),
@@ -1585,6 +1588,12 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     fn punctuation(&mut self, value: u8) -> Result<EngineResult, RuntimeError> {
+        // A symbol the Engine spells with (an operator in the expression mode) or opens a mode with (`/` with nothing composed) is input, whichever route the host chose for the key: finishing first would commit the half-typed spelling. A phrase still being held is a composition too, and the mark has to end it rather than open a mode after it.
+        if self.cached.spelling_symbols.as_bytes().contains(&value)
+            && (self.cached.local_mode != "none" || self.phrase_prefix.is_empty())
+        {
+            return self.engine.character(value, false);
+        }
         // Finish through Engine with the host highlight BEFORE asking it to translate.
         // Calling Engine punctuation on an active composition would choose candidate zero.
         let mut finished = self.engine.finish(self.engine_index(self.highlighted))?;
@@ -1621,6 +1630,12 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     fn punctuation_ascii(&mut self, value: u8) -> Result<EngineResult, RuntimeError> {
+        // A spelling symbol still extends the composition in progress. With nothing composed the host asked for the literal mark after weighing the surrounding text (a `/` after a digit), so it never opens a mode.
+        if self.cached.local_mode != "none"
+            && self.cached.spelling_symbols.as_bytes().contains(&value)
+        {
+            return self.engine.character(value, false);
+        }
         // Keep the same highlighted-candidate completion semantics as normal
         // punctuation, but do not ask Engine to translate the trailing mark.
         // The Linux host has already applied its surrounding-text policy.
@@ -1841,6 +1856,7 @@ impl<E: InputEngine> Runtime<E> {
         let commit_context = needs_commit_context.then(|| OutputContext {
             scheme: self.cached.scheme,
             local_mode: self.cached.local_mode.clone(),
+            typing_statistics: local_mode_counts_as_typing(&self.cached.local_mode),
         });
         let refresh = self.refresh();
         let mut result = result?;

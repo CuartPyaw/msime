@@ -187,6 +187,9 @@ pub fn product_options(options: &mut SessionOptions) {
         super_jianpin: true,
         temporary_english: true,
         temporary_japanese: true,
+        expression: false,
+        command: false,
+        mention: false,
     };
     options.wubi.mixed_pinyin = false;
     options.sentence_alternatives = true;

@@ -13,8 +13,8 @@ use crate::helpcode::{compute_helpcodes, load_helpcode_keymap, SharedKeymap};
 use crate::local::database::LocalDatabaseLease;
 use crate::pinyin::segment::is_complete_pinyin_input;
 use crate::types::{
-    CandidateEdge, CandidateSource, KeyResult, LocalInputMode, OnlineQuery, SchemeType,
-    ShuangpinProfileKind,
+    CandidateEdge, CandidateSource, CommandTableEntry, KeyResult, LocalInputMode, MentionEntry,
+    OnlineQuery, SchemeType, ShuangpinProfileKind,
 };
 use crate::user_dictionary::ngram_store::flush_journal;
 use crate::user_dictionary::removal::learn_entered_english_word;
@@ -45,6 +45,8 @@ pub enum Command {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EngineSnapshot {
     pub local_mode: String,
+    /// The non-letter characters `character` takes in this state (`SessionSnapshot::spelling_symbols`): send one of these as a character, never as punctuation.
+    pub spelling_symbols: String,
     pub dedicated_english: bool,
     /// Mirrors `set_nine_key_enabled`; the engine snapshot has no such flag.
     pub nine_key: bool,
@@ -143,13 +145,14 @@ impl Session {
         let value = self.inner.snapshot();
         let pinyin_scheme = value.scheme.is_pinyin();
         let uppercase_all = value.scheme == SchemeType::Quanpin;
-        let keymap = self
-            .helpcode_keymap
-            .as_deref()
-            .filter(|_| self.helpcode_enabled && pinyin_scheme);
+        // Rows the engine generated in the expression, command and mention modes are not spelled by pinyin; their annotations are the engine's own.
+        let keymap = self.helpcode_keymap.as_deref().filter(|_| {
+            self.helpcode_enabled && pinyin_scheme && !value.local_mode.generates_text()
+        });
         let count = value.candidates.len();
         let mut output = EngineSnapshot {
             local_mode: value.local_mode.name().to_owned(),
+            spelling_symbols: value.spelling_symbols,
             dedicated_english: value.dedicated_english,
             nine_key: self.nine_key,
             nine_key_spellings: value.nine_key_spellings,
@@ -260,6 +263,22 @@ impl Session {
 
     pub fn reset_context(&mut self) {
         self.inner.reset_context();
+    }
+
+    /// Replace the `/` mode's command table live; `EngineOptions::command_table` is what a rebuilt session starts with.
+    pub fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Result<()> {
+        match self.inner.set_command_table(table) {
+            Some(diagnostic) => Err(EngineError::failed(&diagnostic)),
+            None => Ok(()),
+        }
+    }
+
+    /// Replace the `@` mode's list live; `EngineOptions::mention_entries` is what a rebuilt session starts with.
+    pub fn set_mention_entries(&mut self, entries: &[MentionEntry]) -> Result<()> {
+        match self.inner.set_mention_entries(entries) {
+            Some(diagnostic) => Err(EngineError::failed(&diagnostic)),
+            None => Ok(()),
+        }
     }
 
     /// Live update of the neural rescoring context without a rebuild.
@@ -429,9 +448,11 @@ impl Session {
             };
             !segmentation.is_empty() && is_complete_pinyin_input(segmentation)
         };
-        let should_learn = before.dedicated_english
-            || before.local_mode != LocalInputMode::None
-            || (chinese_scheme && !complete_pure_pinyin);
+        // What the expression, command and mention modes hold is arithmetic, a trigger or a key, never a word the user spelled.
+        let should_learn = !before.local_mode.generates_text()
+            && (before.dedicated_english
+                || before.local_mode != LocalInputMode::None
+                || (chinese_scheme && !complete_pure_pinyin));
         let mut result = self.inner.command(crate::types::Command::CommitRaw);
         if let Some(commit) = result.commit.as_deref().filter(|_| should_learn) {
             if !commit.is_empty() {
@@ -467,6 +488,11 @@ impl Drop for Session {
         // A host thread whose sessions are gone (a quiesced IME, a closed window) holds no journal handle.
         crate::user_dictionary::journal::release_thread_journal();
     }
+}
+
+/// Whether a commit made in `local_mode` (a `local_mode` name, as `EngineSnapshot` carries it) counts as typing. Text the expression, command and mention modes generated does not; an unknown name does, as every mode did before those.
+pub fn local_mode_counts_as_typing(local_mode: &str) -> bool {
+    LocalInputMode::from_name(local_mode).is_none_or(|mode| !mode.generates_text())
 }
 
 /// `result_for` (bridge.cpp:408-410): an empty commit with `has_commit = true` stays representable.
