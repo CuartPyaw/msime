@@ -274,9 +274,9 @@ pub fn reorder_candidates_with_single_helpcode(
     if help_code.len() != 1 {
         return candidates;
     }
-    let mut first = Vec::new();
-    let mut last = Vec::new();
-    let mut rest = Vec::new();
+    let mut first = Vec::with_capacity(candidates.len());
+    let mut last = Vec::with_capacity(candidates.len());
+    let mut rest = Vec::with_capacity(candidates.len());
     for candidate in candidates {
         match match_single_helpcode(&candidate.word, help_code, keymap) {
             SingleHelpcodeMatch::First | SingleHelpcodeMatch::Both => first.push(candidate),
