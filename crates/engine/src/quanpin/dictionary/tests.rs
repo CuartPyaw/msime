@@ -20,6 +20,17 @@ fn words(items: &[WordItem]) -> Vec<&str> {
 }
 
 #[test]
+fn segmentation_cache_lookup_uses_one_owned_key() {
+    let mut cache = FifoCache::new(2);
+    cache.insert("ni".to_owned(), vec!["ni".to_owned()]);
+    let key = "ni".to_owned();
+    assert_eq!(
+        lookup_cached_segments(&cache, &key),
+        Some(vec!["ni".to_owned()])
+    );
+}
+
+#[test]
 fn primary_segmentation_is_checked_without_owning_a_key_copy() {
     let seen = HashSet::new();
     assert!(is_duplicate_segmentation("ni'hao", &seen, "ni'hao"));
