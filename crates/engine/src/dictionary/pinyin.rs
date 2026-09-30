@@ -195,7 +195,7 @@ impl PinyinDatabase {
             return result;
         }
         let mut keys_by_table: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::with_capacity(keys.len());
         for key in keys {
             let segments = split_segments(key);
             if !seen.insert(key.as_str()) || !has_only_complete_pinyin_segments(&segments) {
