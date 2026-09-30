@@ -91,7 +91,9 @@ pub fn search_converted(
         .chain(std::iter::once(reading.len()))
         .collect();
     let mora_count = boundaries.len() - 1;
-    let mut rows: Vec<Vec<Node>> = vec![Vec::new(); mora_count + 1];
+    let mut rows: Vec<Vec<Node>> = (0..=mora_count)
+        .map(|_| Vec::with_capacity(MAX_NODES_PER_ROW))
+        .collect();
     rows[0].push(Node {
         text: String::new(),
         cost: 0,
