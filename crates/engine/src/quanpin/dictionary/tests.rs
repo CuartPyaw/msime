@@ -1,6 +1,7 @@
 //! Dictionary-level ports of the reference tests: the autocorrect switch matrix and marking probes (`test_pinyin.cpp:910-993`, `:1169-1225`), the segmentation contract, longer phrases (`test_longer_phrase_candidates.cpp`), fuzzy rules and the protected alternative slot (`test_fuzzy_pinyin.cpp:97-130`), typo sentences (`test_typo_correction_input_session.cpp:260-330`), online rows, initial expansion and the word writers.
 
 use rusqlite::params;
+use std::collections::HashSet;
 
 use super::*;
 use crate::quanpin::fixture::Fixture;
@@ -16,6 +17,24 @@ const NO_FUZZY: FuzzyPinyinOptions = FuzzyPinyinOptions { rules: 0 };
 
 fn words(items: &[WordItem]) -> Vec<&str> {
     items.iter().map(|item| item.word.as_str()).collect()
+}
+
+#[test]
+fn segmentation_cache_lookup_uses_one_owned_key() {
+    let mut cache = FifoCache::new(2);
+    cache.insert("ni".to_owned(), vec!["ni".to_owned()]);
+    let key = "ni".to_owned();
+    assert_eq!(
+        lookup_cached_segments(&cache, &key),
+        Some(vec!["ni".to_owned()])
+    );
+}
+
+#[test]
+fn primary_segmentation_is_checked_without_owning_a_key_copy() {
+    let seen = HashSet::new();
+    assert!(is_duplicate_segmentation("ni'hao", &seen, "ni'hao"));
+    assert!(!is_duplicate_segmentation("ni'hao", &seen, "ni'he"));
 }
 
 fn contains(items: &[WordItem], word: &str) -> bool {

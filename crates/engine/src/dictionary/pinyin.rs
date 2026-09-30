@@ -162,7 +162,6 @@ impl PinyinDatabase {
             return Vec::new();
         }
         let mut keys_by_table: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        let mut seen = HashSet::with_capacity(segmentations.len());
         for segments in segmentations {
             if !has_only_complete_pinyin_segments(segments) {
                 continue;
@@ -171,10 +170,13 @@ impl PinyinDatabase {
                 continue;
             };
             let key = join_segments(segments);
-            if key.is_empty() || !seen.insert(format!("{table}\n{key}")) {
+            if key.is_empty() {
                 continue;
             }
-            keys_by_table.entry(table).or_default().push(key);
+            let table_keys = keys_by_table.entry(table).or_default();
+            if !contains_table_key(table_keys, &key) {
+                table_keys.push(key);
+            }
         }
         let mut rows = Vec::with_capacity(segmentations.len().saturating_mul(limit));
         for (table, keys) in &keys_by_table {
@@ -412,6 +414,10 @@ fn range_sql(table: &str) -> String {
     )
 }
 
+fn contains_table_key(keys: &[String], key: &str) -> bool {
+    keys.iter().any(|existing| existing == key)
+}
+
 fn dict_row(row: &Row<'_>) -> rusqlite::Result<DictRow> {
     Ok(DictRow {
         key: column_text(row, 0)?,
@@ -422,8 +428,19 @@ fn dict_row(row: &Row<'_>) -> rusqlite::Result<DictRow> {
 
 /// First occurrence wins (QQ:774-780).
 fn deduplicate_by_value(rows: &mut Vec<DictRow>) {
+    // Check duplicate values through borrowed slices, then retain in place after releasing the set.
     let mut seen = HashSet::with_capacity(rows.len());
-    rows.retain(|row| seen.insert(row.value.clone()));
+    let unique = rows
+        .iter()
+        .map(|row| seen.insert(row.value.as_str()))
+        .collect::<Vec<_>>();
+    drop(seen);
+    let mut index = 0;
+    rows.retain(|_| {
+        let keep = unique[index];
+        index += 1;
+        keep
+    });
 }
 
 #[cfg(test)]
@@ -439,6 +456,13 @@ mod tests {
 
     fn values(rows: &[DictRow]) -> Vec<&str> {
         rows.iter().map(|row| row.value.as_str()).collect()
+    }
+
+    #[test]
+    fn table_key_lookup_scans_existing_keys() {
+        let keys = vec!["ni'hao".to_owned()];
+        assert!(contains_table_key(&keys, "ni'hao"));
+        assert!(!contains_table_key(&keys, "ni'he"));
     }
 
     fn cascade_fixture(directory: &Path) -> PinyinDatabase {

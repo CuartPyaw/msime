@@ -473,7 +473,7 @@ private final class VoiceTextHandoffWriter {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700])
     let descriptor = open(directory.appendingPathComponent("transfer.lock").path,
-      O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+      O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
     guard descriptor >= 0 else { throw NSError(domain: "voice_handoff", code: 3) }
     defer { close(descriptor) }
     guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {

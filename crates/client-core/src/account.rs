@@ -363,11 +363,13 @@ impl AccountError {
 // everything it did when this was one file.
 mod api;
 mod client;
+mod google;
 mod session;
 mod validate;
 
 pub use api::*;
 pub use client::*;
+pub use google::*;
 pub use session::*;
 pub use validate::*;
 

@@ -965,7 +965,8 @@ def restore_ibus_panel(entries: dict) -> str | None:
 @contextlib.contextmanager
 def panel_restore_lock(record_file: Path):
     """The lock the hosts hold around each change to the record (src/candidates/PanelRestoreRecord.h). Its file is never removed: a host waiting on the old one while another opened a new one would put both in the critical section at once."""
-    descriptor = os.open(record_file.with_name(record_file.name + ".lock"), os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+    descriptor = os.open(record_file.with_name(record_file.name + ".lock"),
+                         os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         yield

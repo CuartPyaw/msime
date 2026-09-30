@@ -1,8 +1,10 @@
 //! `BackendAccountSession`: token refresh, single-flight, and the saved session
 //! the host persists.
 
+use super::google::*;
 use super::validate::*;
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 struct SessionState {
     loaded: bool,
@@ -47,6 +49,8 @@ pub struct BackendAccountSession<A: AccountApi, S: AccountSessionStorage> {
     api: A,
     storage: S,
     state: Mutex<SessionState>,
+    /// Cancel flag of the Google browser sign-in in progress, if any. It lives outside `state` because the sign-in waits on the browser for minutes without holding the session lock.
+    google_sign_in: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
@@ -60,6 +64,7 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
                 generation: 0,
                 refresh: None,
             }),
+            google_sign_in: Mutex::new(None),
         }
     }
 
@@ -131,6 +136,102 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
     ) -> Result<AccountUser, AccountError> {
         validate_apple_login(challenge, credential)?;
         self.sign_in_validated(challenge, credential)
+    }
+
+    /// Completes a Google challenge with the authorization code the system browser delivered to the loopback redirect. The backend holds the PKCE verifier and the client secret and performs the exchange; this process only forwards the code.
+    pub fn sign_in_google(
+        &self,
+        challenge: &str,
+        credential: &str,
+    ) -> Result<AccountUser, AccountError> {
+        validate_google_login(challenge, credential)?;
+        self.sign_in_validated(challenge, credential)
+    }
+
+    /// Runs the desktop Google sign-in (RFC 8252 loopback redirect): binds a loopback listener, requests a challenge for its redirect URI, hands the backend's authorization URL to `open_browser`, waits for the redirect, and signs in with the returned code. `open_browser` receives a URL already checked to be a Google authorization URL for this listener. The wait lasts at most [`GOOGLE_SIGN_IN_TIMEOUT`] and ends early enough for the code to reach the backend before the challenge expires; [`Self::cancel_google_sign_in`] or starting another Google sign-in ends it with [`AccountError::Cancelled`].
+    pub fn sign_in_google_with_browser<F>(
+        &self,
+        open_browser: F,
+    ) -> Result<AccountUser, AccountError>
+    where
+        F: FnOnce(&str) -> Result<(), AccountError>,
+    {
+        self.sign_in_google_with_timeout(open_browser, GOOGLE_SIGN_IN_TIMEOUT)
+    }
+
+    pub(super) fn sign_in_google_with_timeout<F>(
+        &self,
+        open_browser: F,
+        timeout: Duration,
+    ) -> Result<AccountUser, AccountError>
+    where
+        F: FnOnce(&str) -> Result<(), AccountError>,
+    {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let previous = self
+            .google_sign_in
+            .lock()
+            .map_err(|_| AccountError::Unavailable)?
+            .replace(Arc::clone(&cancelled));
+        if let Some(previous) = previous {
+            previous.store(true, Ordering::SeqCst);
+        }
+        let result = self.run_google_sign_in(open_browser, timeout, &cancelled);
+        if let Ok(mut current) = self.google_sign_in.lock() {
+            if current
+                .as_ref()
+                .is_some_and(|flag| Arc::ptr_eq(flag, &cancelled))
+            {
+                *current = None;
+            }
+        }
+        result
+    }
+
+    /// Ends the Google browser sign-in in progress, which then returns [`AccountError::Cancelled`]. The browser tab cannot report that the user closed it, so the page offers this instead of leaving the user waiting for the timeout. Does nothing when no Google sign-in is running.
+    pub fn cancel_google_sign_in(&self) {
+        if let Ok(current) = self.google_sign_in.lock() {
+            if let Some(flag) = current.as_ref() {
+                flag.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+
+    fn run_google_sign_in<F>(
+        &self,
+        open_browser: F,
+        timeout: Duration,
+        cancelled: &AtomicBool,
+    ) -> Result<AccountUser, AccountError>
+    where
+        F: FnOnce(&str) -> Result<(), AccountError>,
+    {
+        let requested = std::time::Instant::now();
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .map_err(|_| AccountError::Unavailable)?;
+        let port = listener
+            .local_addr()
+            .map_err(|_| AccountError::Unavailable)?
+            .port();
+        let target = google_loopback_target(port);
+        let challenge = self.request_code("google", &target)?;
+        let url = challenge
+            .authorization_url
+            .as_deref()
+            .ok_or(AccountError::Unavailable)?;
+        let state = google_authorization_state(url, &target)?;
+        // The challenge clock started when the backend created it, so the wait is measured from before the request.
+        let window = google_callback_window(challenge.expires_in, timeout)
+            .ok_or(AccountError::Unavailable)?;
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(AccountError::Cancelled);
+        }
+        open_browser(url)?;
+        let code = receive_google_callback(&listener, &state, requested + window, cancelled)?;
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(AccountError::Cancelled);
+        }
+        self.sign_in_google(&challenge.challenge_id, &code)
     }
 
     fn sign_in_validated(

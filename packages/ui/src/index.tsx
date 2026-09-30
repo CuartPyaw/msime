@@ -514,6 +514,11 @@ export {
   type SettingsSyncClient,
 } from "./account/account-page";
 export {
+  AccountConfirmation,
+  type AccountConfirmationAction,
+  type AccountConfirmationProps,
+} from "./account/account-confirmation";
+export {
   ChatPage,
   type ChatClient,
   type ChatMessage,
@@ -571,12 +576,20 @@ export {
   type TranslationSecondaryLanguage,
   type TranslationSecondaryLanguageOption,
 } from "./settings/candidate-translation-options-section";
+export {
+  CandidateTranslationSettingsSection,
+  type CandidateTranslationSettingsSectionProps,
+} from "./settings/candidate-translation-settings-section";
 export { PunctuationSection, type PunctuationPreferences } from "./settings/punctuation-section";
 export {
   MixedInputSection,
   defaultMixedInput,
   type MixedInputPreferences,
 } from "./settings/mixed-input-section";
+export {
+  InputLanguageOptionsSection,
+  type InputLanguageOptionsSectionProps,
+} from "./settings/input-language-options-section";
 export {
   FrequencySection,
   defaultFrequency,
@@ -696,6 +709,13 @@ export {
   type InputSchemeDetailsScheme,
   type ShuangpinProfile,
 } from "./settings/input-scheme-details-section";
+export {
+  TranslationProviderSettingsSection,
+  type TranslationProviderSettingsSectionProps,
+  type TranslationNiuTransSettings,
+  type TranslationTencentSettings,
+  type TranslationCustomSettings,
+} from "./settings/translation-provider-settings-section";
 export {
   InputModeShortcutsSection,
   type InputModeShortcutPreferences,
@@ -945,6 +965,10 @@ export {
   type MobileKeyboardFeedbackSectionProps,
 } from "./settings/mobile-keyboard-feedback-section";
 export {
+  MobileKeyboardFeedbackSettings,
+  type MobileKeyboardFeedbackSettingsProps,
+} from "./settings/mobile-keyboard-feedback-settings";
+export {
   PreeditSettingsSection,
   type CandidatePreeditStyle,
   type PreeditSettingsPreferences,
@@ -958,6 +982,20 @@ export {
   type CommunitySkinPage,
   type CommunitySkinTrial,
 } from "./community/community-skins";
+export {
+  useCommunityGallery,
+  type CommunityGalleryClient,
+  type CommunityGalleryOptions,
+  type CommunityGalleryPage,
+} from "./community/community-gallery";
+export {
+  CommunityErrorAlert,
+  type CommunityErrorAlertProps,
+} from "./community/community-error-alert";
+export {
+  CommunityDetailStatus,
+  type CommunityDetailStatusProps,
+} from "./community/community-detail-status";
 export {
   communityDestinationView,
   type CommunityDestination,

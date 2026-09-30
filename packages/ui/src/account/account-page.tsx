@@ -4,6 +4,7 @@ import * as doc from "../settings/document-style";
 import * as account from "./account-style";
 import { accountProviderName, preferredAccountName } from "./account-labels";
 import { accountMessage, isAccountCancellation } from "./account-errors";
+import { AccountConfirmation } from "./account-confirmation";
 import { pushMobileSettingsState } from "../settings/mobile-navigation";
 
 export type AccountUser = {
@@ -16,6 +17,7 @@ export type AccountProviders = {
   email: boolean;
   phone: boolean;
   apple?: boolean;
+  google?: boolean;
 };
 
 export type AccountChallenge = {
@@ -66,6 +68,10 @@ export interface AccountClient {
   login(challengeId: string, code: string): Promise<{ user?: AccountUser | null }>;
   /** iOS performs the nonce and AuthenticationServices exchange natively. */
   appleLogin?: () => Promise<{ user?: AccountUser | null }>;
+  /** Desktop hosts run the Google browser and loopback redirect natively; the page never sees the authorization code. */
+  googleLogin?: () => Promise<{ user?: AccountUser | null }>;
+  /** Ends a pending googleLogin, which then rejects as cancelled. The browser cannot report a closed Google tab, so this is how the user gives up without waiting for the timeout. */
+  googleCancel?: () => Promise<void>;
   profile(): Promise<AccountProfile>;
   rename(displayName: string): Promise<AccountProfile>;
   logout(all: boolean): Promise<void>;
@@ -316,47 +322,13 @@ function MobileAccountProfilePage({
         </div>
       </section>
       {confirmation && (
-        <div
-          className={account.confirmation}
-          role="alertdialog"
-          aria-label={
-            confirmation === "delete"
-              ? "确认注销账号"
-              : confirmation === "logout-all"
-                ? "确认退出所有设备"
-                : confirmation === "relogin"
-                  ? "确认重新登录"
-                  : "确认退出登录"
-          }
-        >
-          <p className={account.note}>
-            {confirmation === "delete"
-              ? "注销账号将删除已发布皮肤、评分及其他云端账号数据，无法撤销。"
-              : confirmation === "logout-all"
-                ? "退出所有设备后，所有设备都需要重新登录。"
-                : confirmation === "relogin"
-                  ? "清除本机登录状态后需要重新登录。"
-                  : "退出登录后，社区功能需要重新登录才能使用。"}
-          </p>
-          <div>
-            <button
-              type="button"
-              className={confirmation === "delete" ? "danger-text" : "account-primary"}
-              disabled={busy}
-              onClick={confirmAction}
-            >
-              确认
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              disabled={busy}
-              onClick={() => setConfirmation(null)}
-            >
-              取消
-            </button>
-          </div>
-        </div>
+        <AccountConfirmation
+          action={confirmation}
+          busy={busy}
+          confirmLabel="确认"
+          onConfirm={confirmAction}
+          onCancel={() => setConfirmation(null)}
+        />
       )}
     </div>
   );
@@ -821,6 +793,8 @@ function AccountDetailsPage({
   const [editingProfile, setEditingProfile] = useState(false);
   const [mobileProfilePage, setMobileProfilePage] = useState(false);
   const [copiedAccountId, setCopiedAccountId] = useState(false);
+  const [googleWaiting, setGoogleWaiting] = useState(false);
+  const googleWaitingRef = useRef(false);
   const mounted = useRef(true);
   const clientGeneration = useRef(0);
 
@@ -833,6 +807,15 @@ function AccountDetailsPage({
       if (generation === clientGeneration.current) clientGeneration.current++;
     };
   }, [client]);
+
+  const cancelGoogle = () => {
+    if (!googleWaitingRef.current || !client.googleCancel) return;
+    // The pending googleLogin reports the outcome; a failed cancel only means there was nothing left to cancel.
+    void client.googleCancel().catch(() => undefined);
+  };
+
+  // Leaving the page must not leave the loopback listener waiting for a browser the user abandoned.
+  useEffect(() => () => cancelGoogle(), [client]);
 
   useEffect(() => {
     if (!mobile || typeof window === "undefined") return;
@@ -909,6 +892,7 @@ function AccountDetailsPage({
   };
 
   const chooseChannel = (value: Channel) => {
+    cancelGoogle();
     setChannel(value);
     setTarget("");
     setCode("");
@@ -1044,10 +1028,14 @@ function AccountDetailsPage({
 
   const resendSeconds = Math.max(0, Math.ceil((resendAt - now) / 1000));
   const expired = Boolean(challenge) && expiresAt <= now;
-  // Count only providers this host can render; the backend may enable Apple for hosts without a native Apple client.
+  // Count only providers this host can render; the backend may enable Apple or Google for hosts without a native client for them.
   const appleAvailable = providers.apple === true && Boolean(client.appleLogin);
+  const googleAvailable = providers.google === true && Boolean(client.googleLogin);
   const enabledProviders =
-    Number(providers.email) + Number(providers.phone) + Number(appleAvailable);
+    Number(providers.email) +
+    Number(providers.phone) +
+    Number(appleAvailable) +
+    Number(googleAvailable);
 
   const signInWithApple = () =>
     void perform(async () => {
@@ -1060,11 +1048,38 @@ function AccountDetailsPage({
       onLoginComplete?.();
     });
 
+  const signInWithGoogle = () =>
+    void perform(async () => {
+      if (!client.googleLogin) throw { code: "account_unavailable" };
+      googleWaitingRef.current = true;
+      setGoogleWaiting(true);
+      let result: { user?: AccountUser | null };
+      try {
+        result = await client.googleLogin();
+      } finally {
+        googleWaitingRef.current = false;
+        if (mounted.current) setGoogleWaiting(false);
+      }
+      if (!result.user) throw { code: "account_unavailable" };
+      setUser(result.user);
+      await loadProfile();
+      setNotice("登录成功。");
+      onLoginComplete?.();
+    });
+
   return (
     <div className={account.page}>
       {!user && onCancelLogin && (
         <div className={account.profilePageHeader}>
-          <button type="button" className="secondary" disabled={busy} onClick={onCancelLogin}>
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy && !(googleWaiting && client.googleCancel)}
+            onClick={() => {
+              cancelGoogle();
+              onCancelLogin();
+            }}
+          >
             取消
           </button>
           <h2 className={account.heading}>登录水杉</h2>
@@ -1279,35 +1294,12 @@ function AccountDetailsPage({
                 </button>
               </div>
               {confirmation && (
-                <div
-                  className={account.confirmation}
-                  role="alertdialog"
-                  aria-label={confirmation === "delete" ? "确认注销账号" : "确认退出所有设备"}
-                >
-                  <p className={account.note}>
-                    {confirmation === "delete"
-                      ? "注销账号将删除已发布皮肤、评分及其他云端账号数据，无法撤销。"
-                      : "退出所有设备后，所有设备都需要重新登录。"}
-                  </p>
-                  <div>
-                    <button
-                      type="button"
-                      className={confirmation === "delete" ? "danger-text" : "account-primary"}
-                      disabled={busy}
-                      onClick={() => (confirmation === "delete" ? deleteAccount() : signOut(true))}
-                    >
-                      {confirmation === "delete" ? "确认注销账号" : "确认退出所有设备"}
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={busy}
-                      onClick={() => setConfirmation(null)}
-                    >
-                      取消
-                    </button>
-                  </div>
-                </div>
+                <AccountConfirmation
+                  action={confirmation}
+                  busy={busy}
+                  onConfirm={() => (confirmation === "delete" ? deleteAccount() : signOut(true))}
+                  onCancel={() => setConfirmation(null)}
+                />
               )}
             </section>
           )}
@@ -1413,6 +1405,21 @@ function AccountDetailsPage({
                     onClick={signInWithApple}
                   >
                     使用 Apple 登录
+                  </button>
+                )}
+                {googleAvailable && (
+                  <button
+                    type="button"
+                    className={account.primary}
+                    disabled={busy}
+                    onClick={signInWithGoogle}
+                  >
+                    {googleWaiting ? "正在等待浏览器完成 Google 登录…" : "使用 Google 登录"}
+                  </button>
+                )}
+                {googleWaiting && client.googleCancel && (
+                  <button type="button" className="secondary" onClick={cancelGoogle}>
+                    取消 Google 登录
                   </button>
                 )}
                 {providers.email && (

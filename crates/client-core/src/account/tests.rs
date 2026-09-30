@@ -235,6 +235,7 @@ struct FakeApi {
     refreshes: Arc<AtomicUsize>,
     reject_refresh: Arc<AtomicBool>,
     refresh_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
+    logins: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 impl FakeApi {
@@ -243,8 +244,25 @@ impl FakeApi {
             refreshes: Arc::new(AtomicUsize::new(0)),
             reject_refresh: Arc::new(AtomicBool::new(false)),
             refresh_gate: None,
+            logins: Arc::new(Mutex::new(Vec::new())),
         }
     }
+}
+
+const GOOGLE_FIXTURE_STATE: &str = "fixture-state_0123456789";
+
+fn google_authorization_url(target: &str, state: &str) -> String {
+    let mut url = Url::parse("https://accounts.google.com/o/oauth2/v2/auth").unwrap();
+    url.query_pairs_mut()
+        .append_pair("client_id", "fixture-client.apps.googleusercontent.com")
+        .append_pair("redirect_uri", target)
+        .append_pair("response_type", "code")
+        .append_pair("scope", "openid email profile")
+        .append_pair("nonce", "fixture-nonce")
+        .append_pair("state", state)
+        .append_pair("code_challenge", "fixture-challenge")
+        .append_pair("code_challenge_method", "S256");
+    url.to_string()
 }
 
 impl AccountApi for FakeApi {
@@ -252,16 +270,21 @@ impl AccountApi for FakeApi {
         Ok(HashMap::from([("email".into(), true)]))
     }
 
-    fn challenge(&self, _provider: &str, _target: &str) -> Result<AccountChallenge, AccountError> {
+    fn challenge(&self, provider: &str, target: &str) -> Result<AccountChallenge, AccountError> {
         Ok(AccountChallenge {
             challenge_id: "fixture-challenge".into(),
             expires_in: 300,
             nonce: None,
-            authorization_url: None,
+            authorization_url: (provider == "google")
+                .then(|| google_authorization_url(target, GOOGLE_FIXTURE_STATE)),
         })
     }
 
-    fn login(&self, _challenge: &str, _credential: &str) -> Result<AccountTokens, AccountError> {
+    fn login(&self, challenge: &str, credential: &str) -> Result<AccountTokens, AccountError> {
+        self.logins
+            .lock()
+            .unwrap()
+            .push((challenge.into(), credential.into()));
         Ok(tokens(b'a', b'b', 900))
     }
 
@@ -407,6 +430,25 @@ fn validates_public_inputs_and_tokens() {
         validate_apple_login("challenge", "identity-token\n"),
         Err(AccountError::Invalid)
     );
+    assert_eq!(
+        validate_google_login("challenge", "4/0Afixture-code"),
+        Ok(())
+    );
+    for code in ["", "4/0A fixture", "4/0A\u{1}", "码"] {
+        assert_eq!(
+            validate_google_login("challenge", code),
+            Err(AccountError::Invalid)
+        );
+    }
+    assert_eq!(
+        validate_google_login("challenge", &"a".repeat(2049)),
+        Err(AccountError::Invalid)
+    );
+    assert_eq!(
+        validate_login_request("challenge", "4/0Afixture-code"),
+        Ok(())
+    );
+    assert_eq!(validate_login_request("challenge", "123456"), Ok(()));
     let mut invalid = tokens(b'a', b'b', 900);
     invalid.access_token = token(b'A');
     assert_eq!(validate_tokens(&invalid), Err(AccountError::Unavailable));
@@ -1205,4 +1247,325 @@ fn account_candidate_transport_maps_canonical_and_fixed_state() {
         .set_fixed_position("server:context", "ni'hao", "你好", None, 43, &token(b'a'))
         .unwrap();
     assert_eq!(revision.revision, 44);
+}
+
+#[test]
+fn google_target_accepts_only_the_loopback_callback() {
+    for target in [
+        "http://127.0.0.1:1024/callback",
+        "http://127.0.0.1:53682/callback",
+        "http://127.0.0.1:65535/callback",
+        "http://[::1]:49152/callback",
+    ] {
+        assert_eq!(
+            validate_provider_target("google", target),
+            Ok(()),
+            "{target}"
+        );
+    }
+    for target in [
+        "",
+        "http://127.0.0.1/callback",
+        "http://127.0.0.1:1023/callback",
+        "http://127.0.0.1:65536/callback",
+        "http://127.0.0.1:080/callback",
+        "http://127.0.0.1:+8080/callback",
+        "http://127.0.0.1:8080/callback/",
+        "http://127.0.0.1:8080/callback?next=1",
+        "http://127.0.0.1:8080/callback#fragment",
+        "http://127.0.0.1:8080/other",
+        "http://localhost:8080/callback",
+        "http://127.0.0.2:8080/callback",
+        "http://user@127.0.0.1:8080/callback",
+        "https://127.0.0.1:8080/callback",
+        " http://127.0.0.1:8080/callback",
+    ] {
+        assert_eq!(
+            validate_provider_target("google", target),
+            Err(AccountError::Invalid),
+            "{target}"
+        );
+    }
+    assert_eq!(
+        validate_provider_target("email", "http://127.0.0.1:8080/callback"),
+        Ok(())
+    );
+    assert_eq!(
+        validate_provider_target("apple", "http://127.0.0.1:8080/callback"),
+        Err(AccountError::Invalid)
+    );
+}
+
+#[test]
+fn google_authorization_url_must_redirect_to_this_listener() {
+    let target = "http://127.0.0.1:53682/callback";
+    let url = google_authorization_url(target, GOOGLE_FIXTURE_STATE);
+    assert_eq!(
+        google::google_authorization_state(&url, target).as_deref(),
+        Ok(GOOGLE_FIXTURE_STATE)
+    );
+    assert_eq!(
+        google::google_authorization_state(&url, "http://127.0.0.1:53683/callback"),
+        Err(AccountError::Unavailable)
+    );
+    for url in [
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE)
+            .replace("accounts.google.com", "accounts.google.com.evil.test"),
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE).replace("https://", "http://"),
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE)
+            .replace("accounts.google.com/", "accounts.google.com:8443/"),
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE) + "#fragment",
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE) + "&state=second",
+        google_authorization_url(target, ""),
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE).replace("state=", "other="),
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE) + "&x=\"quoted\"",
+        "https://evil.test/o/oauth2/v2/auth?state=fixture".into(),
+    ] {
+        assert_eq!(
+            google::google_authorization_state(&url, target),
+            Err(AccountError::Unavailable),
+            "{url}"
+        );
+    }
+}
+
+#[test]
+fn google_callback_requires_the_path_and_matching_state() {
+    use google::{parse_google_callback, GoogleCallback};
+    let state = GOOGLE_FIXTURE_STATE;
+    assert_eq!(
+        parse_google_callback(
+            &format!("GET /callback?state={state}&code=4%2F0Afixture&scope=openid HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"),
+            state
+        ),
+        GoogleCallback::Code("4/0Afixture".into())
+    );
+    assert_eq!(
+        parse_google_callback(
+            &format!("GET /callback?error=access_denied&state={state} HTTP/1.1\r\n\r\n"),
+            state
+        ),
+        GoogleCallback::Failed(AccountError::Cancelled)
+    );
+    assert_eq!(
+        parse_google_callback(
+            &format!("GET /callback?state={state} HTTP/1.1\r\n\r\n"),
+            state
+        ),
+        GoogleCallback::Failed(AccountError::Unavailable)
+    );
+    assert_eq!(
+        parse_google_callback(
+            &format!("GET /callback?state={state}&code=bad%20code HTTP/1.1\r\n\r\n"),
+            state
+        ),
+        GoogleCallback::Failed(AccountError::Unavailable)
+    );
+    for head in [
+        "GET /favicon.ico HTTP/1.1\r\n\r\n".to_string(),
+        format!("GET /callback/extra?state={state}&code=fixture HTTP/1.1\r\n\r\n"),
+        format!("POST /callback?state={state}&code=fixture HTTP/1.1\r\n\r\n"),
+        "GET /callback?state=other-state&code=fixture HTTP/1.1\r\n\r\n".to_string(),
+        "GET /callback?state=other-state&error=access_denied HTTP/1.1\r\n\r\n".to_string(),
+        "GET /callback?code=fixture HTTP/1.1\r\n\r\n".to_string(),
+        format!("GET /callback?state={state}&state={state}&code=fixture HTTP/1.1\r\n\r\n"),
+        format!("GET http://127.0.0.1/callback?state={state}&code=fixture HTTP/1.1\r\n\r\n"),
+        String::new(),
+        "garbage".to_string(),
+    ] {
+        assert_eq!(
+            parse_google_callback(&head, state),
+            GoogleCallback::Ignored,
+            "{head}"
+        );
+    }
+}
+
+fn browser_request(target: &str, path_and_query: &str) -> String {
+    let address = target
+        .strip_prefix("http://")
+        .and_then(|rest| rest.strip_suffix("/callback"))
+        .unwrap()
+        .to_string();
+    let mut stream = std::net::TcpStream::connect(address).unwrap();
+    std::io::Write::write_all(
+        &mut stream,
+        format!("GET {path_and_query} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").as_bytes(),
+    )
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
+}
+
+#[test]
+fn google_sign_in_waits_for_the_matching_loopback_redirect() {
+    let storage = MemoryStorage::default();
+    let api = FakeApi::new();
+    let session = BackendAccountSession::new(api.clone(), storage.clone());
+    let signed_in = session
+        .sign_in_google_with_browser(|url| {
+            let parsed = Url::parse(url).unwrap();
+            let target = parsed
+                .query_pairs()
+                .find(|(key, _)| key == "redirect_uri")
+                .unwrap()
+                .1
+                .into_owned();
+            thread::spawn(move || {
+                let favicon = browser_request(&target, "/favicon.ico");
+                assert!(favicon.starts_with("HTTP/1.1 404 "));
+                let forged = browser_request(&target, "/callback?state=forged&code=attacker");
+                assert!(forged.starts_with("HTTP/1.1 404 "));
+                let page = browser_request(
+                    &target,
+                    &format!("/callback?state={GOOGLE_FIXTURE_STATE}&code=4%2F0Afixture-code"),
+                );
+                assert!(page.starts_with("HTTP/1.1 200 OK\r\n"));
+                assert!(page.contains("Content-Type: text/html; charset=utf-8"));
+                assert!(page.contains("请返回水杉输入法"));
+                // The code has not been exchanged yet, so the page must not claim success.
+                assert!(!page.contains("登录已完成"));
+                assert!(!page.contains("4/0Afixture-code"));
+            });
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(signed_in, user());
+    assert_eq!(
+        api.logins.lock().unwrap().as_slice(),
+        [(
+            "fixture-challenge".to_string(),
+            "4/0Afixture-code".to_string()
+        )]
+    );
+    assert!(storage.load().unwrap().is_some());
+}
+
+#[test]
+fn google_sign_in_treats_denial_and_timeout_as_cancellation() {
+    let api = FakeApi::new();
+    let session = BackendAccountSession::new(api.clone(), MemoryStorage::default());
+    let denied = session.sign_in_google_with_browser(|url| {
+        let parsed = Url::parse(url).unwrap();
+        let target = parsed
+            .query_pairs()
+            .find(|(key, _)| key == "redirect_uri")
+            .unwrap()
+            .1
+            .into_owned();
+        thread::spawn(move || {
+            let page = browser_request(
+                &target,
+                &format!("/callback?error=access_denied&state={GOOGLE_FIXTURE_STATE}"),
+            );
+            assert!(page.contains("已取消"));
+        });
+        Ok(())
+    });
+    assert_eq!(denied, Err(AccountError::Cancelled));
+
+    let timed_out = session.sign_in_google_with_timeout(|_| Ok(()), Duration::from_millis(200));
+    assert_eq!(timed_out, Err(AccountError::Cancelled));
+
+    let unopened = session.sign_in_google_with_browser(|_| Err(AccountError::Unavailable));
+    assert_eq!(unopened, Err(AccountError::Unavailable));
+    assert!(api.logins.lock().unwrap().is_empty());
+}
+
+#[test]
+fn google_sign_in_can_be_cancelled_while_waiting_for_the_browser() {
+    let api = FakeApi::new();
+    let session = BackendAccountSession::new(api.clone(), MemoryStorage::default());
+    let (opened, browser_opened) = mpsc::channel();
+    let started = std::time::Instant::now();
+    let result = thread::scope(|scope| {
+        let session = &session;
+        scope.spawn(move || {
+            browser_opened.recv().unwrap();
+            thread::sleep(Duration::from_millis(200));
+            session.cancel_google_sign_in();
+        });
+        session.sign_in_google_with_browser(|_| {
+            opened.send(()).unwrap();
+            Ok(())
+        })
+    });
+    assert_eq!(result, Err(AccountError::Cancelled));
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(api.logins.lock().unwrap().is_empty());
+    // Cancelling with nothing in progress is harmless and does not poison the next sign-in.
+    session.cancel_google_sign_in();
+    let timed_out = session.sign_in_google_with_timeout(|_| Ok(()), Duration::from_millis(200));
+    assert_eq!(timed_out, Err(AccountError::Cancelled));
+}
+
+#[test]
+fn google_wait_leaves_room_for_the_backend_before_the_challenge_expires() {
+    use google::google_callback_window;
+    assert_eq!(
+        google_callback_window(300, GOOGLE_SIGN_IN_TIMEOUT),
+        Some(Duration::from_secs(270))
+    );
+    assert_eq!(
+        google_callback_window(3600, GOOGLE_SIGN_IN_TIMEOUT),
+        Some(GOOGLE_SIGN_IN_TIMEOUT)
+    );
+    assert_eq!(
+        google_callback_window(300, Duration::from_millis(200)),
+        Some(Duration::from_millis(200))
+    );
+    assert_eq!(google_callback_window(30, GOOGLE_SIGN_IN_TIMEOUT), None);
+    assert_eq!(google_callback_window(1, GOOGLE_SIGN_IN_TIMEOUT), None);
+}
+
+#[test]
+fn a_trickling_loopback_client_cannot_hold_the_listener_past_its_budget() {
+    use google::receive_google_callback;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let trickle = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            let mut stream = std::net::TcpStream::connect(address).unwrap();
+            while !stop.load(Ordering::SeqCst) {
+                if std::io::Write::write_all(&mut stream, b"G").is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        })
+    };
+    let started = std::time::Instant::now();
+    let result = receive_google_callback(
+        &listener,
+        GOOGLE_FIXTURE_STATE,
+        started + Duration::from_millis(500),
+        &AtomicBool::new(false),
+    );
+    let elapsed = started.elapsed();
+    stop.store(true, Ordering::SeqCst);
+    trickle.join().unwrap();
+    assert_eq!(result, Err(AccountError::Cancelled));
+    assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+}
+
+#[test]
+fn backend_login_forwards_a_google_authorization_code() {
+    let body = serde_json::to_string(&tokens(b'a', b'b', 900)).unwrap();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let (origin, request) = serve_once_and_capture(response.into_bytes());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    client
+        .login("fixture-challenge", "4/0Afixture-code")
+        .unwrap();
+    let request = String::from_utf8(request.recv().unwrap()).unwrap();
+    assert!(request.starts_with("POST /v1/auth/login "));
+    assert!(request
+        .ends_with(r#"{"challenge_id":"fixture-challenge","credential":"4/0Afixture-code"}"#));
 }

@@ -184,16 +184,15 @@ impl ShuangpinDictionary {
             pure
         } else {
             cache_key
-        }
-        .to_string();
-        if self.rows_cache.contains(&key) {
+        };
+        if self.rows_cache.get_ref_by(key).is_some() {
             self.reset_cache_if_database_changed();
-            if let Some(cached) = self.rows_cache.get(&key) {
-                return cached;
+            if let Some(cached) = self.rows_cache.get_ref_by(key) {
+                return cached.clone();
             }
         }
         let rows = self.query_rows(pure, segmentation);
-        self.rows_cache.insert(key, rows.clone());
+        self.rows_cache.insert(key.to_owned(), rows.clone());
         rows
     }
 
@@ -205,26 +204,48 @@ impl ShuangpinDictionary {
             _ => {}
         }
         let rows_key = if raw.is_empty() { pure } else { raw };
-        let key = self.sentence_cache_key(rows_key);
+        let mut key = (!self.rerankers.is_empty()).then(|| self.sentence_cache_key(rows_key));
         self.drop_personal_scored_results();
-        if self.series_cache.contains(&key) {
+        let cache_hit = match key.as_ref() {
+            Some(key) => self.series_cache.get_ref(key).is_some(),
+            None => self.series_cache.get_ref_by(rows_key).is_some(),
+        };
+        if cache_hit {
             self.reset_cache_if_database_changed();
-            if let Some(cached) = self.series_cache.get(&key) {
-                return cached;
+            let cached = match key.as_ref() {
+                Some(key) => self.series_cache.get_ref(key),
+                None => self.series_cache.get_ref_by(rows_key),
+            };
+            if let Some(cached) = cached {
+                return cached.clone();
             }
         }
 
         let mut candidates = self.generate(pure, segmentation, rows_key);
         // Every shorter prefix group follows, longest first; phrase creation picks from them (SD:215-231). The reference appended each group whole, so a word several groups answer (a manual delimiter leaves empty pieces, and ni'''nn'i holds the ni group three times) was listed once per group; a word already listed keeps its first, longest-prefix seat instead.
-        let mut listed: HashSet<String> = candidates.iter().map(|item| item.word.clone()).collect();
+        let mut prefix_rows = Vec::new();
         let mut prefix = segmentation;
         while let Some(cut) = prefix.rfind('\'') {
             prefix = &prefix[..cut];
             let prefix_pure = remove_manual_delimiters(prefix);
-            let rows = self.generate(&prefix_pure, prefix, "");
+            prefix_rows.push(self.generate(&prefix_pure, prefix, ""));
+        }
+        // Borrow words while calculating each group's first occurrence, then release the set before moving rows into candidates.
+        let mut listed: HashSet<&str> = candidates.iter().map(|item| item.word.as_str()).collect();
+        let unique = prefix_rows
+            .iter()
+            .map(|rows| {
+                rows.iter()
+                    .map(|item| listed.insert(item.word.as_str()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        drop(listed);
+        for (rows, unique) in prefix_rows.into_iter().zip(unique) {
             candidates.extend(
                 rows.into_iter()
-                    .filter(|item| listed.insert(item.word.clone())),
+                    .zip(unique)
+                    .filter_map(|(item, unique)| unique.then_some(item)),
             );
         }
 
@@ -234,6 +255,7 @@ impl ShuangpinDictionary {
         ));
         self.merge_sentences(&mut candidates, &segments, pure);
 
+        let key = key.take().unwrap_or_else(|| rows_key.to_owned());
         self.series_cache.insert(key.clone(), candidates.clone());
         // Only keys long enough for the lattice carry personal scores.
         if segments.len() >= 2 {
@@ -319,12 +341,18 @@ impl ShuangpinDictionary {
         let original_segmentation = pinyin_segmentation(raw, self.profile);
         let whole = self.generate_series(raw, &original_segmentation, "");
         // The reference appended the whole-input answer and then the unmatched rows whole, so a word already among the matched rows, or in both lists, was listed again; a word already listed keeps its first seat.
-        let mut listed: HashSet<String> = result.iter().map(|item| item.word.clone()).collect();
+        // Keep duplicate keys borrowed while checking both owned append lists, then move rows after releasing the set.
+        let mut listed: HashSet<&str> = result.iter().map(|item| item.word.as_str()).collect();
+        let rows = whole.into_iter().chain(unmatched).collect::<Vec<_>>();
+        let unique = rows
+            .iter()
+            .map(|item| listed.insert(item.word.as_str()))
+            .collect::<Vec<_>>();
+        drop(listed);
         result.extend(
-            whole
-                .into_iter()
-                .chain(unmatched)
-                .filter(|item| listed.insert(item.word.clone())),
+            rows.into_iter()
+                .zip(unique)
+                .filter_map(|(item, unique)| unique.then_some(item)),
         );
         result
     }

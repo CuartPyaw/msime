@@ -879,6 +879,7 @@ public final class MSIMEInputService extends InputMethodService {
         clearDiagnostic();
         clearSmartPunctuationSnapshots();
         deactivateHandwriting();
+        invalidateOnlineProviders();
         invalidateCandidateGlosses();
         preferencesReloader.stop();
         preferenceSaveGeneration++;
@@ -1813,6 +1814,16 @@ public final class MSIMEInputService extends InputMethodService {
             assistant != null && assistant.optBoolean("enabled", false));
     }
 
+    /** Invalidate delayed and in-flight optional provider work at an editor boundary. */
+    private void invalidateOnlineProviders() {
+        onlineSignature = "";
+        if (onlineTask != null) {
+            main.removeCallbacks(onlineTask);
+            onlineTask = null;
+        }
+        onlineEpoch = onlineEpoch == Long.MAX_VALUE ? 0 : onlineEpoch + 1;
+    }
+
     /**
      * The candidate texts inside a Chat Completions reply, in provider order.
      *
@@ -1875,10 +1886,13 @@ public final class MSIMEInputService extends InputMethodService {
      * state already asked about; the epoch is what stops a late reply from a previous composition.
      */
     private void scheduleOnlineProviders() {
-        if (session == 0) return;
+        if (session == 0) {
+            invalidateOnlineProviders();
+            return;
+        }
         JSONObject query = onlineQuery(session);
         if (query == null || (!requestsCloud(query) && !requestsAi(query))) {
-            onlineSignature = "";
+            invalidateOnlineProviders();
             return;
         }
         JSONObject assistant = query.optJSONObject("ai_assistant");

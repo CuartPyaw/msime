@@ -305,12 +305,12 @@ impl NineKeySession {
         }
         let table = spelling_table();
         let locked_length = self.locked_length();
-        let remaining = self.digits[locked_length..].to_string();
-        self.spellings = table.spellings_for(&remaining, locked_length);
+        let remaining = remaining_digits(&self.digits, locked_length);
+        self.spellings = table.spellings_for(remaining, locked_length);
         let alternatives = if remaining.is_empty() {
             vec![Vec::new()]
         } else {
-            let mut alternatives = table.paths(&remaining);
+            let mut alternatives = table.paths(remaining);
             // Even an unfinished or invalid tail must still offer the leading syllable for partial selection.
             alternatives.extend(
                 self.spellings
@@ -331,7 +331,7 @@ impl NineKeySession {
             let mut full = self.locked.clone();
             full.extend(path);
             let key = full.join("'");
-            if key.is_empty() || !queried.insert(key.clone()) {
+            if key.is_empty() || !is_unseen_query_key(&queried, &key) {
                 continue;
             }
             for mut candidate in dictionary.query(&key, &key, 0, self.fuzzy) {
@@ -362,6 +362,7 @@ impl NineKeySession {
                 candidate.canonical_pinyin = canonical;
                 candidates.push(candidate);
             }
+            queried.insert(key);
         }
         rank_candidates(&mut candidates);
 
@@ -421,12 +422,11 @@ impl NineKeySession {
         let prefixes = letter_prefixes(&digits, ENGLISH_PREFIX_BUDGET);
         let capacity = prefixes.len().saturating_mul(ENGLISH_LIMIT);
         let mut words = Vec::with_capacity(capacity);
-        let mut seen = HashSet::with_capacity(capacity);
         for prefix in prefixes {
             for word in english.query_prefix(&prefix, ENGLISH_LIMIT) {
                 // Only a whole code that starts with the digits counts; otherwise letters beyond the expanded prefix leak in.
                 if !digits_for_word(&word.word).starts_with(&digits)
-                    || !seen.insert(word.word.clone())
+                    || has_candidate_word(&words, &word.word)
                 {
                     continue;
                 }
@@ -515,6 +515,10 @@ impl NineKeySession {
     }
 }
 
+fn remaining_digits(digits: &str, locked_length: usize) -> &str {
+    &digits[locked_length..]
+}
+
 /// A row read under the locked syllables must spell them, or be a whole-syllable prefix of them.
 fn agrees_with_locked(matched: &str, locked_key: &str) -> bool {
     if locked_key.is_empty() || matched == locked_key {
@@ -527,6 +531,14 @@ fn agrees_with_locked(matched: &str, locked_key: &str) -> bool {
         .strip_prefix(matched)
         .is_some_and(|rest| rest.starts_with('\''));
     under || over
+}
+
+fn has_candidate_word(candidates: &[WordItem], word: &str) -> bool {
+    candidates.iter().any(|candidate| candidate.word == word)
+}
+
+fn is_unseen_query_key(queried: &HashSet<String>, key: &str) -> bool {
+    !queried.contains(key)
 }
 
 /// More digits covered first. Synthesised rows (whole-sentence Generated, Fallback) score on a different scale from dictionary weights, so within one coverage bucket dictionary rows lead; then exact before fuzzy, then weight. Dedup by word, capped (NK:283-307).
@@ -543,9 +555,23 @@ fn rank_candidates(candidates: &mut Vec<WordItem>) {
             .then_with(|| a.fuzzy.cmp(&b.fuzzy))
             .then_with(|| b.weight.cmp(&a.weight))
     });
-    let mut seen = HashSet::with_capacity(candidates.len());
-    candidates.retain(|item| seen.insert(item.word.clone()));
+    retain_unique_words(candidates);
     candidates.truncate(CANDIDATE_LIMIT);
+}
+
+fn retain_unique_words(candidates: &mut Vec<WordItem>) {
+    let mut seen = HashSet::with_capacity(candidates.len());
+    let keep: Vec<bool> = candidates
+        .iter()
+        .map(|item| seen.insert(item.word.as_str()))
+        .collect();
+    drop(seen);
+    let mut index = 0;
+    candidates.retain(|_| {
+        let keep_item = keep[index];
+        index += 1;
+        keep_item
+    });
 }
 
 /// A word spelling the typed code exactly leads, but only when people type it: 64426 is 你好 and `ogham` is the only five-letter word those keys spell, so a zero-weight exact word gets no privilege. Then weight, then shorter (NK:199-220).
@@ -795,6 +821,43 @@ mod tests {
 
     fn item(word: &str, digits: &str, weight: i64, source: CandidateSource) -> WordItem {
         WordItem::new(digits, word, weight, source, "")
+    }
+
+    #[test]
+    fn refresh_tail_is_borrowed_from_digits() {
+        assert_eq!(remaining_digits("64426", 2), "426");
+    }
+
+    #[test]
+    fn candidate_word_lookup_scans_existing_rows() {
+        let candidates = vec![item("old", "653", 1, CandidateSource::EnglishDictionary)];
+        assert!(has_candidate_word(&candidates, "old"));
+        assert!(!has_candidate_word(&candidates, "older"));
+    }
+
+    #[test]
+    fn unique_word_retain_keeps_the_first_sorted_row() {
+        let mut candidates = vec![
+            item("你", "644", 10, CandidateSource::Database),
+            item("你", "64", 1, CandidateSource::Generated),
+            item("泥", "64", 2, CandidateSource::Database),
+        ];
+        retain_unique_words(&mut candidates);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.word.as_str())
+                .collect::<Vec<_>>(),
+            ["你", "泥"]
+        );
+    }
+
+    #[test]
+    fn query_key_lookup_borrows_before_inserting() {
+        let mut queried = HashSet::new();
+        assert!(is_unseen_query_key(&queried, "ni'hao"));
+        queried.insert("ni'hao".to_owned());
+        assert!(!is_unseen_query_key(&queried, "ni'hao"));
     }
 
     #[test]

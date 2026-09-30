@@ -6,60 +6,25 @@ import type { useCustomTranslations } from "./use-custom-translations";
 import type { SettingsSaveState } from "./use-settings-persistence";
 import { HandwritingPlatformNotice } from "./handwriting-platform-notice";
 import { MobileInputAiNotice } from "./mobile-input-ai-notice";
-import { InputModeSection } from "./input-mode-section";
-import { TouchKeyboardSchemesSection } from "./touch-keyboard-schemes-section";
-import { touchKeyboardSchemeOptions } from "./touch-keyboard-scheme-helpers";
-import {
-  InputSchemeSelectorSection,
-  type InputSchemeSelectorValue,
-} from "./input-scheme-selector-section";
-import { InputSchemeDetailsSection, type ShuangpinProfile } from "./input-scheme-details-section";
-import { WubiSection } from "./wubi-section";
+import { MobileKeyboardFeedbackSettings } from "./mobile-keyboard-feedback-settings";
+import { InputSchemeSettingsContent } from "./input-scheme-settings-content";
 import { NavigationSection, defaultNavigation } from "./navigation-section";
+import type { TouchKeyboardScheme as TouchKeyboardSchemePreference } from "./touch-keyboard-scheme-helpers";
 import {
-  CandidateTranslationOptionsSection,
   type TranslationLanguage,
   type TranslationSecondaryLanguage,
 } from "./candidate-translation-options-section";
-import {
-  TranslationServiceSelectorSection,
-  type TranslationProvider,
-} from "./translation-service-selector-section";
-import { NiuTransSection } from "./niutrans-section";
-import { LinuxTencentCredentialsSection } from "./linux-tencent-credentials-section";
-import { TencentTranslationSection } from "./tencent-translation-section";
-import { CustomTranslationSettingsSection } from "./custom-translation-settings-section";
-import { OnDeviceTranslationNotice } from "./on-device-translation-notice";
-import { WordCharacterSection, defaultWordCharacter } from "./word-character-section";
+import { TranslationSettingsContent } from "./translation-settings-content";
+import { createTranslationProviderSettings } from "./translation-provider-settings";
+import { type TranslationProvider } from "./translation-service-selector-section";
+import { defaultWordCharacter } from "./word-character-section";
 import { FuzzyPinyinSection, defaultFuzzyPinyin } from "./fuzzy-pinyin-section";
-import { LearningSection } from "./learning-section";
 import { PunctuationSection } from "./punctuation-section";
-import { MixedInputSection, defaultMixedInput } from "./mixed-input-section";
-import { InputModeHudSection } from "./input-mode-hud-section";
-import { CandidateEnglishGlossSection } from "./candidate-english-gloss-section";
-import { EnglishSuggestionsSection } from "./english-suggestions-section";
-import { DefaultImeModeSection } from "./default-ime-mode-section";
-import { ImeModeScopeSection } from "./ime-mode-scope-section";
-import { TraditionalChineseOutputSection } from "./traditional-chinese-output-section";
-import { CloudCandidatesSection } from "./cloud-candidates-section";
-import { FrequencySection, defaultFrequency } from "./frequency-section";
-import {
-  MobileKeyboardFeedbackSection,
-  type MobileKeyboardFeedback,
-} from "./mobile-keyboard-feedback-section";
-import { tencentCredentialIssue, translationEndpointIssue } from "./translation-validation";
-import { tencentSecretConfigured } from "./credential-utils";
-import {
-  customTranslationCredentialTestConfig,
-  customTranslationCredentialTestDisabled,
-  niutransCredentialTestConfig,
-  niutransCredentialTestDisabled,
-  tencentTranslationCredentialTestConfig,
-  tencentTranslationCredentialTestDisabled,
-} from "./translation-credential-test-config";
-import type { TouchKeyboardScheme as TouchKeyboardSchemePreference } from "./touch-keyboard-scheme-helpers";
+import { defaultMixedInput, type MixedInputPreferences } from "./mixed-input-section";
+import { defaultFrequency } from "./frequency-section";
+import { InputSharedSettingsSection } from "./input-shared-settings-section";
+import type { MobileKeyboardFeedback } from "./mobile-keyboard-feedback-section";
 import type { FuzzyPinyinPreferences } from "./fuzzy-pinyin-section";
-import type { MixedInputPreferences } from "./mixed-input-section";
 import type { FrequencyPreferences } from "./frequency-section";
 import type { NavigationPreferences, WordCharacterPreferences } from "./word-character-section";
 import { createSettingsDraftActions } from "./settings-draft-actions";
@@ -228,62 +193,26 @@ export function InputSettingsPanel({
         />
       )}
       {mobilePlatform && <MobileInputAiNotice onOpenAi={onOpenAi} />}
-      {!client.touchKeyboardSchemes && (
-        <InputModeSection
-          scheme={draft.scheme}
-          lastChineseScheme={draft.last_chinese_scheme}
-          onChange={onPreferencesChange}
-        />
-      )}
-      {client.touchKeyboardSchemes && (
-        <TouchKeyboardSchemesSection
-          options={touchKeyboardSchemeOptions}
-          enabled={touchKeyboardSchemes.enabled}
-          selected={selectedTouchKeyboardScheme}
-          onSelect={(scheme) => selectTouchKeyboardScheme(scheme as TouchKeyboardSchemePreference)}
-          onToggle={(scheme, enabled) =>
-            setTouchKeyboardSchemeEnabled(scheme as TouchKeyboardSchemePreference, enabled)
-          }
-        />
-      )}
-      <div
-        hidden={
-          client.touchKeyboardSchemes || draft.scheme === "japanese" || draft.scheme === "korean"
-        }
-      >
-        <InputSchemeSelectorSection
-          value={
-            draft.scheme === "japanese" || draft.scheme === "korean" ? "quanpin" : draft.scheme
-          }
-          onChange={(scheme: InputSchemeSelectorValue) =>
-            onPreferencesChange({ scheme, last_chinese_scheme: scheme })
-          }
-        />
-      </div>
-      <InputSchemeDetailsSection
-        scheme={draft.scheme}
-        shuangpinProfile={draft.shuangpin_profile}
+      <InputSchemeSettingsContent
+        preferences={draft}
+        hasTouchKeyboardSchemes={Boolean(client.touchKeyboardSchemes)}
+        touchKeyboardSchemes={touchKeyboardSchemes}
+        selectedTouchKeyboardScheme={selectedTouchKeyboardScheme}
         macos={macosPlatform}
-        hasTouchKeyboardSchemes={client.touchKeyboardSchemes ?? false}
         macosShuangpinKeymap={
           macosPlatform && client.loadMacosShuangpinKeymap && macosShuangpinKeymap !== undefined
             ? macosShuangpinKeymap
             : undefined
         }
-        onShuangpinProfileChange={(shuangpin_profile: ShuangpinProfile) =>
-          onPreferencesChange({ shuangpin_profile })
+        macosWubiAutoCommitUnique={macosWubiAutoCommitUnique}
+        onPreferencesChange={onPreferencesChange}
+        onSelectTouchKeyboardScheme={(scheme) => selectTouchKeyboardScheme(scheme)}
+        onToggleTouchKeyboardScheme={(scheme, enabled) =>
+          setTouchKeyboardSchemeEnabled(scheme, enabled)
         }
         onMacosShuangpinKeymapChange={setShuangpinKeymap}
+        onMacosWubiAutoCommitUniqueChange={setWubiAutoCommitUnique}
       />
-      {((client.touchKeyboardSchemes && touchKeyboardSchemes.enabled.includes("wubi")) ||
-        draft.scheme === "wubi") && (
-        <WubiSection
-          preferences={draft}
-          autoCommitUnique={macosPlatform ? macosWubiAutoCommitUnique : undefined}
-          onChange={onPreferencesChange}
-          onAutoCommitUniqueChange={setWubiAutoCommitUnique}
-        />
-      )}
       <NavigationSection
         navigation={draft.navigation ?? defaultNavigation}
         wordCharacter={wordCharacter}
@@ -295,269 +224,113 @@ export function InputSettingsPanel({
           })
         }
       />
-      <CandidateTranslationOptionsSection
-        enabled={candidateTranslations}
-        targetLanguage={translationTargetLanguage}
-        secondaryLanguage={translationSecondaryLanguage ?? ""}
-        candidateGlossLanguagesEnabled={candidateGlossLanguagesEnabled}
-        visibleLanguages={visibleTranslationLanguages}
-        visibleSecondaryLanguages={visibleSecondaryLanguages}
-        showSecondaryLanguage={androidPlatform || iosPlatform || macosPlatform || harmonyPlatform}
-        showAccountTranslation={androidPlatform}
-        accountTranslation={draft.translation_account ?? false}
-        onEnabledChange={(candidate_translations) =>
-          onPreferencesChange({ candidate_translations })
-        }
-        onTargetLanguageChange={(translation_target_language: TranslationLanguage) =>
-          onPreferencesChange({ translation_target_language })
-        }
-        onSecondaryLanguageChange={(value: TranslationSecondaryLanguage) =>
-          onPreferencesChange({
-            translation_secondary_language: value === "" ? null : value,
-          })
-        }
-        onAccountTranslationChange={(enabled) =>
-          enabled
-            ? setTranslationProvider("account")
-            : onPreferencesChange({ translation_account: undefined })
-        }
-      />
-      {onDeviceMissingLanguages.length > 0 && (
-        <OnDeviceTranslationNotice
-          languages={onDeviceMissingLanguages.map(([, label]) => label)}
-          openSettings={client.onDeviceTranslation?.openSettings}
-          onError={onError}
-        />
-      )}
-      {!androidPlatform && (
-        <>
-          <TranslationServiceSelectorSection
-            available={candidateTranslations}
-            provider={translationProvider}
-            showAccountProvider={macosPlatform || linuxPlatform}
-            onChange={setTranslationProvider}
-          />
-          <NiuTransSection
-            enabled={niutrans.enabled}
-            available={candidateTranslations}
-            appId={niutrans.app_id}
-            apiKey={niutrans.apikey}
-            onToggle={(enabled) => setTranslationProvider(enabled ? "niutrans" : "none")}
-            onAppIdChange={(app_id) => onPreferencesChange({ niutrans: { ...niutrans, app_id } })}
-            onApiKeyChange={(apikey) => onPreferencesChange({ niutrans: { ...niutrans, apikey } })}
-          >
-            {credentialTestControl(
-              "translation.niutrans",
-              "测试 NiuTrans 配置",
-              niutransCredentialTestConfig(niutrans),
-              niutransCredentialTestDisabled(candidateTranslations, niutrans),
-            )}
-          </NiuTransSection>
-          {linuxPlatform ? (
-            <LinuxTencentCredentialsSection
-              available={Boolean(client.providerCredentials)}
-              status={
-                providerCredentials
-                  ? {
-                      tencent: providerCredentials.tencent,
-                      tencentInvalid: providerCredentials.tencentInvalid,
-                    }
-                  : undefined
-              }
-              input={tencentCredentialInput}
-              busy={providerCredentialBusy === "tencent"}
-              message={providerCredentialMessages.tencent}
-              onInputChange={(patch) => updateTencentCredentialInput(patch)}
-              onSave={(credential) =>
-                void runProviderCredential(
-                  "tencent",
-                  (credentials) => credentials.saveTencent(credential),
-                  "凭据已保存，provider 服务下次请求时生效。",
-                )
-              }
-              onClear={() =>
-                void runProviderCredential(
-                  "tencent",
-                  (credentials) => credentials.clearTencent(),
-                  "凭据已清除。",
-                )
-              }
-            >
-              {translationProvider === "tencent" &&
-                credentialTestControl(
-                  "translation.tencent",
-                  "测试腾讯云翻译配置",
-                  {},
-                  !candidateTranslations,
-                )}
-            </LinuxTencentCredentialsSection>
-          ) : (
-            <TencentTranslationSection
-              enabled={tencentTranslation.enabled}
-              available={candidateTranslations}
-              secretId={tencentTranslation.secret_id}
-              secretKey={tencentTranslation.secret_key}
-              region={tencentTranslation.region}
-              credentialIssue={tencentCredentialIssue(
-                tencentTranslation.secret_id,
-                tencentTranslation.secret_key,
-                tencentTranslation.region,
-              )}
-              showMissingCredentialsWarning={
-                !customTranslation.enabled &&
-                !tencentSecretConfigured(tencentTranslation.secret_id) &&
-                !tencentSecretConfigured(tencentTranslation.secret_key)
-              }
-              onToggle={(enabled) =>
-                onPreferencesChange({
-                  tencent_tmt: { ...tencentTranslation, enabled },
-                  // Turning on a service of the user's own ends the account choice, so the account never keeps receiving candidates behind a visible selection.
-                  ...(enabled ? { translation_account: undefined } : {}),
-                })
-              }
-              onSecretIdChange={(secret_id) =>
-                onPreferencesChange({
-                  tencent_tmt: { ...tencentTranslation, secret_id },
-                })
-              }
-              onSecretKeyChange={(secret_key) =>
-                onPreferencesChange({
-                  tencent_tmt: { ...tencentTranslation, secret_key },
-                })
-              }
-              onRegionChange={(region) =>
-                onPreferencesChange({
-                  tencent_tmt: { ...tencentTranslation, region },
-                })
-              }
-            >
-              {(windowsPlatform || macosPlatform) &&
-                tencentTranslation.enabled &&
-                credentialTestControl(
-                  "translation.tencent",
-                  "测试腾讯云翻译配置",
-                  tencentTranslationCredentialTestConfig(tencentTranslation),
-                  tencentTranslationCredentialTestDisabled(
-                    candidateTranslations,
-                    tencentCredentialIssue(
-                      tencentTranslation.secret_id,
-                      tencentTranslation.secret_key,
-                      tencentTranslation.region,
-                    ),
-                  ),
-                )}
-            </TencentTranslationSection>
-          )}
-          <CustomTranslationSettingsSection
-            mobile={mobilePlatform}
-            customTranslationsAvailable={Boolean(client.customTranslations)}
-            customTranslationsText={customTranslationsText}
-            customTranslationsPlaceholder={customTranslationsPlaceholder}
-            customTranslationsNotice={customTranslationsNotice}
-            customTranslationsSummary={customTranslationsSummary}
-            customTranslationsSaveState={customTranslationsSaveState}
-            customTranslationsSaveError={customTranslationsSaveError}
-            onCustomTranslationsChange={setCustomTranslationsText}
-            onFlushCustomTranslations={() => void flushCustomTranslations()}
-            customTranslation={customTranslation}
-            candidateTranslations={candidateTranslations}
-            onPreferencesChange={onPreferencesChange}
-            credentialTest={credentialTestControl(
-              "translation.custom",
-              "测试自定义翻译配置",
-              customTranslationCredentialTestConfig(customTranslation),
-              customTranslationCredentialTestDisabled(
+      <TranslationSettingsContent
+        candidate={{
+          enabled: candidateTranslations,
+          targetLanguage: translationTargetLanguage,
+          secondaryLanguage: translationSecondaryLanguage ?? "",
+          candidateGlossLanguagesEnabled,
+          visibleLanguages: visibleTranslationLanguages,
+          visibleSecondaryLanguages,
+          showSecondaryLanguage: androidPlatform || iosPlatform || macosPlatform || harmonyPlatform,
+          showAccountTranslation: androidPlatform,
+          accountTranslation: draft.translation_account ?? false,
+          onEnabledChange: (candidate_translations) =>
+            onPreferencesChange({ candidate_translations }),
+          onTargetLanguageChange: (translation_target_language: TranslationLanguage) =>
+            onPreferencesChange({ translation_target_language }),
+          onSecondaryLanguageChange: (value: TranslationSecondaryLanguage) =>
+            onPreferencesChange({
+              translation_secondary_language: value === "" ? null : value,
+            }),
+          onAccountTranslationChange: (enabled) =>
+            enabled
+              ? setTranslationProvider("account")
+              : onPreferencesChange({ translation_account: undefined }),
+          onDeviceMissingLanguages: onDeviceMissingLanguages.map(([, label]) => label),
+          openSettings: client.onDeviceTranslation?.openSettings,
+          onError,
+          showTranslationService: !androidPlatform,
+          translationProvider,
+          showAccountProvider: macosPlatform || linuxPlatform,
+          onTranslationProviderChange: setTranslationProvider,
+        }}
+        providers={
+          !androidPlatform
+            ? createTranslationProviderSettings({
+                client,
                 candidateTranslations,
-                translationEndpointIssue(customTranslation.endpoint),
-              ),
-            )}
-          />
-        </>
-      )}
-      <WordCharacterSection
-        preferences={wordCharacter}
-        navigation={draft.navigation ?? defaultNavigation}
-        ios={iosPlatform}
-        onChange={({ wordCharacter: nextWordCharacter, navigation }) =>
-          onPreferencesChange({
-            word_character: nextWordCharacter,
-            navigation,
-          })
+                mobile: mobilePlatform,
+                linux: linuxPlatform,
+                windows: windowsPlatform,
+                macos: macosPlatform,
+                customTranslation,
+                tencentTranslation,
+                niutrans,
+                translationProvider,
+                providerCredentials,
+                tencentCredentialInput,
+                updateTencentCredentialInput,
+                providerCredentialBusy,
+                providerCredentialMessages,
+                runProviderCredential,
+                credentialTestControl,
+                customTranslationsText,
+                customTranslationsPlaceholder,
+                customTranslationsNotice,
+                customTranslationsSummary,
+                customTranslationsSaveState,
+                customTranslationsSaveError,
+                onCustomTranslationsChange: setCustomTranslationsText,
+                onFlushCustomTranslations: () => void flushCustomTranslations(),
+                onPreferencesChange,
+                setTranslationProvider,
+                serviceCredentialEnabled: tencentTranslation.enabled,
+              })
+            : undefined
         }
       />
-      {client.fuzzyPinyin && (
-        <FuzzyPinyinSection
-          preferences={fuzzyPinyin}
-          onChange={(fuzzy_pinyin) => onPreferencesChange({ fuzzy_pinyin })}
-          confirm={confirm}
-        />
-      )}
-      <LearningSection
-        value={draft.learning}
-        onChange={(learning) => onPreferencesChange({ learning })}
-      />
-      <PunctuationSection
+      <InputSharedSettingsSection
         preferences={draft}
-        showCharacterWidth={showCharacterWidth}
-        onChange={onPreferencesChange}
-      />
-      <MixedInputSection
-        preferences={mixedInput}
-        onChange={(mixed_input) => onPreferencesChange({ mixed_input })}
-      />
-      {/* macOS keeps this with the chords that trigger it, on the shortcut page. */}
-      {showInputModeHUD && !macosPlatform && (
-        <InputModeHudSection
-          value={draft.input_mode_hud}
-          onChange={(input_mode_hud) => onPreferencesChange({ input_mode_hud })}
-        />
-      )}
-      {client.candidateEnglishGloss && (
-        <CandidateEnglishGlossSection
-          value={draft.candidate_english_gloss}
-          onChange={(candidate_english_gloss) => onPreferencesChange({ candidate_english_gloss })}
-        />
-      )}
-      {showEnglishSuggestions && (
-        <EnglishSuggestionsSection
-          value={draft.english_suggestions}
-          onChange={(english_suggestions) => onPreferencesChange({ english_suggestions })}
-        />
-      )}
-      <DefaultImeModeSection
-        value={draft.default_ime_mode}
-        onChange={(default_ime_mode) => onPreferencesChange({ default_ime_mode })}
-      />
-      {showModeScope && (
-        <ImeModeScopeSection
-          value={draft.ime_mode_scope}
-          onChange={(ime_mode_scope) => onPreferencesChange({ ime_mode_scope })}
-        />
-      )}
-      <TraditionalChineseOutputSection
-        value={draft.traditional_chinese_output}
-        onChange={(traditional_chinese_output) =>
-          onPreferencesChange({ traditional_chinese_output })
+        wordCharacter={wordCharacter}
+        navigation={draft.navigation ?? defaultNavigation}
+        frequency={frequency}
+        ios={iosPlatform}
+        showInputModeHUD={showInputModeHUD && !macosPlatform}
+        showModeScope={showModeScope}
+        mixedInput={mixedInput}
+        onMixedInputChange={(mixed_input) => onPreferencesChange({ mixed_input })}
+        showCandidateEnglishGloss={Boolean(client.candidateEnglishGloss)}
+        showEnglishSuggestions={showEnglishSuggestions}
+        beforeLearning={
+          client.fuzzyPinyin ? (
+            <FuzzyPinyinSection
+              preferences={fuzzyPinyin}
+              onChange={(fuzzy_pinyin) => onPreferencesChange({ fuzzy_pinyin })}
+              confirm={confirm}
+            />
+          ) : null
         }
+        beforeLanguage={
+          <>
+            <PunctuationSection
+              preferences={draft}
+              showCharacterWidth={showCharacterWidth}
+              onChange={onPreferencesChange}
+            />
+          </>
+        }
+        onPreferencesChange={onPreferencesChange}
       />
-      <CloudCandidatesSection
-        value={draft.cloud_candidates}
-        onChange={(cloud_candidates) => onPreferencesChange({ cloud_candidates })}
+      <MobileKeyboardFeedbackSettings
+        mobile={mobilePlatform}
+        client={client.mobileKeyboardFeedback}
+        value={mobileKeyboardFeedback}
+        busy={mobileKeyboardFeedbackBusy}
+        ios={iosPlatform}
+        onChange={(value) => void saveMobileKeyboardFeedback(value)}
+        onPreview={() => void previewMobileKeyboardHaptics()}
       />
-      <FrequencySection
-        preferences={frequency}
-        onChange={(frequency) => onPreferencesChange({ frequency })}
-      />
-      {mobilePlatform && client.mobileKeyboardFeedback && mobileKeyboardFeedback && (
-        <MobileKeyboardFeedbackSection
-          value={mobileKeyboardFeedback}
-          busy={mobileKeyboardFeedbackBusy}
-          ios={iosPlatform}
-          canPreview={Boolean(client.mobileKeyboardFeedback.preview)}
-          onChange={(next) => void saveMobileKeyboardFeedback(next)}
-          onPreview={() => void previewMobileKeyboardHaptics()}
-        />
-      )}
     </fieldset>
   );
 }

@@ -280,6 +280,101 @@ test("an Apple-only backend without a native Apple client shows the empty login 
   expect(screen.queryByRole("button", { name: "使用 Apple 登录" })).toBeNull();
 });
 
+test("desktop Google sign-in runs through the native account client", async () => {
+  const googleLogin = vi.fn().mockResolvedValue({ user });
+  const onLoginComplete = vi.fn();
+  const client = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false, google: true }),
+    profile: vi.fn().mockResolvedValue({ user, providers: ["google"] }),
+    googleLogin,
+  });
+  render(<AccountPage client={client} onLoginComplete={onLoginComplete} />);
+  fireEvent.click(await screen.findByRole("button", { name: "使用 Google 登录" }));
+  await waitFor(() => expect(googleLogin).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(onLoginComplete).toHaveBeenCalledTimes(1));
+  expect(client.profile).toHaveBeenCalled();
+  expect(await screen.findByText("Google")).not.toBeNull();
+  expect(client.requestCode).not.toHaveBeenCalled();
+  expect(screen.queryByText(/token|code|state/i)).toBeNull();
+});
+
+test("Google sign-in needs both the backend provider and a native Google client", async () => {
+  const withoutClient = account({
+    providers: vi.fn().mockResolvedValue({ email: false, phone: false, google: true }),
+  });
+  render(<AccountPage client={withoutClient} />);
+  expect(await screen.findByText("当前没有可用的验证码登录方式，请稍后重试。")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "使用 Google 登录" })).toBeNull();
+  cleanup();
+
+  const googleLogin = vi.fn();
+  const withoutProvider = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false, google: false }),
+    googleLogin,
+  });
+  render(<AccountPage client={withoutProvider} />);
+  expect(await screen.findByRole("button", { name: "邮箱登录" })).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "使用 Google 登录" })).toBeNull();
+  expect(googleLogin).not.toHaveBeenCalled();
+});
+
+test("a cancelled Google sign-in stays silent", async () => {
+  const googleLogin = vi.fn().mockRejectedValue({ code: "account_cancelled" });
+  const client = account({
+    providers: vi.fn().mockResolvedValue({ email: false, phone: false, google: true }),
+    googleLogin,
+  });
+  render(<AccountPage client={client} />);
+  fireEvent.click(await screen.findByRole("button", { name: "使用 Google 登录" }));
+  await waitFor(() => expect(googleLogin).toHaveBeenCalledTimes(1));
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "使用 Google 登录" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("a pending Google sign-in can be abandoned without waiting for the browser", async () => {
+  let rejectLogin: (reason: unknown) => void = () => undefined;
+  const googleLogin = vi.fn(
+    () =>
+      new Promise<{ user?: null }>((_, reject) => {
+        rejectLogin = reject;
+      }),
+  );
+  const googleCancel = vi.fn(async () => rejectLogin({ code: "account_cancelled" }));
+  const onCancelLogin = vi.fn();
+  const client = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false, google: true }),
+    googleLogin,
+    googleCancel,
+  });
+  render(<AccountPage client={client} onCancelLogin={onCancelLogin} />);
+  fireEvent.click(await screen.findByRole("button", { name: "使用 Google 登录" }));
+  const cancel = await screen.findByRole("button", { name: "取消 Google 登录" });
+  expect(
+    (screen.getByRole("button", { name: "正在等待浏览器完成 Google 登录…" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect((screen.getByRole("button", { name: "取消" }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(cancel);
+  expect(googleCancel).toHaveBeenCalledTimes(1);
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "使用 Google 登录" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  expect(screen.queryByRole("button", { name: "取消 Google 登录" })).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "使用 Google 登录" }));
+  await screen.findByRole("button", { name: "取消 Google 登录" });
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  expect(googleCancel).toHaveBeenCalledTimes(2);
+  expect(onCancelLogin).toHaveBeenCalledTimes(1);
+});
+
 test("mobile profile card opens a back-stack page with account actions", async () => {
   window.history.replaceState({ msimeSettings: true, page: "account" }, "");
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });

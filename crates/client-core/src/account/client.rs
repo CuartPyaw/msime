@@ -977,7 +977,7 @@ impl AccountApi for BackendAccountClient {
     }
 
     fn login(&self, challenge: &str, credential: &str) -> Result<AccountTokens, AccountError> {
-        validate_login(challenge, credential)?;
+        validate_login_request(challenge, credential)?;
         #[derive(Serialize)]
         struct Body<'a> {
             challenge_id: &'a str,

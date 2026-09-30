@@ -49,6 +49,26 @@ public final class BootstrapMarkerSmoke {
                 });
             }
         }
+        Path lockRoot = Files.createTempDirectory("bootstrap-lock-root");
+        Path lockTarget = Files.createTempFile("bootstrap-lock-target", ".lock");
+        try {
+            Path linkedLock = lockRoot.resolve("bootstrap.lock");
+            Files.createSymbolicLink(linkedLock, lockTarget);
+            boolean rejected = false;
+            java.nio.channels.FileChannel opened = null;
+            try {
+                opened = Bootstrap.openLock(linkedLock);
+            } catch (java.io.IOException expected) {
+                rejected = true;
+            } finally {
+                if (opened != null) opened.close();
+            }
+            check(rejected);
+        } finally {
+            Files.deleteIfExists(lockRoot.resolve("bootstrap.lock"));
+            Files.deleteIfExists(lockRoot);
+            Files.deleteIfExists(lockTarget);
+        }
         Path boundaryRoot = Files.createTempDirectory("bootstrap-boundary-root");
         Path boundaryOutside = Files.createTempDirectory("bootstrap-boundary-outside");
         try {

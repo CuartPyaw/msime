@@ -17,6 +17,11 @@ pub(crate) fn cleanup_stale_snapshot_previews(directory: &Path) -> std::io::Resu
     Ok(())
 }
 
+/// Keep restore requests from copying data that the native snapshot inspectors will reject.
+pub(crate) fn snapshot_text_within_limit(bytes: usize) -> bool {
+    bytes <= 512 * 1024 * 1024
+}
+
 #[cfg(test)]
 mod tests {
     use super::cleanup_stale_snapshot_previews;

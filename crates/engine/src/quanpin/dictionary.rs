@@ -685,13 +685,12 @@ impl QuanpinDictionary {
             raw
         } else {
             segmentation
-        }
-        .to_string();
-        if let Some(cached) = self.cache.get(&cache_key) {
-            return cached;
+        };
+        if let Some(cached) = self.cache.get_ref_by(cache_key) {
+            return cached.clone();
         }
         let result = self.query_database(segments, segmentation);
-        self.cache.insert(cache_key, result.clone());
+        self.cache.insert(cache_key.to_owned(), result.clone());
         result
     }
 
@@ -744,12 +743,12 @@ impl QuanpinDictionary {
 
     /// The first correction-mode cut of the raw input, cached (QD:777-788).
     fn computed_segments(&mut self, raw: &str) -> Vec<String> {
-        if let Some(cached) = self.segmentation_cache.get(&raw.to_string()) {
+        let key = raw.to_owned();
+        if let Some(cached) = lookup_cached_segments(&self.segmentation_cache, &key) {
             return cached;
         }
         let segments = first_correction_cut(raw).unwrap_or_default();
-        self.segmentation_cache
-            .insert(raw.to_string(), segments.clone());
+        self.segmentation_cache.insert(key, segments.clone());
         segments
     }
 
@@ -825,6 +824,13 @@ impl QuanpinDictionary {
     }
 }
 
+fn lookup_cached_segments(
+    cache: &FifoCache<String, Vec<String>>,
+    key: &String,
+) -> Option<Vec<String>> {
+    cache.get_ref(key).cloned()
+}
+
 /// The readings that compete with the primary one (QD:394-443): with a mask, the same-cost corrections and then every correction-mode cut; for a short all-complete input, every complete segmentation of the letters. Deduplicated against the primary and the costlier cuts, at most 32.
 fn alternative_segmentations(
     raw: &str,
@@ -839,7 +845,7 @@ fn alternative_segmentations(
             .saturating_add(resolution.costlier_corrected_cuts.len())
             .saturating_add(SYLLABLE_GRAPH_PATH_LIMIT),
     );
-    seen.insert(resolution.segmentation.clone());
+    let primary_segmentation = resolution.segmentation.as_str();
     seen.extend(
         resolution
             .costlier_corrected_cuts
@@ -848,7 +854,11 @@ fn alternative_segmentations(
     );
     let mut append = |candidate: &[String]| {
         let key = join_segments(candidate);
-        if !key.is_empty() && seen.insert(key) && alternatives.len() < SYLLABLE_GRAPH_PATH_LIMIT {
+        if !key.is_empty()
+            && !is_duplicate_segmentation(primary_segmentation, &seen, &key)
+            && alternatives.len() < SYLLABLE_GRAPH_PATH_LIMIT
+        {
+            seen.insert(key);
             alternatives.push(candidate.to_vec());
         }
     };
@@ -871,6 +881,10 @@ fn alternative_segmentations(
         }
     }
     alternatives
+}
+
+fn is_duplicate_segmentation(primary: &str, seen: &HashSet<String>, key: &str) -> bool {
+    key == primary || seen.contains(key)
 }
 
 /// Letters of a row's matched code, what the fuzzy merge sorts by.

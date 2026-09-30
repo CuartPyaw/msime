@@ -6,7 +6,7 @@
 //!
 //! A trigram cannot be searched the same way without carrying two words of history in every beam entry, so it is applied after the search: the n best paths are rescored with what the third word adds over the second, then reordered. That is the reason to decode more paths than are shown.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::cxx_sort;
@@ -372,7 +372,6 @@ pub(super) fn decode_graph(
     let take = options.nbest.min(last.len());
 
     let mut paths = Vec::with_capacity(take);
-    let mut seen = HashSet::with_capacity(take);
     for hyp in &last {
         if paths.len() >= take {
             break;
@@ -389,7 +388,7 @@ pub(super) fn decode_graph(
         words.reverse();
         keys.reverse();
         let sentence = words.concat();
-        if sentence.is_empty() || !seen.insert(sentence.clone()) {
+        if sentence.is_empty() || contains_sentence(&paths, &sentence) {
             continue;
         }
         paths.push(SentencePath {
@@ -402,6 +401,10 @@ pub(super) fn decode_graph(
     }
     rescore_with_trigram(&mut paths, options);
     paths
+}
+
+fn contains_sentence(paths: &[SentencePath], sentence: &str) -> bool {
+    paths.iter().any(|path| path.sentence == sentence)
 }
 
 /// WL:168-186. The beam carries one word of history, so a third word of context cannot be searched without widening every hypothesis into (position, last two words); the survivors are rescored instead. Each entry holds what the third word adds over the second, so summing it onto a path that already carries its bigram score is the whole model, not a second opinion.
@@ -489,6 +492,8 @@ pub(super) fn decode_typo_on_graph(
 
 #[cfg(test)]
 pub(super) mod tests {
+    use std::collections::HashSet;
+
     use super::super::ngram::tests::{pair_table, triple_table};
     use super::super::personal::tests::record_run;
     use super::*;
@@ -534,6 +539,19 @@ pub(super) mod tests {
         let paths = decode(text, rows, options);
         assert!(!paths.is_empty(), "the lattice decoded nothing for {text}");
         paths[0].sentence.clone()
+    }
+
+    #[test]
+    fn sentence_lookup_scans_existing_paths() {
+        let paths = vec![SentencePath {
+            sentence: "你好".to_owned(),
+            key: "ni'hao".to_owned(),
+            log_prob: 0.0,
+            words: vec!["你".to_owned(), "好".to_owned()],
+            typo_edges: 0,
+        }];
+        assert!(contains_sentence(&paths, "你好"));
+        assert!(!contains_sentence(&paths, "泥好"));
     }
 
     #[test]

@@ -1,6 +1,5 @@
 //! The emoji, symbol and kaomoji catalog the host's picker pages through (api-contract §1c, bridge.cpp:1018-1137, 1237-1260). Errors deliberately carry no SQLite detail.
 
-use std::collections::HashSet;
 use std::path::Path;
 
 use rusqlite::{Connection, Statement};
@@ -106,7 +105,6 @@ pub fn read_emoji_catalog_slice(
         next_offset: offset,
         complete: false,
     };
-    let mut seen = HashSet::with_capacity(if deduplicate { limit } else { 0 });
     let mut rows = statement.raw_query();
     loop {
         let row = match rows.next() {
@@ -131,7 +129,7 @@ pub fn read_emoji_catalog_slice(
             continue;
         }
         if let Some(text) = text {
-            if !deduplicate || seen.insert(text.clone()) {
+            if !deduplicate || !contains_catalog_text(&result.items, &text) {
                 result.items.push(EmojiCatalogItem {
                     text,
                     annotation: annotation.unwrap_or_default(),
@@ -142,6 +140,10 @@ pub fn read_emoji_catalog_slice(
     }
     result.complete = result.next_offset - offset < limit;
     Ok(result)
+}
+
+fn contains_catalog_text(items: &[EmojiCatalogItem], text: &str) -> bool {
+    items.iter().any(|item| item.text == text)
 }
 
 /// The groups of a category in first-appearance order.
@@ -246,6 +248,17 @@ mod tests {
 
     fn texts(slice: &EmojiCatalogSlice) -> Vec<&str> {
         slice.items.iter().map(|item| item.text.as_str()).collect()
+    }
+
+    #[test]
+    fn catalog_text_lookup_uses_owned_items() {
+        let items = vec![EmojiCatalogItem {
+            text: "😀".into(),
+            annotation: String::new(),
+            group: String::new(),
+        }];
+        assert!(contains_catalog_text(&items, "😀"));
+        assert!(!contains_catalog_text(&items, "😄"));
     }
 
     #[test]

@@ -3,6 +3,19 @@ import Security
 
 final class KeyboardAITests: XCTestCase {
   @MainActor
+  func testOversizedPasteClearsPreviousSourceText() {
+    let model = ReplyKeyboardModel()
+    model.setText("旧文本")
+
+    model.setText(String(repeating: "字", count: 10_001))
+
+    XCTAssertEqual(model.text, "")
+    XCTAssertTrue(model.replies.isEmpty)
+    XCTAssertFalse(model.busy)
+    XCTAssertTrue(model.status.contains("一万字"))
+  }
+
+  @MainActor
   func testReplyClearDropsLateResultsAndNeverInsertsAutomatically() async throws {
     let model = ReplyKeyboardModel()
     var inserted = 0

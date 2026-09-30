@@ -147,6 +147,10 @@ public final class VoiceResultStore {
             if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS))
                 throw new Failure(Reason.UNAVAILABLE);
             Path lockPath = directory.resolve(LOCK_NAME);
+            if (Files.isSymbolicLink(lockPath)
+                    || (Files.exists(lockPath, LinkOption.NOFOLLOW_LINKS)
+                        && !Files.isRegularFile(lockPath, LinkOption.NOFOLLOW_LINKS)))
+                throw new Failure(Reason.UNAVAILABLE);
             try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE,
                     StandardOpenOption.READ, StandardOpenOption.WRITE)) {
                 FileLock lock;
@@ -164,13 +168,15 @@ public final class VoiceResultStore {
     }
 
     private static void rejectSymlinkComponents(Path path) throws IOException {
-        if (Files.isSymbolicLink(path))
-            throw new IOException("voice result directory is a symbolic link");
-        Path parent = path.getParent();
-        if (parent != null && Files.isSymbolicLink(parent))
-            throw new IOException("voice result parent is a symbolic link");
-        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)
-                && !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
+        Path absolute = path.toAbsolutePath().normalize();
+        Path existing = absolute;
+        while (existing != null
+                && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+            existing = existing.getParent();
+        }
+        if (existing == null || Files.isSymbolicLink(existing))
+            throw new IOException("voice result path contains a symbolic link");
+        if (!Files.isDirectory(existing, LinkOption.NOFOLLOW_LINKS))
             throw new IOException("voice result directory is not a directory");
     }
 

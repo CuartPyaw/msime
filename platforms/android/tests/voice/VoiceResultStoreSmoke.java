@@ -27,10 +27,19 @@ public final class VoiceResultStoreSmoke {
             Path outside = Files.createDirectory(directory.resolve("outside"));
             Path linkedParent = directory.resolve("linked-parent");
             Files.createSymbolicLink(linkedParent, outside);
-            VoiceResultStore linkedStore = new VoiceResultStore(linkedParent.resolve("nested"));
+            VoiceResultStore linkedStore = new VoiceResultStore(
+                linkedParent.resolve("middle").resolve("nested"));
             fails(VoiceResultStore.Reason.UNAVAILABLE, () -> linkedStore.save("synthetic", now));
-            check(!Files.exists(outside.resolve("nested")));
+            check(!Files.exists(outside.resolve("middle")));
             Files.delete(linkedParent);
+            Path outsideLock = Files.createTempFile("msime-voice-lock-target-", ".lock");
+            Files.writeString(outsideLock, "synthetic-lock-target");
+            Path linkedLock = directory.resolve("transfer.lock");
+            Files.createSymbolicLink(linkedLock, outsideLock);
+            fails(VoiceResultStore.Reason.UNAVAILABLE, () -> store.read(now));
+            check(Files.readString(outsideLock).equals("synthetic-lock-target"));
+            Files.delete(linkedLock);
+            Files.delete(outsideLock);
             fails(VoiceResultStore.Reason.INVALID, () -> store.read(-1));
             fails(VoiceResultStore.Reason.INVALID, () -> store.save("   ", now));
             fails(VoiceResultStore.Reason.INVALID, () -> store.save("\ud800", now));

@@ -21,7 +21,7 @@ public final class Bootstrap {
     private Bootstrap() {}
     public static boolean prepare(Context context) throws Exception {
         File root = context.getFilesDir();
-        try (FileChannel channel = FileChannel.open(new File(root, "bootstrap.lock").toPath(), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        try (FileChannel channel = openLock(new File(root, "bootstrap.lock").toPath());
              FileLock lock = channel.lock()) {
             if (!lock.isValid()) throw new IllegalStateException("Bootstrap lock unavailable");
             installOfflineGlosses(context, new File(root, "bootstrap/offline-glosses"));
@@ -66,6 +66,14 @@ public final class Bootstrap {
             }
             return true;
         }
+    }
+
+    static FileChannel openLock(java.nio.file.Path path) throws java.io.IOException {
+        if (Files.isSymbolicLink(path)
+                || (Files.exists(path, LinkOption.NOFOLLOW_LINKS)
+                    && !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)))
+            throw new java.io.IOException("Bootstrap lock is not a regular file");
+        return FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
     }
 
     static void ensureSafeDirectory(java.nio.file.Path directory) throws java.io.IOException {

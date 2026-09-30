@@ -15,13 +15,32 @@ fn lock_file_options() -> OpenOptions {
     options
 }
 
+fn secure_lock_file_options(path: &Path) -> io::Result<OpenOptions> {
+    crate::storage::reject_symlink(path)?;
+    let mut options = lock_file_options();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    Ok(options)
+}
+
 pub(crate) fn open_lock_file(path: impl AsRef<Path>) -> io::Result<File> {
-    lock_file_options().open(path)
+    let path = path.as_ref();
+    secure_lock_file_options(path)?.open(path)
 }
 
 /// Open a lock file with owner-only permissions on Unix hosts.
 pub fn open_private_lock_file(path: impl AsRef<Path>) -> io::Result<File> {
-    let mut options = lock_file_options();
+    let path = path.as_ref();
+    let mut options = secure_lock_file_options(path)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -118,6 +137,41 @@ mod tests {
 
     // 宽限期内释放的锁应当被拿到，长期被持有的锁仍要如实报告占用——后者是产品语义，
     // 不能因为加了重试就变成无限等待。
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_symlinked_lock_leaf() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.lock");
+        std::fs::write(&target, b"synthetic-lock-target").unwrap();
+        let linked = root.path().join("state.lock");
+        symlink(&target, &linked).unwrap();
+
+        assert!(open_lock_file(&linked).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-lock-target");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_symlinked_private_lock_leaf() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.lock");
+        std::fs::write(&target, b"synthetic-private-lock-target").unwrap();
+        let linked = root.path().join("state.lock");
+        symlink(&target, &linked).unwrap();
+
+        assert!(open_private_lock_file(&linked).is_err());
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"synthetic-private-lock-target"
+        );
+    }
+
     #[test]
     fn grace_waits_for_a_lock_that_is_about_to_be_released_and_still_reports_real_contention() {
         let directory = tempfile::tempdir().unwrap();
