@@ -184,16 +184,15 @@ impl ShuangpinDictionary {
             pure
         } else {
             cache_key
-        }
-        .to_string();
-        if self.rows_cache.contains(&key) {
+        };
+        if self.rows_cache.get_ref_by(key).is_some() {
             self.reset_cache_if_database_changed();
-            if let Some(cached) = self.rows_cache.get(&key) {
-                return cached;
+            if let Some(cached) = self.rows_cache.get_ref_by(key) {
+                return cached.clone();
             }
         }
         let rows = self.query_rows(pure, segmentation);
-        self.rows_cache.insert(key, rows.clone());
+        self.rows_cache.insert(key.to_owned(), rows.clone());
         rows
     }
 
