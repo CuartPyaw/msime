@@ -545,6 +545,8 @@ fn item() -> CandidateSkinItem {
         owned: false,
         my_rating: 0,
         created_at: "2026-09-30T00:00:00Z".into(),
+        visibility: CandidateSkinVisibility::Public,
+        updated_at: "2026-09-30T00:00:00Z".into(),
     }
 }
 
@@ -557,6 +559,7 @@ fn publish_request() -> CandidateSkinPublishRequest {
         description: "公开说明".into(),
         manifest: manifest("sakura", TOP, "", "", LICENSE),
         files,
+        visibility: CandidateSkinVisibility::Public,
     }
 }
 
@@ -685,6 +688,36 @@ impl CandidateSkinCommunityApi for FakeApi {
     }
     fn unpublish_candidate_skin(&self, _: Uuid, bearer: &str) -> Result<(), AccountError> {
         self.call(Some(bearer))
+    }
+    fn candidate_skin_sync_list(
+        &self,
+        bearer: &str,
+    ) -> Result<Vec<CandidateSkinSyncEntry>, AccountError> {
+        self.call(Some(bearer))?;
+        Ok(Vec::new())
+    }
+    fn replace_candidate_skin(
+        &self,
+        id: Uuid,
+        _: &CandidateSkinReplaceRequest,
+        bearer: &str,
+    ) -> Result<CandidateSkinItem, AccountError> {
+        self.call(Some(bearer))?;
+        let mut value = item();
+        value.id = id;
+        Ok(value)
+    }
+    fn set_candidate_skin_visibility(
+        &self,
+        id: Uuid,
+        visibility: CandidateSkinVisibility,
+        bearer: &str,
+    ) -> Result<CandidateSkinItem, AccountError> {
+        self.call(Some(bearer))?;
+        let mut value = item();
+        value.id = id;
+        value.visibility = visibility;
+        Ok(value)
     }
 }
 
@@ -857,7 +890,7 @@ fn transport_lists_with_scope_and_encoded_search() {
     assert_eq!(page.skins, vec![item()]);
     let (head, _) = received.recv().unwrap();
     assert!(head.starts_with(
-        "GET /v1/community/candidate-skins?offset=20&q=%E6%A8%B1%20%E8%8A%B1&scope=mine HTTP/1.1"
+        "GET /v1/community/candidate-skins?offset=20&q=%E6%A8%B1%20%E8%8A%B1&scope=mine&fields=sync HTTP/1.1"
     ));
     assert!(head.contains("authorization: Bearer "));
 }
@@ -889,7 +922,8 @@ fn transport_publishes_a_body_larger_than_the_account_default() {
     assert_eq!(body["description"], "公开说明");
     assert_eq!(body["manifest"], request.manifest);
     assert_eq!(body["files"][BACKGROUND].as_str().unwrap().len(), 960_000);
-    assert_eq!(body.as_object().unwrap().len(), 5);
+    assert_eq!(body["visibility"], "public");
+    assert_eq!(body.as_object().unwrap().len(), 6);
 }
 
 #[test]
@@ -962,5 +996,150 @@ fn other_account_requests_keep_the_one_mebibyte_body_limit() {
     assert_eq!(
         client.publish_candidate_skin(&request, &token(b'c')),
         Err(AccountError::Invalid)
+    );
+}
+
+#[test]
+fn request_digest_matches_the_server() {
+    // Computed by the server's candidateRequestDigest (internal/account/community_candidate.go) over the same inputs.
+    let mut files = BTreeMap::new();
+    files.insert(
+        "preview.png".to_owned(),
+        BASE64.encode([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3]),
+    );
+    files.insert(
+        "images/bg.jpg".to_owned(),
+        BASE64.encode([0xFF, 0xD8, 0xFF, 9, 9]),
+    );
+    assert_eq!(
+        request_digest("樱花候选", "说明", "id = 'sakura'\n", &files).unwrap(),
+        "77cbb8f2bdf2cbba7114cff86610b7ac715d173e41b1b1d880bb21f6be9d549a"
+    );
+    let mut empty = BTreeMap::new();
+    empty.insert("a.png".to_owned(), String::new());
+    assert_eq!(
+        request_digest("", "", "", &empty).unwrap(),
+        "65ecbf6005c09c90503e68786bc4753896fdc3496f0df547d422b5c02540b1ab"
+    );
+    files.insert("x.png".to_owned(), "***".to_owned());
+    assert!(request_digest("", "", "", &files).is_err());
+}
+
+#[test]
+fn a_private_package_needs_no_asset_license() {
+    let root = tempfile::tempdir().unwrap();
+    write_skin(root.path(), "sakura", TOP, "", "", "");
+    assert_eq!(pack(root.path(), "sakura"), Err(LICENSE_REQUIRED));
+    let packed = pack_as(root.path(), "sakura", CandidateSkinVisibility::Private).unwrap();
+    assert_eq!(packed.license, SkinLicense::default());
+    assert_eq!(packed.files.keys().collect::<Vec<_>>(), [PREVIEW]);
+
+    let mut value = item();
+    value.license.assets = String::new();
+    assert_eq!(validate_item(&value), Err(AccountError::Unavailable));
+    value.visibility = CandidateSkinVisibility::Private;
+    assert!(validate_item(&value).is_ok());
+}
+
+#[test]
+fn items_from_a_server_before_private_packages_read_as_public() {
+    let mut value = serde_json::to_value(item()).unwrap();
+    let object = value.as_object_mut().unwrap();
+    object.remove("visibility");
+    object.remove("updated_at");
+    let parsed: CandidateSkinItem = serde_json::from_value(value).unwrap();
+    assert_eq!(parsed.visibility, CandidateSkinVisibility::Public);
+    assert_eq!(parsed.updated_at, "");
+}
+
+#[test]
+fn transport_reads_the_sync_list_and_refuses_a_malformed_row() {
+    let entry = CandidateSkinSyncEntry {
+        id: item().id,
+        package_id: "sakura".into(),
+        request_sha256: "a".repeat(64),
+        visibility: CandidateSkinVisibility::Private,
+        updated_at: "2026-09-30T00:00:00Z".into(),
+    };
+    let (origin, received) =
+        serve_once(serde_json::to_vec(&serde_json::json!({ "skins": [entry] })).unwrap());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    assert_eq!(
+        client.candidate_skin_sync_list(&token(b'c')).unwrap(),
+        vec![entry.clone()]
+    );
+    let (head, _) = received.recv().unwrap();
+    assert!(head.starts_with("GET /v1/community/candidate-skins/sync HTTP/1.1"));
+
+    let mut bad = entry.clone();
+    bad.request_sha256 = "A".repeat(64);
+    let (origin, _received) =
+        serve_once(serde_json::to_vec(&serde_json::json!({ "skins": [bad] })).unwrap());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    assert_eq!(
+        client.candidate_skin_sync_list(&token(b'c')),
+        Err(AccountError::Unavailable)
+    );
+}
+
+#[test]
+fn transport_replaces_and_sets_visibility_by_id() {
+    let request = publish_request();
+    let replace = CandidateSkinReplaceRequest {
+        name: request.name.clone(),
+        description: request.description.clone(),
+        manifest: request.manifest.clone(),
+        files: request.files.clone(),
+    };
+    let (origin, received) = serve_once(serde_json::to_vec(&item()).unwrap());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    assert_eq!(
+        client
+            .replace_candidate_skin(item().id, &replace, &token(b'c'))
+            .unwrap(),
+        item()
+    );
+    let (head, body) = received.recv().unwrap();
+    assert!(head.starts_with(&format!(
+        "PUT /v1/community/candidate-skins/{} HTTP/1.1",
+        item().id.hyphenated()
+    )));
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body.as_object().unwrap().len(), 4);
+
+    let mut private = item();
+    private.visibility = CandidateSkinVisibility::Private;
+    let (origin, received) = serve_once(serde_json::to_vec(&private).unwrap());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    assert_eq!(
+        client
+            .set_candidate_skin_visibility(
+                item().id,
+                CandidateSkinVisibility::Private,
+                &token(b'c')
+            )
+            .unwrap(),
+        private
+    );
+    let (head, body) = received.recv().unwrap();
+    assert!(head.starts_with(&format!(
+        "PATCH /v1/community/candidate-skins/{} HTTP/1.1",
+        item().id.hyphenated()
+    )));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+        serde_json::json!({ "visibility": "private" })
+    );
+
+    // An echo with the other visibility means the change did not happen.
+    let (origin, _received) = serve_once(serde_json::to_vec(&item()).unwrap());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    assert_eq!(
+        client.set_candidate_skin_visibility(
+            item().id,
+            CandidateSkinVisibility::Private,
+            &token(b'c')
+        ),
+        Err(AccountError::Unavailable)
     );
 }
