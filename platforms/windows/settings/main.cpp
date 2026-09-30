@@ -2968,9 +2968,9 @@ private:
         {L"super_jianpin", L"超级简拼(J 模式)", true},
         {L"temporary_english", L"临时英文(Y 模式)", true},
         {L"temporary_japanese", L"临时日语(R 模式)", true},
-        {L"expression", L"计算与数字大写(V 模式)", false},
-        {L"command", L"快捷指令(/ 键)", false},
-        {L"mention", L"常用名单(@ 键)", false},
+        {L"expression", L"计算与数字(V 模式)", false},
+        {L"command", L"指令(/ 模式)", false},
+        {L"mention", L"@ 名字与地点(@ 模式)", false},
     }};
     std::vector<Check> checks;
     for (const auto &[id, label, default_on] : modes) {
