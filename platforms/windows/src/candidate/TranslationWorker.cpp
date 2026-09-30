@@ -602,6 +602,7 @@ TranslationWorker::translate(const FocusLease &lease, const std::string &query_b
           .dump();
     };
     std::vector<std::string> planned;
+    planned.reserve(plan->size());
     for (const auto &item : *plan)
       planned.push_back(item.at("text").get<std::string>());
     const auto wanted = msime::windows::untranslated_texts(answered, planned);
