@@ -16,6 +16,7 @@ export type AccountProviders = {
   email: boolean;
   phone: boolean;
   apple?: boolean;
+  google?: boolean;
 };
 
 export type AccountChallenge = {
@@ -66,6 +67,8 @@ export interface AccountClient {
   login(challengeId: string, code: string): Promise<{ user?: AccountUser | null }>;
   /** iOS performs the nonce and AuthenticationServices exchange natively. */
   appleLogin?: () => Promise<{ user?: AccountUser | null }>;
+  /** Desktop hosts run the Google browser and loopback redirect natively; the page never sees the authorization code. */
+  googleLogin?: () => Promise<{ user?: AccountUser | null }>;
   profile(): Promise<AccountProfile>;
   rename(displayName: string): Promise<AccountProfile>;
   logout(all: boolean): Promise<void>;
@@ -1044,15 +1047,30 @@ function AccountDetailsPage({
 
   const resendSeconds = Math.max(0, Math.ceil((resendAt - now) / 1000));
   const expired = Boolean(challenge) && expiresAt <= now;
-  // Count only providers this host can render; the backend may enable Apple for hosts without a native Apple client.
+  // Count only providers this host can render; the backend may enable Apple or Google for hosts without a native client for them.
   const appleAvailable = providers.apple === true && Boolean(client.appleLogin);
+  const googleAvailable = providers.google === true && Boolean(client.googleLogin);
   const enabledProviders =
-    Number(providers.email) + Number(providers.phone) + Number(appleAvailable);
+    Number(providers.email) +
+    Number(providers.phone) +
+    Number(appleAvailable) +
+    Number(googleAvailable);
 
   const signInWithApple = () =>
     void perform(async () => {
       if (!client.appleLogin) throw { code: "account_unavailable" };
       const result = await client.appleLogin();
+      if (!result.user) throw { code: "account_unavailable" };
+      setUser(result.user);
+      await loadProfile();
+      setNotice("登录成功。");
+      onLoginComplete?.();
+    });
+
+  const signInWithGoogle = () =>
+    void perform(async () => {
+      if (!client.googleLogin) throw { code: "account_unavailable" };
+      const result = await client.googleLogin();
       if (!result.user) throw { code: "account_unavailable" };
       setUser(result.user);
       await loadProfile();
@@ -1413,6 +1431,16 @@ function AccountDetailsPage({
                     onClick={signInWithApple}
                   >
                     使用 Apple 登录
+                  </button>
+                )}
+                {googleAvailable && (
+                  <button
+                    type="button"
+                    className={account.primary}
+                    disabled={busy}
+                    onClick={signInWithGoogle}
+                  >
+                    使用 Google 登录
                   </button>
                 )}
                 {providers.email && (
