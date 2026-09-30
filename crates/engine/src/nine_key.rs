@@ -418,9 +418,11 @@ impl NineKeySession {
         let Some(english) = self.open_english() else {
             return Vec::new();
         };
-        let mut words = Vec::new();
-        let mut seen = HashSet::new();
-        for prefix in letter_prefixes(&digits, ENGLISH_PREFIX_BUDGET) {
+        let prefixes = letter_prefixes(&digits, ENGLISH_PREFIX_BUDGET);
+        let capacity = prefixes.len().saturating_mul(ENGLISH_LIMIT);
+        let mut words = Vec::with_capacity(capacity);
+        let mut seen = HashSet::with_capacity(capacity);
+        for prefix in prefixes {
             for word in english.query_prefix(&prefix, ENGLISH_LIMIT) {
                 // Only a whole code that starts with the digits counts; otherwise letters beyond the expanded prefix leak in.
                 if !digits_for_word(&word.word).starts_with(&digits)
