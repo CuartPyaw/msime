@@ -32,6 +32,7 @@ fn settings_deep_link_names_a_category() {
         ("settings:expression", SettingsCategory::Expression),
         ("settings:download", SettingsCategory::Download),
         ("settings:developer", SettingsCategory::Developer),
+        ("settings:plugins", SettingsCategory::Plugins),
     ] {
         assert_eq!(
             SurfaceRoute::parse(argument),
@@ -536,11 +537,20 @@ fn voice_commit_mode_is_offered_only_where_a_host_chooses_between_paths() {
 
 /// No host plays sound packs, routes the `/` and `@` modes or streams music yet, and a host binary from before the flags sends a document without them; both must read as "not offered".
 #[test]
-fn plugin_surfaces_are_not_claimed_until_a_host_wires_them() {
+fn plugin_surfaces_are_claimed_only_by_the_hosts_that_wire_them() {
     for platform in [
         HostPlatform::Windows,
         HostPlatform::Macos,
         HostPlatform::Linux,
+    ] {
+        let capabilities = HostCapabilities::for_platform(platform);
+        assert!(
+            capabilities.key_sound && capabilities.plugin_triggers && capabilities.music,
+            "{platform:?}"
+        );
+    }
+    // HarmonyOS claims its 2in1 surfaces in its own form-factor projection; the phone hosts wire none.
+    for platform in [
         HostPlatform::Android,
         HostPlatform::Ios,
         HostPlatform::Harmony,

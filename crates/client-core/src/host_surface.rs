@@ -533,10 +533,10 @@ impl HostCapabilities {
             // no platform here that can and one that cannot. The flag exists for the version
             // skew: a host binary older than the entry point sends no field and gets `false`.
             vocabulary_review: true,
-            // The packs, the tables and the name list are all in place, but no host plays, routes or loads them yet. Each flips here in the change that wires it, the rule `for_platform` keeps: a switch with nothing behind it reads as a setting being ignored.
-            key_sound: false,
-            plugin_triggers: false,
-            music: false,
+            // The three desktop hosts play the packs, route V, / and @ by the Engine's spelling symbols and stream music while they are the active input method. HarmonyOS claims key sounds and the triggers per form factor in its own settings projection (2in1 only) and has no music player; the phone and tablet hosts wire none of them. A switch with nothing behind it reads as a setting being ignored, so each host flips here only in the change that wires it.
+            key_sound: platform.is_desktop(),
+            plugin_triggers: platform.is_desktop(),
+            music: platform.is_desktop(),
             os_version: None,
             candidate_panel_limit: None,
         }
@@ -572,6 +572,8 @@ pub enum SettingsCategory {
     Voice,
     Ai,
     Tools,
+    /// 扩展: sound packs, background music, command tables and the @ name list.
+    Plugins,
     FloatingToolbar,
     /// 开发者选项, which holds the local MCP server.
     Developer,
@@ -602,6 +604,7 @@ impl SettingsCategory {
             SettingsCategory::Voice => "voice",
             SettingsCategory::Ai => "ai",
             SettingsCategory::Tools => "tools",
+            SettingsCategory::Plugins => "plugins",
             SettingsCategory::FloatingToolbar => "floating-toolbar",
             SettingsCategory::Developer => "developer",
             SettingsCategory::Help => "help",
@@ -630,6 +633,7 @@ impl SettingsCategory {
             "voice" => Ok(SettingsCategory::Voice),
             "ai" => Ok(SettingsCategory::Ai),
             "tools" => Ok(SettingsCategory::Tools),
+            "plugins" => Ok(SettingsCategory::Plugins),
             "floating-toolbar" => Ok(SettingsCategory::FloatingToolbar),
             "developer" => Ok(SettingsCategory::Developer),
             "help" => Ok(SettingsCategory::Help),
@@ -640,7 +644,7 @@ impl SettingsCategory {
         }
     }
 
-    pub const ALL: [SettingsCategory; 23] = [
+    pub const ALL: [SettingsCategory; 24] = [
         SettingsCategory::Account,
         SettingsCategory::Chat,
         SettingsCategory::Community,
@@ -659,6 +663,7 @@ impl SettingsCategory {
         SettingsCategory::Voice,
         SettingsCategory::Ai,
         SettingsCategory::Tools,
+        SettingsCategory::Plugins,
         SettingsCategory::FloatingToolbar,
         SettingsCategory::Developer,
         SettingsCategory::Help,
