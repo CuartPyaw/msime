@@ -116,6 +116,16 @@ NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSize, NSRect visible
     [self applyThemeColors];
 }
 
+- (void)applyThemePreferences:(NSDictionary *)preferences {
+    id surface = preferences[@"toolbar_theme"];
+    id global = preferences[@"theme"];
+    id resolved = ([surface isEqual:@"dark"] || [surface isEqual:@"light"]) ? surface : global;
+    if ([resolved isEqual:@"light"]) self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+    else if (resolved == nil || [resolved isEqual:@"system"]) self.appearance = nil;
+    else self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    [self applyThemeColors];
+}
+
 - (NSColor *)surfaceColor { return _surfaceColor ?: NSColor.windowBackgroundColor; }
 - (NSColor *)borderColor { return _borderColor ?: NSColor.separatorColor; }
 - (NSColor *)textColor { return _textColor ?: NSColor.labelColor; }

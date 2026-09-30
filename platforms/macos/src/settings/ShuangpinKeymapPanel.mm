@@ -115,6 +115,7 @@ NSColor *KeymapAccentColor()
 @property(nonatomic, copy) NSString *key;
 @property(nonatomic, copy) NSString *codes;
 @property(nonatomic) BOOL highlighted;
+@property(nonatomic, copy) NSColor *accentColor;
 @end
 
 @implementation MSIMEShuangpinKeyView
@@ -139,7 +140,7 @@ NSColor *KeymapAccentColor()
     (void)dirtyRect;
     NSRect keyRect = NSInsetRect(self.bounds, 0.5, 0.5);
     NSBezierPath *keyPath = [NSBezierPath bezierPathWithRoundedRect:keyRect xRadius:7.0 yRadius:7.0];
-    NSColor *fillColor = self.highlighted ? KeymapAccentColor() : [NSColor controlBackgroundColor];
+    NSColor *fillColor = self.highlighted ? (self.accentColor ?: KeymapAccentColor()) : [NSColor controlBackgroundColor];
     [fillColor setFill];
     [keyPath fill];
     NSColor *borderColor = self.highlighted ? [[NSColor whiteColor] colorWithAlphaComponent:0.28]
@@ -174,7 +175,7 @@ namespace
 {
 
 NSStackView *KeyRow(NSArray<NSDictionary<NSString *, NSString *> *> *definitions,
-                    NSMutableArray<MSIMEShuangpinKeyView *> *keyViews)
+                    NSMutableArray<MSIMEShuangpinKeyView *> *keyViews, NSColor *accentColor)
 {
     NSMutableArray<NSView *> *views = [NSMutableArray arrayWithCapacity:definitions.count];
     for (NSDictionary<NSString *, NSString *> *definition in definitions)
@@ -182,6 +183,7 @@ NSStackView *KeyRow(NSArray<NSDictionary<NSString *, NSString *> *> *definitions
         MSIMEShuangpinKeyView *view = [[MSIMEShuangpinKeyView alloc] initWithFrame:NSZeroRect];
         view.key = definition[@"key"];
         view.codes = definition[@"codes"];
+        view.accentColor = accentColor;
         view.accessibilityRole = NSAccessibilityStaticTextRole;
         view.accessibilityLabel = view.key;
         view.accessibilityValue = view.codes;
@@ -285,6 +287,7 @@ NSRect MSIMEShuangpinKeymapPanelFrame(NSRect caretRect, NSSize panelSize, CGFloa
 {
     NSMutableArray<MSIMEShuangpinKeyView *> *_keyViews;
     NSString *_profileName;
+    NSColor *_accentColor;
 }
 
 - (instancetype)init
@@ -350,9 +353,9 @@ NSRect MSIMEShuangpinKeymapPanelFrame(NSRect caretRect, NSSize panelSize, CGFloa
     _keyViews = [NSMutableArray arrayWithCapacity:27];
     NSArray<NSArray<NSDictionary<NSString *, NSString *> *> *> *definitions =
         MSIMEShuangpinKeymapRows(_profileName);
-    NSStackView *topRow = KeyRow(definitions[0], _keyViews);
-    NSStackView *homeRow = KeyRow(definitions[1], _keyViews);
-    NSStackView *bottomRow = KeyRow(definitions[2], _keyViews);
+    NSStackView *topRow = KeyRow(definitions[0], _keyViews, _accentColor);
+    NSStackView *homeRow = KeyRow(definitions[1], _keyViews, _accentColor);
+    NSStackView *bottomRow = KeyRow(definitions[2], _keyViews, _accentColor);
     const CGFloat homeInset = KeyRowInset(definitions[1].count);
     const CGFloat bottomInset = KeyRowInset(definitions[2].count);
 
@@ -390,6 +393,21 @@ NSRect MSIMEShuangpinKeymapPanelFrame(NSRect caretRect, NSSize panelSize, CGFloa
     ]];
     background.accessibilityValue = AccessibleKeymapDescription(_keyViews, nil);
     self.contentView = background;
+}
+
+- (NSColor *)accentColor
+{
+    return _accentColor ?: KeymapAccentColor();
+}
+
+- (void)setAccentColor:(NSColor *)accent
+{
+    _accentColor = [accent copy];
+    for (MSIMEShuangpinKeyView *view in _keyViews)
+    {
+        view.accentColor = _accentColor;
+        view.needsDisplay = YES;
+    }
 }
 
 - (void)updateHighlightedKey:(NSString *)key

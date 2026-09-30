@@ -36,6 +36,23 @@ int main() {
             [hud setSurfaceColor:surface borderColor:border textColor:text];
             Require([hud.surfaceColor isEqual:surface] && [hud.borderColor isEqual:border] && [hud.textColor isEqual:text], "HUD did not keep the theme colours");
             Require(CGColorEqualToColor(hud.contentView.layer.backgroundColor, surface.CGColor) && hud.contentView.layer.borderWidth > 0, "HUD surface or outline not drawn in the theme colours");
+            // The badge is drawn in the toolbar's mode: toolbar_theme when it names one, then theme, then the system.
+            [hud applyThemePreferences:@{@"theme" : @"light", @"toolbar_theme" : @"dark"}];
+            Require([hud.appearance.name isEqualToString:NSAppearanceNameDarkAqua], "HUD ignored the toolbar's own mode");
+            [hud applyThemePreferences:@{@"theme" : @"dark", @"toolbar_theme" : @"follow"}];
+            Require([hud.appearance.name isEqualToString:NSAppearanceNameDarkAqua], "HUD ignored the global mode");
+            [hud applyThemePreferences:@{@"theme" : @"light"}];
+            Require([hud.appearance.name isEqualToString:NSAppearanceNameAqua], "HUD ignored the light mode");
+            NSColor *darkSurface = [NSColor colorWithSRGBRed:0x14 / 255.0 green:0x1B / 255.0 blue:0x33 / 255.0 alpha:1.0];
+            NSColor *dynamicSurface = [NSColor colorWithName:nil dynamicProvider:^NSColor *(NSAppearance *appearance) {
+                return [appearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] == NSAppearanceNameDarkAqua ? darkSurface : surface;
+            }];
+            [hud setSurfaceColor:dynamicSurface borderColor:border textColor:text];
+            [hud applyThemePreferences:@{@"theme" : @"system", @"toolbar_theme" : @"dark"}];
+            Require(CGColorEqualToColor(hud.contentView.layer.backgroundColor, darkSurface.CGColor), "HUD did not draw the dark palette in the toolbar's dark mode");
+            [hud applyThemePreferences:@{@"theme" : @"system"}];
+            Require(hud.appearance == nil, "HUD did not return to the system appearance");
+            [hud setSurfaceColor:surface borderColor:border textColor:text];
             [hud showEnglishInputMode:YES nearCaretRect:caret];
             Require([hud.displayedText isEqualToString:@"英"], "English HUD missing");
             [hud showEnglishInputMode:NO nearCaretRect:caret];

@@ -463,6 +463,14 @@ static NSColor *SkinColor(msime::mac::Rgba color) {
     return [NSColor colorWithSRGBRed:color.r green:color.g blue:color.b alpha:color.a];
 }
 
+// A theme colour for a floating panel that resolves in whichever appearance the panel is drawn in: the light palette's value in Aqua, the dark palette's in Dark Aqua.
+static NSColor *MSIMEThemedSkinColor(NSString *name, msime::mac::Rgba lightColor, msime::mac::Rgba darkColor) {
+    NSColor *lightValue = SkinColor(lightColor), *darkValue = SkinColor(darkColor);
+    return [NSColor colorWithName:name dynamicProvider:^NSColor *(NSAppearance *appearance) {
+        return [appearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] == NSAppearanceNameDarkAqua ? darkValue : lightValue;
+    }];
+}
+
 // The reading in the candidate window's top row is set semibold (dc.html L1325) at the size the user picked for it. A resolved family is named by its face (Menlo-Regular), which pins the weight, so the face is swapped for the family and the fallback cascade is kept; a family whose nearest heavier face is bold draws bold, and one with no heavier face keeps its regular one.
 static NSFont *MSIMECandidatePreeditFont(MSIMEAppearancePreferences *appearance) {
     NSFont *regular = [appearance candidateFontOfSize:appearance.preeditFontSize englishFirst:YES];
@@ -3154,16 +3162,10 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
         // The badge takes the floating toolbar's palette in each appearance, so it follows the selected theme and skin.
         const auto light = [_appearance toolbarSkinForDark:NO];
         const auto dark = [_appearance toolbarSkinForDark:YES];
-        auto themed = ^NSColor *(NSString *name, msime::mac::Rgba lightColor, msime::mac::Rgba darkColor) {
-            NSColor *lightValue = SkinColor(lightColor), *darkValue = SkinColor(darkColor);
-            return [NSColor colorWithName:name dynamicProvider:^NSColor *(NSAppearance *appearance) {
-                return [appearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] == NSAppearanceNameDarkAqua ? darkValue : lightValue;
-            }];
-        };
         MSIMEInputModeHUDPanel *hud = [MSIMEInputModeHUDPanel sharedPanel];
-        [hud setSurfaceColor:themed(@"MSIMEInputModeHUDSurface", light.surface, dark.surface)
-                 borderColor:themed(@"MSIMEInputModeHUDBorder", light.border, dark.border)
-                   textColor:themed(@"MSIMEInputModeHUDText", light.text, dark.text)];
+        [hud setSurfaceColor:MSIMEThemedSkinColor(@"MSIMEInputModeHUDSurface", light.surface, dark.surface)
+                 borderColor:MSIMEThemedSkinColor(@"MSIMEInputModeHUDBorder", light.border, dark.border)
+                   textColor:MSIMEThemedSkinColor(@"MSIMEInputModeHUDText", light.text, dark.text)];
         [hud showEnglishInputMode:enabled nearCaretRect:caret];
     }
 }
@@ -4420,6 +4422,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     [_toolbar applyLightToolbarSkin:[_appearance toolbarSkinForDark:NO]
                             darkSkin:[_appearance toolbarSkinForDark:YES]];
     [_toolbar applyThemePreferences:toolbarThemePreferences];
+    // The mode badge wears the toolbar's palette, so it is drawn in the toolbar's mode too; it is updated whether or not the toolbar is shown.
+    [[MSIMEInputModeHUDPanel sharedPanel] applyThemePreferences:toolbarThemePreferences];
     [_toolbar applySizingPreferences:preferences];
     NSDictionary *toolbar = preferences[@"floating_toolbar"];
     id enabled = [toolbar isKindOfClass:NSDictionary.class] ? toolbar[@"enabled"] : nil;
@@ -5556,6 +5560,10 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     if (!MSIMEValidCaret(cursor)) { [_keymapPanel orderOut:nil]; return; }
     if (!_keymapPanel) _keymapPanel = [[MSIMEShuangpinKeymapPanel alloc] init];
     [_keymapPanel setProfileName:profile];
+    // The keymap opens beside the candidate window, so it is drawn in the candidate window's mode and marks the current key in the theme's accent.
+    _keymapPanel.appearance = [_appearance candidateAppearanceOverride];
+    [_keymapPanel setAccentColor:MSIMEThemedSkinColor(@"MSIMEKeymapAccent", [_appearance resolvedSkinForDark:NO].tokens.accent,
+                                                      [_appearance resolvedSkinForDark:YES].tokens.accent)];
     [_keymapPanel updateHighlightedKey:MSIMEShuangpinKeymapHighlightedKey(_view)];
     CGFloat clearance = _appearance.fontSize + 42.0;
     if (_appearance.vertical) clearance = (_appearance.fontSize + 10.0) * MIN([_view[@"candidates"] count], _appearance.pageSize) + 24.0;
