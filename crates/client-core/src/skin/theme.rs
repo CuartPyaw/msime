@@ -340,19 +340,22 @@ pub struct ThemePackage {
 impl From<&SkinSummary> for ThemePackage {
     fn from(summary: &SkinSummary) -> Self {
         let declared = |mode: &str| summary.themes.iter().any(|theme| theme == mode);
-        Self {
-            id: summary.id.clone(),
-            base: summary.base,
-            // `scan` accepts only these two names, so nothing is dropped here.
-            layouts: summary
+        let mut layouts = Vec::with_capacity(summary.layouts.len());
+        // `scan` accepts only these two names, so nothing is dropped here.
+        layouts.extend(
+            summary
                 .layouts
                 .iter()
                 .filter_map(|layout| match layout.as_str() {
                     "horizontal" => Some(CandidateLayout::Horizontal),
                     "vertical" => Some(CandidateLayout::Vertical),
                     _ => None,
-                })
-                .collect(),
+                }),
+        );
+        Self {
+            id: summary.id.clone(),
+            base: summary.base,
+            layouts,
             light: declared("light").then(|| summary.candidate.light.clone()),
             dark: declared("dark").then(|| summary.candidate.dark.clone()),
         }
