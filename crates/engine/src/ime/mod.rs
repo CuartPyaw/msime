@@ -386,11 +386,18 @@ fn merge_pinyin_fallback(
     mut candidates: Vec<WordItem>,
     pinyin_rows: Vec<WordItem>,
 ) -> Vec<WordItem> {
-    let mut seen: HashSet<String> = candidates.iter().map(|item| item.word.clone()).collect();
+    // Keep deduplication keys borrowed until the pinyin rows are ready to move into the result.
+    let mut seen: HashSet<&str> = candidates.iter().map(|item| item.word.as_str()).collect();
+    let unique = pinyin_rows
+        .iter()
+        .map(|item| seen.insert(item.word.as_str()))
+        .collect::<Vec<_>>();
+    drop(seen);
     candidates.extend(
         pinyin_rows
             .into_iter()
-            .filter(|item| seen.insert(item.word.clone())),
+            .zip(unique)
+            .filter_map(|(item, unique)| unique.then_some(item)),
     );
     candidates
 }
