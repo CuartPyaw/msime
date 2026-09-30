@@ -12,6 +12,7 @@ chinese-ime-lm = { git = "https://github.com/metasequoiaime/chinese-ime-lm", rev
 hex = "0.4"
 lru = "0.16"
 lunar-lite = "0.1"
+memmap2 = "0.9"
 rusqlite = { workspace = true, features = ["bundled", "backup"] }
 serde.workspace = true
 serde_json.workspace = true

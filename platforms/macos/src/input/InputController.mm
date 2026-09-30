@@ -3232,7 +3232,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
 }
 - (BOOL)usesNativeHTTPVoice {
     NSString *provider = [NSUserDefaults.standardUserDefaults stringForKey:@"MSIMEClientVoiceASRProvider"] ?: @"";
-    // An installed model directory streams through the helper instead; "local" naming anything else falls through to the platform recognizer.
+    // An installed model directory streams through the helper instead; "local" naming anything else never records (MSIMEVoiceLocalModelMissing).
     if ([self usesLocalModelVoice]) return NO;
     return MSIMEVoiceUsesNativeHTTPProvider(provider, MSIMEVoiceProviderSocket() != nil);
 }
@@ -3734,6 +3734,11 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     if (MSIMEVoiceASRTokenMissing([voiceDefaults stringForKey:@"MSIMEClientVoiceASRProvider"],
                                   [voiceDefaults stringForKey:@"MSIMEClientVoiceASRToken"], MSIMEVoiceProviderSocket() != nil)) {
         [self reportVoiceFailure:MSIMEVoiceFailureMissingToken];
+        return;
+    }
+    if (MSIMEVoiceLocalModelMissing([voiceDefaults stringForKey:@"MSIMEClientVoiceASRProvider"], MSIMEVoiceProviderSocket() != nil,
+                                    MSIMELocalVoiceModelDirectory([voiceDefaults stringForKey:@"MSIMEClientVoiceASRModelPath"]))) {
+        [self reportVoiceFailure:MSIMEVoiceFailureMissingLocalModel];
         return;
     }
     __weak MSIMEInputController *weakSelf = self;

@@ -2851,11 +2851,10 @@ fn open_translation_language_settings() -> Result<(), HostActionError> {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 async fn pick_voice_model_path(app: tauri::AppHandle) -> Result<Option<String>, HostActionError> {
-    // A local speech model is loaded by path, and a web view's file input hands back contents instead, so
-    // the settings page cannot resolve one itself. AppKit will only run the panel on the main thread.
+    // A local speech model is an installed directory loaded by path, and a web view's file input hands back contents instead, so the settings page cannot resolve one itself. AppKit will only run the panel on the main thread.
     let (send, received) = std::sync::mpsc::sync_channel(1);
     app.run_on_main_thread(move || {
-        let _ = send.send(msime_host_macos::pick_file());
+        let _ = send.send(msime_host_macos::pick_voice_model_directory());
     })
     .map_err(|_| HostActionError {
         code: "unavailable",

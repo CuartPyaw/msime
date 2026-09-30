@@ -784,3 +784,102 @@ fn association_switches_select_their_own_series_slot() {
         "switching back finds the earlier slot with its online row"
     );
 }
+
+/// Both shipped models in a fixture the way a desktop host installs them: the keyboard model in the resource bundle, the desktop model in the `settled-model` directory beside it. `None` (with the reason printed) when the models are not available.
+fn neural_fixture(test: &str) -> Option<Fixture> {
+    let models = (
+        crate::lattice::neural::test_model_path(NEURAL_MODEL_KEYBOARD),
+        crate::lattice::neural::test_model_path(NEURAL_MODEL_DESKTOP),
+    );
+    let (keyboard, desktop) = match models {
+        (Ok(keyboard), Ok(desktop)) => (keyboard, desktop),
+        (Err(reason), _) | (_, Err(reason)) => {
+            eprintln!("skipping {test}: {reason}");
+            return None;
+        }
+    };
+    let fixture = Fixture::new();
+    fixture
+        .insert("shu'ru", "输入", 20000)
+        .insert("fa", "法", 800000)
+        .insert("fa", "发", 900000)
+        .insert("fa", "罚", 100000);
+    std::fs::copy(keyboard, fixture.paths.resource(NEURAL_MODEL_KEYBOARD)).unwrap();
+    let beside = fixture
+        .paths
+        .resources
+        .parent()
+        .unwrap()
+        .join("settled-model");
+    std::fs::create_dir_all(&beside).unwrap();
+    std::fs::copy(desktop, beside.join(NEURAL_MODEL_DESKTOP)).unwrap();
+    Some(fixture)
+}
+
+fn count_source(items: &[WordItem], source: CandidateSource) -> usize {
+    items.iter().filter(|item| item.source == source).count()
+}
+
+/// overlays.md §1.6.3 option b: the desktop model (found beside the bundle, where desktop hosts install it) never scores a keystroke query; it scores only while settling, into a list cached apart from the keystroke list, and the online rows of the keystroke list follow it there.
+#[test]
+fn the_desktop_model_scores_only_while_settling() {
+    let Some(fixture) = neural_fixture("the_desktop_model_scores_only_while_settling") else {
+        return;
+    };
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    dictionary.set_sentence_association(SentenceAssociationOptions {
+        word_lattice: true,
+        neural_keyboard: true,
+        neural_desktop: true,
+        show_next_on_duplicate: true,
+    });
+    assert_eq!(dictionary.rerankers.len(), 1);
+    assert_eq!(
+        dictionary.rerankers[0].source,
+        CandidateSource::NeuralKeyboard
+    );
+    assert!(dictionary.settled_reranker.is_some());
+    dictionary.set_rescoring_context("我在用一个新的");
+
+    let keystroke = query(&mut dictionary, "shurufa", "", NONE);
+    assert_eq!(count_source(&keystroke, CandidateSource::NeuralKeyboard), 1);
+    assert_eq!(count_source(&keystroke, CandidateSource::NeuralDesktop), 0);
+    assert!(dictionary.insert_online_words(
+        "shurufa",
+        "",
+        NONE,
+        &["云输入".to_owned()],
+        CandidateSource::CloudSuggestion
+    ));
+
+    assert!(dictionary.set_settling(true));
+    let settled = query(&mut dictionary, "shurufa", "", NONE);
+    assert!(dictionary.set_settling(false));
+    assert_eq!(dictionary.rerankers.len(), 1);
+    assert!(dictionary.settled_reranker.is_some());
+    assert_eq!(count_source(&settled, CandidateSource::NeuralKeyboard), 1);
+    assert_eq!(
+        count_source(&settled, CandidateSource::NeuralDesktop),
+        1,
+        "{:?}",
+        words(&settled)
+    );
+    assert_eq!(position(&settled, "云输入"), 1);
+
+    let again = query(&mut dictionary, "shurufa", "", NONE);
+    assert_eq!(count_source(&again, CandidateSource::NeuralDesktop), 0);
+    assert!(contains(&again, "云输入"));
+}
+
+/// Without the desktop switch there is nothing to settle.
+#[test]
+fn settling_without_a_desktop_model_does_nothing() {
+    let fixture = Fixture::new();
+    fixture.insert("ni'hao", "你好", 100);
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    assert!(!dictionary.set_settling(true));
+    assert!(!dictionary.settling);
+    let rows = query(&mut dictionary, "nihao", "", NONE);
+    assert!(dictionary.rerankers.is_empty());
+    assert_eq!(words(&rows)[0], "你好");
+}

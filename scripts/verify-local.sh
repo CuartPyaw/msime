@@ -620,6 +620,12 @@ fi
 
 note "rust tests"
 : > "$collected.rust"
+# The neural sentence model tests (msime-engine's lattice::neural and settling tests, msime-input-runtime's settle test) skip without the shipped models, and neither model is in the repository. Fetch the pinned pair so they run here; the path is absolute because cargo runs each test binary from its own crate directory. A failed fetch is not a test failure: the tests skip and say why.
+if python3 scripts/fetch_neural_model.py --out "$root/target/neural-model" > "$collected.neural-model" 2>&1; then
+  export MSIME_NEURAL_MODEL_DIR="$root/target/neural-model"
+else
+  echo "neural model tests: skipped ($(tail -1 "$collected.neural-model"))"
+fi
 # msime-host-macos and msime-desktop were missing from this list, and a crate nobody tests is not the
 # worst of it: cargo's exit status is not the verdict here (known failures make it non-zero), so a crate that does not build at
 # all collects no failing names and is reported as being at baseline. msime-desktop did not link on macOS

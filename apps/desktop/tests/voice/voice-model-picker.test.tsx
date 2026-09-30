@@ -39,17 +39,17 @@ async function openVoice(client: Record<string, unknown>) {
   );
   await screen.findByRole("button", { name: "保存设置" });
   fireEvent.click(screen.getByRole("button", { name: "语音输入" }));
-  return screen.findByLabelText("Whisper 模型文件");
+  return screen.findByLabelText("本地模型目录");
 }
 
 test("choosing a model fills the path the recognizer loads", async () => {
-  const pickVoiceModelPath = vi.fn(async () => "/Users/someone/models/ggml-base.bin");
+  const pickVoiceModelPath = vi.fn(async () => "/Users/someone/voice-models/sense-voice");
   const field = (await openVoice({ pickVoiceModelPath })) as HTMLInputElement;
   expect(field.value).toBe("/old/model.bin");
 
   fireEvent.click(screen.getByRole("button", { name: "选择…" }));
 
-  await waitFor(() => expect(field.value).toBe("/Users/someone/models/ggml-base.bin"));
+  await waitFor(() => expect(field.value).toBe("/Users/someone/voice-models/sense-voice"));
   expect(pickVoiceModelPath).toHaveBeenCalledTimes(1);
 });
 

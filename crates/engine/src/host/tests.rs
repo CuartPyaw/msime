@@ -1360,3 +1360,92 @@ fn dropping_a_session_writes_its_queued_personal_context() {
         .unwrap();
     assert_eq!(count, 2);
 }
+
+/// user_dictionary_journal.cpp:445-452: the reference opened msime's journal per call, so no thread kept it open. A one-shot call releases its thread's cached journal on return, a dropped session releases it too, and a live session keeps it for the keystroke path.
+#[test]
+fn journal_handles_are_released_when_a_thread_is_done_with_them() {
+    use crate::user_dictionary::journal::thread_holds_journal;
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.learning = true;
+    for directory in [&value.resources, &value.dictionaries] {
+        Connection::open(Path::new(directory).join("msime.db"))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',200),('ni''hao','nh','拟好',100);",
+            )
+            .unwrap();
+    }
+
+    // A pool thread editing the dictionary keeps nothing open afterwards, whatever the call returned.
+    let edit = value.clone();
+    std::thread::spawn(move || {
+        let entry = DictionaryEntry {
+            kind: DictionaryKind::Pinyin,
+            key: "ni'hao".into(),
+            value: "你蒿".into(),
+            weight: 100_000,
+        };
+        dictionary_edit(&edit, None, Some(&entry), "release-test").unwrap();
+        assert!(!thread_holds_journal());
+        assert!(dictionary_state_revision(&edit).is_ok());
+        assert!(!thread_holds_journal());
+    })
+    .join()
+    .unwrap();
+
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"nihao");
+    let snapshot = session.snapshot().unwrap();
+    let index = snapshot
+        .candidates
+        .iter()
+        .position(|word| word == "拟好")
+        .unwrap();
+    session.select(index).unwrap();
+    assert!(thread_holds_journal());
+    drop(session);
+    assert!(!thread_holds_journal());
+}
+
+/// Hosts keep their sessions in a thread-local map, so a session can be dropped while its thread exits, after that thread's cached journal is already destroyed. Its drop still flushes and releases without touching the destroyed cache; it used to abort the process (`cannot access a Thread Local Storage value during or after destruction`).
+#[test]
+fn a_session_dropped_while_its_thread_exits_does_not_abort() {
+    use crate::user_dictionary::journal::thread_holds_journal;
+    thread_local! {
+        static HELD: std::cell::RefCell<Option<Session>> = const { std::cell::RefCell::new(None) };
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.learning = true;
+    for directory in [&value.resources, &value.dictionaries] {
+        Connection::open(Path::new(directory).join("msime.db"))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',200),('ni''hao','nh','拟好',100);",
+            )
+            .unwrap();
+    }
+    std::thread::spawn(move || {
+        // The map is registered before the journal cache, so thread exit destroys the cache first.
+        HELD.with(|held| {
+            *held.borrow_mut() = Some(Session::new(&value).unwrap());
+            let mut held = held.borrow_mut();
+            let session = held.as_mut().unwrap();
+            type_text(session, b"nihao");
+            let index = session
+                .snapshot()
+                .unwrap()
+                .candidates
+                .iter()
+                .position(|word| word == "拟好")
+                .unwrap();
+            session.select(index).unwrap();
+        });
+        assert!(thread_holds_journal());
+    })
+    .join()
+    .unwrap();
+}

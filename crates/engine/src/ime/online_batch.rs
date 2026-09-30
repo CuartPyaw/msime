@@ -62,6 +62,22 @@ pub fn replace_online_candidate_batch(
     true
 }
 
+/// Re-apply the online rows of `from` to a freshly computed `into`, AI first so the cloud insert moves the AI block exactly as it did when the answers arrived.
+pub fn carry_online_rows(from: &[WordItem], into: &mut Vec<WordItem>) {
+    for source in [
+        CandidateSource::AiSuggestion,
+        CandidateSource::CloudSuggestion,
+    ] {
+        let rows: Vec<&WordItem> = from.iter().filter(|item| item.source == source).collect();
+        let Some(first) = rows.first() else {
+            continue;
+        };
+        let key = first.pinyin.clone();
+        let words: Vec<String> = rows.iter().map(|item| item.word.clone()).collect();
+        replace_online_candidate_batch(into, &key, &words, source);
+    }
+}
+
 /// Non-empty, at most 4096 bytes, no C0 control byte and no DEL.
 fn is_acceptable_online_word(word: &str) -> bool {
     !word.is_empty()

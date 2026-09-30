@@ -144,6 +144,7 @@ impl ResourceStore {
         Ok(destination)
     }
 
+    /// Check that `directory` holds exactly the artifacts `specification` pins, each with its pinned length and SHA-256, and nothing else. Two exceptions: a real `helpcodes/` directory is let through for the Engine's helpcode tables, and a regular file named in `RETIRED_ARTIFACTS` that the specification does not pin is deleted in place rather than refused. That deletion is the only write `verify` makes; if it fails the directory is refused as before.
     pub fn verify(
         &self,
         directory: &Path,
@@ -562,6 +563,23 @@ mod tests {
         ));
         assert!(path.join("dict_pinyin.dat").is_dir());
         fs::remove_dir(path.join("dict_pinyin.dat")).unwrap();
+        // A symlink by that name is refused, and neither it nor its target is touched.
+        #[cfg(unix)]
+        {
+            let target = root.path().join("outside.dat");
+            fs::write(&target, b"outside").unwrap();
+            std::os::unix::fs::symlink(&target, path.join("dict_pinyin.dat")).unwrap();
+            assert!(matches!(
+                store.verify(&path, &spec),
+                Err(ResourceError::ExistingGeneration(_))
+            ));
+            assert!(fs::symlink_metadata(path.join("dict_pinyin.dat"))
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert_eq!(fs::read(&target).unwrap(), b"outside");
+            fs::remove_file(path.join("dict_pinyin.dat")).unwrap();
+        }
         for other in ["DICT_PINYIN.DAT", "dict_pinyin.dat.bak", "extra.db"] {
             fs::write(path.join(other), b"unpinned").unwrap();
             assert!(matches!(
@@ -572,6 +590,25 @@ mod tests {
             fs::remove_file(path.join(other)).unwrap();
         }
         store.verify(&path, &spec).unwrap();
+    }
+
+    #[test]
+    fn a_retired_name_that_the_lock_pins_is_verified_and_kept() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ResourceStore::new(root.path());
+        let mut spec = specification();
+        spec.artifacts.push(Artifact {
+            name: "dict_pinyin.dat".into(),
+            url: "https://example.invalid/dict_pinyin.dat".into(),
+            ..spec.artifacts[0].clone()
+        });
+        let path = store.install(&spec, |_| Ok(source(b"fixture"))).unwrap();
+        store.verify(&path, &spec).unwrap();
+        assert_eq!(fs::read(path.join("dict_pinyin.dat")).unwrap(), b"fixture");
+        // Pinned, it is checked like any other artifact instead of being deleted.
+        fs::write(path.join("dict_pinyin.dat"), b"altered").unwrap();
+        assert!(store.verify(&path, &spec).is_err());
+        assert_eq!(fs::read(path.join("dict_pinyin.dat")).unwrap(), b"altered");
     }
 
     #[cfg(unix)]

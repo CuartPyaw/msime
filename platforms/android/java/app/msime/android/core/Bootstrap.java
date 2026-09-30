@@ -25,6 +25,7 @@ public final class Bootstrap {
              FileLock lock = channel.lock()) {
             if (!lock.isValid()) throw new IllegalStateException("Bootstrap lock unavailable");
             installOfflineGlosses(context, new File(root, "bootstrap/offline-glosses"));
+            installHelpcodes(context, new File(root, "bootstrap/resources/helpcodes"));
             File configuration = new File(root, "runtime-options.json");
             if (configuration.exists()) return false;
             File resources = new File(root, "bootstrap/resources");
@@ -117,6 +118,35 @@ public final class Bootstrap {
         } catch (Exception error) {
             // Bootstrap has no editor or session input; never use this logging for keystrokes.
             android.util.Log.w("MSIMEBootstrap", "Offline gloss extraction failed", error);
+        }
+    }
+
+    /**
+     * The helpcode tables (resources/helpcodes), extracted into helpcodes/ under the resource directory, where the Engine reads them.
+     *
+     * <p>Like the offline glosses they are not part of the verified dictionary (the shared verification lets a real helpcodes/ directory through), so they follow the installed package: an install prepared before they shipped gets them on the first start after the update, although its configuration is never rewritten. Each packaged file is replaced on its own through a temporary sibling and an atomic rename, so a table being read is never half written and the user's own tables under helpcodes/custom are left alone. A failure leaves helpcode input narrowing nothing, never the keyboard without an Engine.
+     */
+    private static void installHelpcodes(Context context, File destination) {
+        try {
+            String stamp = Long.toString(context.getPackageManager()
+                .getPackageInfo(context.getPackageName(), 0).lastUpdateTime);
+            File marker = new File(destination, ".package");
+            if (marker.isFile() && stamp.equals(readMarker(marker.toPath()))) return;
+            ensureSafeDirectory(destination.toPath());
+            String[] names = context.getAssets().list("helpcodes");
+            for (String name : names == null ? new String[0] : names) {
+                if (!name.matches("[A-Za-z0-9_.-]+") || name.contains("..")) throw new IllegalArgumentException("Invalid asset name");
+                File staged = new File(destination, "." + name + ".staging");
+                try (InputStream input = context.getAssets().open("helpcodes/" + name)) {
+                    Files.copy(input, staged.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                }
+                Files.move(staged.toPath(), new File(destination, name).toPath(),
+                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            Files.write(marker.toPath(), stamp.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception error) {
+            // Bootstrap has no editor or session input; never use this logging for keystrokes.
+            android.util.Log.w("MSIMEBootstrap", "Helpcode table extraction failed", error);
         }
     }
 

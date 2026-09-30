@@ -351,6 +351,14 @@ impl Session {
         self.input.online_query()
     }
 
+    /// Re-answer the composition with the desktop sentence model, which never scores on a keystroke (overlays.md §1.6.3 option b); the host calls this once typing pauses. True when the candidates changed, so the host redraws.
+    pub fn settle_sentence_rows(&mut self) -> bool {
+        if self.nine_key.active() {
+            return false;
+        }
+        self.input.settle_sentence_rows()
+    }
+
     /// Whether the rows now show; false (not an error) for a stale query.
     pub fn apply_online_candidates(
         &mut self,

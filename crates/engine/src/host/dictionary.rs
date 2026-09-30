@@ -6,6 +6,7 @@ use super::options::{runtime_paths, EngineOptions};
 use crate::diagnostics;
 use crate::error::{EngineError, Result};
 use crate::types::{PersonalDictionaryEntry, PersonalDictionaryKind};
+use crate::user_dictionary::journal::release_thread_journal;
 use crate::user_dictionary::{bundled, personal, replay, reset, state};
 
 pub type DictionaryKind = PersonalDictionaryKind;
@@ -19,12 +20,23 @@ pub use crate::user_dictionary::state::DictionaryStateRecord;
 #[error("Snapshot record stream failed")]
 pub struct SnapshotReadError;
 
+/// These calls come from pool threads (a Tauri blocking task, the MCP server) that may never touch the journal again, so each one closes its thread's cached connection before returning, on success and failure alike.
+fn released<T>(value: T) -> T {
+    release_thread_journal();
+    value
+}
+
 pub fn dictionary_entries(
     options: &EngineOptions,
     offset: usize,
     limit: usize,
 ) -> Result<DictionaryPage> {
-    personal::personal_dictionary_entries(&runtime_paths(options), offset, limit, false)
+    released(personal::personal_dictionary_entries(
+        &runtime_paths(options),
+        offset,
+        limit,
+        false,
+    ))
 }
 
 pub fn dictionary_export_entries(
@@ -33,12 +45,12 @@ pub fn dictionary_export_entries(
     limit: usize,
     include_learned_pinyin: bool,
 ) -> Result<DictionaryPage> {
-    personal::personal_dictionary_entries(
+    released(personal::personal_dictionary_entries(
         &runtime_paths(options),
         offset,
         limit,
         include_learned_pinyin,
-    )
+    ))
 }
 
 pub fn dictionary_table_entries(
@@ -48,7 +60,13 @@ pub fn dictionary_table_entries(
     offset: usize,
     limit: usize,
 ) -> Result<DictionaryTablePage> {
-    bundled::dictionary_table_entries(&runtime_paths(options), kind, query, offset, limit)
+    released(bundled::dictionary_table_entries(
+        &runtime_paths(options),
+        kind,
+        query,
+        offset,
+        limit,
+    ))
 }
 
 pub fn dictionary_edit_bundled(
@@ -57,7 +75,12 @@ pub fn dictionary_edit_bundled(
     weight: Option<i64>,
     request_id: &str,
 ) -> Result<()> {
-    bundled::edit_bundled_dictionary_entry(&runtime_paths(options), previous, weight, request_id)
+    released(bundled::edit_bundled_dictionary_entry(
+        &runtime_paths(options),
+        previous,
+        weight,
+        request_id,
+    ))
 }
 
 pub fn dictionary_validate(entry: &DictionaryEntry) -> Result<DictionaryEntry> {
@@ -70,12 +93,17 @@ pub fn dictionary_edit(
     replacement: Option<&DictionaryEntry>,
     request_id: &str,
 ) -> Result<()> {
-    personal::edit_personal_dictionary(&runtime_paths(options), previous, replacement, request_id)
+    released(personal::edit_personal_dictionary(
+        &runtime_paths(options),
+        previous,
+        replacement,
+        request_id,
+    ))
 }
 
 /// Refuses to reset the packaged bundle in place and needs both packaged dictionaries.
 pub fn reset_learned_data(options: &EngineOptions) -> Result<()> {
-    reset::reset_learned_data(&runtime_paths(options))
+    released(reset::reset_learned_data(&runtime_paths(options)))
 }
 
 /// `(applied, skipped, failed, error)`; never errors.
@@ -84,11 +112,11 @@ pub fn replay_user_dictionary(
     main_db_path: &str,
     english_db_path: &str,
 ) -> (i32, i32, i32, String) {
-    let result = replay::replay(
+    let result = released(replay::replay(
         Path::new(user_db_path),
         Path::new(main_db_path),
         Path::new(english_db_path),
-    );
+    ));
     (result.applied, result.skipped, result.failed, result.error)
 }
 
@@ -108,13 +136,13 @@ pub fn stage_dictionary_state(
     // A transport failure reaches the stager as an error, never as the end of the stream: only verified EOF may finish a generation (bridge.cpp:473-476).
     let mut records = records
         .map(|record| record.map_err(|_| EngineError::failed(diagnostics::SNAPSHOT_STREAM_FAILED)));
-    let paths = state::stage_dictionary_state(
+    let paths = released(state::stage_dictionary_state(
         Path::new(&options.resources),
         Path::new(generation),
         content_id,
         &mut records,
         maximum_records,
-    )?;
+    ))?;
     let text = |path: &Path| path.to_string_lossy().into_owned();
     Ok(EngineOptions {
         resources: text(&paths.resources),
@@ -126,5 +154,5 @@ pub fn stage_dictionary_state(
 }
 
 pub fn dictionary_state_revision(options: &EngineOptions) -> Result<String> {
-    state::dictionary_state_revision(&runtime_paths(options))
+    released(state::dictionary_state_revision(&runtime_paths(options)))
 }

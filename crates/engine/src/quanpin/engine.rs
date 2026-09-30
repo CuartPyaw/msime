@@ -136,6 +136,11 @@ impl QuanpinEngine {
     pub fn reset_cache(&mut self) {
         self.dictionary.reset_cache()
     }
+
+    /// `QuanpinDictionary::set_settling`.
+    pub fn set_settling(&mut self, on: bool) -> bool {
+        self.dictionary.set_settling(on)
+    }
 }
 
 #[cfg(test)]

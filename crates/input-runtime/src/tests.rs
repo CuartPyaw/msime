@@ -2990,6 +2990,102 @@ fn settling_while_idle_is_inert() {
     assert!(!runtime.rerank_settled());
 }
 
+/// Settling asks the Engine for its desktop sentence model, which no keystroke runs: the row it answers with appears only after the settle, once, and the next keystroke takes it away again. Needs the dictionary resource set (`MSIME_EVAL_RESOURCES`) and the desktop model (in it, or in `MSIME_NEURAL_MODEL_DIR`, where `scripts/fetch_neural_model.py` puts it).
+#[cfg(unix)]
+#[test]
+fn settling_shows_the_engine_desktop_model_row() {
+    const NEURAL_DESKTOP: u8 = 10;
+    const DESKTOP_MODEL: &str = "sentence-model-desktop.safetensors";
+    let Some(resources) = std::env::var_os("MSIME_EVAL_RESOURCES").map(std::path::PathBuf::from)
+    else {
+        eprintln!(
+            "skipping settling_shows_the_engine_desktop_model_row: MSIME_EVAL_RESOURCES is not set"
+        );
+        return;
+    };
+    let Some(model) = [
+        Some(resources.clone()),
+        std::env::var_os("MSIME_NEURAL_MODEL_DIR").map(Into::into),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|directory: std::path::PathBuf| directory.join(DESKTOP_MODEL))
+    .find(|path| path.is_file()) else {
+        eprintln!("skipping settling_shows_the_engine_desktop_model_row: {DESKTOP_MODEL} is in neither MSIME_EVAL_RESOURCES nor MSIME_NEURAL_MODEL_DIR");
+        return;
+    };
+    // The Engine finds the desktop model in the settled-model directory beside the resources, where desktop hosts install it.
+    let directory = tempfile::tempdir().unwrap();
+    let mut options = real_engine_options(directory.path());
+    let linked = directory.path().join("resources");
+    for entry in std::fs::read_dir(&resources).unwrap() {
+        let entry = entry.unwrap();
+        std::os::unix::fs::symlink(entry.path(), linked.join(entry.file_name())).unwrap();
+    }
+    let settled = directory.path().join("settled-model");
+    std::fs::create_dir_all(&settled).unwrap();
+    std::os::unix::fs::symlink(&model, settled.join(DESKTOP_MODEL)).unwrap();
+    // The dictionaries are read from a prepared generation, as every host prepares one.
+    let prepared = msime_engine::prepare_runtime_paths(
+        &linked,
+        &directory.path().join("user"),
+        &directory.path().join("cache"),
+        "settle",
+    )
+    .unwrap();
+    options.dictionaries = prepared.dictionaries.to_str().unwrap().to_owned();
+    options.sentence_association.neural_desktop = true;
+    // The desktop pick agrees with the dictionary's first row here; the duplicate option gives it a row of its own instead of folding it away.
+    options.sentence_association.show_next_on_duplicate = true;
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    let type_text = |runtime: &mut Runtime<msime_engine::host::Session>, text: &[u8]| {
+        for byte in text {
+            runtime
+                .dispatch(Action::Character {
+                    value: *byte,
+                    shift: false,
+                })
+                .unwrap();
+        }
+    };
+    let desktop_rows = |runtime: &Runtime<msime_engine::host::Session>| {
+        runtime
+            .view()
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.source == NEURAL_DESKTOP)
+            .count()
+    };
+    type_text(&mut runtime, b"shurufa");
+    assert_eq!(desktop_rows(&runtime), 0);
+    let generation = runtime.view().generation;
+    assert!(runtime.rerank_settled());
+    let view = runtime.view();
+    assert_eq!(
+        desktop_rows(&runtime),
+        1,
+        "{:?}",
+        view.candidates
+            .iter()
+            .map(|candidate| (&candidate.text, candidate.source))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        view.generation > generation,
+        "old IDs must not select from the settled list"
+    );
+    assert!(
+        !runtime.rerank_settled(),
+        "a second settle has nothing to change"
+    );
+    runtime
+        .dispatch(Action::Command(Command::Backspace))
+        .unwrap();
+    assert_eq!(desktop_rows(&runtime), 0);
+}
+
 fn withholding_runtime(offered: usize, withheld: usize, page_size: u8) -> Runtime<Fixture> {
     Runtime::new(
         Fixture {

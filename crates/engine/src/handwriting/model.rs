@@ -2,7 +2,7 @@
 //!
 //! Ported from zinnia (https://github.com/taku910/zinnia at 581faa8f), Copyright (c) 2005-2007 Taku Kudo, under its 3-clause BSD license, whose text ships with the product notices as `Zinnia-LICENSE.txt`.
 //!
-//! The file is read into memory rather than mapped, as `lattice::ngram` and `japanese::decoder` do, because `memmap2::Mmap::map` is `unsafe` and the workspace denies it. The weights are decoded once at load.
+//! The file is read into memory rather than mapped, as `japanese::decoder` does, because `memmap2::Mmap::map` is `unsafe` and the workspace denies it; the one mapping exemption is `lattice::ngram`, whose two tables decisions.md names. The weights are decoded once at load.
 
 use std::cmp::Ordering;
 use std::ops::Range;

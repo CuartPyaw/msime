@@ -40,7 +40,9 @@ test("describes local recognition with and without model management", () => {
       onOpenVoice={vi.fn()}
     />,
   );
-  expect(screen.getByText(/需要自备 whisper\.cpp/)).toBeTruthy();
+  expect(screen.getByText(/已安装模型目录（包含 msime-model\.json）/)).toBeTruthy();
+  // No host runs a Whisper model file any more, so nothing may still ask for one.
+  expect(document.body.textContent).not.toMatch(/whisper\.cpp|ggml|Whisper 模型文件/);
 });
 
 test("offers the iOS voice entry when provided", () => {

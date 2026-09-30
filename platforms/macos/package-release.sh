@@ -147,6 +147,9 @@ check_app() {
   local resources_dir="$root/Contents/Resources"
   test -d "$resources_dir/EngineResources"
   cargo run --quiet --locked -p msime-client-core --example verify_resources -- "$resources_dir/EngineResources" >/dev/null
+  for table in helpcode.txt zrm_helpcode_big_unique.txt shouyou2_0_helpcode.txt shouyouplus_helpcode.txt xiaohe_helpcode.txt jiajia_helpcode.txt NOTICE.md NOTICE-jiajia.md; do
+    test -f "$resources_dir/EngineResources/helpcodes/$table"
+  done
   test -f "$resources_dir/handwriting/handwriting-zh_CN.model"
   test -f "$resources_dir/handwriting/HandwritingModel-LICENSE.txt"
   test -f "$resources_dir/handwriting/Zinnia-LICENSE.txt"

@@ -558,6 +558,37 @@ fn fixed_positions_apply_within_each_producer_group() {
     assert_eq!(stored, 1);
 }
 
+/// test_runtime_isolation.cpp:500-507: a fixed-slot write the journal refuses is reported, and the list keeps the slots it had.
+#[test]
+fn a_rejected_fixed_slot_write_reports_and_keeps_the_snapshot() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    type_text(&mut session, "nihao");
+    let result = session.fix_position(index_of(&session, "拟好"), 1);
+    assert!(result.handled && result.diagnostic.is_none(), "{result:?}");
+    assert_eq!(words(&session)[0], "拟好");
+    Connection::open(fixture.journal())
+        .and_then(|journal| journal.execute_batch("CREATE TRIGGER reject_fixed BEFORE INSERT ON fixed_candidate_positions BEGIN SELECT RAISE(ABORT,'fixture rejection'); END;"))
+        .expect("trigger");
+    let result = session.fix_position(index_of(&session, "你好"), 2);
+    assert!(result.handled);
+    assert_eq!(result.commit, None);
+    assert_eq!(
+        result.diagnostic.as_deref(),
+        Some(crate::diagnostics::POSITION_NOT_PERSISTED)
+    );
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.candidates[0].word, "拟好");
+    assert_eq!(snapshot.candidates[0].fixed_position, 1);
+    assert_eq!(
+        count(
+            &fixture.journal(),
+            "SELECT count(*) FROM fixed_candidate_positions WHERE value='你好'"
+        ),
+        0
+    );
+}
+
 // ---- personal learning windows (set_clock) ----
 
 #[test]
@@ -879,6 +910,210 @@ fn an_edit_rejects_the_answer_to_the_old_composition() {
     let live = session.online_query().expect("a quanpin query");
     assert!(session.apply_online_candidate(&live, "妮", CandidateSource::CloudSuggestion));
     assert!(words(&session).contains(&"妮".to_owned()));
+}
+
+/// Loading a helpcode table drops the cached pinyin answers, online rows included, as the reference's keymap setters did (quanpin/engine.h:37-41); the golden ri_session_a_resources records the same sequence.
+#[test]
+fn a_new_helpcode_table_drops_the_online_rows_of_an_earlier_composition() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    type_text(&mut session, "ni");
+    let query = session.online_query().expect("a quanpin query");
+    assert!(session.apply_online_candidates(
+        &query,
+        &["本会话建议".to_owned()],
+        CandidateSource::CloudSuggestion
+    ));
+    session.command(Command::Cancel);
+    // Without a table change the series cache keeps the row for the same key.
+    type_text(&mut session, "ni");
+    assert!(words(&session).contains(&"本会话建议".to_owned()));
+    session.command(Command::Cancel);
+    assert!(session.set_helpcode_schema("lantian"));
+    type_text(&mut session, "ni");
+    let snapshot = session.snapshot();
+    assert!(!snapshot.candidates.is_empty());
+    assert!(
+        snapshot
+            .candidates
+            .iter()
+            .all(|item| !item.source.is_online()),
+        "{:?}",
+        words(&session)
+    );
+}
+
+/// test_input_session.cpp (longer phrases): a row that continues past the typed syllables keeps the typed reading as its pinyin, and selecting it commits the whole phrase and ends the composition.
+#[test]
+fn selecting_a_longer_phrase_commits_it_whole() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_n VALUES('ni','n','你',8000),('ni','n','泥',7000);\
+CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',10000),('ni''hao','nh','拟好',30);\
+CREATE TABLE tbl_3_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_3_n VALUES('ni''hao''ma','nhm','你好吗',900);",
+    );
+    let mut session = fixture.session();
+    type_text(&mut session, "nihao");
+    let index = index_of(&session, "你好吗");
+    let row = &session.snapshot().candidates[index];
+    assert_eq!(row.pinyin, "ni'hao");
+    assert_eq!(row.canonical_pinyin, "ni'hao'ma");
+    let result = session.select(index);
+    assert!(result.handled);
+    assert_eq!(result.commit.as_deref(), Some("你好吗"));
+    assert!(session.snapshot().preedit.is_empty());
+}
+
+/// overlays.md §1.6.3 option b through the session: typing never shows the desktop model's row; settling adds it once and a second settle has nothing to change. Needs both shipped models (`lattice::neural::test_model_path`).
+#[test]
+fn settling_adds_the_desktop_row_once() {
+    let models = (
+        crate::lattice::neural::test_model_path(assets::NEURAL_MODEL_KEYBOARD),
+        crate::lattice::neural::test_model_path(assets::NEURAL_MODEL_DESKTOP),
+    );
+    let (keyboard, desktop) = match models {
+        (Ok(keyboard), Ok(desktop)) => (keyboard, desktop),
+        (Err(reason), _) | (_, Err(reason)) => {
+            eprintln!("skipping settling_adds_the_desktop_row_once: {reason}");
+            return;
+        }
+    };
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_2_s(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_2_s VALUES('shu''ru','sr','输入',20000);\
+CREATE TABLE tbl_1_f(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_f VALUES('fa','f','法',800000),('fa','f','发',900000),('fa','f','罚',100000);",
+    );
+    std::fs::copy(keyboard, fixture.path().join(assets::NEURAL_MODEL_KEYBOARD)).unwrap();
+    std::fs::copy(desktop, fixture.path().join(assets::NEURAL_MODEL_DESKTOP)).unwrap();
+    let mut session = fixture.session_with(|options| {
+        options.sentence_association.neural_keyboard = true;
+        options.sentence_association.neural_desktop = true;
+        options.sentence_association.show_next_on_duplicate = true;
+    });
+    let desktop_rows = |session: &Session| {
+        session
+            .snapshot()
+            .candidates
+            .iter()
+            .filter(|item| item.source == CandidateSource::NeuralDesktop)
+            .count()
+    };
+    type_text(&mut session, "shurufa");
+    assert_eq!(desktop_rows(&session), 0);
+    assert!(session.settle_sentence_rows());
+    assert_eq!(desktop_rows(&session), 1, "{:?}", words(&session));
+    assert!(!session.settle_sentence_rows());
+    // The next keystroke answers without the desktop model again.
+    session.command(Command::Backspace);
+    assert_eq!(desktop_rows(&session), 0);
+}
+
+// ---- isolation between sessions (test_runtime_isolation.cpp:367-413, :447-464) ----
+
+/// One root of test_runtime_isolation.cpp:39-85: its own `ni` rows, quick phrase, helpcode tables and Japanese model, each naming `own` so a leak from the other root shows.
+fn isolation_root(own: &str, own_kanji: &str) -> Fixture {
+    let fixture = Fixture::new(&format!(
+        "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_n VALUES('ni','n','{own}',10000),('ni','n','拟',9000);\
+CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);\
+INSERT INTO quick_parases VALUES('x','{own}短语',10);"
+    ));
+    let helpcodes = fixture.path().join("helpcodes");
+    std::fs::write(helpcodes.join("helpcode.txt"), format!("{own}=aa\n拟=cc\n")).unwrap();
+    std::fs::write(
+        helpcodes.join("xiaohe_helpcode.txt"),
+        format!("{own}=cc\n拟=aa\n"),
+    )
+    .unwrap();
+    // The recorder's one-entry model (reading かな), with the entry's word swapped; both words are three UTF-8 bytes, so every offset holds.
+    let model = format!(
+        "MSJPDT1\u{0}\u{1}\u{0}\u{0}\u{0}\u{1}\u{0}\u{0}\u{0}\u{1}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}8\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}L\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}N\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\t\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{6}\u{0}\u{6}\u{0}\u{0}\u{0}\u{3}\u{0}\u{0}\u{0}\u{0}\u{0}\u{1}\u{0}\u{0}\u{0}\u{0}\u{0}かな{own_kanji}"
+    );
+    std::fs::write(fixture.path().join(assets::JAPANESE_MODEL), model).unwrap();
+    fixture
+}
+
+/// Two sessions on different roots stay open together and never see each other's dictionary, online rows, helpcode table, quote pairing, quick phrases or Japanese model (test_runtime_isolation.cpp:367-413, :447-464).
+#[test]
+fn sessions_on_different_roots_stay_isolated() {
+    let (root_a, root_b) = (isolation_root("你", "甲"), isolation_root("妮", "乙"));
+    let mut a = root_a.session();
+    let mut b = root_b.session();
+
+    type_text(&mut a, "ni");
+    type_text(&mut b, "ni");
+    assert_eq!(words(&a)[0], "你");
+    assert_eq!(words(&b)[0], "妮");
+    let query = a.online_query().expect("a quanpin query");
+    assert!(a.apply_online_candidates(
+        &query,
+        &["本会话建议".to_owned()],
+        CandidateSource::CloudSuggestion
+    ));
+    assert!(!b.apply_online_candidates(
+        &query,
+        &["跨会话建议".to_owned()],
+        CandidateSource::CloudSuggestion
+    ));
+    assert!(words(&a).contains(&"本会话建议".to_owned()));
+    assert!(!words(&b).iter().any(|word| word.contains("会话建议")));
+    a.command(Command::Cancel);
+    b.command(Command::Cancel);
+
+    assert!(a.set_helpcode_schema("lantian"));
+    assert!(b.set_helpcode_schema("xiaohe"));
+    type_text(&mut a, "niC");
+    type_text(&mut b, "niC");
+    assert_eq!(words(&a), ["拟", "你"]);
+    assert_eq!(words(&b), ["妮", "拟"]);
+    a.command(Command::Cancel);
+    b.command(Command::Cancel);
+
+    assert_eq!(a.punctuation(b'"').commit.as_deref(), Some("\u{201c}"));
+    assert_eq!(b.punctuation(b'"').commit.as_deref(), Some("\u{201c}"));
+    assert_eq!(a.punctuation(b'"').commit.as_deref(), Some("\u{201d}"));
+
+    for (session, phrase) in [(&mut a, "你短语"), (&mut b, "妮短语")] {
+        assert!(session.character(b'K', true).handled);
+        assert!(session.character(b'x', false).handled);
+        assert_eq!(words(session), [phrase]);
+        session.command(Command::Cancel);
+    }
+
+    a.switch_scheme(SchemeType::JapaneseRomaji);
+    b.switch_scheme(SchemeType::JapaneseRomaji);
+    type_text(&mut a, "kana");
+    type_text(&mut b, "kana");
+    assert_eq!(words(&a)[0], "甲");
+    assert_eq!(words(&b)[0], "乙");
+}
+
+/// test_runtime_isolation.cpp:367-413: twenty threads, each with its own session on one of two roots, read only their own root's dictionary.
+#[test]
+fn concurrent_sessions_read_only_their_own_dictionary() {
+    let roots = [isolation_root("你", "甲"), isolation_root("妮", "乙")];
+    std::thread::scope(|scope| {
+        for thread in 0..20 {
+            let (root, own, other) = if thread % 2 == 0 {
+                (&roots[0], "你", "妮")
+            } else {
+                (&roots[1], "妮", "你")
+            };
+            scope.spawn(move || {
+                let mut session = root.session();
+                type_text(&mut session, "ni");
+                let listed = words(&session);
+                assert_eq!(listed[0], own, "thread {thread}");
+                assert!(
+                    !listed.iter().any(|word| word == other),
+                    "thread {thread}: {listed:?}"
+                );
+            });
+        }
+    });
 }
 
 // ---- local mode fallback rows and temporary modes (overlays.md §8.1, test_temporary_input_session.cpp) ----

@@ -96,6 +96,36 @@ fn resource_verification_rejects_a_symlinked_state_root() {
 }
 
 #[test]
+fn resource_verification_removes_the_retired_pinyin_dictionary_in_place() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    std::fs::write(resources.join("fixture.db"), b"fixture").unwrap();
+    // Left behind by a release whose lock still pinned the C++ Engine's system dictionary.
+    std::fs::write(resources.join("dict_pinyin.dat"), b"retired").unwrap();
+    let specification = ResourceSet {
+        source_commit: "a".repeat(40),
+        artifacts: vec![msime_client_core::resources::Artifact {
+            name: "fixture.db".into(),
+            url: "https://example.invalid/fixture.db".into(),
+            sha256: hex::encode(Sha256::digest(b"fixture")),
+            size: 7,
+        }],
+    };
+    let state = root.path().join("state");
+
+    verify_resources_once(&resources, &specification, &state).unwrap();
+    assert!(!resources.join("dict_pinyin.dat").exists());
+    assert_eq!(
+        std::fs::read(resources.join("fixture.db")).unwrap(),
+        b"fixture"
+    );
+    // The marker describes the directory as it was before hashing, so it is recorded on the next verification once the directory holds only pinned files.
+    verify_resources_once(&resources, &specification, &state).unwrap();
+    assert!(state.join("verified-resources.json").is_file());
+}
+
+#[test]
 fn windows_legacy_mixed_input_is_imported_without_leaking_other_config() {
     let mut preferences = Preferences::default();
     assert!(apply_windows_legacy_mixed_input(

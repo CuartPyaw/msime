@@ -753,4 +753,45 @@ mod tests {
         assert_eq!(model.confidence("想"), 0.0);
         assert!(model.confidence("他") > 0.0);
     }
+
+    /// test_personal_context_input_session.cpp:510-543: concurrent reads, writes and reloads neither produce an invalid probability nor lose or double-count a transition. Reloads bump this store's own `invalidations`; `release_all` would close the stores of tests running in parallel.
+    #[test]
+    fn concurrent_reads_writes_and_reloads_keep_every_transition() {
+        let dir = Dir::new();
+        let journal = dir.journal();
+        let store = PersonalNgramStore::for_journal(&journal);
+        std::thread::scope(|scope| {
+            for _ in 0..3 {
+                scope.spawn(|| {
+                    for _ in 0..300 {
+                        let model = store.model();
+                        let probability = model.probability(&model.context(None, Some("甲")), "乙");
+                        assert!(
+                            (0.0..=1.0).contains(&probability),
+                            "a concurrent read saw {probability}"
+                        );
+                    }
+                });
+            }
+            scope.spawn(|| {
+                for _ in 0..100 {
+                    store.record(&[transition("", "甲", "乙", 1)]).unwrap();
+                }
+            });
+            for _ in 0..50 {
+                store.invalidations.fetch_add(1, Ordering::AcqRel);
+                store.flush().unwrap();
+            }
+        });
+        store.flush().unwrap();
+        assert_eq!(
+            count(
+                &journal,
+                "SELECT count FROM personal_bigram WHERE previous='甲' AND word='乙'"
+            ),
+            100
+        );
+        store.invalidations.fetch_add(1, Ordering::AcqRel);
+        assert!(store.model().bigram_probability("甲", "乙") > 0.0);
+    }
 }

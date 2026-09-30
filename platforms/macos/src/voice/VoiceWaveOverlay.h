@@ -32,7 +32,8 @@ typedef NS_ENUM(NSUInteger, MSIMEVoiceFailure) {
     MSIMEVoiceFailureNoSpeech,
     MSIMEVoiceFailureTimeout,
     MSIMEVoiceFailureSession,
-    MSIMEVoiceFailureMissingToken
+    MSIMEVoiceFailureMissingToken,
+    MSIMEVoiceFailureMissingLocalModel
 };
 @interface MSIMEVoiceWaveOverlay : NSPanel
 // Host presentation only; all calls are made on the main thread.

@@ -4,20 +4,20 @@ export interface VoiceModelPathSectionProps {
   onChange: (path: string) => void;
 }
 
-/** Manual Whisper model path input shared by voice hosts with and without a model store. */
+/** Manual model directory input shared by voice hosts with and without a model store. */
 export function VoiceModelPathSection({ path, pickPath, onChange }: VoiceModelPathSectionProps) {
   return (
     <div className="section">
       <label className="section-header">
         <span className="section-title">
-          Whisper 模型文件
-          <small>ggml 模型的绝对路径，例如 /Users/you/models/ggml-large-v3-turbo.bin</small>
+          本地模型目录
+          <small>已安装模型所在文件夹的绝对路径（包含 msime-model.json）</small>
         </span>
         <span className="flex items-center gap-2 [&>input]:min-w-0 [&>input]:flex-1">
           <input
-            aria-label="Whisper 模型文件"
+            aria-label="本地模型目录"
             value={path}
-            placeholder="/path/to/ggml-model.bin"
+            placeholder="/path/to/voice-models/<model>"
             onChange={(event) => onChange(event.target.value)}
           />
           {pickPath && (

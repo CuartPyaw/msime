@@ -35,7 +35,7 @@ export function VoiceInputIntroSection({
         <p className={settings.groupNote}>
           {localVoiceModelsAvailable
             ? "录音和识别都在这台设备上完成，音频不会离开本机，也不需要任何 API Key。在下方下载一个模型并点击“使用”，保存设置后生效；下载只会连接 GitHub 或你配置的镜像。你的用户词库会作为热词提高专有名词的识别率。可选的文本润色仍会调用你配置的云服务。"
-            : "录音和识别都在这台机器上完成，音频不会离开本机，也不需要任何 API Key。需要自备 whisper.cpp 的 ggml 模型文件（.bin），在下方填写它的绝对路径；模型越大越准也越慢，首次识别要等模型载入。可选的文本润色仍会调用你配置的云服务。"}
+            : "录音和识别都在这台机器上完成，音频不会离开本机，也不需要任何 API Key。需要一个已安装模型目录（包含 msime-model.json）的绝对路径，在下方填写；模型越大越准也越慢，首次识别要等模型载入。可选的文本润色仍会调用你配置的云服务。"}
         </p>
       </GroupList>
     );

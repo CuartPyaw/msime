@@ -12,11 +12,12 @@ macOS 平台源码统一放在 `src/` 下按 `backend/`、`voice/`、`candidate/
 
 ```sh
 cargo run --quiet -p msime-client-core --example install_resources --locked -- target/resources   # 拉取并逐个校验固定词库发布，打印目录
-ditto target/resources/<上一步的目录> "$HOME/Library/Application Support/app.msime.macos/EngineResources"
+bash platforms/macos/stage-resources.sh target/resources/<上一步的目录>                            # 再加上仓库自带的辅助码表，暂存到 target/macos/EngineResources
+ditto target/macos/EngineResources "$HOME/Library/Application Support/app.msime.macos/EngineResources"
 cargo run --quiet -p msime-host-api --example prepare_host --locked -- "$HOME/Library/Application Support/app.msime.macos/EngineResources" "$HOME/Library/Application Support/app.msime.macos"
 ```
 
-第二条不是多余的。`prepare_host` 只是把传进去的目录记到 `runtime-options.json` 里，指向 `target/resources` 的安装会在这个被忽略的产物目录被清掉时（AGENTS.md 里那条磁盘写满的记录说明它随时会）安静地失效，表现又是打不出中文。词库不合适时输入法只写一行 `MSIME has no input session (…)` 到统一日志，`log show --predicate 'process == "水杉输入法"'` 能看到，原因分「no usable runtime options」（没准备）和「session refused the runtime options」（准备过但 Engine 不接受）两种。
+`ditto` 那一条不是多余的。`prepare_host` 只是把传进去的目录记到 `runtime-options.json` 里，指向 `target/resources` 的安装会在这个被忽略的产物目录被清掉时（AGENTS.md 里那条磁盘写满的记录说明它随时会）安静地失效，表现又是打不出中文。词库不合适时输入法只写一行 `MSIME has no input session (…)` 到统一日志，`log show --predicate 'process == "水杉输入法"'` 能看到，原因分「no usable runtime options」（没准备）和「session refused the runtime options」（准备过但 Engine 不接受）两种。
 
 `scripts/install.sh` 会停掉正在运行的实例、在暂存目录用本机 Developer ID 连同 `resources/VoiceInput.entitlements` 重签名（`--deep`，因为 Sparkle 自带其发布方的签名，hardened runtime 下 Team ID 不一致会导致进程加载失败）、原子替换并保留旧 bundle，任一步失败自动回滚，最后调用 `--register-input-source` 并用 `scripts/check_input_source.swift` 查注册表，而不是只看退出码。
 
@@ -339,7 +340,7 @@ platforms/macos/stage-resources.sh <已校验资源目录>
 
 打包时如果 `cargo` 报某个过程宏 crate「can't find crate for `xxx_macros`」，看它前面一行的 dlopen 错误：`mis-aligned LINKEDIT string pool` 表示过程宏的 dylib 被产出成 dyld 拒绝加载的形状。成因是 `MACOSX_DEPLOYMENT_TARGET`：`tauri build` 会按 `bundle.macOS.minimumSystemVersion` 导出它，rustc 把它也用在宿主过程宏上，同一个 crate 不设该变量时产出的 dylib 能正常加载。cargo 不把这个变量算进指纹，坏掉的 dylib 会留在产物目录里被后续构建继续复用，所以换一个干净的 `CARGO_TARGET_DIR` 看起来也能「修好」——但那只是另起一整棵要从头编译、占几个 GB 的产物树，坏掉的 dylib 还留在原处，不要这么做。`package-release.sh` 因此先用不带该变量的 `cargo build --features tauri/custom-protocol` 编译设置应用，再用 `tauri bundle` 只做打包；已经坏掉的过程宏要删掉 `target/<profile>/deps` 里对应的 `.dylib` 让它重编。
 
-`tauri.macos.conf.json` 会把 `target/macos/EngineResources` 嵌入为 `EngineResources`；不要直接把未校验的词库目录配置到 bundle。资源目录缺少 `others.db` 或 `dict_japanese.dat` 时，宿主会安全关闭对应的 Emoji、颜文字或临时日语触发键，而不会吞掉普通大写字母。
+`tauri.macos.conf.json` 会把 `target/macos/EngineResources` 嵌入为 `EngineResources`；不要直接把未校验的词库目录配置到 bundle。`stage-resources.sh` 还把仓库自带的六套辅助码表（`resources/helpcodes`，不在词库发布里）连同来源声明放进其中的 `helpcodes/`，Engine 从资源目录下的这个子目录读辅助码表；缺了它们，Shift 字母仍被当作辅助码却筛不掉任何候选。`package-release.sh` 检查打出的应用里有这几个文件。资源目录缺少 `others.db` 或 `dict_japanese.dat` 时，宿主会安全关闭对应的 Emoji、颜文字或临时日语触发键，而不会吞掉普通大写字母。
 
 Tauri macOS 设置宿主首次启动时，如果应用数据目录中没有 `runtime-options.json`，会从 bundle 内的 `EngineResources` 调用共享 Host API 准备默认用户词库、缓存和配置，并以同目录原子发布配置；已有配置不会被覆盖。`MSIME_CLIENT_HOST_OPTIONS`（兼容 `MSIME_IBUS_OPTIONS`）显式指定配置时不会触发自动准备，`MSIME_CLIENT_STATE_DIR` 仍可指定偏好与用户状态根目录。资源校验或准备失败会以通用错误终止本次设置宿主启动，不泄露路径、输入或 Host API 诊断内容。
 

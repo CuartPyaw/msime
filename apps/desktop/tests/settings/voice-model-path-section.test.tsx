@@ -12,7 +12,7 @@ test("edits the manual model path", () => {
   const onChange = vi.fn();
   render(<VoiceModelPathSection path="/old/model.bin" onChange={onChange} />);
 
-  fireEvent.change(screen.getByRole("textbox", { name: "Whisper 模型文件" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "本地模型目录" }), {
     target: { value: "/new/model.bin" },
   });
   expect(onChange).toHaveBeenCalledWith("/new/model.bin");

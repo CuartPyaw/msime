@@ -6,6 +6,7 @@
 extern "C" char *msime_macos_pick_file_with(const char *(*picker)(void));
 extern "C" char *msime_macos_pick_file(void);
 extern "C" char *msime_macos_pick_directory(void);
+extern "C" char *msime_macos_pick_voice_model_directory(void);
 extern "C" void msime_macos_free_picked_path(char *path);
 
 static const char *ChosePath(void) { return "/Users/someone/models/ggml-base.bin"; }
@@ -48,6 +49,13 @@ int main() {
         offMain = reinterpret_cast<char *>(1);
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             offMain = msime_macos_pick_directory();
+            dispatch_semaphore_signal(done);
+        });
+        assert(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+        assert(offMain == nullptr);
+        offMain = reinterpret_cast<char *>(1);
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            offMain = msime_macos_pick_voice_model_directory();
             dispatch_semaphore_signal(done);
         });
         assert(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);

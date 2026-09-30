@@ -19,6 +19,12 @@ int main() {
         assert(!MSIMEVoiceUsesLocalModelHelper(@"local", NO, NO) && !MSIMEVoiceUsesLocalModelHelper(@"local", YES, YES));
         for (NSString *provider in @[@"doubao", @"system", @"openai", @""])
             assert(!MSIMEVoiceUsesLocalModelHelper(provider, NO, YES));
+        // `local` naming no installed model directory (a Whisper .bin from before the model catalog, say) refuses to record instead of reaching a network or system recognizer; a model directory or an external socket does not.
+        assert(MSIMEVoiceLocalModelMissing(@"local", NO, NO) && MSIMEVoiceLocalModelMissing(@"Local", NO, NO));
+        assert(!MSIMEVoiceLocalModelMissing(@"local", NO, YES) && !MSIMEVoiceLocalModelMissing(@"local", YES, NO));
+        for (NSString *provider in @[@"doubao", @"system", @"openai", @""])
+            assert(!MSIMEVoiceLocalModelMissing(provider, NO, NO));
+        assert(!MSIMEVoiceUsesNativeHTTPProvider(@"local", NO) && !MSIMEVoiceUsesLocalModelHelper(@"local", NO, NO));
         // Every provider this host calls with the stored token asks for one before recording; an unset provider preference means Doubao.
         for (NSString *provider in @[@"openai", @"groq", @"siliconflow", @"everyapi", @"mistral", @"cloud", @"doubao", @"Doubao"]) {
             assert(MSIMEVoiceASRTokenMissing(provider, nil, NO) && MSIMEVoiceASRTokenMissing(provider, @"", NO));

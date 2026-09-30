@@ -640,7 +640,7 @@ mod tests {
         records
     }
 
-    // dictionary_stage/tests.rs `complete_state_rebuild_changes_real_engine_candidates_without_touching_source`, reading the rebuilt tables instead of a session.
+    // dictionary_stage/tests.rs `complete_state_rebuild_changes_real_engine_candidates_without_touching_source`: the rebuilt tables row by row; `a_session_on_a_staged_generation_offers_its_candidates` checks what a session makes of them.
     #[test]
     fn a_complete_state_rebuild_replays_into_fresh_dictionaries_without_touching_resources() {
         let root = tempfile::tempdir().unwrap();
@@ -735,6 +735,37 @@ mod tests {
             Some(100)
         );
         assert!(streamed(&empty).is_empty());
+    }
+
+    /// test_dictionary_state.cpp:129-147: a session opened on the staged generation reads its dictionaries and journal, so the fixed 拟蒿 leads and the deleted 你好 is gone; an empty stage offers the resource rows again.
+    #[test]
+    fn a_session_on_a_staged_generation_offers_its_candidates() {
+        use crate::session::{Session, SessionOptions};
+        let words = |paths: RuntimePaths| {
+            let mut options = SessionOptions::new(paths);
+            options.learning = false;
+            let mut session = Session::new(options).unwrap();
+            for letter in "nihao".bytes() {
+                session.character(letter, false);
+            }
+            session
+                .snapshot()
+                .candidates
+                .into_iter()
+                .map(|item| item.word)
+                .collect::<Vec<_>>()
+        };
+        let root = tempfile::tempdir().unwrap();
+        let resources = resources(root.path());
+        let restored = words(stage(&resources, &root.path().join("restored"), records()).unwrap());
+        assert_eq!(
+            restored.first().map(String::as_str),
+            Some("拟蒿"),
+            "{restored:?}"
+        );
+        assert!(!restored.iter().any(|word| word == "你好"), "{restored:?}");
+        let empty = words(stage(&resources, &root.path().join("empty"), vec![]).unwrap());
+        assert_eq!(empty.first().map(String::as_str), Some("你好"), "{empty:?}");
     }
 
     #[test]

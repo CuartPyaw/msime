@@ -934,4 +934,96 @@ mod tests {
             2
         );
     }
+
+    /// The comparison set is ranked by weight, not display order: 西鄂 (xi'e, weight 6) shown in a protected slot above 写 must not be the basis for 写's new weight.
+    #[test]
+    fn the_comparison_set_is_ranked_by_weight_not_display_order() {
+        let dir = Dir::new();
+        dir.pinyin(&[
+            ("xie", "些", 3_752_167),
+            ("xie", "写", 605_147),
+            ("xi'e", "西鄂", 6),
+        ]);
+        let ordered = vec![
+            item("xie", "些", 3_752_167),
+            item("xi'e", "西鄂", 6),
+            item("xie", "写", 605_147),
+        ];
+        let (main_db, user_db) = (dir.main_db(), dir.journal());
+        assert!(adjust_candidate_ranking(&RankingRequest {
+            main_db: &main_db,
+            user_db: &user_db,
+            context_key: "xie",
+            ordered: &ordered,
+            entry_key: "xie",
+            value: "写",
+            mode: FrequencyAdjustmentMode::Promote,
+            linear_step: 1,
+            trigger_count: 1,
+            force_top: false,
+            kind: PersonalDictionaryKind::Pinyin,
+        })
+        .unwrap());
+        // Weight order makes 写 rank 1, so Promote lifts it above 些. Display order would make it rank 2 and bracket it between 西鄂 and 些 instead.
+        let written = dir.weight("xie", "写").unwrap();
+        assert!(written > 3_752_167, "写 was written as {written}");
+        assert_eq!(dir.weight("xie", "些"), Some(3_752_167));
+        assert_eq!(dir.weight("xi'e", "西鄂"), Some(6));
+    }
+
+    /// test_english_input_session.cpp:203-240: while another connection holds the journal's write lock the pick fails before english.db is opened, so the dictionary never carries a weight the journal lacks.
+    #[test]
+    fn a_locked_journal_leaves_english_db_untouched() {
+        let dir = Dir::new();
+        dir.english(&[("ninja", "Ninja", 200), ("nimbus", "Nimbus", 100)]);
+        let (english_db, user_db) = (dir.english_db(), dir.journal());
+        super::super::journal::ensure_user_database(&user_db).unwrap();
+        let ordered = vec![
+            english_item("ninja", "Ninja", 200),
+            english_item("nimbus", "Nimbus", 100),
+        ];
+        let request = RankingRequest {
+            main_db: &english_db,
+            user_db: &user_db,
+            context_key: "english:ni",
+            ordered: &ordered,
+            entry_key: "nimbus",
+            value: "Nimbus",
+            mode: FrequencyAdjustmentMode::Promote,
+            linear_step: 1,
+            trigger_count: 1,
+            force_top: false,
+            kind: PersonalDictionaryKind::English,
+        };
+        let blocker = Sqlite::open(&user_db).unwrap();
+        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+        // Waits out the journal's busy timeout.
+        assert!(adjust_english_candidate_ranking(&request).is_err());
+        assert_eq!(
+            query_i64(
+                &english_db,
+                "SELECT weight FROM english_words WHERE word='nimbus'"
+            ),
+            Some(100)
+        );
+        blocker.execute_batch("ROLLBACK").unwrap();
+        drop(blocker);
+        assert_eq!(
+            count(&user_db, "SELECT count(*) FROM user_dictionary_operations"),
+            0
+        );
+
+        adjust_english_candidate_ranking(&request).unwrap();
+        assert_eq!(
+            query_i64(
+                &english_db,
+                "SELECT weight FROM english_words WHERE word='nimbus'"
+            ),
+            Some(1200)
+        );
+        assert_eq!(
+            count(&user_db, "SELECT count(*) FROM user_dictionary_operations WHERE dictionary='english' AND key='nimbus' AND value='Nimbus' AND weight=1200"),
+            1
+        );
+    }
 }

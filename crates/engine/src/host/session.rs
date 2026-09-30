@@ -321,6 +321,11 @@ impl Session {
         }
     }
 
+    /// `session::Session::settle_sentence_rows`: true when the candidates changed.
+    pub fn settle_sentence_rows(&mut self) -> bool {
+        self.inner.settle_sentence_rows()
+    }
+
     pub fn select(&mut self, index: usize) -> Result<EngineResult> {
         Ok(result_for(self.inner.select(index)))
     }
@@ -454,6 +459,8 @@ impl Drop for Session {
         let journal = runtime_paths(&self.options).user(assets::USER_JOURNAL);
         // Nobody is left to report to: a failed write stays queued and flagged in the store, and the next record reports it and schedules another try.
         let _ = flush_journal(&journal);
+        // A host thread whose sessions are gone (a quiesced IME, a closed window) holds no journal handle.
+        crate::user_dictionary::journal::release_thread_journal();
     }
 }
 

@@ -447,6 +447,13 @@ mod tests {
             .unwrap();
         assert!(!EnglishDictionary::open(&foreign, None, None).ready());
         assert!(!EnglishDictionary::open(Path::new(""), None, None).ready());
+
+        // test_english_input_session.cpp:304-328: a file that is not a database at all is not ready either.
+        let corrupt = directory.path().join("corrupt.db");
+        std::fs::write(&corrupt, "not a sqlite database").unwrap();
+        let dictionary = EnglishDictionary::open(&corrupt, None, None);
+        assert!(!dictionary.ready());
+        assert!(dictionary.query_prefix("ni", 5).is_empty());
     }
 
     // test_runtime_isolation.cpp:665-705: the sidecar outranks english.db, which outranks the learned store, and a gloss learned after opening is visible to the open dictionary.

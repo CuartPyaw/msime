@@ -17,7 +17,7 @@ export function VoiceModelPathDisclosure({
   const editor = <VoiceModelPathSection path={path} pickPath={pickPath} onChange={onChange} />;
   return disclosure ? (
     <details className="section">
-      <summary>高级：手动指定 Whisper 模型文件</summary>
+      <summary>高级：手动指定本地模型目录</summary>
       {editor}
     </details>
   ) : (

@@ -17,6 +17,14 @@ while IFS= read -r artifact; do
   cp "$source_dir/$artifact" "$destination/$artifact"
 done <<< "$artifacts"
 cargo run --quiet -p msime-client-core --example verify_resources --locked -- "$destination" >/dev/null
+# Helpcode tables are not part of the dictionary release; the repository carries them in resources/helpcodes, and the Engine reads them from helpcodes/ under the resource directory (crates/engine/src/assets.rs names the six files). Without them the Engine has nothing to match: Shift letters are taken as helpcode and narrow nothing. The shared verifier lets a real helpcodes/ directory through.
+helpcodes="$repo_root/resources/helpcodes"
+mkdir -p "$destination/helpcodes"
+for table in helpcode.txt zrm_helpcode_big_unique.txt shouyou2_0_helpcode.txt shouyouplus_helpcode.txt xiaohe_helpcode.txt jiajia_helpcode.txt; do
+  cp "$helpcodes/$table" "$destination/helpcodes/$table"
+done
+cp "$helpcodes/ENGINE-NOTICE.md" "$destination/helpcodes/NOTICE.md"
+cp "$helpcodes/NOTICE.md" "$destination/helpcodes/NOTICE-jiajia.md"
 
 # The settled-rerank model, staged as a sibling of the bundle rather than a member of it.
 #

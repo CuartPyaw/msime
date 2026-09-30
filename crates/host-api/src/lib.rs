@@ -588,7 +588,7 @@ impl HostOptions {
             local_temporary_japanese: self.preferences.local_modes.temporary_japanese,
             sentence_association: msime_engine::host::SentenceAssociationOptions {
                 word_lattice: self.preferences.sentence_association.word_lattice,
-                // The Google decoder is gone and the engine reads nothing from this switch.
+                // The engine loads the desktop model from the settled-model directory beside the resources and scores it only when the runtime settles a composition.
                 neural_desktop: self.preferences.sentence_association.neural_desktop,
                 neural_keyboard: self.preferences.sentence_association.neural_keyboard,
                 show_next_on_duplicate: self

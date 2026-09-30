@@ -234,6 +234,29 @@ impl ImeSession {
         true
     }
 
+    /// Re-answer the live request with the desktop sentence model beside the keyboard one (overlays.md §1.6.3 option b), keeping the settled list until the next refresh. True when the list changed; false without a desktop model or a pinyin request, or when the model agreed with the list shown.
+    pub fn settle(&mut self) -> bool {
+        let scheme = self.state.request.scheme;
+        if !self.state.request.valid
+            || !matches!(scheme, SchemeType::Quanpin | SchemeType::Shuangpin)
+            || !self.registry.set_settling(scheme, true)
+        {
+            return false;
+        }
+        let before = std::mem::take(&mut self.state.candidates);
+        self.refresh_candidates();
+        self.registry.set_settling(scheme, false);
+        self.state.candidates.len() != before.len()
+            || self
+                .state
+                .candidates
+                .iter()
+                .zip(&before)
+                .any(|(settled, shown)| {
+                    settled.word != shown.word || settled.source != shown.source
+                })
+    }
+
     /// ime_session.cpp:299-369.
     fn refresh_candidates(&mut self) {
         self.state.preedit = self.scheme.preedit();

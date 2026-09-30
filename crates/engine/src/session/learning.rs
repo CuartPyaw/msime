@@ -972,12 +972,12 @@ mod tests {
     /// 904bd0976: a sentence a neural model picked has no dictionary row to re-rank, so selecting it stores the sentence as a user phrase like a lattice sentence. Needs the keyboard model from `MSIME_EVAL_RESOURCES`.
     #[test]
     fn a_neural_sentence_is_learned_as_a_sentence() {
-        let Some(model) = std::env::var_os("MSIME_EVAL_RESOURCES")
-            .map(|resources| PathBuf::from(resources).join(assets::NEURAL_MODEL_KEYBOARD))
-            .filter(|path| path.is_file())
-        else {
-            eprintln!("skipping a_neural_sentence_is_learned_as_a_sentence: no keyboard model in MSIME_EVAL_RESOURCES");
-            return;
+        let model = match crate::lattice::neural::test_model_path(assets::NEURAL_MODEL_KEYBOARD) {
+            Ok(model) => model,
+            Err(reason) => {
+                eprintln!("skipping a_neural_sentence_is_learned_as_a_sentence: {reason}");
+                return;
+            }
         };
         let fixture = Fixture::new(
             &[
@@ -1119,5 +1119,146 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The first row the session would store as a sentence, if any.
+    fn sentence_row(session: &Session) -> Option<(usize, String)> {
+        session
+            .snapshot()
+            .candidates
+            .iter()
+            .position(|item| item.source.is_sentence_learning())
+            .map(|index| (index, session.snapshot().candidates[index].word.clone()))
+    }
+
+    /// ISC:51-53: a generated sentence longer than `MAX_LEARNED_SENTENCE_SYLLABLES` is committed but never stored; one at the cap is.
+    #[test]
+    fn a_sentence_longer_than_the_cap_is_committed_but_not_stored() {
+        let fixture = Fixture::new(&[("yi", "一", 100), ("er", "二", 100)], &[]);
+        // Both tables exist, so only the cap can keep the longer sentence out.
+        Connection::open(fixture.paths.dictionary(assets::MAIN_DICTIONARY))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE tbl_7_y(key TEXT, jp TEXT, value TEXT, weight INTEGER);\
+                 CREATE TABLE tbl_others_y(key TEXT, jp TEXT, value TEXT, weight INTEGER);",
+            )
+            .unwrap();
+        for syllables in [
+            MAX_LEARNED_SENTENCE_SYLLABLES + 1,
+            MAX_LEARNED_SENTENCE_SYLLABLES,
+        ] {
+            let mut session = fixture.session(|_| {});
+            type_text(&mut session, &"yi".repeat(syllables));
+            let (index, word) = sentence_row(&session).unwrap_or_else(|| {
+                panic!(
+                    "no generated sentence for {syllables} syllables: {:?}",
+                    words(&session)
+                )
+            });
+            assert_eq!(word.chars().count(), syllables);
+            let result = session.select(index);
+            assert_eq!(result.commit.as_deref(), Some(word.as_str()));
+            assert_eq!(result.diagnostic, None);
+            // The SQL literal of yi'yi'...: each apostrophe doubled.
+            let key = vec!["yi"; syllables].join("''");
+            let stored = fixture.journal_count(&format!(
+                "SELECT count(*) FROM user_dictionary_operations WHERE key='{key}' AND value='{word}' AND user_inserted=1"
+            ));
+            let table = crate::format::quanpin_table(syllables, b'y').unwrap();
+            let in_main = fixture.main_count(&format!(
+                "SELECT count(*) FROM {table} WHERE value='{word}'"
+            ));
+            if syllables > MAX_LEARNED_SENTENCE_SYLLABLES {
+                assert_eq!(
+                    fixture.journal_count("SELECT count(*) FROM user_dictionary_operations"),
+                    0
+                );
+                assert_eq!(in_main, 0);
+            } else {
+                assert_eq!(stored, 1);
+                assert_eq!(in_main, 1);
+            }
+        }
+    }
+
+    /// input_session_composition.cpp:562-600: the English and Japanese modes offer Generated and online rows too, but none of them is a pinyin sentence, so selecting one stores nothing. Today these rows also carry no canonical pinyin, so the empty-reading check rejects them as well; the test pins the outcome, whichever check makes it.
+    #[test]
+    fn generated_rows_outside_pinyin_composition_are_not_stored() {
+        let fixture = Fixture::new(&[("ni", "你", 100), ("hao", "好", 100)], &[]);
+        for mode in [
+            "temporary English",
+            "dedicated English",
+            "temporary Japanese",
+        ] {
+            let mut session = fixture.session(|_| {});
+            match mode {
+                "temporary English" => {
+                    assert!(session.character(b'Y', true).handled);
+                    type_text(&mut session, "zzq");
+                }
+                "dedicated English" => {
+                    session.set_dedicated_english(true);
+                    type_text(&mut session, "zzq");
+                }
+                _ => {
+                    assert!(session.character(b'R', true).handled);
+                    type_text(&mut session, "ka");
+                }
+            }
+            let (index, word) = sentence_row(&session)
+                .unwrap_or_else(|| panic!("{mode} offers no generated row: {:?}", words(&session)));
+            let result = session.select(index);
+            assert_eq!(result.commit.as_deref(), Some(word.as_str()), "{mode}");
+            assert_eq!(
+                fixture.journal_count("SELECT count(*) FROM user_dictionary_operations"),
+                0,
+                "{mode} stored {word}"
+            );
+        }
+        assert_eq!(fixture.main_count("SELECT count(*) FROM tbl_1_n"), 1);
+
+        // A cloud answer to Japanese `ka` is an online row, which the session otherwise stores under the typed reading.
+        let mut session = fixture.session(|o| o.scheme = SchemeType::JapaneseRomaji);
+        type_text(&mut session, "ka");
+        let query = session.online_query().expect("a Japanese cloud query");
+        assert!(session.apply_online_candidates(
+            &query,
+            &["蚊".to_owned()],
+            CandidateSource::CloudSuggestion
+        ));
+        let result = select_word(&mut session, "蚊");
+        assert_eq!(result.commit.as_deref(), Some("蚊"));
+        assert_eq!(
+            fixture.journal_count("SELECT count(*) FROM user_dictionary_operations"),
+            0
+        );
+    }
+
+    /// test_runtime_isolation.cpp:618-642: a pin the journal refuses is reported, and the list keeps its order.
+    #[test]
+    fn a_failed_pin_reports_and_keeps_the_order() {
+        let fixture = Fixture::new(&FQ, &[]);
+        std::fs::create_dir(fixture.journal()).unwrap();
+        let mut session = fixture.session(|o| o.learning = false);
+        type_text(&mut session, "ni");
+        let before = session.snapshot();
+        let index = words(&session)
+            .iter()
+            .position(|word| word == "己")
+            .unwrap();
+        let result = session.pin(index);
+        assert!(result.handled);
+        assert_eq!(result.commit, None);
+        assert_eq!(
+            result.diagnostic.as_deref(),
+            Some(diagnostics::FREQUENCY_NOT_PERSISTED)
+        );
+        let after = session.snapshot();
+        assert_eq!(after.preedit, before.preedit);
+        assert_eq!(after.candidates[0].word, before.candidates[0].word);
+        assert_eq!(
+            fixture.main_count("SELECT weight FROM tbl_1_n WHERE value='己'"),
+            50
+        );
     }
 }

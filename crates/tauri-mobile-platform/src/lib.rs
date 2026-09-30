@@ -267,7 +267,7 @@ pub struct MobileVoiceTranscriptionRequest {
     pub enable_punctuation: bool,
     pub enable_ddc: bool,
     pub boosting_table_id: String,
-    /// Provider `local` only: the absolute path of the installed model directory (or Whisper file) to run on the device.
+    /// Provider `local` only: the absolute path of the installed model directory to run on the device.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub model_path: String,
     /// Provider `local` only: the user's own dictionary words, passed to a recognizer with native hotword support or applied after the final text by `msime_client_voice_hotword_correct` when the model's manifest says `"hotwords": "pinyin"`.

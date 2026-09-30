@@ -1357,7 +1357,7 @@ export type VoiceInputPreferences = {
   polish_enabled?: boolean;
   polish_text?: boolean;
   asr_model?: string;
-  /** Absolute path the `local` provider loads: an installed model directory (one holding msime-model.json) or a Whisper model file. */
+  /** Absolute path the `local` provider loads: an installed model directory (one holding msime-model.json). */
   asr_model_path?: string;
   /** Optional `https://` prefix put in front of every model download URL (a ghproxy-style mirror); empty downloads from the catalog URLs as-is. */
   asr_model_mirror?: string;
@@ -2021,8 +2021,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     candidateEnglishGloss,
     englishSuggestions,
     inputModeHUD,
-  } =
-    settingsInputPreferences(draft);
+  } = settingsInputPreferences(draft);
   const touchKeyboardSchemes = draft?.touch_keyboard_schemes ?? {
     enabled: allTouchKeyboardSchemes,
   };
@@ -2187,8 +2186,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     category: initialCommunityCategory,
     scope: initialCommunityScope,
     initialMine: initialCommunityMine,
-  } =
-    communityDestinationView(communityDestination);
+  } = communityDestinationView(communityDestination);
   return {
     client,
     confirmation,

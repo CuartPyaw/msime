@@ -143,7 +143,7 @@ pub(crate) fn open_existing_read_only(path: &Path) -> Result<Option<Connection>>
 /// Open (creating) the journal, reusing this thread's connection for the path.
 pub fn open_journal(path: &Path) -> Result<JournalConnection> {
     let generation = CACHE_GENERATION.load(Ordering::Acquire);
-    CACHED_JOURNAL.with(|cache| {
+    let cached = CACHED_JOURNAL.try_with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(cached) = cache.as_ref() {
             if cached.path == path && cached.generation == generation {
@@ -166,7 +166,21 @@ pub fn open_journal(path: &Path) -> Result<JournalConnection> {
             connection: Rc::clone(&connection),
         });
         Ok(JournalConnection { connection })
-    })
+    });
+    match cached {
+        Ok(opened) => opened,
+        // A session a host drops while its thread exits (sessions kept in a thread-local map) can outlive this thread's cache, which thread-local destruction order does not fix. Its last flush gets a connection of its own, closed when that flush ends.
+        Err(_) => {
+            let connection = open_database(
+                path,
+                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
+            )?;
+            ensure_schema(&connection)?;
+            Ok(JournalConnection {
+                connection: Rc::new(connection),
+            })
+        }
+    }
 }
 
 /// Every `CREATE ... IF NOT EXISTS` of J:114-154 and NS:156-167, the `user_inserted` column check, then `PRAGMA user_version = 4` (informational only).
@@ -213,6 +227,18 @@ pub fn close_cached_journals() {
     // The calling thread's connection closes now (once no operation still holds it); other threads' connections close on their next journal access.
     CACHED_JOURNAL.with(|cache| *cache.borrow_mut() = None);
     crate::local::database::close_cached_local_databases();
+}
+
+/// Closes this thread's cached journal connection now. The reference cached only its default journal path and opened msime's journal per call (user_dictionary_journal.cpp:445-452), so a thread that is done with the journal must not keep a handle that blocks the reset's rename or a generation delete on Windows. A connection an operation still holds closes when that operation ends.
+pub(crate) fn release_thread_journal() {
+    // At thread exit the cache may already be destroyed, which closed its connection; there is nothing left to release then.
+    let _ = CACHED_JOURNAL.try_with(|cache| *cache.borrow_mut() = None);
+}
+
+/// Whether this thread still caches a journal connection.
+#[cfg(test)]
+pub(crate) fn thread_holds_journal() -> bool {
+    CACHED_JOURNAL.with(|cache| cache.borrow().is_some())
 }
 
 /// The syllables of a journal key; empty when the key or any segment is empty, which means the key cannot be stored (J:182-199).

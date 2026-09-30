@@ -1,4 +1,4 @@
-//! Neural reranking of the lattice's n-best (overlays.md §1.6.2-§1.6.3) on the `chinese-ime-lm` crate. The model never generates sentences; it only reorders lattice paths, and each enabled source contributes one row. Scoring is synchronous on the session's own `Reranker`, whose prefix cache keeps a keystroke cheap.
+//! Neural reranking of the lattice's n-best (overlays.md §1.6.2-§1.6.3) on the `chinese-ime-lm` crate. The model never generates sentences; it only reorders lattice paths, and each enabled source contributes one row. Scoring is synchronous on the session's own `Reranker`: the keyboard model on every keystroke, whose prefix cache keeps it cheap, and the desktop model only when the host settles a composition (`Session::settle_sentence_rows`, §1.6.3 option b), because its p95 of 153 ms does not fit a keystroke.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -20,6 +20,26 @@ pub const MAX_MODEL_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The lattice score is converted as log10 the way the C++ did (patch:869-871); the arithmetic is ported unchanged so the two models' blend keeps the weight it was tuned with.
 const LOG10_TO_NATS: f64 = std::f64::consts::LN_10;
+
+/// A shipped model for tests: from `MSIME_EVAL_RESOURCES` (the dictionary resource set), else from `MSIME_NEURAL_MODEL_DIR` (where `scripts/fetch_neural_model.py` puts both models, `target/neural-model` by default); the error is the reason a test skips.
+#[cfg(test)]
+pub(crate) fn test_model_path(name: &str) -> Result<PathBuf, String> {
+    let directories: Vec<PathBuf> = ["MSIME_EVAL_RESOURCES", "MSIME_NEURAL_MODEL_DIR"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .collect();
+    if directories.is_empty() {
+        return Err("neither MSIME_EVAL_RESOURCES nor MSIME_NEURAL_MODEL_DIR is set".to_owned());
+    }
+    directories
+        .iter()
+        .map(|directory| directory.join(name))
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            format!("{name} is in neither MSIME_EVAL_RESOURCES nor MSIME_NEURAL_MODEL_DIR")
+        })
+}
 
 /// One model per path for the process; a load failure is remembered as `None`, so a missing file is not re-read on every keystroke (patch:902-912).
 pub fn shared_sentence_model(path: &Path) -> Option<Arc<SentenceModel>> {
@@ -208,14 +228,9 @@ mod tests {
         );
     }
 
-    /// The keyboard model from `MSIME_EVAL_RESOURCES`, or the reason the test cannot run.
+    /// A shipped model (`test_model_path`), or the reason the test cannot run.
     fn resource_model(name: &str) -> Result<Arc<SentenceModel>, String> {
-        let resources = std::env::var_os("MSIME_EVAL_RESOURCES")
-            .ok_or_else(|| "MSIME_EVAL_RESOURCES is not set".to_owned())?;
-        let path = PathBuf::from(resources).join(name);
-        if !path.is_file() {
-            return Err(format!("{} is not in MSIME_EVAL_RESOURCES", name));
-        }
+        let path = test_model_path(name)?;
         shared_sentence_model(&path).ok_or_else(|| format!("{} did not load", path.display()))
     }
 
@@ -242,6 +257,25 @@ mod tests {
         let means = Reranker::new(model).log_probabilities("", &["输入法"]);
         assert_eq!(means.len(), 1);
         assert!(means[0] < 0.0);
+    }
+
+    /// The desktop model reorders like the keyboard one, under its own source.
+    #[test]
+    fn a_real_desktop_model_scores_and_reorders() {
+        let model = match resource_model(assets::NEURAL_MODEL_DESKTOP) {
+            Ok(model) => model,
+            Err(reason) => {
+                eprintln!("skipping a_real_desktop_model_scores_and_reorders: {reason}");
+                return;
+            }
+        };
+        let mut reranker = NeuralReranker::new(CandidateSource::NeuralDesktop, model);
+        let mut paths = vec![path("输入发", -5.0), path("输入法", -5.1)];
+        assert!(reranker.rerank(&mut paths, "我在用一个新的"));
+        assert_eq!(
+            paths[0].sentence, "输入法",
+            "the model knows the common word"
+        );
     }
 
     /// 904bd0976: with a reranker running, the typo decode still runs and still starts from the unreranked best, so the typo sentence answers the literal reading rather than whatever the model preferred.

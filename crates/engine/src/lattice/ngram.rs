@@ -1,11 +1,13 @@
 //! `bigram.bin` / `trigram.bin` (MSNG v1, quanpin.md §12.1, data-formats.md §7). The files are copied into a generation through `<name>.incoming` and renamed into place, never written in place, so a table read once stays the table of that generation.
 //!
-//! The table is read into memory rather than mapped: `memmap2::Mmap::map` is an `unsafe fn` and the workspace denies `unsafe_code`. Lookups go through `key_at` / `value_at` over the raw bytes, so moving to a mapping only changes the type of `bytes` and the line in `load` that fills it.
+//! The table is mapped read-only, as ngram_table.cpp:108 did (MapViewOfFile on Windows, :131-133), so its pages are clean and file-backed: the system can evict them under memory pressure, which the iOS keyboard extension's limit needs, instead of holding two 12 MB tables of dirty heap per generation. This is the one `unsafe` block of the crate (decisions.md: memmap2 for bigram.bin/trigram.bin), and it rests on the generation contract above. Like the reference, a table stays mapped for the life of the process once loaded.
 
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+
+use memmap2::{Mmap, MmapOptions};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 /// The sentence-start token in n-gram keys. Not a character any dictionary value can contain, so it cannot be confused with a real first word (NG:61-66).
@@ -23,12 +25,14 @@ const FNV_OFFSET: u64 = 0xCBF2_9CE4_8422_2325;
 const FNV_PRIME: u64 = 0x0100_0000_01B3;
 
 pub struct NgramTable {
-    bytes: Vec<u8>,
+    /// The header and the entries, exactly `HEADER_BYTES + count * ENTRY_BYTES` bytes.
+    bytes: Mmap,
     count: usize,
 }
 
 impl NgramTable {
     /// `None` for a missing, short, wrong-magic, wrong-version, oversized or unsorted file; the decoder then runs without the table.
+    #[allow(unsafe_code)]
     pub fn load(path: &Path) -> Option<NgramTable> {
         let mut file = File::open(path).ok()?;
         let size = file.metadata().ok()?.len();
@@ -42,12 +46,9 @@ impl NgramTable {
         if count > MAX_ENTRIES || needed as u64 > size {
             return None;
         }
-        // Only `needed` bytes are read: trailing bytes are legal (NG:124-126), and the header alone bounds the allocation, so a foreign file cannot make this read more than the largest valid table.
-        let mut bytes = header.to_vec();
-        bytes.reserve_exact(needed - HEADER_BYTES);
-        file.take((needed - HEADER_BYTES) as u64)
-            .read_to_end(&mut bytes)
-            .ok()?;
+        // Only `needed` bytes are mapped: trailing bytes are legal (NG:124-126), and the header alone bounds the mapping, so a foreign file cannot make it larger than the largest valid table.
+        // SAFETY: a mapping is only sound while nothing changes the file underneath it. Tables reach a generation as `<name>.incoming` and are renamed into place, never written in place (module doc, assets.rs), so the mapped inode keeps its bytes for as long as the map lives; `needed <= size` was checked above.
+        let bytes = unsafe { MmapOptions::new().len(needed).map(&file) }.ok()?;
         if bytes.len() != needed {
             return None;
         }
@@ -262,6 +263,25 @@ pub(super) mod tests {
             0.0,
             "an empty second word scores zero"
         );
+    }
+
+    /// The generation contract that makes the mapping sound: a new table arrives as `<name>.incoming` and is renamed over the old one, so a table already mapped keeps answering from the file it mapped.
+    #[test]
+    fn a_mapped_table_survives_a_rename_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let table = pair_table(directory.path(), "bigram.bin", &[("配置", "与", 2.5)]);
+        let path = directory.path().join("bigram.bin");
+        let incoming = directory.path().join("bigram.bin.incoming");
+        write_table(
+            &incoming,
+            &sorted(vec![(hash_pair("配置", "与"), -2.0)]),
+            MAGIC,
+            VERSION,
+        );
+        std::fs::rename(&incoming, &path).unwrap();
+        assert!((table.bigram("配置", "与") - 2.5).abs() < 0.01);
+        let replaced = NgramTable::load(&path).expect("the new table loads");
+        assert!((replaced.bigram("配置", "与") + 2.0).abs() < 0.01);
     }
 
     #[test]

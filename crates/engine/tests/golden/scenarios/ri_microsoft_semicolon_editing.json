@@ -1,6 +1,7 @@
 {
  "name": "ri_microsoft_semicolon_editing",
  "source": "tests/src/test_runtime_isolation.cpp:39-85; case :203-247",
+ "note": "Steps 19-20 (MoveLeft) are not the reference's output: they hold the Rust caret-prefix decode. In the reference, MoveLeft only stores the caret and returns without recomputing (core/input_session_editing.cpp:132-134 and :157-158), because the caret_prefix overlay failed to apply to the recorded build (.migration/spec/overlays.md §7.6), so it kept showing the step-18 list, [你, 拟] four times. That list is the shuangpin prefix-group cascade, which appends every shorter prefix group without de-duplication (shuangpin/shuangpin_dictionary.cpp:214-229, ported as generate_series); it is recorded as-is at step 18. The port decodes only the complete units before the caret (decisions.md: caret_prefix follows upstream bc46f27), so caret 5 decodes ni'nn and caret 4 decodes ni', each answering [你, 拟]; steps 19-20 were rewritten to that output.",
  "covers": [
   "shuangpin",
   "caret"

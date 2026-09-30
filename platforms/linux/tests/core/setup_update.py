@@ -57,10 +57,6 @@ Path(sys.argv[-1]).mkdir(parents=True)
 '''
 
 
-# What dict_pinyin.dat stands for here: the C++ Engine's system dictionary, which earlier releases kept in the resource directory and the current lock no longer names.
-RETIRED_PAYLOAD = b"the C++ Engine's system dictionary"
-
-
 class Artifacts(http.server.BaseHTTPRequestHandler):
     payloads: dict = {}
     requested: list = []
@@ -253,22 +249,26 @@ def check_setup(harness: Harness) -> None:
     assert sorted(path.name for path in harness.staged(resources).iterdir()) == ["a.db", "b.db"]
     assert (resources / "retired.db").is_file() and (resources / "b.db").read_bytes() == harness.previous_b
 
-    # The upgrade that replaced the C++ Engine dropped dict_pinyin.dat from the lock, so a directory an earlier release downloaded differs from the lock in that file alone. Nothing is out of date, so --update needs no --download: it switches to a directory beside the previous one that holds only the lock's entries, downloads nothing, and the dropped file stays behind with the previous generation.
-    state = harness.installed("state-retired")
+    # dict_pinyin.dat, the C++ Engine's system dictionary, is the one file a dropped lock entry may leave behind without the directory being refused: the host library deletes it in place when it verifies the directory. So a directory that differs from the lock in that file alone is current, --update stages nothing and downloads nothing, and the file is left for the host.
+    state = harness.installed("state-retired-pinyin")
     resources = Path(options(state)["resources"])
     (resources / "b.db").write_bytes(harness.current["b.db"])
-    (resources / "dict_pinyin.dat").write_bytes(RETIRED_PAYLOAD)
-    staged = harness.staged(resources)
+    (resources / "dict_pinyin.dat").write_bytes(b"the C++ Engine's system dictionary")
     result = harness.run("--update", "--state", str(state))
     assert result.returncode == 0, result
     assert Artifacts.requested == [], Artifacts.requested
-    assert sorted(path.name for path in staged.iterdir()) == ["a.db", "b.db"], list(staged.iterdir())
-    assert all((staged / name).stat().st_ino == (resources / name).stat().st_ino for name in ("a.db", "b.db"))
-    assert (resources / "dict_pinyin.dat").read_bytes() == RETIRED_PAYLOAD
-    assert harness.refreshes() == [{"lease": True, "locked": True, "resources": str(staged)}], harness.refreshes()
-    assert options(state)["resources"] == str(staged), options(state)
-    assert leftovers(state) == [], leftovers(state)
-    assert "当前版本不再使用" in result.stdout and str(resources) in result.stdout, result.stdout
+    assert not harness.staged(resources).exists()
+    assert harness.refreshes() == [{"lease": True, "locked": True, "resources": str(resources)}], harness.refreshes()
+    assert (resources / "dict_pinyin.dat").is_file()
+
+    # Only as a regular file: a directory by that name is refused by the host, so it is reported like any other unpinned entry.
+    state = harness.installed("state-retired-pinyin-directory")
+    resources = Path(options(state)["resources"])
+    (resources / "b.db").write_bytes(harness.current["b.db"])
+    (resources / "dict_pinyin.dat").mkdir()
+    result = harness.run("--update", "--state", str(state))
+    assert result.returncode == 1 and "dict_pinyin.dat" in result.stderr, result
+    assert harness.prepare_calls() == [], harness.prepare_calls()
 
     # A refresh that fails leaves the options naming the previous directory, which was never written, and says where the new dictionaries wait.
     state = harness.installed("state-refresh-failed")
@@ -336,47 +336,6 @@ def check_setup(harness: Harness) -> None:
     assert "限制" in result.stderr and harness.prepare_calls() == [], result
 
 
-def check_first_run(harness: Harness) -> None:
-    """A first setup that finds the dictionaries an earlier release downloaded, still holding dict_pinyin.dat."""
-    downloaded = harness.scratch / "data/msime-client/resources"
-    downloaded.mkdir(parents=True)
-    for name, payload in harness.current.items():
-        (downloaded / name).write_bytes(payload)
-    (downloaded / "dict_pinyin.dat").write_bytes(RETIRED_PAYLOAD)
-    # First-run setup goes on to enable the user services and look for a running host; neither may reach the machine the test runs on.
-    tools = harness.scratch / "tools"
-    tools.mkdir()
-    for tool, code in (("systemctl", 0), ("pgrep", 1)):
-        (tools / tool).write_text(f"#!/bin/sh\nexit {code}\n")
-        (tools / tool).chmod(0o755)
-    path = f"{tools}:{os.environ.get('PATH', '/usr/bin:/bin')}"
-
-    # Without --download, since nothing needs fetching: the lock's entries are linked into a directory beside the earlier one and that one is prepared. The earlier directory keeps every file it had.
-    state = harness.scratch / "state-first-run"
-    staged = harness.staged(downloaded)
-    result = harness.run("--state", str(state), "--no-register", PATH=path)
-    assert result.returncode == 0, result
-    assert Artifacts.requested == [], Artifacts.requested
-    assert harness.prepare_calls() == [[str(staged), str(state)]], harness.prepare_calls()
-    assert sorted(path.name for path in staged.iterdir()) == ["a.db", "b.db"], list(staged.iterdir())
-    assert (staged / "a.db").stat().st_ino == (downloaded / "a.db").stat().st_ino
-    assert sorted(path.name for path in downloaded.iterdir()) == ["a.db", "b.db", "dict_pinyin.dat"]
-    assert "当前版本不再使用" in result.stdout, result.stdout
-
-    # With a stale artifact as well, --download fetches only that one, into the directory beside the earlier one.
-    shutil.rmtree(staged)
-    (downloaded / "b.db").write_bytes(harness.previous_b)
-    state = harness.scratch / "state-first-run-download"
-    result = harness.run("--state", str(state), "--no-register", "--download", PATH=path)
-    assert result.returncode == 0, result
-    assert Artifacts.requested == ["/b.db"], Artifacts.requested
-    assert harness.prepare_calls() == [[str(staged), str(state)]], harness.prepare_calls()
-    assert (staged / "b.db").read_bytes() == harness.current["b.db"]
-    assert (downloaded / "b.db").read_bytes() == harness.previous_b
-    assert (downloaded / "dict_pinyin.dat").read_bytes() == RETIRED_PAYLOAD
-    shutil.rmtree(harness.scratch / "data/msime-client")
-
-
 def check_prepare(prepare: Path, harness: Harness) -> None:
     """The built msime-linux-prepare against the lock it was compiled with: the fixture dictionaries match none of it."""
     result = subprocess.run([str(prepare), "--refresh", "runtime-options.json"], capture_output=True, text=True, timeout=30)
@@ -400,7 +359,6 @@ def main() -> int:
         with tempfile.TemporaryDirectory() as name:
             harness = Harness(Path(name), server.server_address[1])
             Artifacts.payloads = {f"/{key}": value for key, value in harness.current.items()}
-            check_first_run(harness)
             check_setup(harness)
             if len(sys.argv) > 1:
                 check_prepare(Path(sys.argv[1]), harness)

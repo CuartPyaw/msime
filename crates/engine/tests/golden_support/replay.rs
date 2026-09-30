@@ -787,7 +787,7 @@ mod tests {
     #[test]
     fn every_scenario_is_selected_in_name_order_without_a_filter() {
         let all = selected_scenarios_from(None);
-        assert_eq!(all.len(), 71);
+        assert_eq!(all.len(), 272);
         let mut sorted = all.clone();
         sorted.sort();
         assert_eq!(all, sorted);

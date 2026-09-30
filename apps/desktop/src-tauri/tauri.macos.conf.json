@@ -27,7 +27,8 @@
       "../../../platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt": "Licenses/THIRD_PARTY_NOTICES.txt",
       "../../../LICENSE": "Licenses/GPL-3.0.txt",
       "../../../resources/licenses/msime-engine-dictionary-NOTICE.md": "Licenses/MSIME-Engine-dictionary-NOTICE.md",
-      "../../../resources/helpcodes/ENGINE-NOTICE.md": "Licenses/MSIME-Engine-helpcode-NOTICE.md"
+      "../../../resources/helpcodes/ENGINE-NOTICE.md": "Licenses/MSIME-Engine-helpcode-NOTICE.md",
+      "../../../resources/helpcodes/NOTICE.md": "Licenses/MSIME-helpcode-jiajia-NOTICE.md"
     }
   }
 }

@@ -298,4 +298,62 @@ mod tests {
             0
         );
     }
+
+    /// test_candidate_removal.cpp:176-184: when the journal refuses the tombstone the row deletion rolls back with it, for pinyin and English rows alike.
+    #[test]
+    fn a_deletion_the_journal_refuses_is_rolled_back() {
+        let dir = Dir::new();
+        dir.pinyin(&[("ni'hao", "你好", 200), ("ni'hao", "拟好", 100)]);
+        dir.english(&[("help", "help", 50)]);
+        let journal = dir.journal();
+        ensure_user_database(&journal).unwrap();
+        let trigger = "CREATE TRIGGER reject_removal BEFORE INSERT ON user_dictionary_operations BEGIN SELECT RAISE(ABORT,'fixture rejection'); END;";
+        rusqlite::Connection::open(&journal)
+            .unwrap()
+            .execute_batch(trigger)
+            .unwrap();
+
+        assert!(delete_dictionary_candidate(
+            &dir.main_db(),
+            &journal,
+            PersonalDictionaryKind::Pinyin,
+            "ni'hao",
+            "拟好"
+        )
+        .is_err());
+        assert_eq!(dir.weight("ni'hao", "拟好"), Some(100));
+        assert!(delete_dictionary_candidate(
+            &dir.english_db(),
+            &journal,
+            PersonalDictionaryKind::English,
+            "help",
+            "help"
+        )
+        .is_err());
+        assert_eq!(
+            count(
+                &dir.english_db(),
+                "SELECT count(*) FROM english_words WHERE word='help'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(&journal, "SELECT count(*) FROM user_dictionary_operations"),
+            0
+        );
+
+        rusqlite::Connection::open(&journal)
+            .unwrap()
+            .execute_batch("DROP TRIGGER reject_removal;")
+            .unwrap();
+        delete_dictionary_candidate(
+            &dir.main_db(),
+            &journal,
+            PersonalDictionaryKind::Pinyin,
+            "ni'hao",
+            "拟好",
+        )
+        .unwrap();
+        assert_eq!(dir.weight("ni'hao", "拟好"), None);
+    }
 }

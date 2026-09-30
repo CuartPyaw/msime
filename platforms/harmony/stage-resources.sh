@@ -18,6 +18,13 @@ staged="$repo_root/platforms/harmony/entry/src/main/resources/resfile/engine"
 rm -rf "$staged"
 mkdir -p "$staged"
 while IFS= read -r artifact; do cp "$resource_dir/$artifact" "$staged/"; done <<< "$artifacts"
+# Helpcode tables are not part of the dictionary release; the repository carries them in resources/helpcodes, and the Engine reads them from helpcodes/ under the resource directory (crates/engine/src/assets.rs names the six files). The shared verification lets a real helpcodes/ directory through, and StagedResources copies it out with the rest.
+mkdir -p "$staged/helpcodes"
+for table in helpcode.txt zrm_helpcode_big_unique.txt shouyou2_0_helpcode.txt shouyouplus_helpcode.txt xiaohe_helpcode.txt jiajia_helpcode.txt; do
+  cp "resources/helpcodes/$table" "$staged/helpcodes/$table"
+done
+cp resources/helpcodes/ENGINE-NOTICE.md "$staged/helpcodes/NOTICE.md"
+cp resources/helpcodes/NOTICE.md "$staged/helpcodes/NOTICE-jiajia.md"
 cargo run --quiet -p msime-client-core --example verify_resources --locked -- "$staged" >/dev/null
 echo "Staged for the HAP: $staged"
 

@@ -13,7 +13,7 @@ Windows 安装程序注册 TSF profile，装完输入法就出现在输入法列
 
 Windows 卸载程序注销 TSF profile 和类别，输入法随之从列表里消失，并删除水杉留下的全部状态；对应的是 --unregister：卸载时（.deb 的 prerm、CMake 卸载）在删除文件之前把输入法从这些列表里移除，再把宿主改过的桌面候选面板设置（Fcitx5 classicui 的主题、字体和滚轮翻页，IBus 面板的字体）恢复成接管之前的值——用户之后自己改过的不动——并删除水杉生成的 Fcitx5 主题。只做这些，不准备状态也不下载。
 
---update 对应 Windows 安装程序升级时的用户词库回放。随包提供词库的安装由包管理器换掉词库，宿主启动时自己切换代次；自行下载的词库没有人替换，升级抬高词库版本后宿主只能继续用旧的。--update 读出已有状态记录的词库目录，按已安装的词库锁核对；不符时加 --download 在旁边另建一份新词库目录，与旧目录一致的几项直接链接过去，只取回缺失或不符的几项，旧目录一个文件都不动。锁里各项都相符、只多出锁已去掉的条目时（换成 Rust Engine 之后的 dict_pinyin.dat）不需要下载，不加 --download 也同样另建一份只放锁里各项的目录切过去，多出的条目留在旧目录里。首次配置找到的用户自己下载的词库目录也照此处理。随后请两个宿主关掉输入会话，用 msime-linux-prepare --refresh 切到新代次并回放用户词库，再让它们重新打开。已有状态时给 --download 即视为 --update。
+--update 对应 Windows 安装程序升级时的用户词库回放。随包提供词库的安装由包管理器换掉词库，宿主启动时自己切换代次；自行下载的词库没有人替换，升级抬高词库版本后宿主只能继续用旧的。--update 读出已有状态记录的词库目录，按已安装的词库锁核对；不符时加 --download 在旁边另建一份新词库目录，与旧目录一致的几项直接链接过去，只取回缺失或不符的几项，旧目录一个文件都不动。锁已去掉的 dict_pinyin.dat 不算不符：宿主校验词库时自己把它从原目录删掉。随后请两个宿主关掉输入会话，用 msime-linux-prepare --refresh 切到新代次并回放用户词库，再让它们重新打开。已有状态时给 --download 即视为 --update。
 """
 from __future__ import annotations
 
@@ -112,9 +112,12 @@ def digest(path: Path) -> str:
 # The Engine's helpcode tables live in this subdirectory of the resource directory; the host's verification lets it through (crates/client-core/src/resources.rs).
 HELPCODE_DIRECTORY = "helpcodes"
 
+# Files an earlier lock pinned and the current one no longer does. The host's verification deletes such a regular file in place instead of refusing the directory (RETIRED_ARTIFACTS in crates/client-core/src/resources.rs), so a directory still holding one is usable as it is. Exact names only, and only as a regular file: a directory or symlink by that name is refused by the host and reported here too.
+RETIRED_ARTIFACTS = frozenset({"dict_pinyin.dat"})
+
 
 def unexpected_entries(directory: Path, lock: dict) -> list[str]:
-    """目录里锁之外的条目。宿主要求词库目录恰好是锁里那几项，多一个文件就拒绝整份词库；下载补不掉它们。用户自己下载的目录在旁边另建一份只放锁里各项的目录绕开，原目录不动；其他目录得由用户移走。"""
+    """目录里锁之外的条目。宿主要求词库目录恰好是锁里那几项，多一个文件就拒绝整份词库；下载补不掉它们，得由用户移走。例外是锁已去掉的旧词库文件（RETIRED_ARTIFACTS，换成 Rust Engine 之后的 dict_pinyin.dat）：宿主校验时自己把它删掉，这里不算。"""
     if not directory.is_dir():
         return []
     names = {artifact["name"] for artifact in lock["artifacts"]}
@@ -122,6 +125,7 @@ def unexpected_entries(directory: Path, lock: dict) -> list[str]:
         f"{entry.name} 不在词库锁中或不是普通文件，宿主会拒绝这份词库；请把它移出 {directory}"
         for entry in sorted(os.scandir(directory), key=lambda item: item.name)
         if not (entry.name == HELPCODE_DIRECTORY and entry.is_dir(follow_symlinks=False))
+        and not (entry.name in RETIRED_ARTIFACTS and entry.is_file(follow_symlinks=False))
         and (entry.name not in names or not entry.is_file(follow_symlinks=False))
     ]
 
@@ -129,13 +133,8 @@ def unexpected_entries(directory: Path, lock: dict) -> list[str]:
 def verify_directory(directory: Path, lock: dict) -> list[str]:
     """锁文件与目录不符之处，逐条列出；空列表表示这份词库可用。
 
-    与宿主的校验一致，锁之外的条目也算：升级去掉某项词库时旧文件会留在下载目录里，在这里报出来，而不是等宿主拒绝后只剩一句笼统的失败。"""
-    return unexpected_entries(directory, lock) + pinned_problems(directory, lock)
-
-
-def pinned_problems(directory: Path, lock: dict) -> list[str]:
-    """锁里各项在目录中缺失或不符之处。只有这些需要下载；锁之外的条目下载补不掉，另建一份只放锁里各项的目录即可绕开。"""
-    problems = []
+    与宿主的校验一致，锁之外的条目也算：升级去掉某项词库时旧文件会留在下载目录里，在这里报出来，而不是等宿主拒绝后只剩一句笼统的失败。宿主自己删掉的 RETIRED_ARTIFACTS 不算。"""
+    problems = unexpected_entries(directory, lock)
     for artifact in lock["artifacts"]:
         name = artifact["name"]
         path = directory / name
@@ -426,22 +425,20 @@ def update_dictionaries(prefix: Path, lock: dict, options_file: Path, download: 
             file=sys.stderr,
         )
         return 1
-    unexpected = unexpected_entries(resources, lock)
-    stale = pinned_problems(resources, lock)
-    if stale and not download:
-        print_problems(f"词库与当前版本不符：{resources}", unexpected + stale)
+    problems = verify_directory(resources, lock)
+    if problems and not download:
+        print_problems(f"词库与当前版本不符：{resources}", problems)
         print("\n加 --download 按锁文件只取回缺失或不符的几项。", file=sys.stderr)
         return 1
     target = resources
-    if unexpected or stale:
+    if problems:
         try:
             target = staged_resources(resources, lock)
         except OSError as error:
             raise SystemExit(f"无法建立新词库目录：{error}\n词库目录未改动：{resources}")
-        # Only lock entries are linked into the new directory, so a file the lock no longer names (dict_pinyin.dat from the releases that still shipped the C++ Engine) stays behind in the previous one and nothing needs downloading.
-        remaining = fetch_missing(lock, target, resources) if stale else verify_directory(target, lock)
+        remaining = fetch_missing(lock, target, resources)
         if remaining:
-            print_problems("下载后仍不完整：" if stale else f"新词库目录不可用：{target}", remaining)
+            print_problems("下载后仍不完整：", remaining)
             return 1
     print(f"词库已校验：{target}")
     try:
@@ -458,8 +455,7 @@ def update_dictionaries(prefix: Path, lock: dict, options_file: Path, download: 
     if refreshed:
         print("已切换到新版本的词库，用户词库已回放进去。输入法在切换期间暂停了输入会话，现在已恢复，新的输入即使用新词库。")
         if target != resources:
-            left = "，锁之外、当前版本不再使用的条目也留在那里" if unexpected else ""
-            print(f"旧词库目录 {resources} 保留未动{left}，确认新词库正常后可以自行删除。")
+            print(f"旧词库目录 {resources} 保留未动，确认新词库正常后可以自行删除。")
         return 0
     if result.returncode == 0:
         print(f"{options_file} 未改写：它已指向当前版本的词库，或不是 msime-linux-prepare 生成的布局。")
@@ -1011,7 +1007,7 @@ def main() -> int:
     parser.add_argument(
         "--update",
         action="store_true",
-        help="升级之后把已有状态记录的词库补到当前版本并切换过去，用户词库随之回放；缺的词库要配合 --download 取回，只多出当前版本不再使用的条目时不需要",
+        help="升级之后把已有状态记录的词库补到当前版本并切换过去，用户词库随之回放；缺的词库要配合 --download 取回",
     )
     parser.add_argument(
         "--no-cloud-candidates",
@@ -1070,28 +1066,19 @@ def main() -> int:
             data_home() / "msime-client/resources",
         )
 
-    unexpected = unexpected_entries(resources, lock)
-    stale = pinned_problems(resources, lock)
-    if stale and not arguments.download:
-        print_problems(f"词库目录不可用：{resources}", unexpected + stale)
+    problems = verify_directory(resources, lock)
+    if problems and not arguments.download:
+        print_problems(f"词库目录不可用：{resources}", problems)
         print(
             "\n加 --download 按锁文件取回（首次约 170 MB），"
             "或用 --resources 指向一份已备齐的目录。",
             file=sys.stderr,
         )
         return 1
-    if unexpected and updatable(resources, prefix):
-        # A directory an earlier release downloaded can still hold a file the lock has since dropped (dict_pinyin.dat from the releases that still shipped the C++ Engine), and the hosts reject the whole directory for it. Nothing in it is removed: as an update does, the lock's entries are linked into a directory beside it and that one is prepared.
-        previous = resources
-        try:
-            resources = staged_resources(previous, lock)
-        except OSError as error:
-            raise SystemExit(f"无法建立新词库目录：{error}\n词库目录未改动：{previous}")
-        print(f"{previous} 里有锁之外、当前版本不再使用的条目，宿主会拒绝整份词库；已在旁边另建 {resources}，只放锁里的几项，原目录保留未动。")
-    if unexpected or stale:
-        remaining = fetch_missing(lock, resources) if arguments.download else verify_directory(resources, lock)
+    if problems:
+        remaining = fetch_missing(lock, resources)
         if remaining:
-            print_problems("下载后仍不完整：" if arguments.download else f"词库目录不可用：{resources}", remaining)
+            print_problems("下载后仍不完整：", remaining)
             return 1
 
     print(f"词库已校验：{resources}")
