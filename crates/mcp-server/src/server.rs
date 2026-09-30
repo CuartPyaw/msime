@@ -5,6 +5,7 @@
 use crate::config::Config;
 use crate::diagnostics::{self, LogRequest, LogView, SwitchRequest, SwitchView};
 use crate::preferences::{self, PreferencesChange, PreferencesView};
+use crate::skins::{self, CreateSkinRequest, CreatedSkin, SkinList};
 use crate::statistics::{self, StatisticsRequest, StatisticsView};
 use crate::words;
 use crate::words::{
@@ -30,13 +31,17 @@ const MAX_EDITS: usize = 50;
 /// The shortest gap between two writing calls, so an agent stuck in a loop cannot rewrite the dictionary or the preferences many times a second.
 const WRITE_INTERVAL: Duration = Duration::from_secs(1);
 
-const WRITE_TOOLS: [&str; 2] = ["edit_quick_phrases", "update_preferences"];
+const WRITE_TOOLS: [&str; 3] = [
+    "create_candidate_skin",
+    "edit_quick_phrases",
+    "update_preferences",
+];
 /// Offered with --allow-dictionary-read.
 const DICTIONARY_READ_TOOLS: [&str; 2] = ["list_dictionary_words", "lookup_candidates"];
 /// Offered with --allow-write and --allow-dictionary-read together: an edit or import also tells whether a word is there.
 const DICTIONARY_WRITE_TOOLS: [&str; 2] = ["edit_dictionary_words", "import_dictionary_words"];
 
-const INSTRUCTIONS: &str = "Manages 水杉输入法 (MSIME), a Chinese input method: its quick phrases (a short code the user types that expands to a longer text), a few of its preferences, and aggregate typing statistics. With --allow-dictionary-read it also lists the user's own dictionary words and shows which candidates a code offers and why, which is how to explain a candidate's rank; with --allow-write as well it adds, reweights, removes and imports words. To import a word list the user gives you, read it yourself and send the words, 200 at a time. It also helps with problems the user runs into: lag, a candidate window that is missing or in the wrong place, the input method stopping or switching by itself. The user may not be technical, so do the steps yourself rather than asking them to open files, settings or a terminal: read the log with read_diagnostic_log; if it is off, turn it on with set_diagnostic_log, ask the user in plain words to do again what went wrong and to tell you when they have, then read the log again and explain what you found in plain words. Turn the log off with set_diagnostic_log when you are done. Changes take effect in the input method within a few seconds. Apart from set_diagnostic_log, writing tools are only offered when the user started the server with --allow-write.";
+const INSTRUCTIONS: &str = "Manages 水杉输入法 (MSIME), a Chinese input method: its quick phrases (a short code the user types that expands to a longer text), a few of its preferences, and aggregate typing statistics. With --allow-dictionary-read it also lists the user's own dictionary words and shows which candidates a code offers and why, which is how to explain a candidate's rank; with --allow-write as well it adds, reweights, removes and imports words. To import a word list the user gives you, read it yourself and send the words, 200 at a time. It also helps with problems the user runs into: lag, a candidate window that is missing or in the wrong place, the input method stopping or switching by itself. The user may not be technical, so do the steps yourself rather than asking them to open files, settings or a terminal: read the log with read_diagnostic_log; if it is off, turn it on with set_diagnostic_log, ask the user in plain words to do again what went wrong and to tell you when they have, then read the log again and explain what you found in plain words. Turn the log off with set_diagnostic_log when you are done. It also lists the user's candidate-window skins and, with --allow-write, makes new ones: write a skin.toml and PNG or JPEG images yourself and pass them to create_candidate_skin. The desktop app then syncs every skin made this way to the user's cloud library as a private package, from where the user can publish it to the community; this server never signs in to the account itself. Changes take effect in the input method within a few seconds. Apart from set_diagnostic_log, writing tools are only offered when the user started the server with --allow-write.";
 
 #[derive(Clone)]
 pub struct MsimeServer {
@@ -288,6 +293,53 @@ impl MsimeServer {
         eprintln!(
             "msime-mcp: update_preferences {}",
             if result.is_ok() { "saved" } else { "refused" }
+        );
+        result
+    }
+
+    #[tool(
+        name = "list_candidate_skins",
+        description = "List the candidate-window skins installed as folders in the input method's skin directory: id, name, version, the layouts and colour modes each supports, and whether the desktop app has synced it to the user's cloud library. Folders that are not a usable skin are listed with the reason.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn list_candidate_skins(&self) -> Result<Json<SkinList>, String> {
+        let config = self.config.clone();
+        blocking(move || {
+            let state_dir = config.state_dir(&config.read_options()?)?;
+            Ok(Json(skins::list(&state_dir)))
+        })
+        .await
+    }
+
+    #[tool(
+        name = "create_candidate_skin",
+        description = "Install a candidate-window skin from a skin.toml and its images. The manifest is TOML: schema_version = 1; id (equal to package_id); name (at most 80 bytes); version; base, the built-in theme drawn under it (system, shuishan, light, paper, night or ink); preview, the path of a PNG or JPEG shown in the skin list; optional author, description and [license] code, assets and source; [supports] layouts (horizontal, vertical) and themes (dark, light); [candidate_window] min_width_dip (0-1000), optional corner_radius_dip (0-32), optional [candidate_window.decoration] top_inset_dip, width_dip, image and align (left, center, right), optional [candidate_window.background] image, fit (cover, contain, stretch) and opacity (0-1); [candidate.dark] and [candidate.light] colours accent, selected, hover, surface, border, text, number and translation as #RRGGBB or #RRGGBBAA, plus show_selected_bar. images must hold exactly the images the manifest references. A stylesheet is not accepted, so the skin can be synced and shared. Refused when the skin exists, unless replace is true.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn create_candidate_skin(
+        &self,
+        Parameters(request): Parameters<CreateSkinRequest>,
+    ) -> Result<Json<CreatedSkin>, String> {
+        let guard = self.claim_write()?;
+        let config = self.config.clone();
+        let result = blocking(move || {
+            let _guard = guard;
+            let state_dir = config.state_dir(&config.read_options()?)?;
+            skins::create(&state_dir, &request).map(Json)
+        })
+        .await;
+        eprintln!(
+            "msime-mcp: create_candidate_skin {}",
+            match &result {
+                Ok(created) if created.0.replaced => "replaced",
+                Ok(_) => "installed",
+                Err(_) => "refused",
+            }
         );
         result
     }
@@ -618,6 +670,7 @@ mod tests {
             [
                 "get_preferences",
                 "get_typing_statistics",
+                "list_candidate_skins",
                 "list_quick_phrases",
                 "read_diagnostic_log",
                 "set_diagnostic_log"
@@ -626,9 +679,11 @@ mod tests {
         assert_eq!(
             names(&server(true)),
             [
+                "create_candidate_skin",
                 "edit_quick_phrases",
                 "get_preferences",
                 "get_typing_statistics",
+                "list_candidate_skins",
                 "list_quick_phrases",
                 "read_diagnostic_log",
                 "set_diagnostic_log",
@@ -640,6 +695,7 @@ mod tests {
             [
                 "get_preferences",
                 "get_typing_statistics",
+                "list_candidate_skins",
                 "list_dictionary_words",
                 "list_quick_phrases",
                 "lookup_candidates",
@@ -650,11 +706,13 @@ mod tests {
         assert_eq!(
             names(&server_with(true, true)),
             [
+                "create_candidate_skin",
                 "edit_dictionary_words",
                 "edit_quick_phrases",
                 "get_preferences",
                 "get_typing_statistics",
                 "import_dictionary_words",
+                "list_candidate_skins",
                 "list_dictionary_words",
                 "list_quick_phrases",
                 "lookup_candidates",
