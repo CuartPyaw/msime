@@ -5,6 +5,39 @@
 use crate::*;
 use msime_client_core::is_bounded_text;
 
+#[cfg(test)]
+mod tests {
+    use super::online_candidate_response;
+    use serde_json::json;
+
+    #[test]
+    fn online_candidate_response_preserves_legacy_first_candidate_and_batch() {
+        let value =
+            online_candidate_response(vec![("first".to_owned(), 0), ("second".to_owned(), 1)]);
+
+        assert_eq!(value["text"], json!("first"));
+        assert_eq!(value["source"], json!(0));
+        assert_eq!(
+            value["candidates"],
+            json!([
+                {"text": "first", "source": 0},
+                {"text": "second", "source": 1},
+            ])
+        );
+    }
+}
+
+fn online_candidate_response(candidates: Vec<(String, u8)>) -> Value {
+    let mut rows = Vec::with_capacity(candidates.len());
+    for (text, source) in candidates {
+        rows.push(json!({"text": text, "source": source}));
+    }
+    // Preserve the single-result fields for older CLI consumers.
+    let mut value = rows.first().cloned().unwrap_or(json!({}));
+    value["candidates"] = json!(rows);
+    value
+}
+
 #[no_mangle]
 pub extern "C" fn msime_client_view(handle: u64) -> *mut c_char {
     response(|| with_session(handle, |session| serialized_runtime_view(session)))
@@ -329,16 +362,7 @@ pub unsafe extern "C" fn msime_client_online_provider_request(
         })?;
         Ok(UnixSocketProvider::new(path)
             .query_candidates(query)
-            .map(|candidates| {
-                let rows: Vec<_> = candidates
-                    .into_iter()
-                    .map(|(text, source)| json!({"text": text, "source": source}))
-                    .collect();
-                // Preserve the single-result fields for older CLI consumers.
-                let mut value = rows.first().cloned().unwrap_or(json!({}));
-                value["candidates"] = json!(rows);
-                value
-            })
+            .map(online_candidate_response)
             .unwrap_or(Value::Null))
     })
 }
