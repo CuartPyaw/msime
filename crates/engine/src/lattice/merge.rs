@@ -46,7 +46,8 @@ pub fn merge_lattice_candidates(
         _ => None,
     };
 
-    let mut already: HashSet<String> = candidates.iter().map(|item| item.word.clone()).collect();
+    let mut already = HashSet::with_capacity(candidates.len().saturating_add(paths.len()));
+    already.extend(candidates.iter().map(|item| item.word.clone()));
     let block = if rerankers.is_empty() {
         // Searching several paths and showing fewer is the point of `emit`: the alternatives exist so the trigram has something to reorder, not so the page fills with near-duplicate sentences.
         if options.emit > 0 {
