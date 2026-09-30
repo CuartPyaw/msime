@@ -11,6 +11,9 @@
 // The compact water-fir mark keeps the toolbar identifiable when it is detached from the settings window. It mirrors the shared MSIME app mark without loading an image resource, so it remains crisp at every toolbar scale.
 //
 // It is also the drag handle, the counterpart of the reference's ToolbarDragHandle: pressing it moves the panel through movableByWindowBackground, and the reference's IDC_SIZEALL cursor maps to the open-hand cursor, the macOS cue for a movable surface. The toolbar used to carry a grip bar beside the logo in the theme's accent, standing in for the reference's own handle; with the logo already leading the row that bar was a second mark saying the same thing, so the logo took over its job.
+// Side of the brand mark inside the logo view, unscaled: the size of the toolbar's button glyphs.
+constexpr CGFloat kToolbarLogoMarkSide = 22.0;
+
 @interface MetasequoiaFloatingToolbarLogoView : NSView
 @property(nonatomic) CGFloat scale;
 @end
@@ -70,7 +73,8 @@
 - (void)drawRect:(NSRect)dirtyRect
 {
     (void)dirtyRect;
-    const CGFloat side = std::min(NSWidth(self.bounds), NSHeight(self.bounds)) - 4.0 * _scale;
+    // The mark is drawn at the size of the button glyphs beside it, not the full height of the bar; the view around it stays the full drag handle.
+    const CGFloat side = std::min(std::min(NSWidth(self.bounds), NSHeight(self.bounds)) - 4.0 * _scale, kToolbarLogoMarkSide * _scale);
     const NSRect mark = NSMakeRect(NSMidX(self.bounds) - side * 0.5, NSMidY(self.bounds) - side * 0.5, side, side);
     if (_image != nil)
     {

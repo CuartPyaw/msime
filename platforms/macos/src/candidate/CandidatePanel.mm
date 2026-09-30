@@ -369,7 +369,7 @@
                                          : _skin.decorationAlign == msime::mac::DecorationAlign::center ? NSImageAlignTop
                                                                                                         : NSImageAlignTopRight;
         _decorationView.frame =
-            NSMakeRect(msime::mac::DecorationLeft(_skin.decorationAlign, size.width, decorationWidth),
+            NSMakeRect(msime::mac::DecorationLeft(_skin.decorationAlign, size.width, inset, decorationWidth),
                        size.height - decorationHeight, decorationWidth, decorationHeight);
         [_chrome addSubview:_decorationView];
     }

@@ -406,11 +406,18 @@ corner_radius_dip = 4
     Require(msime::mac::ToolbarSkinTokens(centered, root).radius == 4.0f &&
                 msime::mac::ToolbarSkinTokens(msime::mac::ResolveSkin("custom", withSkin("styled"), false, "horizontal", root), root).radius == 14.0f,
             "The toolbar radius did not layer manifest under stylesheet.");
-    Require(msime::mac::DecorationLeft(msime::mac::DecorationAlign::left, 200, 60) == 0.0 &&
-                msime::mac::DecorationLeft(msime::mac::DecorationAlign::center, 200, 60) == 70.0 &&
-                msime::mac::DecorationLeft(msime::mac::DecorationAlign::right, 200, 60) == 140.0 &&
-                msime::mac::DecorationLeft(msime::mac::DecorationAlign::right, 40, 60) == 0.0,
+    Require(msime::mac::DecorationLeft(msime::mac::DecorationAlign::left, 200, 8, 60) == 8.0 &&
+                msime::mac::DecorationLeft(msime::mac::DecorationAlign::center, 200, 8, 60) == 70.0 &&
+                msime::mac::DecorationLeft(msime::mac::DecorationAlign::right, 200, 8, 60) == 132.0 &&
+                msime::mac::DecorationLeft(msime::mac::DecorationAlign::right, 40, 8, 60) == 0.0,
             "Decoration alignment placed the image wrongly.");
+    // A 60 x 90 image in a 100 band with an 8 overlap: its own aspect, bottom 8 below the band. A taller one shrinks whole to the 108 of room instead of being squashed.
+    const auto fits = msime::mac::DecorationPlacement(msime::mac::DecorationAlign::right, 200, 8, 100, 60, 120, 180);
+    const auto tall = msime::mac::DecorationPlacement(msime::mac::DecorationAlign::left, 200, 8, 100, 60, 60, 216);
+    Require(fits && fits->x == 132.0 && fits->width == 60.0 && fits->height == 90.0 && fits->top == 18.0 && tall &&
+                tall->height == 108.0 && tall->width == 30.0 && tall->top == 0.0 && tall->x == 8.0 &&
+                !msime::mac::DecorationPlacement(msime::mac::DecorationAlign::right, 200, 8, 0, 60, 120, 180),
+            "The decoration was not placed on the card's top edge at its own aspect ratio.");
     const auto cover = msime::mac::BackgroundRects(msime::mac::BackgroundFit::cover, {0, 0, 200, 100}, 100, 100);
     const auto contain = msime::mac::BackgroundRects(msime::mac::BackgroundFit::contain, {10, 0, 200, 100}, 100, 100);
     const auto stretch = msime::mac::BackgroundRects(msime::mac::BackgroundFit::stretch, {0, 0, 200, 100}, 100, 100);

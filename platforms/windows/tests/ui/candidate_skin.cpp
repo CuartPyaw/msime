@@ -91,6 +91,30 @@ int main() {
   // Wider than the card: never left of the window.
   require(candidate_decoration_left(CandidateSkinAlign::right, 0, 40, 8, 100) == 0.0f);
 
+  // The mascot rect: width at the image's aspect, bottom pad_y below the card top, over a card [10, 210] whose top is at 50 under a 40 band, pad 8 and pad_y 6.
+  const auto rect_equals = [](const std::optional<CandidateSkinRect> &rect,
+                              float left, float top, float right, float bottom) {
+    return rect && rect->left == left && rect->top == top &&
+           rect->right == right && rect->bottom == bottom;
+  };
+  // Fits in band + pad_y (46): drawn at its natural aspect, 60 wide and 30 tall, right aligned.
+  require(rect_equals(candidate_decoration_rect(CandidateSkinAlign::right, 10, 210, 50, 8, 6, 40, 60, 120, 60),
+                      142, 26, 202, 56));
+  // Twice as tall as the room (92 at width 46): halved in both axes, not squashed to the band. The aligned edge and the bottom stay put.
+  require(rect_equals(candidate_decoration_rect(CandidateSkinAlign::right, 10, 210, 50, 8, 6, 40, 46, 50, 100),
+                      179, 10, 202, 56));
+  require(rect_equals(candidate_decoration_rect(CandidateSkinAlign::left, 10, 210, 50, 8, 6, 40, 46, 50, 100),
+                      18, 10, 41, 56));
+  require(rect_equals(candidate_decoration_rect(CandidateSkinAlign::center, 10, 210, 50, 8, 6, 40, 46, 50, 100),
+                      98.5f, 10, 121.5f, 56));
+  // Exactly the room: not scaled.
+  require(rect_equals(candidate_decoration_rect(CandidateSkinAlign::left, 10, 210, 50, 8, 6, 40, 46, 46, 46),
+                      18, 10, 64, 56));
+  // An image or a width with no size draws nothing.
+  require(!candidate_decoration_rect(CandidateSkinAlign::right, 10, 210, 50, 8, 6, 40, 60, 0, 60));
+  require(!candidate_decoration_rect(CandidateSkinAlign::right, 10, 210, 50, 8, 6, 40, 60, 120, 0));
+  require(!candidate_decoration_rect(CandidateSkinAlign::right, 10, 210, 50, 8, 6, 40, 0, 120, 60));
+
   // Corner radius, background and toolbar, as a msime-skins package declares them.
   std::ofstream(root / "mascot" / "background.png") << "synthetic";
   Json styled = catalog;

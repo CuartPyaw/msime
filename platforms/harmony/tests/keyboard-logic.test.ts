@@ -294,6 +294,10 @@ import {
   CandidateSkinCatalogPolicy,
   CandidateSkinPackage,
 } from "../entry/src/main/ets/keyboard/candidate/CandidateSkinCatalogPolicy";
+import {
+  CandidateDecorationLayout,
+  CandidateDecorationRect,
+} from "../entry/src/main/ets/keyboard/candidate/CandidateDecorationLayout";
 import { CandidateWidthPolicy } from "../entry/src/main/ets/keyboard/candidate/CandidateWidthPolicy";
 import { CandidatePagerPolicy } from "../entry/src/main/ets/keyboard/candidate/CandidatePagerPolicy";
 import { CandidatePresentationPolicy } from "../entry/src/main/ets/keyboard/candidate/CandidatePresentationPolicy";
@@ -1702,7 +1706,9 @@ group("community reply templates accept only bounded reply entries", () => {
   );
   check(
     CommunityReplyLibraryPolicy.parse(
-      JSON.stringify([{ id: "one", kind: "reply", name: "x", content: { prompt: "字".repeat(2_001) } }]),
+      JSON.stringify([
+        { id: "one", kind: "reply", name: "x", content: { prompt: "字".repeat(2_001) } },
+      ]),
     ).length === 0,
     "rejects prompts beyond the community contract",
   );
@@ -1985,6 +1991,91 @@ group("maps shared candidate skins to native Harmony palettes", () => {
   check(
     CandidateSkinPolicy.rowTextColor(true, true, "#111111", "#ffffff") === "#379AD3",
     "being selected as well does not hide that a candidate is pinned",
+  );
+});
+
+group("places the skin decoration as the Windows candidate window does", () => {
+  // The Windows fixtures (tests/ui/candidate_skin.cpp): a card [10, 210] whose top is at 50 under a 40 band, padX 8 and padY 6, so the room is 46.
+  const rectIs = (
+    rect: CandidateDecorationRect | null,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): boolean =>
+    rect !== null && rect.x === x && rect.y === y && rect.width === width && rect.height === height;
+  check(
+    rectIs(CandidateDecorationLayout.rect("right", 10, 210, 50, 8, 6, 40, 60, 2), 142, 26, 60, 30),
+    "a mascot that fits keeps its width and aspect, its bottom padY into the card",
+  );
+  check(
+    rectIs(
+      CandidateDecorationLayout.rect("right", 10, 210, 50, 8, 6, 40, 46, 0.5),
+      179,
+      10,
+      23,
+      46,
+    ),
+    "a mascot twice the room's height is halved in both axes and keeps its right edge",
+  );
+  check(
+    rectIs(CandidateDecorationLayout.rect("left", 10, 210, 50, 8, 6, 40, 46, 0.5), 18, 10, 23, 46),
+    "a left aligned mascot scales down from its left edge",
+  );
+  check(
+    rectIs(
+      CandidateDecorationLayout.rect("center", 10, 210, 50, 8, 6, 40, 46, 0.5),
+      98.5,
+      10,
+      23,
+      46,
+    ),
+    "a centred mascot stays centred on the card when it scales down",
+  );
+  check(
+    rectIs(CandidateDecorationLayout.rect("left", 10, 210, 50, 8, 6, 40, 46, 1), 18, 10, 46, 46),
+    "a mascot exactly the room's height is not scaled",
+  );
+  check(
+    rectIs(CandidateDecorationLayout.rect("right", 0, 40, 50, 8, 6, 40, 100, 4), 0, 31, 100, 25),
+    "a mascot wider than the card is never left of the window",
+  );
+  check(
+    CandidateDecorationLayout.rect("right", 10, 210, 50, 8, 6, 40, 60, 0) === null &&
+      CandidateDecorationLayout.rect("right", 10, 210, 50, 8, 6, 40, 60, Number.NaN) === null &&
+      CandidateDecorationLayout.rect("right", 10, 210, 50, 8, 6, 40, 0, 2) === null,
+    "an image or a width with no size draws nothing",
+  );
+  check(
+    CandidateDecorationLayout.backdropInsetVp(
+      true,
+      true,
+      24,
+      KeyboardMetrics.ROOT_VERTICAL_PADDING_VP,
+    ) ===
+      24 + KeyboardMetrics.ROOT_VERTICAL_PADDING_VP,
+    "the desktop backdrop starts at the card's top edge, leaving the band transparent",
+  );
+  check(
+    CandidateDecorationLayout.backdropInsetVp(
+      false,
+      true,
+      24,
+      KeyboardMetrics.ROOT_VERTICAL_PADDING_VP,
+    ) === 0 &&
+      CandidateDecorationLayout.backdropInsetVp(
+        true,
+        false,
+        24,
+        KeyboardMetrics.ROOT_VERTICAL_PADDING_VP,
+      ) === 0 &&
+      CandidateDecorationLayout.backdropInsetVp(
+        true,
+        true,
+        0,
+        KeyboardMetrics.ROOT_VERTICAL_PADDING_VP,
+      ) === 0,
+    "a phone, or a window with no mascot, keeps the backdrop over the whole panel",
   );
 });
 
@@ -7734,16 +7825,10 @@ group("community resource responses are checked before reaching the page", () =>
     search: "",
     offset: 0,
   }).then((result) => {
-    check(
-      JSON.parse(result).error === "community_unavailable",
-      "a malformed list item is refused",
-    );
+    check(JSON.parse(result).error === "community_unavailable", "a malformed list item is refused");
   });
   void resources({ resource_operation: "detail", id }).then((result) => {
-    check(
-      JSON.parse(result).error === "community_unavailable",
-      "a malformed detail is refused",
-    );
+    check(JSON.parse(result).error === "community_unavailable", "a malformed detail is refused");
   });
 });
 
@@ -7920,11 +8005,11 @@ group("the skin gallery is public to browse and signed in to change", () => {
         design: { background: 0x1000000 },
       }).then((result) => {
         const publishCalls = calls.filter((call) => call.path === "/v1/community/skins");
-        check(JSON.parse(result).error === "community_invalid", "an out-of-range design is refused");
         check(
-          publishCalls.length === 1,
-          "an invalid design never reaches the publish endpoint",
+          JSON.parse(result).error === "community_invalid",
+          "an out-of-range design is refused",
         );
+        check(publishCalls.length === 1, "an invalid design never reaches the publish endpoint");
       });
 
       // The community pages decode their own vocabulary; an account_* code would arrive as the

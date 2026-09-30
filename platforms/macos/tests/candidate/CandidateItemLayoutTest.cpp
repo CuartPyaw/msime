@@ -135,6 +135,26 @@ int main()
         assert(Near(narrowed[1].x, 0.0) && Near(narrowed[1].y, narrowed[0].height));
     }
 
+    // Glosses too wide for one line give up room in proportion to what they can spare, never below their candidate's line, so the page stays on one line and the glosses wrap under their text.
+    {
+        const std::vector<CandidateItemWidths> items{{60.0, 0.0, 200.0}, {50.0, 0.0, 150.0}, {40.0}};
+        const auto columns = SingleLineColumns(items, 300.0, metrics);
+        assert(columns && Near((*columns)[0], 125.0) && Near((*columns)[1], 105.0) && Near((*columns)[2], 70.0));
+        const auto rows = LayoutCandidatePage(items, 300.0, metrics, true,
+            [](std::size_t, CandidateRun run, double) { return run == CandidateRun::translation ? 40.0 : 0.0; });
+        assert(Near(rows[0].x, 0.0) && Near(rows[1].x, 125.0) && Near(rows[2].x, 230.0));
+        assert(Near(rows[0].y, 0.0) && Near(rows[1].y, 0.0) && Near(rows[2].y, 0.0));
+        assert(Near(rows[0].item.translation.width, 95.0) && Near(rows[0].height, 32.0 + 40.0));
+        // Columns that fit keep their natural widths.
+        const auto fits = SingleLineColumns(items, 500.0, metrics);
+        assert(fits && Near((*fits)[0], 230.0) && Near((*fits)[1], 180.0) && Near((*fits)[2], 70.0));
+        // When the candidate lines alone pass the line's end there is no single line to keep.
+        assert(!SingleLineColumns(items, 200.0, metrics));
+        // The narrowest single line is the candidates' own lines with their chrome; the card grows to it before a page breaks.
+        assert(Near(SingleLineMinimumWidth(items, metrics), 90.0 + 80.0 + 70.0));
+        assert(SingleLineColumns(items, SingleLineMinimumWidth(items, metrics), metrics));
+    }
+
     // The card is at least 7em of the candidate font; a skin floor only raises it, and the 7em part never passes the screen cap.
     {
         assert(Near(CandidateCardMinimumWidth(16.0, 0.0, 0.0), 112.0));

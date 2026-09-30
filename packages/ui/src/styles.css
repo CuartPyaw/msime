@@ -569,16 +569,18 @@
  * The per-skin blocks pair with the `skin-<id>` class the same element carries.
  */
 /*
- * An external skin's decoration geometry.
+ * An external skin's decoration geometry, the same on every host (Windows CandidateWindow.cpp draws it this way):
  *
- * Source: Windows 04a8df56 skin.ts candidatePreviewCss / skin.css, GPL-3.0. Reserve the upstream
- * geometry; the sibling image element receives bytes from the bounded host image reader, never a
- * manifest-supplied URL.
+ * - The stage is `--msime-skin-decoration-top` (the band) taller than the card. The band is transparent; the card -- fill, border, background image, shadow -- starts below it.
+ * - The mascot is `--msime-skin-decoration-width` wide at its own aspect ratio. Its bottom is pad_y below the card's top edge, so it overhangs into the card, and it is drawn over the card.
+ * - Taller than band + pad_y, it is scaled down uniformly to fit (`object-fit: contain`, anchored to the bottom and the aligned side); it is never squashed.
+ * - Horizontally it is placed against the card, not the stage: left at card_left + pad_x, centre on the card, right (the default) at card_right - pad_x - width, never left of the card.
  *
- * The stage is matched by `[data-skin-stage]` rather than by a class. It had been `.skin-preview-stage`,
- * and that class stopped being rendered when the stage moved to utilities -- the same way this file's
- * `.skin-card-preview` did -- so the selector had nothing to match. The data attribute is what the
- * markup actually carries.
+ * pad_x / pad_y are the card's own inner padding, `--msime-candidate-pad-x` / `--msime-candidate-pad-y` from `skin-card-preview`. The container parent shrinks to the card, so its edges are the card's edges in both layouts.
+ *
+ * Source: Windows 04a8df56 skin.ts candidatePreviewCss / skin.css, GPL-3.0. The sibling image element receives bytes from the bounded host image reader, never a manifest-supplied URL.
+ *
+ * The stage is matched by `[data-skin-stage]` rather than by a class. It had been `.skin-preview-stage`, and that class stopped being rendered when the stage moved to utilities -- the same way this file's `.skin-card-preview` did -- so the selector had nothing to match. The data attribute is what the markup actually carries.
  */
 @utility external-skin-decorated {
   &.skin-card,
@@ -588,21 +590,38 @@
   }
 
   & .candidate .containerParent {
+    --msime-skin-decoration-bottom: calc(
+      var(--msime-skin-decoration-top, 0px) + var(--msime-candidate-pad-y, 0px)
+    );
     position: relative;
     box-sizing: border-box;
+    width: fit-content;
+    max-width: 100%;
     padding-top: var(--msime-skin-decoration-top, 0px);
+  }
+
+  & .candidate .containerParent:not(:empty)::before,
+  & .skin-decoration-image {
+    position: absolute;
+    z-index: 2;
+    bottom: calc(100% - var(--msime-skin-decoration-bottom));
+    left: max(
+      0px,
+      calc(100% - var(--msime-candidate-pad-x, 0px) - var(--msime-skin-decoration-width, 0px))
+    );
+    width: var(--msime-skin-decoration-width, 0px);
+    height: auto;
+    max-height: var(--msime-skin-decoration-bottom);
+    object-fit: contain;
+    object-position: right bottom;
+    pointer-events: none;
   }
 
   & .candidate .containerParent:not(:empty)::before {
     content: "";
-    position: absolute;
-    z-index: 0;
-    top: 0;
-    right: 0;
-    width: var(--msime-skin-decoration-width, 0px);
-    height: 118px;
-    background: none center / contain no-repeat;
-    pointer-events: none;
+    /* An empty box has no intrinsic height, so the hook takes the whole band + pad_y and a background drawn in it shrinks with `contain`. */
+    height: var(--msime-skin-decoration-bottom);
+    background: none right bottom / contain no-repeat;
   }
 
   & .candidate .container {
@@ -611,27 +630,18 @@
     min-width: max(7em, var(--msime-skin-min-width, 0px));
   }
 
-  & .skin-decoration-image {
-    position: absolute;
-    z-index: 0;
-    top: 0;
-    right: 0;
-    width: var(--msime-skin-decoration-width, 0px);
-    height: 118px;
-    object-fit: contain;
-    pointer-events: none;
-  }
-
   /* The manifest's `decoration.align`; right is the default above. */
   & [data-decoration-align="left"] .skin-decoration-image,
   & [data-decoration-align="left"] .candidate .containerParent:not(:empty)::before {
-    left: 0;
-    right: auto;
+    left: var(--msime-candidate-pad-x, 0px);
+    object-position: left bottom;
+    background-position: left bottom;
   }
   & [data-decoration-align="center"] .skin-decoration-image,
   & [data-decoration-align="center"] .candidate .containerParent:not(:empty)::before {
-    left: calc(50% - var(--msime-skin-decoration-width, 0px) / 2);
-    right: auto;
+    left: max(0px, calc(50% - var(--msime-skin-decoration-width, 0px) / 2));
+    object-position: center bottom;
+    background-position: center bottom;
   }
 }
 
@@ -678,6 +688,9 @@
     pointer-events: none;
   }
   & .wnd-h {
+    /* The card's inner padding, named so the decoration geometry (`external-skin-decorated`) reads the same pad_x / pad_y the card is drawn with. */
+    --msime-candidate-pad-x: 1px;
+    --msime-candidate-pad-y: 2px;
     /* Preview card is narrower than a real candwnd host; constrain to parent. */
     max-width: 100%;
     width: 100%;
@@ -688,7 +701,7 @@
       margin-top: 0px;
       margin-left: 0px;
       background: var(--cand-bg);
-      padding: 2px 1px;
+      padding: var(--msime-candidate-pad-y) var(--msime-candidate-pad-x);
       border-radius: var(--msime-skin-radius, 6px);
       box-shadow: var(--cand-shadow);
       min-width: 7em;
@@ -802,11 +815,14 @@
     }
   }
   & .wnd-v {
+    --msime-candidate-pad-x: 2px;
+    --msime-candidate-pad-y: 2px;
+
     .container {
       margin-top: 0px;
       margin-left: 0px;
       background: var(--cand-bg);
-      padding: 2px;
+      padding: var(--msime-candidate-pad-y) var(--msime-candidate-pad-x);
       border-radius: var(--msime-skin-radius, 6px);
       box-shadow: var(--cand-shadow);
       min-width: 7em;

@@ -33,6 +33,7 @@ import { CandidateContextMenuPolicy, PointerAction, PointerButton }
 import { CandidateNumberFontPolicy } from './candidate/CandidateNumberFontPolicy';
 import { CandidateWidthPolicy } from './candidate/CandidateWidthPolicy';
 import { CandidatePagerPolicy } from './candidate/CandidatePagerPolicy';
+import { CandidateDecorationLayout, CandidateDecorationRect } from './candidate/CandidateDecorationLayout';
 import { PreeditCaretPolicy } from './candidate/PreeditCaretPolicy';
 import { CandidatePreeditStylePolicy, VisibleComposition } from './candidate/CandidatePreeditStylePolicy';
 import { CandidateTranslationStyle } from './candidate/CandidateTranslationStyle';
@@ -1745,10 +1746,15 @@ struct KeyboardView {
    * The composition gets a line of its own. Sharing the candidate row costs it width on the one row
    * where width is worth most, which is the reasoning the iOS implementation records.
    */
-  /** The decoration's place along the card's top edge, as the package aligns it. */
-  candidateDecorationAlignment(): Alignment {
-    const align: string = this.settings.candidateDecorationAlign;
-    return align === 'left' ? Alignment.TopStart : align === 'center' ? Alignment.Top : Alignment.TopEnd;
+  /** The mascot over the card's top edge, placed as every host places it: see CandidateDecorationLayout. The card spans the strip's width, with its top edge below the band. */
+  candidateDecorationRect(): CandidateDecorationRect | null {
+    if (this.settings.candidateDecorationImage === null) {
+      return null;
+    }
+    return CandidateDecorationLayout.rect(this.settings.candidateDecorationAlign, 0, this.availableWidth,
+      this.settings.candidateDecorationTopVp, KeyboardMetrics.CANDIDATE_PADDING_VP,
+      CandidateDecorationLayout.OVERLAP_VP, this.settings.candidateDecorationTopVp,
+      this.settings.candidateDecorationWidthVp, this.settings.candidateDecorationAspectRatio);
   }
 
   /** The package background: over the surface colour, under the candidates, clipped with the card. */
@@ -1766,7 +1772,7 @@ struct KeyboardView {
 
   @Builder
   candidateStrip() {
-    Stack({ alignContent: this.candidateDecorationAlignment() }) {
+    Stack({ alignContent: Alignment.Top }) {
       Column() {
       // Idle on a touch keyboard the strip is one bar over the height of both lines below: the logo, the switches and the tools. Nothing shifts when a composition starts, because the two lines it gives way to add up to the same height.
       if (this.stripIdle()) {
@@ -1868,14 +1874,14 @@ struct KeyboardView {
       .onAreaChange((_old: Area, now: Area): void => {
         this.availableWidth = Number(now.width);
       })
-      if (this.settings.candidateDecorationImage !== null
-          && this.settings.candidateDecorationWidthVp > 0) {
+      // After the card, so it is drawn over the card's top edge: that overlap is the whole point of the decoration.
+      if (this.settings.candidateDecorationImage !== null && this.candidateDecorationRect() !== null) {
         Image(this.settings.candidateDecorationImage)
-          .width(this.settings.candidateDecorationWidthVp)
-          .height(Math.max(this.settings.candidateDecorationTopVp,
-            this.settings.candidateDecorationWidthVp
-              / Math.max(0.05, this.settings.candidateDecorationAspectRatio)))
+          .position({ x: this.candidateDecorationRect()!.x, y: this.candidateDecorationRect()!.y })
+          .width(this.candidateDecorationRect()!.width)
+          .height(this.candidateDecorationRect()!.height)
           .objectFit(ImageFit.Contain)
+          .hitTestBehavior(HitTestMode.Transparent)
       }
     }
     .width('100%')
@@ -5167,7 +5173,15 @@ struct KeyboardView {
 
   build() {
     Stack({ alignContent: Alignment.Top }) {
-      this.skinBackdrop()
+      // On a desktop candidate window with a mascot the backdrop starts at the card's top edge: the band above it is transparent, so the mascot stands on the card rather than on a slab of keyboard colour.
+      Column() {
+        this.skinBackdrop()
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ top: CandidateDecorationLayout.backdropInsetVp(KeyboardFormFactor.isDesktop(),
+        this.settings.candidateDecorationImage !== null, this.settings.candidateDecorationTopVp,
+        KeyboardMetrics.ROOT_VERTICAL_PADDING_VP) })
       this.keyboard()
       if (this.punctuation || this.brackets || this.managing >= 0
         || this.expandedGloss >= 0) {

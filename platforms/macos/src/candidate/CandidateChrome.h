@@ -10,6 +10,8 @@ static const CGFloat MSIMECandidateTranslationOpacity = 0.62;
 static const CGFloat MSIMECandidateTranslationPointSize = 12.0;
 // The top row of the card: the reading on the left, then 「1 / 3」 and the two page arrows on the right.
 static const CGFloat MSIMECandidateHeaderHeight = 26.0;
+// Room kept between a horizontal card that grows past half the screen and each edge of the visible area.
+static const CGFloat MSIMECandidateScreenMargin = 16.0;
 // 「1 / 3」 is set at the design's 13pt in the secondary colour (dc.html L1324), a point above the translation run.
 static const CGFloat MSIMECandidatePageIndicatorPointSize = 13.0;
 static const CGFloat MSIMECandidatePageArrowWidth = 28.0;
@@ -299,6 +301,8 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
 @property(nonatomic, strong) NSImage *backgroundImage;
 @property(nonatomic) msime::mac::BackgroundFit backgroundFit;
 @property(nonatomic) CGFloat backgroundOpacity;
+// The transparent band above the card that a skin's decoration stands in. The fill, background image and stroke cover only the card below it.
+@property(nonatomic) CGFloat cardTopInset;
 @end
 @implementation MSIMECandidateChromeView
 - (BOOL)isOpaque { return NO; }
@@ -322,13 +326,15 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
 - (void)drawRect:(NSRect)dirtyRect
 {
     (void)dirtyRect;
-    NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:self.bounds
+    // Not flipped: the band is the top of the bounds, the card everything under it.
+    const NSRect bounds = NSMakeRect(NSMinX(self.bounds), NSMinY(self.bounds), NSWidth(self.bounds),
+                                     MAX(0.0, NSHeight(self.bounds) - MAX(0.0, self.cardTopInset)));
+    NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:bounds
                                                          xRadius:self.cornerRadius
                                                          yRadius:self.cornerRadius];
     [(self.fillColor != nil ? self.fillColor : NSColor.windowBackgroundColor) setFill];
     [path fill];
     NSImage *background = self.backgroundImage;
-    const NSRect bounds = self.bounds;
     const auto rects = background != nil && self.backgroundOpacity > 0.0
         ? msime::mac::BackgroundRects(self.backgroundFit, {NSMinX(bounds), NSMinY(bounds), NSWidth(bounds), NSHeight(bounds)},
                                       background.size.width, background.size.height)

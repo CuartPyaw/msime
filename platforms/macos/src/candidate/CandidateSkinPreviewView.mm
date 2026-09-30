@@ -225,21 +225,23 @@ void DrawSelectedBar(NSRect row, const msime::mac::SkinTokens &tokens, CGFloat f
     [[NSBezierPath bezierPathWithRoundedRect:bar xRadius:1.5 yRadius:1.5] fill];
 }
 
-void DrawDecoration(NSRect rect, const msime::mac::ResolvedSkin &skin)
+// Drawn after the card, over its top edge, placed as the candidate window places it; `card` is in this flipped view, with the transparent band above it.
+void DrawDecoration(NSRect card, CGFloat pad, const msime::mac::ResolvedSkin &skin)
 {
     if (skin.decorationTopDip <= 0.0 || skin.decorationPath.empty())
     {
         return;
     }
     NSImage *image = [[NSImage alloc] initWithContentsOfFile:@(skin.decorationPath.c_str())];
-    if (image == nil)
+    const auto placed = image == nil ? std::nullopt
+                                     : msime::mac::DecorationPlacement(skin.decorationAlign, NSWidth(card), pad, skin.decorationTopDip,
+                                                                       skin.decorationWidthDip, image.size.width, image.size.height);
+    if (!placed)
     {
         return;
     }
-    const CGFloat width =
-        skin.decorationWidthDip > 0.0 ? skin.decorationWidthDip : MIN(NSWidth(rect), image.size.width);
-    NSRect imageRect = NSMakeRect(NSMinX(rect) + msime::mac::DecorationLeft(skin.decorationAlign, NSWidth(rect), width),
-                                  NSMinY(rect), width, skin.decorationTopDip);
+    const NSRect imageRect = NSMakeRect(NSMinX(card) + placed->x, NSMinY(card) - skin.decorationTopDip + placed->top,
+                                        placed->width, placed->height);
     [image drawInRect:imageRect
               fromRect:NSZeroRect
              operation:NSCompositingOperationSourceOver
@@ -254,7 +256,6 @@ void DrawPreviewCandidates(NSRect rect, const msime::mac::ResolvedSkin &skin, BO
 {
     const msime::mac::SkinTokens &tokens = skin.tokens;
     const CGFloat decorationTop = MAX(0.0, skin.decorationTopDip);
-    DrawDecoration(rect, skin);
     NSRect chrome =
         NSMakeRect(NSMinX(rect), NSMinY(rect) + decorationTop, NSWidth(rect), NSHeight(rect) - decorationTop);
     DrawSkinChrome(chrome, skin);
@@ -354,6 +355,7 @@ void DrawPreviewCandidates(NSRect rect, const msime::mac::ResolvedSkin &skin, BO
              withAttributes:footerAttributes];
     }
     [NSGraphicsContext restoreGraphicsState];
+    DrawDecoration(chrome, pad, skin);
 }
 
 // What each component puts on its button, in the order of FloatingToolbarComponentKeys(): a title, or the SF Symbol the panel gives the button instead. The four titled buttons carry the state they toggle, so these are the ones the panel starts in — Chinese input, Chinese punctuation, half width, simplified output.

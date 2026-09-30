@@ -3151,7 +3151,20 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     if (changed && _appearance.inputModeHUD && _activeClient) {
         NSRect caret = NSZeroRect;
         [(id<IMKTextInput>)_activeClient attributesForCharacterIndex:0 lineHeightRectangle:&caret];
-        [[MSIMEInputModeHUDPanel sharedPanel] showEnglishInputMode:enabled nearCaretRect:caret];
+        // The badge takes the floating toolbar's palette in each appearance, so it follows the selected theme and skin.
+        const auto light = [_appearance toolbarSkinForDark:NO];
+        const auto dark = [_appearance toolbarSkinForDark:YES];
+        auto themed = ^NSColor *(NSString *name, msime::mac::Rgba lightColor, msime::mac::Rgba darkColor) {
+            NSColor *lightValue = SkinColor(lightColor), *darkValue = SkinColor(darkColor);
+            return [NSColor colorWithName:name dynamicProvider:^NSColor *(NSAppearance *appearance) {
+                return [appearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] == NSAppearanceNameDarkAqua ? darkValue : lightValue;
+            }];
+        };
+        MSIMEInputModeHUDPanel *hud = [MSIMEInputModeHUDPanel sharedPanel];
+        [hud setSurfaceColor:themed(@"MSIMEInputModeHUDSurface", light.surface, dark.surface)
+                 borderColor:themed(@"MSIMEInputModeHUDBorder", light.border, dark.border)
+                   textColor:themed(@"MSIMEInputModeHUDText", light.text, dark.text)];
+        [hud showEnglishInputMode:enabled nearCaretRect:caret];
     }
 }
 // Keeps the selected input mode - 中, 英 or 日 in the input menu - in step with the Chinese/English state and the scheme. A switch the system reported is already recorded as shown, so this does not echo it back.
@@ -5492,7 +5505,12 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     // The page arrows sit in the card's top row beside the reading, so they take no width from the candidate line.
     CGFloat width = MAX(20, natural + 2 * inset);
     width = MAX(width, preeditWidth);
-    const CGFloat widthCap = MAX(80, floor(visible.size.width * 0.5));
+    // Half the screen caps the card, except that a horizontal page grows past it as far as its candidates' own lines need (their glosses wrap underneath) so the page stays on one line, up to the screen less a margin on each side.
+    CGFloat widthCap = MAX(80, floor(visible.size.width * 0.5));
+    if (!vertical) {
+        const CGFloat screenCap = MAX(widthCap, floor(visible.size.width - 2 * MSIMECandidateScreenMargin));
+        widthCap = MAX(widthCap, MIN(screenCap, ceil(msime::mac::SingleLineMinimumWidth(items, metrics)) + 2 * inset));
+    }
     width = MIN(width, widthCap);
     if (paging) width = MAX(width, 76);
     // At least 7em of the candidate font, raised by the skin's floor; the 7em part stays within the half-screen cap (CandidateItemLayout.h).
@@ -5670,7 +5688,8 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
     candidatePanel.hasNextPage = page + 1 < pageCount;
     _panel.opaque = NO;
     _panel.backgroundColor = NSColor.clearColor;
-    const CGFloat decorationHeight = skin.decorationTopDip;
+    // The band above the card that the decoration stands in, transparent; none without an image to put there, as on Windows.
+    const CGFloat decorationHeight = _appearance.decorationImage ? MAX(0.0, skin.decorationTopDip) : 0.0;
     const CGFloat height = pageGeometry.rowsHeight + 2 * inset + decorationHeight + headerHeight;
     const CGFloat headerBottom = height - inset - decorationHeight - headerHeight;
     // Gloss replies keep the candidate IDs and all panel structure stable. Repaint those rows in
@@ -5814,15 +5833,15 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
                                  width - 2 * inset - (paging ? pageControlsWidth + MSIMECandidatePageIndicatorGap : 0), preeditHeight);
         [content addSubview:label];
     }
-    if (decorationHeight > 0 && _appearance.decorationImage) {
-        // Flush with the edge the manifest aligns it to (right unless it says otherwise), and pinned to the same edge inside its frame.
-        const CGFloat decorationLeft = msime::mac::DecorationLeft(skin.decorationAlign, width, skin.decorationWidthDip);
-        NSImageView *decoration = [[NSImageView alloc] initWithFrame:NSMakeRect(decorationLeft, height - decorationHeight, skin.decorationWidthDip, decorationHeight)];
+    content.cardTopInset = decorationHeight;
+    const NSSize decorationSize = _appearance.decorationImage.size;
+    if (const auto placed = msime::mac::DecorationPlacement(skin.decorationAlign, width, inset, decorationHeight, skin.decorationWidthDip,
+                                                            decorationSize.width, decorationSize.height)) {
+        // Added last so it sits over the card's top edge and the top row, which is what the overlap is for. It takes no clicks.
+        NSImageView *decoration = [[NSImageView alloc] initWithFrame:NSMakeRect(placed->x, height - placed->top - placed->height, placed->width, placed->height)];
+        decoration.identifier = @"candidate-decoration";
         decoration.image = _appearance.decorationImage;
-        decoration.imageScaling = NSImageScaleProportionallyUpOrDown;
-        decoration.imageAlignment = skin.decorationAlign == msime::mac::DecorationAlign::left     ? NSImageAlignTopLeft
-                                    : skin.decorationAlign == msime::mac::DecorationAlign::center ? NSImageAlignTop
-                                                                                                  : NSImageAlignTopRight;
+        decoration.imageScaling = NSImageScaleAxesIndependently;
         decoration.wantsLayer = YES;
         [content addSubview:decoration];
     }

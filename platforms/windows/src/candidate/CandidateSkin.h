@@ -215,6 +215,27 @@ inline float candidate_decoration_left(CandidateSkinAlign align, float card_left
 struct CandidateSkinRect {
   float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
 };
+// Where the mascot is drawn: `width` wide at the image's own aspect ratio, its bottom `pad_y` below the card's top edge so it overhangs into the card, aligned along that edge as candidate_decoration_left places it. The window holds only the `band` above the card plus that overlap, so an image taller than band + pad_y is scaled down uniformly - narrower as well as shorter, keeping its aligned edge and its bottom - rather than squashed into the space. Nothing is drawn for an image or a width with no size.
+inline std::optional<CandidateSkinRect>
+candidate_decoration_rect(CandidateSkinAlign align, float card_left,
+                          float card_right, float card_top, float pad_x,
+                          float pad_y, float band, float width,
+                          float natural_width, float natural_height) {
+  if (!(width > 0.0f) || !(natural_width > 0.0f) || !(natural_height > 0.0f))
+    return std::nullopt;
+  const float room = (std::max)(0.0f, band + pad_y);
+  float height = width * (natural_height / natural_width);
+  if (height > room) {
+    width *= room / height;
+    height = room;
+  }
+  if (!(width > 0.0f) || !(height > 0.0f))
+    return std::nullopt;
+  const float left =
+      candidate_decoration_left(align, card_left, card_right, pad_x, width);
+  const float bottom = card_top + pad_y;
+  return CandidateSkinRect{left, bottom - height, left + width, bottom};
+}
 // Where a background image of `natural` size is drawn in `card`, and which part of the image: cover crops the image's overflow to fill the card, contain letterboxes the whole image inside it, stretch scales each axis to the card.
 struct CandidateSkinBackgroundRects {
   CandidateSkinRect destination, source;

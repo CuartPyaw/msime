@@ -118,14 +118,14 @@ struct SkinLicense
     std::string source;
 };
 
-// The x of a decoration `width` wide in a card `cardWidth` wide, flush with the edge it is aligned to (the macOS placement since the first decorated skin), never left of the card.
-inline double DecorationLeft(DecorationAlign align, double cardWidth, double width)
+// The x of a decoration `width` wide over a card `cardWidth` wide: `pad` in from the edge it is aligned to, or centred, never left of the card. The same rule as the Windows host's candidate_decoration_left.
+inline double DecorationLeft(DecorationAlign align, double cardWidth, double pad, double width)
 {
-    double left = cardWidth - width;
+    double left = cardWidth - pad - width;
     switch (align)
     {
     case DecorationAlign::left:
-        left = 0.0;
+        left = pad;
         break;
     case DecorationAlign::center:
         left = (cardWidth - width) / 2.0;
@@ -134,6 +134,31 @@ inline double DecorationLeft(DecorationAlign align, double cardWidth, double wid
         break;
     }
     return left > 0.0 ? left : 0.0;
+}
+
+// Where the decoration is drawn, in top-down coordinates: x from the card's left edge, top from the window's top edge.
+struct DecorationRect
+{
+    double x = 0.0;
+    double top = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+};
+
+// The decoration as every host draws it: the window is `band` taller than the card and that band is transparent; the image is `width` wide at its own aspect ratio, its bottom `pad` below the card's top edge so it sits over the edge, and it is drawn after the card. An image too tall for the band and the overlap is scaled down whole rather than squashed. None for an empty band, width or image.
+inline std::optional<DecorationRect> DecorationPlacement(DecorationAlign align, double cardWidth, double pad, double band,
+                                                         double width, double imageWidth, double imageHeight)
+{
+    if (!(band > 0.0) || !(width > 0.0) || !(imageWidth > 0.0) || !(imageHeight > 0.0))
+        return std::nullopt;
+    const double room = band + pad;
+    double height = width * imageHeight / imageWidth;
+    if (height > room)
+    {
+        width *= room / height;
+        height = room;
+    }
+    return DecorationRect{DecorationLeft(align, cardWidth, pad, width), room - height, width, height};
 }
 
 struct SkinRect
