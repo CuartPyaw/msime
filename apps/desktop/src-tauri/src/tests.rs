@@ -60,6 +60,12 @@ fn session_provider_discovery_rejects_symlinked_or_shared_endpoints() {
     assert!(super::discover_session_provider_in(runtime.path(), "provider.sock").is_none());
 }
 
+#[test]
+fn snapshot_restore_preflight_rejects_text_larger_than_native_limit() {
+    assert!(crate::platform::account_helpers::snapshot_text_within_limit(512 * 1024 * 1024));
+    assert!(!crate::platform::account_helpers::snapshot_text_within_limit(512 * 1024 * 1024 + 1));
+}
+
 #[cfg(unix)]
 #[test]
 fn runtime_options_reject_a_symlinked_file() {

@@ -1,5 +1,6 @@
 pub(crate) use crate::platform::account_helpers::{
     account_command_error, call_session, cleanup_stale_snapshot_previews,
+    snapshot_text_within_limit,
 };
 use crate::shared::account_dto::{
     ChallengeResponse, ChatModelsResponse, ChatResponse, PreferenceSchemaResponse, ProfileResponse,
