@@ -1157,8 +1157,8 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     merged[@"candidate_follow_cursor"] = @(self.candidateFollowCursor);
     merged[@"input_mode_hud"] = @(self.inputModeHUD);
     merged[@"scheme"] = self.inputScheme;
-    // Leaving for Japanese has to leave a way back. `last_chinese_scheme` is what every other host writes when the scheme changes - Fcitx5, IBus, iOS and HarmonyOS all do - and what the shared settings page reads to put the user back on 五笔 rather than 全拼. This window sets the scheme itself, Japanese included, so without this the field keeps whatever a different surface wrote and the way back points at the wrong scheme. While japanese is active the scheme it was entered from is written too, once one is known, since the input menu's 中 entry leaves japanese the same way.
-    if (![self.inputScheme isEqual:@"japanese"] || _lastChineseScheme) merged[@"last_chinese_scheme"] = self.lastChineseScheme;
+    // Leaving for Japanese or Korean has to leave a way back. `last_chinese_scheme` is what every other host writes when the scheme changes - Fcitx5, IBus, iOS and HarmonyOS all do - and what the shared settings page reads to put the user back on 五笔 rather than 全拼. This window sets the scheme itself, Japanese and Korean included, so without this the field keeps whatever a different surface wrote and the way back points at the wrong scheme. While japanese or korean is active the scheme it was entered from is written too, once one is known, since the input menu's 中 entry leaves them the same way.
+    if (![@[@"japanese", @"korean"] containsObject:self.inputScheme] || _lastChineseScheme) merged[@"last_chinese_scheme"] = self.lastChineseScheme;
     merged[@"shuangpin_profile"] = self.shuangpinProfile;
     merged[@"shuangpin_preedit_uses_raw"] = @(self.shuangpinPreeditUsesRaw);
     merged[@"wubi_mixed_pinyin"] = @(self.wubiMixedPinyinEnabled);
@@ -1371,9 +1371,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     snapshot[@"platform.macos.candidate_page_shortcut"] = @([self storedPageShortcutForCurrentBindings]);
     NSArray *schemes = @[@"quanpin", @"shuangpin", @"wubi"];
     NSUInteger schemeIndex = [schemes indexOfObject:self.inputScheme];
-    // The fixed Apple cloud contract has no Japanese entry. Keep its
-    // historical Chinese fallback instead of serializing NSNotFound when a
-    // shared Tauri snapshot currently uses the Japanese Engine scheme.
+    // The fixed Apple cloud contract has no Japanese or Korean entry. Keep its historical Chinese fallback instead of serializing NSNotFound when a shared Tauri snapshot currently uses the Japanese or Korean Engine scheme.
     snapshot[@"platform.macos.input_scheme"] = @(schemeIndex == NSNotFound ? 0 : schemeIndex);
     snapshot[@"platform.macos.quanpin_helpcode_schema"] = @([MSIMECloudHelpcodeSchemas() indexOfObject:[self helpcodeOptionsForScheme:@"quanpin"][@"schema"]]);
     snapshot[@"platform.macos.shuangpin_helpcode_schema"] = @([MSIMECloudHelpcodeSchemas() indexOfObject:[self helpcodeOptionsForScheme:@"shuangpin"][@"schema"]]);
@@ -1648,11 +1646,11 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 - (void)helpcodeDisplayChanged:(NSSwitch *)sender {
     [self setHelpcodeOption:@"show_in_candidate_window" value:@(sender.state == NSControlStateValueOn) scheme:sender.identifier];
 }
-- (NSString *)inputScheme { NSString *value = _sharedInputScheme ?: [_defaults stringForKey:SchemeKey]; return [@[@"quanpin", @"shuangpin", @"wubi", @"japanese"] containsObject:value] ? value : @"quanpin"; }
-- (void)setInputScheme:(NSString *)value { if (![@[@"quanpin", @"shuangpin", @"wubi", @"japanese"] containsObject:value]) value = @"quanpin"; if (![self.inputScheme isEqual:@"japanese"]) _lastChineseScheme = self.inputScheme; _sharedInputScheme = nil; [_defaults setObject:value forKey:SchemeKey]; [self preferencesChanged]; }
+- (NSString *)inputScheme { NSString *value = _sharedInputScheme ?: [_defaults stringForKey:SchemeKey]; return [@[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"] containsObject:value] ? value : @"quanpin"; }
+- (void)setInputScheme:(NSString *)value { if (![@[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"] containsObject:value]) value = @"quanpin"; if (![@[@"japanese", @"korean"] containsObject:self.inputScheme]) _lastChineseScheme = self.inputScheme; _sharedInputScheme = nil; [_defaults setObject:value forKey:SchemeKey]; [self preferencesChanged]; }
 - (NSString *)lastChineseScheme {
     NSString *scheme = self.inputScheme;
-    if (![scheme isEqual:@"japanese"]) return scheme;
+    if (![@[@"japanese", @"korean"] containsObject:scheme]) return scheme;
     return _lastChineseScheme ?: @"quanpin";
 }
 - (NSString *)shuangpinProfile { NSString *value = _sharedShuangpinProfile ?: [_defaults stringForKey:ShuangpinProfileKey]; return [@[@"xiaohe", @"ziranma", @"shoudao", @"microsoft"] containsObject:value] ? value : @"xiaohe"; }
@@ -1732,7 +1730,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     id profile = preferences[@"shuangpin_profile"];
     id raw = preferences[@"shuangpin_preedit_uses_raw"];
     id wubiMixedPinyin = preferences[@"wubi_mixed_pinyin"];
-    if ([@[@"quanpin", @"shuangpin", @"wubi", @"japanese"] containsObject:scheme]) _sharedInputScheme = [scheme copy];
+    if ([@[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"] containsObject:scheme]) _sharedInputScheme = [scheme copy];
     id lastChinese = preferences[@"last_chinese_scheme"];
     if ([@[@"quanpin", @"shuangpin", @"wubi"] containsObject:lastChinese]) _lastChineseScheme = [lastChinese copy];
     if ([@[@"xiaohe", @"ziranma", @"shoudao", @"microsoft"] containsObject:profile]) _sharedShuangpinProfile = [profile copy];
@@ -2655,7 +2653,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     _controlOptionSpaceShortcutToggle.state = self.controlOptionSpaceShortcut ? NSControlStateValueOn : NSControlStateValueOff;
     _characterSetShortcutToggle.state = self.characterSetShortcut ? NSControlStateValueOn : NSControlStateValueOff;
     [_layoutButton selectItemAtIndex:self.vertical ? 1 : 0];
-    NSDictionary *schemeIndexes = @{@"quanpin": @0, @"shuangpin": @1, @"wubi": @2, @"japanese": @3};
+    NSDictionary *schemeIndexes = @{@"quanpin": @0, @"shuangpin": @1, @"wubi": @2, @"japanese": @3, @"korean": @4};
     const NSInteger storedScheme = [schemeIndexes[self.inputScheme] integerValue];
     // The radios and the scheme popups mirror the same stored value; which of the popups is usable
     // is in the dependency table with every other such rule.
@@ -2668,9 +2666,10 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     _shuangpinCard.hidden = storedScheme != 1;
     _wubiCard.hidden = storedScheme != 2;
     // 拼音匹配 is on another page than the scheme that decides whether it does anything, so the card says which scheme is selected rather than leaving a disabled group with no cause in sight.
-    const BOOL pinyinMatching = storedScheme != 3;
+    const BOOL pinyinMatching = storedScheme != 3 && storedScheme != 4;
     _pinyinMatchingSchemeLabel.stringValue =
-        pinyinMatching ? @"" : @"当前方案为日语，模糊音与全拼纠错只作用于拼音查询，在日语下不生效。";
+        pinyinMatching ? @"" : storedScheme == 3 ? @"当前方案为日语，模糊音与全拼纠错只作用于拼音查询，在日语下不生效。"
+                                                 : @"当前方案为韩语，模糊音与全拼纠错只作用于拼音查询，在韩语下不生效。";
     _pinyinMatchingSchemeLabel.hidden = pinyinMatching;
     NSDictionary *profileIndexes = @{@"xiaohe": @0, @"ziranma": @1, @"shoudao": @2, @"microsoft": @3};
     [_profileButton selectItemAtIndex:[profileIndexes[self.shuangpinProfile] integerValue]];
@@ -2723,7 +2722,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     // Every control below is nil until the pages are built, and -refreshControls runs long before
     // that: every setter calls it, including the ones the input method uses with no window open.
     if (_preferencePages == nil) return @[];
-    NSDictionary *schemeIndexes = @{@"quanpin": @0, @"shuangpin": @1, @"wubi": @2, @"japanese": @3};
+    NSDictionary *schemeIndexes = @{@"quanpin": @0, @"shuangpin": @1, @"wubi": @2, @"japanese": @3, @"korean": @4};
     const NSInteger scheme = [schemeIndexes[self.inputScheme] integerValue];
     const BOOL learning = self.candidateLearningEnabled;
     const BOOL toolbar = self.floatingToolbarEnabled;
@@ -2734,9 +2733,9 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         // configuring the scheme that is actually in use.
         @[ @(scheme == 1), @[_shuangpinSchemeButton] ],
         @[ @(scheme == 2), @[_wubiSchemeButton] ],
-        // Fuzzy rules and the two quanpin corrections reach the candidates of every scheme but Japanese. refresh_candidates (crates/engine/src/ime/mod.rs) puts all three into the query request whatever the scheme is, and only the quanpin and shuangpin engines read them back out (crates/engine/src/quanpin/engine.rs, crates/engine/src/shuangpin/engine.rs); the Japanese provider never looks. 五笔 is not in this rule even though its own table ignores them too, because the same method builds a second, quanpin request carrying the same three values when 编码打不出时用拼音候选 is on and the table cannot answer the code — so under 五笔 they decide what that fallback offers.
-        @[ @(scheme != 3), @[_fuzzyPinyinToggle, _transpositionToggle, _neighborToggle] ],
-        @[ @(self.fuzzyPinyinEnabled && scheme != 3), _fuzzyPinyinRuleButtons.allValues ],
+        // Fuzzy rules and the two quanpin corrections reach the candidates of every scheme but Japanese and Korean; Korean has no candidates at all. refresh_candidates (crates/engine/src/ime/mod.rs) puts all three into the query request whatever the scheme is, and only the quanpin and shuangpin engines read them back out (crates/engine/src/quanpin/engine.rs, crates/engine/src/shuangpin/engine.rs); the Japanese provider never looks. 五笔 is not in this rule even though its own table ignores them too, because the same method builds a second, quanpin request carrying the same three values when 编码打不出时用拼音候选 is on and the table cannot answer the code — so under 五笔 they decide what that fallback offers.
+        @[ @(scheme != 3 && scheme != 4), @[_fuzzyPinyinToggle, _transpositionToggle, _neighborToggle] ],
+        @[ @(self.fuzzyPinyinEnabled && scheme != 3 && scheme != 4), _fuzzyPinyinRuleButtons.allValues ],
         // Both places the space conversion is read — InputController.mm, where a space after a
         // just-committed mark is rewritten — ask for 智能标点 first, so it does nothing without it.
         @[ @(self.smartPunctuation), @[_smartPunctuationSpaceToggle] ],
@@ -3204,7 +3203,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 
     // The scheme is one choice, so it reads as radios with each scheme's own popup trailing it,
     // disabled until that scheme is selected. The stored value stays the same scheme string.
-    NSArray<NSString *> *schemeTitles = @[@"全拼输入", @"双拼输入", @"五笔输入", @"日语输入"];
+    NSArray<NSString *> *schemeTitles = @[@"全拼输入", @"双拼输入", @"五笔输入", @"日语输入", @"韩语输入"];
     NSMutableArray<NSButton *> *schemeButtons = [NSMutableArray array];
     NSMutableArray<NSView *> *schemeRows = [NSMutableArray arrayWithObjects:MSIMECardHeader(@"输入方式"), MSIMECardSeparator(), nil];
     _shuangpinSchemeButton = _profileButton;
@@ -4648,7 +4647,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     [_searchToolbarItem beginSearchInteraction];
 }
 - (void)schemeRadioChanged:(NSButton *)sender {
-    self.inputScheme = @[@"quanpin", @"shuangpin", @"wubi", @"japanese"][sender.tag];
+    self.inputScheme = @[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"][sender.tag];
 }
 - (void)showBackendAccount:(id)sender {
     (void)sender;

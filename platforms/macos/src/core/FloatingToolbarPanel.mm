@@ -826,6 +826,7 @@ static void MSIMELogToolbarAction(const char *action, BOOL hasDelegate, id sende
     [self updateEnglishInputMode:englishInputMode
              englishCandidateMode:NO
               japaneseInputMode:NO
+                koreanInputMode:NO
                        capsLock:NO
               chinesePunctuationEnabled:chinesePunctuationEnabled
                        fullWidthEnabled:fullWidthEnabled
@@ -842,6 +843,7 @@ static void MSIMELogToolbarAction(const char *action, BOOL hasDelegate, id sende
     [self updateEnglishInputMode:englishInputMode
              englishCandidateMode:NO
               japaneseInputMode:japaneseInputMode
+                koreanInputMode:NO
                        capsLock:capsLock
               chinesePunctuationEnabled:chinesePunctuationEnabled
                        fullWidthEnabled:fullWidthEnabled
@@ -851,13 +853,14 @@ static void MSIMELogToolbarAction(const char *action, BOOL hasDelegate, id sende
 - (void)updateEnglishInputMode:(BOOL)englishInputMode
          englishCandidateMode:(BOOL)englishCandidateMode
              japaneseInputMode:(BOOL)japaneseInputMode
+               koreanInputMode:(BOOL)koreanInputMode
                       capsLock:(BOOL)capsLock
           chinesePunctuationEnabled:(BOOL)chinesePunctuationEnabled
                    fullWidthEnabled:(BOOL)fullWidthEnabled
     traditionalChineseOutputEnabled:(BOOL)traditionalChineseOutputEnabled
 {
     NSString *inputModeTitle = capsLock ? @"A" :
-        (englishInputMode ? @"英" : (englishCandidateMode ? @"En" : (japaneseInputMode ? @"日" : @"中")));
+        (englishInputMode ? @"英" : (englishCandidateMode ? @"En" : (japaneseInputMode ? @"日" : (koreanInputMode ? @"한" : @"中"))));
     _inputModeButton.title = inputModeTitle;
     _inputModeButton.accessibilityLabel = englishInputMode || englishCandidateMode ? @"切换到中文输入" : @"切换到英文输入";
     _punctuationButton.title = chinesePunctuationEnabled ? @"。" : @".";

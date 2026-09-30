@@ -15,7 +15,7 @@ add_executable(input-mode-hud-panel-test tests/input/InputModeHUDPanelTest.mm sr
 target_compile_options(input-mode-hud-panel-test PRIVATE -fobjc-arc -UNDEBUG -Wall -Wextra -Werror)
 target_link_libraries(input-mode-hud-panel-test PRIVATE "-framework AppKit")
 add_test(NAME input-mode-hud-panel COMMAND input-mode-hud-panel-test)
-# The selected input mode (中, 英 or 日) follows the controller's state; this checks the mapping to the plist's mode identifiers and that a switch made by either side is not echoed back by the other.
+# The selected input mode (中, 英, 日 or 한) follows the controller's state; this checks the mapping to the plist's mode identifiers and that a switch made by either side is not echoed back by the other.
 add_executable(input-mode-identifiers-test tests/input/InputModeIdentifiersTest.mm)
 target_compile_options(input-mode-identifiers-test PRIVATE -fobjc-arc -UNDEBUG -Wall -Wextra -Werror)
 target_link_libraries(input-mode-identifiers-test PRIVATE "-framework Foundation")
@@ -158,11 +158,12 @@ set_target_properties(MSIMEClientInputMethod PROPERTIES OUTPUT_NAME "水杉输�
 target_sources(MSIMEClientInputMethod PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethod.icns")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethod.icns"
   PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-# The input menu's own icon, a template TIFF rather than the application icon: the bundle's logo, which the switch HUD also shows, and the three input modes' badged variants of it. See the comment beside tsInputMethodIconFileKey in Info.plist.in for why the logo and the application icon cannot be the same file.
+# The input menu's own icon, a template TIFF rather than the application icon: the bundle's logo, which the switch HUD also shows, and the four input modes' badged variants of it. See the comment beside tsInputMethodIconFileKey in Info.plist.in for why the logo and the application icon cannot be the same file.
 set(MSIME_MENU_ICON_RESOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIcon.tiff"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIconChinese.tiff"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIconJapanese.tiff"
+  "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIconKorean.tiff"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIconEnglish.tiff")
 target_sources(MSIMEClientInputMethod PRIVATE ${MSIME_MENU_ICON_RESOURCES})
 set_source_files_properties(${MSIME_MENU_ICON_RESOURCES} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)

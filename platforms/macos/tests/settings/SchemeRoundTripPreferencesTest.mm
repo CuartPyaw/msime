@@ -1,5 +1,5 @@
 #import "TestPreferenceSuite.h"
-// Switching to Japanese has to leave a way back to the Chinese scheme the user was on.
+// Switching to Japanese or Korean has to leave a way back to the Chinese scheme the user was on.
 //
 // The scheme the user returns to is carried in `last_chinese_scheme`, which every other host writes
 // when the scheme changes. This window sets the scheme itself, Japanese included, so it has to write
@@ -27,6 +27,13 @@ int main(void)
         merged = [preferences sharedPreferencesByMerging:@{@"last_chinese_scheme": @"wubi"}];
         assert([merged[@"scheme"] isEqual:@"japanese"]);
         assert([merged[@"last_chinese_scheme"] isEqual:@"wubi"]);
+
+        // Korean is not one either, and moving between the two keeps the Chinese scheme both were entered from.
+        preferences.inputScheme = @"korean";
+        merged = [preferences sharedPreferencesByMerging:@{@"last_chinese_scheme": @"wubi"}];
+        assert([merged[@"scheme"] isEqual:@"korean"]);
+        assert([merged[@"last_chinese_scheme"] isEqual:@"wubi"]);
+        assert([preferences.lastChineseScheme isEqual:@"wubi"]);
 
         // Coming back records the scheme that was returned to, so the next excursion goes back there.
         preferences.inputScheme = @"shuangpin";

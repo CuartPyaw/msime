@@ -598,6 +598,13 @@ static BOOL MSIMEASCIIAlphanumeric(unichar character) {
     return (character >= '0' && character <= '9') || (character >= 'A' && character <= 'Z') ||
            (character >= 'a' && character <= 'z');
 }
+// A Korean composition is a Hangul syllable automaton, not a reading converted through candidates: letters compose in the marked text, and the syllable is written out by whatever key ends it. Dedicated English and local modes keep their own rules inside the korean scheme.
+static BOOL MSIMEKoreanComposition(NSDictionary *view) {
+    if (![view isKindOfClass:NSDictionary.class] || [view[@"scheme"] integerValue] != msime::mac::KoreanScheme) return NO;
+    if ([view[@"dedicated_english"] isEqual:@YES]) return NO;
+    id mode = view[@"local_mode"];
+    return ![mode isKindOfClass:NSString.class] || [mode isEqualToString:@"none"];
+}
 // Match the Windows TSF classifier's CapsLock special case. CapsLock turns an
 // unshifted alphabetic key into an uppercase character, but an uppercase key
 // must remain a native application key when a new composition would otherwise
@@ -1091,6 +1098,11 @@ static NSImage *MSIMECandidateLogoImage() {
     return [_view[@"scheme"] integerValue] == 3;
 }
 
+// Korean writes half-width ASCII punctuation whatever the Chinese punctuation switches say, so neither reversible gesture has a Chinese mark to convert from or back to; the Engine refuses to arm the repeat gesture there for the same reason.
+- (BOOL)koreanSchemeActive {
+    return [_view[@"scheme"] integerValue] == msime::mac::KoreanScheme;
+}
+
 // Arms the space conversion from what a punctuation commit actually put in the document, as the reference's _NoteCommittedChinesePunctuation does: the committed tail decides, so a candidate committed together with its mark (nihao, gives 你好，) arms too, and the ASCII target comes from the mark map rather than the key pressed (the backslash key gives 、, which converts to /). Called after apply:, so an opening mark this host has just auto-closed is seen as a pending closing and does not arm. Anything else disarms.
 - (void)noteCommittedChinesePunctuation:(NSDictionary *)transition client:(id)client {
     NSString *commit = transition[@"commit"];
@@ -1098,7 +1110,7 @@ static NSImage *MSIMECandidateLogoImage() {
         ? MSIMEASCIIForSmartChinesePunctuation([commit characterAtIndex:commit.length - 1])
         : 0;
     if (!_appearance.smartPunctuation || !_appearance.smartPunctuationSpaceConvert || !ascii ||
-        _pendingPairedClosing || [self japaneseSchemeActive]) {
+        _pendingPairedClosing || [self japaneseSchemeActive] || [self koreanSchemeActive]) {
         [self clearSmartPunctuationSpaceConversion];
         return;
     }
@@ -1120,7 +1132,7 @@ static NSImage *MSIMECandidateLogoImage() {
     [self clearSmartPunctuationSpaceConversion];
     if (!_appearance.smartPunctuation || !_appearance.smartPunctuationSpaceConvert ||
         _appearance.runtimeFullWidthInput || armed != client || _pendingPairedClosing.length ||
-        [self japaneseSchemeActive])
+        [self japaneseSchemeActive] || [self koreanSchemeActive])
         return NO;
     if ([_view[@"editing_text"] length] ||
         ([_view[@"candidates"] isKindOfClass:NSArray.class] && [_view[@"candidates"] count]))
@@ -1168,7 +1180,7 @@ static NSImage *MSIMECandidateLogoImage() {
         return NO;
     if (!_appearance.smartPunctuation || !_appearance.smartPunctuationRepeatToChinese ||
         _appearance.runtimeFullWidthInput || armed != client || _pendingPairedClosing.length ||
-        [self japaneseSchemeActive] || NSProcessInfo.processInfo.systemUptime - armedAt > 2.0)
+        [self japaneseSchemeActive] || [self koreanSchemeActive] || NSProcessInfo.processInfo.systemUptime - armedAt > 2.0)
         return NO;
     if ([_view[@"editing_text"] length] ||
         ([_view[@"candidates"] isKindOfClass:NSArray.class] && [_view[@"candidates"] count]))
@@ -1192,6 +1204,11 @@ static NSImage *MSIMECandidateLogoImage() {
         return NO;
     const unichar character = [event.characters characterAtIndex:0];
     if (!MSIMESmartPunctuationSpaceKey(character)) return NO;
+    // Korean marks are ASCII already, and the repeat gesture that would turn them Chinese never arms there: the key goes to the Engine, which writes the mark after the open syllable or leaves it to the application.
+    if ([self koreanSchemeActive]) {
+        [self resetSmartPunctuationState];
+        return NO;
+    }
     if (!_appearance.smartPunctuation) {
         [self resetSmartPunctuationState];
         [self clearSmartPunctuationSpaceConversion];
@@ -1724,8 +1741,8 @@ static NSImage *MSIMECandidateLogoImage() {
             (_tencentTranslationConfig && ![_tencentTranslationConfig isEqual:config]))) ||
         (_glossTargetLanguages && ![_glossTargetLanguages isEqual:MSIMETranslationTargets(query)])) return nil;
     NSDictionary *view = [self serviceSnapshotView];
-    if ([view[@"scheme"] isEqual:@3] || [view[@"local_mode"] isEqual:@"temporary_japanese"] ||
-        ![view[@"generation"] isEqual:query[@"generation"]]) return nil;
+    if ([view[@"scheme"] isEqual:@3] || [view[@"scheme"] isEqual:@(msime::mac::KoreanScheme)] ||
+        [view[@"local_mode"] isEqual:@"temporary_japanese"] || ![view[@"generation"] isEqual:query[@"generation"]]) return nil;
     NSDictionary *gloss = [self currentGlossRequest];
     // Resolve the local dictionary first; never transmit an already-resolved key.
     if (gloss && (![_glossRequest isEqual:gloss] || !_glossResults)) return nil;
@@ -2037,8 +2054,8 @@ static NSImage *MSIMECandidateLogoImage() {
     NSArray *targets = MSIMETranslationTargets(query);
     if (!targets.count || (_glossTargetLanguages && ![_glossTargetLanguages isEqual:targets])) return nil;
     NSDictionary *view = [self serviceSnapshotView];
-    if ([view[@"scheme"] isEqual:@3] || [view[@"local_mode"] isEqual:@"temporary_japanese"] ||
-        ![view[@"generation"] isEqual:query[@"generation"]]) return nil;
+    if ([view[@"scheme"] isEqual:@3] || [view[@"scheme"] isEqual:@(msime::mac::KoreanScheme)] ||
+        [view[@"local_mode"] isEqual:@"temporary_japanese"] || ![view[@"generation"] isEqual:query[@"generation"]]) return nil;
     NSMutableArray *candidates = [NSMutableArray array];
     for (NSDictionary *candidate in MSIMEOnlineGlossCandidates(query)) [candidates addObject:@{@"text":candidate[@"text"]}];
     return candidates.count ? @{@"target_languages":targets, @"candidates":[candidates copy]} : nil;
@@ -2314,9 +2331,9 @@ static NSImage *MSIMECandidateLogoImage() {
     if (!query || ![targets containsObject:@"en"]) return nil;
     if (_glossTargetLanguages && ![_glossTargetLanguages isEqual:targets]) return nil;
     NSDictionary *view = [self serviceSnapshotView];
-    // Windows suppresses candidate translations in Japanese, including a
-    // temporary Japanese composition whose view retains its original scheme.
-    if ([view[@"scheme"] isEqual:@3] || [view[@"local_mode"] isEqual:@"temporary_japanese"]) return nil;
+    // Windows suppresses candidate translations in Japanese, including a temporary Japanese composition whose view retains its original scheme. Korean has no candidates to translate.
+    if ([view[@"scheme"] isEqual:@3] || [view[@"scheme"] isEqual:@(msime::mac::KoreanScheme)] ||
+        [view[@"local_mode"] isEqual:@"temporary_japanese"]) return nil;
     if (![view[@"generation"] isEqual:query[@"generation"]]) return nil;
     NSMutableArray *candidates = [NSMutableArray array];
     for (NSDictionary *candidate in view[@"candidates"])
@@ -2445,7 +2462,8 @@ static NSImage *MSIMECandidateLogoImage() {
         if (![target isEqual:@"en"] && [installed containsObject:target]) [languages addObject:target];
     if (!languages.count) return nil;
     NSDictionary *view = [self serviceSnapshotView];
-    if ([view[@"scheme"] isEqual:@3] || [view[@"local_mode"] isEqual:@"temporary_japanese"]) return nil;
+    if ([view[@"scheme"] isEqual:@3] || [view[@"scheme"] isEqual:@(msime::mac::KoreanScheme)] ||
+        [view[@"local_mode"] isEqual:@"temporary_japanese"]) return nil;
     if (![view[@"generation"] isEqual:query[@"generation"]]) return nil;
     NSMutableArray *candidates = [NSMutableArray array];
     for (NSDictionary *candidate in view[@"candidates"])
@@ -2673,9 +2691,11 @@ static const NSTimeInterval kSettledRerankDelay = 0.15;
     if (!_toolbar || !_appearance) return;
     const BOOL englishCandidateMode = [_view[@"dedicated_english"] boolValue] && !_appearance.englishMode;
     const BOOL japaneseInputMode = [_view[@"scheme"] integerValue] == 3;
+    const BOOL koreanInputMode = [_view[@"scheme"] integerValue] == msime::mac::KoreanScheme;
     [_toolbar updateEnglishInputMode:_appearance.englishMode
              englishCandidateMode:englishCandidateMode
                    japaneseInputMode:japaneseInputMode
+                     koreanInputMode:koreanInputMode
                             capsLock:_capsLock
               chinesePunctuationEnabled:_appearance.runtimeChinesePunctuation
                        fullWidthEnabled:_appearance.runtimeFullWidthInput
@@ -2708,7 +2728,7 @@ static const NSTimeInterval kSettledRerankDelay = 0.15;
     [self refreshFloatingToolbarState];
     if (_activeClient) [self renderCandidates];
     if (_activeClient) [_toolbar setVisible:_appearance.floatingToolbarEnabled forDelegate:self];
-    // The settings window can move the scheme in or out of japanese, which moves the menu bar between 中 and 日.
+    // The settings window can move the scheme in or out of japanese or korean, which moves the menu bar between 中, 日 and 한.
     if (_activeClient) [self syncSystemInputModeForClient:_activeClient];
     // Every Shift tap lands here. Saving then wrote this process's whole view of the settings over the shared document once per mode switch, so a controller that had not yet reloaded an edit made elsewhere put the old value back, and two writers that disagreed traded the document on every tap.
     if (![notification.userInfo[MSIMEAppearanceInputModeOnlyKey] isEqual:@YES]) [self persistAppearancePreferences];
@@ -2840,8 +2860,8 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     [menu addItem:schemeHeader];
     NSString *profile = [NSString stringWithUTF8String:msime::mac::ShuangpinSchemaTitle(_appearance.shuangpinProfile.UTF8String ?: "")];
     if ([profile hasSuffix:@"双拼"] && profile.length > 2) profile = [profile substringToIndex:profile.length - 2];
-    NSArray<NSString *> *schemes = @[@"quanpin", @"shuangpin", @"wubi", @"japanese"];
-    NSArray<NSString *> *schemeTitles = @[@"全拼", [NSString stringWithFormat:@"双拼（%@）", profile], @"五笔 86", @"日语"];
+    NSArray<NSString *> *schemes = @[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"];
+    NSArray<NSString *> *schemeTitles = @[@"全拼", [NSString stringWithFormat:@"双拼（%@）", profile], @"五笔 86", @"日语", @"韩语"];
     for (NSUInteger index = 0; index < schemes.count; ++index) {
         NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:schemeTitles[index] action:@selector(selectInputScheme:) keyEquivalent:@""];
         item.target = self;
@@ -3145,7 +3165,10 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
         //
         // The Shift tap keeps its own rule: it commits the raw letters before calling this, which
         // leaves nothing here to cancel.
-        NSDictionary *cancelled = [_session command:MSIME_CANCEL error:nil];
+        //
+        // A Korean syllable is the exception: it is text the user already wrote, not candidates they are rejecting, so it is committed, as the scheme switches and the other hosts do.
+        const BOOL koreanSyllable = MSIMEKoreanComposition(_view) && [_view[@"editing_text"] length];
+        NSDictionary *cancelled = [_session command:koreanSyllable ? MSIME_FINISH_COMPOSITION : MSIME_CANCEL error:nil];
         if (!cancelled) return; // Do not hide an unsettled composition after an Engine failure.
         [self apply:cancelled];
     }
@@ -3180,12 +3203,12 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
         [hud showEnglishInputMode:enabled nearCaretRect:caret];
     }
 }
-// Keeps the selected input mode - 中, 英 or 日 in the input menu - in step with the Chinese/English state and the scheme. A switch the system reported is already recorded as shown, so this does not echo it back.
+// Keeps the selected input mode - 中, 英, 日 or 한 in the input menu - in step with the Chinese/English state and the scheme. A switch the system reported is already recorded as shown, so this does not echo it back.
 - (void)syncSystemInputModeForClient:(id)client {
-    NSString *mode = MSIMEInputModeIDFor(_appearance.englishMode, [_appearance.inputScheme isEqualToString:@"japanese"]);
+    NSString *mode = MSIMEInputModeID(MSIMEInputModeFor(_appearance.englishMode, _appearance.inputScheme));
     MSIMESelectSystemInputMode(MSIMESharedSystemInputModeState(), mode, client, MSIMEInputSourceIsEnabled);
 }
-// The system reports the mode the user picked from the input menu or reached with Ctrl+Space; the controller's Chinese/English state and, for 中 and 日, its scheme follow it. A report that only repeats the mode already shown, or one delivered from inside this controller's own selectInputMode:, leaves the state alone.
+// The system reports the mode the user picked from the input menu or reached with Ctrl+Space; the controller's Chinese/English state and, for 中, 日 and 한, its scheme follow it. A report that only repeats the mode already shown, or one delivered from inside this controller's own selectInputMode:, leaves the state alone.
 - (void)setValue:(id)value forTag:(long)tag client:(id)sender {
     if (tag == kTextServiceInputModePropertyTag) [self systemDidReportInputMode:value client:sender];
     [super setValue:value forTag:tag client:sender];
@@ -3195,14 +3218,23 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     [self ensureAppearance];
     // The report can arrive before activateServer: or handleEvent: has named the client, and the mode is remembered per application.
     [_appearance activateInputModeForApplication:[sender respondsToSelector:@selector(bundleIdentifier)] ? [sender bundleIdentifier] : nil];
-    // Moving from 英 to 日 changes two things, and each change syncs the menu bar on its own: between them it would select 中 or 英 again and the system would report that back as a new choice. Holding `selecting` keeps both quiet, and the sync below selects the one mode they add up to. 英 leaves the scheme alone, so returning to 中 or 日 afterwards finds it where it was.
+    // Moving from 英 to 日 changes two things, and each change syncs the menu bar on its own: between them it would select 中 or 英 again and the system would report that back as a new choice. Holding `selecting` keeps both quiet, and the sync below selects the one mode they add up to. 英 leaves the scheme alone, so returning to 中, 日 or 한 afterwards finds it where it was.
     MSIMESystemInputModeState &state = MSIMESharedSystemInputModeState();
     state.selecting = true;
+    const MSIMEInputMode mode = MSIMEInputModeForID(value);
     NSString *scheme = _appearance.inputScheme;
-    if (MSIMEJapaneseForInputModeID(value) && ![scheme isEqualToString:@"japanese"]) _appearance.inputScheme = @"japanese";
-    else if ([value isEqualToString:MSIMEChineseInputModeID] && [scheme isEqualToString:@"japanese"])
-        _appearance.inputScheme = _appearance.lastChineseScheme;
-    [self setEnglishInputMode:MSIMEEnglishForInputModeID(value)];
+    NSString *target = MSIMESchemeForInputMode(mode);
+    // 中 goes back to the Chinese scheme japanese or korean was entered from; a Chinese scheme is already there.
+    if (mode == MSIMEInputMode::Chinese && [@[@"japanese", @"korean"] containsObject:scheme]) target = _appearance.lastChineseScheme;
+    if (target && ![target isEqualToString:scheme]) {
+        // The composition was typed under the old scheme and a scheme switch discards it, so commit it first, as the scheme menu does. A Korean syllable is text the user already wrote.
+        if (_session && _activeClient && [_view[@"editing_text"] length]) {
+            NSDictionary *finished = [_session command:MSIME_FINISH_COMPOSITION error:nil];
+            if (finished) [self apply:finished];
+        }
+        _appearance.inputScheme = target;
+    }
+    [self setEnglishInputMode:mode == MSIMEInputMode::English];
     state.selecting = false;
     // setEnglishInputMode: can refuse the switch (an Engine cancel failure while composing) after the report was already recorded as shown; select the mode the controller actually has so the menu bar does not keep the refused one. A switch that went through makes this a no-op.
     [self syncSystemInputModeForClient:sender];
@@ -3218,8 +3250,8 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     if (!_session || _focusPending) [self prepareSession];
     if (!_session) return;
     if ([_view[@"editing_text"] isKindOfClass:NSString.class] && [_view[@"editing_text"] length]) {
-        // Ctrl+Shift+E is the reference's FUNCTION_CANCEL in both directions: _HandleCancel terminates the composition and commits nothing, so neither the highlighted Chinese candidate nor the English word being spelled reaches the document. An Engine failure leaves the mode as it was.
-        NSDictionary *cancelled = [_session command:MSIME_CANCEL error:nil];
+        // Ctrl+Shift+E is the reference's FUNCTION_CANCEL in both directions: _HandleCancel terminates the composition and commits nothing, so neither the highlighted Chinese candidate nor the English word being spelled reaches the document. A Korean syllable is already text the user wrote, so it is committed instead. An Engine failure leaves the mode as it was.
+        NSDictionary *cancelled = [_session command:MSIMEKoreanComposition(_view) ? MSIME_FINISH_COMPOSITION : MSIME_CANCEL error:nil];
         if (!cancelled) return;
         [self apply:cancelled];
     }
@@ -4518,7 +4550,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
 - (void)selectInputScheme:(id)sender {
     [self ensureAppearance];
     NSString *scheme = [sender respondsToSelector:@selector(representedObject)] ? [sender representedObject] : nil;
-    if (![@[@"quanpin", @"shuangpin", @"wubi", @"japanese"] containsObject:scheme] || [_appearance.inputScheme isEqual:scheme]) return;
+    if (![@[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"] containsObject:scheme] || [_appearance.inputScheme isEqual:scheme]) return;
     // The composition was typed under the old scheme; commit it rather than reinterpret its keys.
     if (_session && _activeClient && [_view[@"editing_text"] length]) {
         NSDictionary *finished = [_session command:MSIME_FINISH_COMPOSITION error:nil];
@@ -4887,7 +4919,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         }
         return NO;
     }
-    if (MSIMECapsLockFreshUppercaseBypass(event, _view)) return NO;
+    // Korean letters take their case from Shift alone (KoreanKeyLetter), so Caps Lock does not hand them to the application either.
+    if (!MSIMEKoreanComposition(_view) && MSIMECapsLockFreshUppercaseBypass(event, _view)) return NO;
     if (!_session) [self prepareSession];
     if (!_session) return NO;
     if (_focusPending) [self prepareSession];
@@ -5005,19 +5038,13 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
             return YES;
         }
     }
-    // Ctrl+Backspace deletes a segmentation unit and Ctrl+Left / Ctrl+Right move the caret by one,
-    // which is what the reference's composition editor does (`IsSegmentBackspaceKey` and
-    // `IsSegmentCaretKey` in its input_key_policy.h) and what both Linux front ends and the Windows
-    // host already route. It has to be decided before the rule below, which hands every Ctrl, Option
-    // and Command chord back to the application after finishing the composition - that rule is what
-    // left this host without segment editing.
+    // Ctrl+Backspace deletes a segmentation unit and Ctrl+Left / Ctrl+Right move the caret by one, which is what the reference's composition editor does (`IsSegmentBackspaceKey` and `IsSegmentCaretKey` in its input_key_policy.h) and what both Linux front ends and the Windows host already route. It has to be decided before the rule below, which hands every Ctrl, Option and Command chord back to the application after finishing the composition - that rule is what left this host without segment editing.
     //
-    // Only the bare Ctrl chord is the input method's: with Shift, Option or Command also held, or
-    // with nothing being composed, the key stays the application's.
+    // Only the bare Ctrl chord is the input method's: with Shift, Option or Command also held, or with nothing being composed, the key stays the application's. A Korean syllable has no segments, so there the chord finishes it below and the application edits by word as usual.
     if ((event.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagShift |
                                 NSEventModifierFlagOption | NSEventModifierFlagCommand)) ==
             NSEventModifierFlagControl &&
-        _session && _activeClient && ([_view[@"editing_text"] length] || [_view[@"candidates"] count] ||
+        !MSIMEKoreanComposition(_view) && _session && _activeClient && ([_view[@"editing_text"] length] || [_view[@"candidates"] count] ||
                                       [_view[@"phrase_prefix"] length])) {
         uint32_t segment = UINT32_MAX;
         if (event.keyCode == 51) segment = MSIME_BACKSPACE_SEGMENT;
@@ -5176,7 +5203,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     // below. See handleJapaneseConversionKey: for why the two keys cannot be the shared ones.
     if ([self handleJapaneseConversionKey:event client:sender]) return YES;
     // The reference sends `{` down its punctuation path and closes it with `}` (`_GetPairedPunctuationClosingFor`), whether or not a composition is live, and the Linux host does the same. The Engine answers `{` on its ASCII route: while composing it commits the candidate followed by `{`, and idle it leaves the key alone, so the host commits the opening mark itself. The mark is not in MSIMEPunctuationPairs because a symbol candidate that is exactly `{` is not paired by the reference.
-    if ([event.characters isEqualToString:@"{"] &&
+    // Korean ignores the Chinese punctuation switch, so its `{` is the Engine's plain ASCII mark.
+    if ([event.characters isEqualToString:@"{"] && !MSIMEKoreanComposition(_view) &&
         !(event.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand)) &&
         _appearance.runtimeChinesePunctuation && _appearance.pairedPunctuation && !_pendingPairedClosing &&
         !MSIMEPairedPunctuationExcludedHost()) {
@@ -5199,8 +5227,16 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         _hostOpenedClosing = nil;
         return YES;
     }
+    const BOOL korean = MSIMEKoreanComposition(_view);
+    // With its navigation binding off, a paging or arrow key is the application's and moves the caret, so it ends a Korean syllable the way Tab does below.
+    const BOOL applicationNavigationKey = ((event.keyCode == 116 || event.keyCode == 121) && ![_appearance navigationEnabled:@"page_up_down"]) ||
+        ((event.keyCode == 125 || event.keyCode == 126) && ![_appearance navigationEnabled:@"arrows"]);
+    if (korean && applicationNavigationKey && [_view[@"editing_text"] length]) [self apply:[_session command:MSIME_FINISH_COMPOSITION error:nil]];
     switch (event.keyCode) {
-        case 48: return NO;
+        case 48:
+            // Tab is the application's, and so is the Korean syllable it ends: write it out before the key moves on.
+            if (korean && [_view[@"editing_text"] length]) [self apply:[_session command:MSIME_FINISH_COMPOSITION error:nil]];
+            return NO;
         case 51: command = MSIME_BACKSPACE; break;
         case 36: case 76: command = MSIME_COMMIT_RAW; break;
         case 53: [self flushPendingPairedClosing]; _pairedPunctuation.clear(); command = MSIME_CANCEL; break;
@@ -5218,9 +5254,11 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     NSDictionary *transition = nil;
     if (command != UINT32_MAX) transition = [_session command:command error:nil];
     else if (event.characters.length == 1 && [event.characters characterAtIndex:0] <= 127) {
-        const unichar typed = [event.characters characterAtIndex:0];
+        const BOOL shift = (event.modifierFlags & NSEventModifierFlagShift) != 0;
+        unichar typed = [event.characters characterAtIndex:0];
+        if (korean) typed = (unichar)msime::mac::KoreanKeyLetter((char)typed, shift);
         _punctuationKeyInFlight = MSIMEASCIIPunctuation(typed) ? typed : 0;
-        transition = [_session typeASCII:(uint8_t)[event.characters characterAtIndex:0] shift:(event.modifierFlags & NSEventModifierFlagShift) != 0 error:nil];
+        transition = [_session typeASCII:(uint8_t)typed shift:shift error:nil];
     }
     if (!transition) { _punctuationKeyInFlight = 0; return NO; }
     [self apply:transition];
@@ -5241,7 +5279,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         if (!finished) return NO;
         [self apply:finished];
     }
-    if (_appearance.runtimeFullWidthInput && [_view[@"editing_text"] isKindOfClass:NSString.class] &&
+    // Korean writes half-width digits and punctuation whatever the width switch says, as the Engine does for its own commits.
+    if (!korean && _appearance.runtimeFullWidthInput && [_view[@"editing_text"] isKindOfClass:NSString.class] &&
         ![_view[@"editing_text"] length] && event.characters.length == 1 &&
         msime::mac::IsFullWidthDirectCharacter([event.characters characterAtIndex:0], event.modifierFlags)) {
         const unichar converted = msime::mac::FullWidthCharacter([event.characters characterAtIndex:0]);
@@ -5408,8 +5447,10 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     const uint64_t applySequence = ++_applySequence;
     const uint64_t glossViewSequence = _glossViewSequence;
     NSString *pendingClosing = _pendingPairedClosing;
-    MSIMEApplyTransitionWithPendingClosing(displayTransition, (id<MSIMETextClient>)_activeClient,
-                                           _appearance.inlinePreeditStyle, pendingClosing);
+    // The Korean syllable has no candidate window to show it in, so it is always drawn inline, whatever the preedit display preference says: hidden it would be text the user cannot see being written.
+    const MSIMEInlinePreeditStyle preeditStyle = MSIMEKoreanComposition(displayTransition[@"view"])
+        ? MSIMEInlinePreeditStylePinyin : _appearance.inlinePreeditStyle;
+    MSIMEApplyTransitionWithPendingClosing(displayTransition, (id<MSIMETextClient>)_activeClient, preeditStyle, pendingClosing);
     // What a commit leaves left of the caret is known for certain, even in a host that never reads it back (Windows sets the shadow after every commit it makes). A pending closing mark goes in behind the commit, so it is the character the caret follows.
     if ([displayTransition[@"commit"] isKindOfClass:NSString.class]) {
         NSString *landed = pendingClosing.length ? pendingClosing : displayTransition[@"commit"];

@@ -37,9 +37,11 @@ FOUNDATION_EXPORT NSMenu *CreateMetasequoiaFloatingToolbarUtilityMenu(id target)
           chinesePunctuationEnabled:(BOOL)chinesePunctuationEnabled
                    fullWidthEnabled:(BOOL)fullWidthEnabled
     traditionalChineseOutputEnabled:(BOOL)traditionalChineseOutputEnabled;
+/// The mode button reads A under Caps Lock, then 英 for English, En for English candidates, 日 for the japanese scheme, 한 for the korean scheme and 中 otherwise.
 - (void)updateEnglishInputMode:(BOOL)englishInputMode
          englishCandidateMode:(BOOL)englishCandidateMode
              japaneseInputMode:(BOOL)japaneseInputMode
+               koreanInputMode:(BOOL)koreanInputMode
                       capsLock:(BOOL)capsLock
           chinesePunctuationEnabled:(BOOL)chinesePunctuationEnabled
                    fullWidthEnabled:(BOOL)fullWidthEnabled

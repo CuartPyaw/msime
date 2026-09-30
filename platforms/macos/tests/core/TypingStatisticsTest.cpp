@@ -26,6 +26,8 @@ int main() {
     assert(ResolveTypingSource(1, false, false, "none", "shoudao") == TypingSource::Shoudao);
     assert(ResolveTypingSource(2, false, false, "none", "xiaohe") == TypingSource::Wubi);
     assert(ResolveTypingSource(3, false, false, "none", "xiaohe") == TypingSource::Japanese);
+    assert(ResolveTypingSource(4, false, false, "none", "xiaohe") == TypingSource::Korean);
+    assert(msime::mac::TypingSourceId(TypingSource::Korean) == "korean");
     assert(ResolveTypingSource(0, false, true, "none", "xiaohe") == TypingSource::English);
     assert(ResolveTypingSource(0, false, false, "temporary_japanese", "xiaohe") == TypingSource::Japanese);
     assert(ResolveTypingSource(0, false, false, "emoji", "xiaohe") == TypingSource::Local);
@@ -57,8 +59,11 @@ int main() {
                reinterpret_cast<const uint8_t *>(directoryString.data()), directoryString.size()) == 1);
     const auto result = call(directory, "{\"operation\":\"record\",\"text\":\"合成🌲\",\"source\":\"japanese\",\"day\":\"2026-09-15\"}");
     assert(result.find("\"recorded\":3") != std::string::npos);
+    // The id ResolveTypingSource gives Korean commits is one the shared store accepts.
+    const auto korean = call(directory, "{\"operation\":\"record\",\"text\":\"한글\",\"source\":\"korean\",\"day\":\"2026-09-15\"}");
+    assert(korean.find("\"recorded\":2") != std::string::npos);
     const auto loaded = call(directory, "{\"operation\":\"load\"}");
-    assert(loaded.find("\"total\":3") != std::string::npos);
+    assert(loaded.find("\"total\":5") != std::string::npos);
     assert(loaded.find("合成🌲") == std::string::npos);
     std::filesystem::remove_all(directory);
     return 0;
