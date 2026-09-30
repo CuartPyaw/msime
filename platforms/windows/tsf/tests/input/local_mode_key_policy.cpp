@@ -73,6 +73,10 @@ int main() {
     check(!triggers.expression && triggers.command && !triggers.mention, "command alone");
     triggers = parse(L"111");
     check(triggers.expression && triggers.command && triggers.mention, "all on");
+    // The Server sends V off while the focused Engine is in its own English mode, so an English word starting with V is not the V mode and its digits still select.
+    triggers = parse(L"011");
+    const std::wstring english = L"Very";
+    check(!IsExpressionModeComposition(english.c_str(), english.size(), triggers.expression), "V is a letter in English mode");
     for (const wchar_t *invalid : {L"", L"1", L"11", L"1111", L"1x1", L"abc"}) {
         triggers = parse(invalid);
         check(!triggers.expression && !triggers.command && !triggers.mention, "malformed frame is all off");

@@ -848,7 +848,9 @@ int wmain(int argc, wchar_t **argv) {
           // focused TIP, since the server is constructed after this handler.
           {
             std::lock_guard<std::mutex> lock(*tsf_config_mutex);
+            const bool dedicated_english = tsf_config->dedicated_english;
             *tsf_config = tsf_local_config(preferences);
+            tsf_config->dedicated_english = dedicated_english;
             tsf_config_dirty->store(true, std::memory_order_release);
           }
           {
@@ -1636,6 +1638,11 @@ int wmain(int argc, wchar_t **argv) {
           std::lock_guard<std::mutex> lock(*tsf_config_mutex);
           language.japanese = tsf_config->japanese_input_mode;
           language.korean = tsf_config->korean_input_mode;
+          // The TIP's V-mode key rule follows the focused session's English mode (Ctrl+Shift+E, the toolbar exit, a focus change): the next pass pushes the trigger frame again.
+          if (tsf_config->dedicated_english != language.dedicated_english) {
+            tsf_config->dedicated_english = language.dedicated_english;
+            tsf_config_dirty->store(true, std::memory_order_release);
+          }
         }
         toolbar.set_language_state(language);
       }

@@ -135,6 +135,11 @@ int main() {
     require(frame_text(tsf_config_frames(config)[8]) == L"001");
     config.expression_mode = config.command_mode = true;
     require(frame_text(tsf_config_frames(config)[8]) == L"111");
+    // In the Engine's own English mode V is a letter, so the TIP is told the V mode is off and a word starting with V keeps digit selection and paging; "/" and "@" are unaffected.
+    config.dedicated_english = true;
+    require(frame_text(tsf_config_frames(config)[8]) == L"011");
+    config.dedicated_english = false;
+    require(frame_text(tsf_config_frames(config)[8]) == L"111");
     // The TIP drops every type above MaxKnown, so the new type has to be inside it.
     require(FanyImeWorkerReplyType::LocalModeTriggersChanged <=
             FanyImeWorkerReplyType::MaxKnown);

@@ -528,9 +528,12 @@ ServerSession::word_character(const FanyImeNamedpipeData &packet,
     return std::nullopt;
   const auto current = view();
   // Korean has no candidate to take a character from; its '-', '=', '[' and ']' are punctuation.
+  // A key the Engine spells in its current state (V mode's '-') is input, as `edit_kind` routes it; taking it here first would commit the highlighted row instead.
   if (current.at("local_mode") == "unknown" ||
       current.at("editing_text").get<std::string>().empty() ||
       current.value("scheme", 0u) == 4u ||
+      spelled_by_engine(current.value("spelling_symbols", std::string{}),
+                        static_cast<uint32_t>(packet.wch)) ||
       !word_character_edge(packet, binding, current.value("scheme", 0u) == 3u))
     return std::nullopt;
   std::string fallback;
