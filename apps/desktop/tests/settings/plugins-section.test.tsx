@@ -363,6 +363,13 @@ test("checks a name list the way the host does", () => {
       { text: "张三", key: "zs" },
     ]),
   ).toBe("「张三」重复了。");
+  // Names are saved trimmed, so a pasted trailing space does not make a second name.
+  expect(
+    mentionListIssue([
+      { text: "张三", key: "" },
+      { text: "张三 ", key: "" },
+    ]),
+  ).toBe("「张三」重复了。");
   expect(
     mentionListIssue(Array.from({ length: 1001 }, (_, index) => ({ text: `${index}`, key: "" }))),
   ).toBe("名单最多 1000 条。");

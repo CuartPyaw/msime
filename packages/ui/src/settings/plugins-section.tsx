@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as settings from "./settings-style";
 import { GroupList, Row, Segmented, Select, Slider, Switch } from "../core/platform-controls";
 import type { ConfirmRequest } from "../core/confirm";
@@ -90,8 +90,10 @@ export function mentionListIssue(entries: readonly MentionEntry[]): string | nul
     ) {
       return `${row}的拼音只能是小写字母，音节之间用 ' 分隔，例如 zhang'san。`;
     }
-    if (seen.has(entry.text)) return `「${entry.text}」重复了。`;
-    seen.add(entry.text);
+    // Compared as saved: `saveMentions` trims each name before the host checks for duplicates.
+    const text = entry.text.trim();
+    if (seen.has(text)) return `「${text}」重复了。`;
+    seen.add(text);
   }
   return null;
 }
@@ -181,11 +183,15 @@ export function PluginsSection({
   confirm,
 }: PluginsSectionProps) {
   const [catalog, setCatalog] = useState<PluginCatalogResult>({ packages: [], issues: [] });
+  // Until a catalog has been read, an empty one says nothing about what is installed: no pack is reported missing.
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [working, setWorking] = useState(false);
   const [notice, setNotice] = useState("");
   const [mentions, setMentions] = useState<MentionEntry[]>([]);
   const [savedMentions, setSavedMentions] = useState<MentionEntry[]>([]);
   const mentionsEditable = triggers && Boolean(client);
+  // The page stays mounted while hidden, so a reload on the next visit must not overwrite edits that were never saved.
+  const mentionsDirtyRef = useRef(false);
 
   useEffect(() => {
     if (!active || !client) return;
@@ -193,7 +199,9 @@ export function PluginsSection({
     void client
       .catalog()
       .then((next) => {
-        if (current) setCatalog(next);
+        if (!current) return;
+        setCatalog(next);
+        setCatalogLoaded(true);
       })
       .catch((error: unknown) => {
         if (current) onError(pluginErrorMessage(error, "无法读取扩展包列表，请重试。"));
@@ -203,7 +211,7 @@ export function PluginsSection({
         .loadMentions()
         .then((next) => {
           if (!current) return;
-          setMentions(next);
+          if (!mentionsDirtyRef.current) setMentions(next);
           setSavedMentions(next);
         })
         .catch((error: unknown) => {
@@ -224,8 +232,15 @@ export function PluginsSection({
   const commandPacks = packs("command_table");
   const { key_sound, commit_sound, melody, achievements, command_tables } = preferences;
 
+  // After an import or removal that already succeeded: a failed reread is reported as such, not as a failed import or removal.
   const refresh = async () => {
-    if (client) setCatalog(await client.catalog());
+    if (!client) return;
+    try {
+      setCatalog(await client.catalog());
+      setCatalogLoaded(true);
+    } catch (error) {
+      onError(pluginErrorMessage(error, "无法读取扩展包列表，请重试。"));
+    }
   };
 
   const importPack = async (source: "folder" | "archive") => {
@@ -277,6 +292,7 @@ export function PluginsSection({
 
   const mentionIssue = mentionListIssue(mentions);
   const mentionsDirty = JSON.stringify(mentions) !== JSON.stringify(savedMentions);
+  mentionsDirtyRef.current = mentionsDirty;
   const updateMention = (index: number, patch: Partial<MentionEntry>) =>
     setMentions((current) =>
       current.map((entry, position) => (position === index ? { ...entry, ...patch } : entry)),
@@ -297,7 +313,10 @@ export function PluginsSection({
   };
 
   // Enabled tables that are no longer installed, listed so they can be switched off.
-  const missingTables = command_tables.filter((id) => !commandPacks.some((pack) => pack.id === id));
+  const missingTables = catalogLoaded
+    ? command_tables.filter((id) => !commandPacks.some((pack) => pack.id === id))
+    : [];
+  const packsListed = Boolean(client) && catalogLoaded;
 
   return (
     <>
@@ -329,7 +348,7 @@ export function PluginsSection({
                 onChange({ ...preferences, key_sound: { ...key_sound, pack: event.target.value } })
               }
             >
-              {packOptions(keyPacks, key_sound.pack, Boolean(client)).map((option) => (
+              {packOptions(keyPacks, key_sound.pack, packsListed).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -343,7 +362,7 @@ export function PluginsSection({
                 onChange({ ...preferences, melody: { pack: event.target.value } })
               }
             >
-              {packOptions(melodyPacks, melody.pack, Boolean(client)).map((option) => (
+              {packOptions(melodyPacks, melody.pack, packsListed).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -405,7 +424,7 @@ export function PluginsSection({
               }
             >
               <option value="">未选择</option>
-              {packOptions(musicPacks, preferences.music.pack, Boolean(client)).map((option) => (
+              {packOptions(musicPacks, preferences.music.pack, packsListed).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
