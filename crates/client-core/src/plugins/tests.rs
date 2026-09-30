@@ -474,6 +474,17 @@ fn command_tables_follow_the_rules_the_engine_expands_them_by() {
             "为空或太长",
         ),
         (row("sig", &format!("{long}{{date:%A %B}}")), "展开后太长"),
+        // Fits in September, one unit over in October to December, where an unpadded month has two digits.
+        (
+            row(
+                "sig",
+                &format!(
+                    "{}{{date:%A%A%A%-m}}",
+                    "字".repeat(command_table::MAX_TEXT_UTF16 - 28)
+                ),
+            ),
+            "展开后太长",
+        ),
         (format!("{}{}", row("sig", "a"), row("sig", "b")), "重复了"),
         (
             "[[commands]]\ntrigger = 'sig'\ntemplate = 'x'\n".to_owned(),

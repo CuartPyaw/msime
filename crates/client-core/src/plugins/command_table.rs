@@ -105,12 +105,32 @@ pub fn validate(command: &CommandRow) -> Result<(), String> {
     Ok(())
 }
 
-/// The template expanded at an instant whose fields are all at their widest - a two-digit day and hour, September and Wednesday for the longest English names - so a template that fits here fits on every day. `None` when a placeholder is not one of the three or its format does not parse.
+/// The template expanded at the widest of two instants - both a Wednesday with a two-digit day and hour, one in September for the longest English names, one in December for the two-digit month an unpadded `%-m` gives - so a template that fits here fits on every day. `None` when a placeholder is not one of the three or its format does not parse.
 fn expand_longest(template: &str) -> Option<String> {
-    let instant = PrimitiveDateTime::new(
-        Date::from_calendar_date(2026, Month::September, 30).ok()?,
-        Time::from_hms(23, 59, 59).ok()?,
-    );
+    let time = Time::from_hms(23, 59, 59).ok()?;
+    let september = expand_at(
+        template,
+        PrimitiveDateTime::new(
+            Date::from_calendar_date(2026, Month::September, 30).ok()?,
+            time,
+        ),
+    )?;
+    let december = expand_at(
+        template,
+        PrimitiveDateTime::new(
+            Date::from_calendar_date(2026, Month::December, 30).ok()?,
+            time,
+        ),
+    )?;
+    let utf16 = |text: &str| text.encode_utf16().count();
+    Some(if utf16(&december) > utf16(&september) {
+        december
+    } else {
+        september
+    })
+}
+
+fn expand_at(template: &str, instant: PrimitiveDateTime) -> Option<String> {
     let mut output = String::with_capacity(template.len());
     let mut rest = template;
     while let Some(open) = rest.find(['{', '}']) {
