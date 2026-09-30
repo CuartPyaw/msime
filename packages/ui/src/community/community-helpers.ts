@@ -113,7 +113,7 @@ export function candidateSkinMessage(error: unknown, publishing = false): string
         ? "服务器未接受这款皮肤：请确认图片每边不超过 2048 像素、能被正常解码，且皮肤 ID 不与内置主题重名。"
         : "内容无效，请修改后重试。";
     case "community_conflict":
-      return "发布信息已变更或已达到 20 款上限。";
+      return "发布信息已变更，或皮肤库已达到数量上限。";
     case "community_rate_limited":
       return "发布太频繁，请稍后再试。";
     case "community_forbidden":

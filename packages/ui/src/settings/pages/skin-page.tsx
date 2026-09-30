@@ -17,6 +17,7 @@ import {
   useSkinCatalog,
 } from "../../skin/external-skins";
 import { CandidateSkinPublishDialog } from "../../community/candidate-skin-publish-dialog";
+import type { CandidateSkinVisibility } from "../../community/community-candidate-skins";
 import { ScreenKeyboardPreview } from "../../keyboard/screen-keyboard-preview";
 import { TouchKeyboardSkinEditor } from "../../keyboard/touch-keyboard-skin-editor";
 import { GroupList, Row, Segmented, Switch } from "../../core/platform-controls";
@@ -75,7 +76,7 @@ export function SkinSettingsPage() {
   const { onCustomThemeChange, onPreferencesChange } = createSettingsDraftActions({ setDraft });
   // The package offered to the candidate-skin community from its card; the dialog is drawn outside the fieldset so a settings save in flight does not disable it.
   const [publishSkinId, setPublishSkinId] = useState<string | null>(null);
-  const [published, setPublished] = useState(false);
+  const [published, setPublished] = useState<CandidateSkinVisibility | null>(null);
   const candidateSkins = client.communityCandidateSkins;
   const importsSkin = host?.skin_directory_import === true;
   const skins = useSkinCatalog(client.scanSkinCatalog, client.openSkinDirectory, importsSkin);
@@ -233,7 +234,7 @@ export function SkinSettingsPage() {
               onPublish={
                 candidateSkins
                   ? (id) => {
-                      setPublished(false);
+                      setPublished(null);
                       setPublishSkinId(id);
                     }
                   : undefined
@@ -243,7 +244,7 @@ export function SkinSettingsPage() {
         </ThemeCarousel>
         {published && (
           <p role="status" className={settings.externalMeta}>
-            已发布到社区。
+            {published === "private" ? "已保存到你的皮肤库，仅自己可见。" : "已发布到社区。"}
           </p>
         )}
         <div className={settings.groups}>
@@ -354,9 +355,9 @@ export function SkinSettingsPage() {
           initialSkinId={publishSkinId}
           openSkinDirectory={client.openSkinDirectory}
           onClose={() => setPublishSkinId(null)}
-          onPublished={() => {
+          onPublished={(skin) => {
             setPublishSkinId(null);
-            setPublished(true);
+            setPublished(skin.visibility);
           }}
           onLogin={() => {
             setPublishSkinId(null);

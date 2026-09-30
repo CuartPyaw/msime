@@ -143,10 +143,12 @@ pub async fn candidate_skin_community_install(
 pub async fn candidate_skin_community_pack_preview(
     directory: State<'_, SkinDirectoryState>,
     skin_id: String,
+    // A private package may leave out the asset license; none checks as public.
+    visibility: Option<CandidateSkinVisibility>,
 ) -> Result<CandidateSkinPackPreview, CommandError> {
     let root = directory.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        candidate_community::pack(&root, &skin_id)
+        candidate_community::pack_as(&root, &skin_id, visibility.unwrap_or_default())
             .map(|packed| CandidateSkinPackPreview {
                 suggested_name: packed.suggested_name,
                 license: packed.license,
@@ -167,7 +169,7 @@ pub async fn candidate_skin_community_publish(
     id: String,
     name: String,
     description: String,
-    // A page from before private packages sends none, and published publicly.
+    // None publishes publicly, as every page did before private packages.
     visibility: Option<CandidateSkinVisibility>,
 ) -> Result<CandidateSkinItem, CommandError> {
     let id = community_id(&id)?;

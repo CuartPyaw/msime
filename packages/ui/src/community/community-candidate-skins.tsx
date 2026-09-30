@@ -14,6 +14,9 @@ import { CommunitySkinModerationSection } from "./community-skin-moderation-sect
 /** The server's license columns; each is `""` when the manifest leaves it out. */
 export type CommunityCandidateSkinLicense = { code: string; assets: string; source: string };
 
+/** Who can see a package: everyone in the gallery, or only its owner, whose library sync keeps private packages in. */
+export type CandidateSkinVisibility = "public" | "private";
+
 export type CommunityCandidateSkin = {
   id: string;
   /** The manifest id, which is also the folder the package installs into. */
@@ -31,6 +34,8 @@ export type CommunityCandidateSkin = {
   owned: boolean;
   my_rating: number;
   created_at: string;
+  visibility: CandidateSkinVisibility;
+  updated_at: string;
 };
 
 export type CommunityCandidateSkinPage = {
@@ -46,6 +51,20 @@ export type CandidateSkinPackPreview = {
   size: number;
 };
 
+/** A package one sync run left as it was, with a `candidate_skin_*` rule code or an `account_*` request code. */
+export type CandidateSkinSyncSkip = { package_id: string; code: string };
+
+/** What one sync of the local skin directory with the user's library did, each list by package id. */
+export type CandidateSkinSyncReport = {
+  uploaded: string[];
+  downloaded: string[];
+  deleted_local: string[];
+  deleted_cloud: string[];
+  skipped: CandidateSkinSyncSkip[];
+  /** `account_rate_limited` or `candidate_skin_library_limit` when uploads stopped for the rest of the run. */
+  stopped: string | null;
+};
+
 /** Desktop community commands for candidate-window skin packages; the host packs, downloads and installs, so the webview never handles paths or package bytes. */
 export interface CandidateSkinCommunityClient {
   list(offset: number, search: string, mine: boolean): Promise<CommunityCandidateSkinPage>;
@@ -53,13 +72,22 @@ export interface CandidateSkinCommunityClient {
   preview(id: string): Promise<{ dataUrl: string }>;
   /** Downloads and installs into the external skin directory, answering with the rescanned catalog. */
   install(id: string, replace: boolean): Promise<SkinCatalog>;
-  packPreview(skinId: string): Promise<CandidateSkinPackPreview>;
+  /** Checks the package against the rules for `visibility`: only a public package needs an asset license. */
+  packPreview(
+    skinId: string,
+    visibility: CandidateSkinVisibility,
+  ): Promise<CandidateSkinPackPreview>;
+  /** A package sync already keeps in the library is updated in place, so publishing never leaves a second copy. */
   publish(
     skinId: string,
     id: string,
     name: string,
     description: string,
+    visibility: CandidateSkinVisibility,
   ): Promise<CommunityCandidateSkin>;
+  setVisibility(id: string, visibility: CandidateSkinVisibility): Promise<CommunityCandidateSkin>;
+  /** Brings the local skin directory and the signed-in user's library in step; `community_unauthorized` when signed out. */
+  sync(): Promise<CandidateSkinSyncReport>;
   rate(id: string, stars: number): Promise<{ stars: number }>;
   unpublish(id: string): Promise<{ deleted: boolean }>;
 }
@@ -141,7 +169,10 @@ function CommunityCandidateSkinCard({
         className={style.cardStage}
       />
       <strong className={style.cardTitle}>{skin.name}</strong>
-      <span className={style.cardAuthor}>{skin.owned ? "我的作品" : skin.author}</span>
+      <span className={style.cardAuthor}>
+        {skin.owned ? "我的作品" : skin.author}
+        {skin.visibility === "private" && " · 私有"}
+      </span>
       <span className={style.cardMetrics}>
         <span>↓ {skin.downloads.toLocaleString("zh-CN")}</span>
         <span>☆ {communityRating(skin.rating_count, skin.rating_average)}</span>
@@ -276,13 +307,43 @@ export function CommunityCandidateSkinsPage({
     }
   };
 
-  const unpublish = () => {
-    void unpublishSelected("已下架这款皮肤；其他用户将无法再下载，已安装的本地副本不会受影响。");
+  const changeVisibility = async (visibility: CandidateSkinVisibility) => {
+    if (!selected) return;
+    const currentClient = gallery.beginAction();
+    if (currentClient === null) return;
+    const target = selected;
+    gallery.setError("");
+    setActionNotice("");
+    try {
+      const updated = await client.setVisibility(target.id, visibility);
+      if (!gallery.isCurrent(currentClient)) return;
+      gallery.setSelected(updated);
+      gallery.setItems((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      setActionNotice(
+        visibility === "public"
+          ? "已公开，其他用户现在可以下载这款皮肤。"
+          : "已设为私有，只有你能看到这款皮肤。",
+      );
+    } catch (actionError) {
+      if (gallery.isCurrent(currentClient)) gallery.fail(actionError);
+    } finally {
+      gallery.endAction(currentClient);
+    }
   };
 
-  const publishDone = async () => {
+  const unpublish = () => {
+    void unpublishSelected(
+      "已下架这款皮肤；其他用户将无法再下载。本地皮肤会保留，并在下次同步时作为私有皮肤存回你的皮肤库。",
+    );
+  };
+
+  const publishDone = async (published: CommunityCandidateSkin) => {
     setPublishOpen(false);
-    setActionNotice("已发布到社区。");
+    setActionNotice(
+      published.visibility === "private" ? "已保存到你的皮肤库，仅自己可见。" : "已发布到社区。",
+    );
     await requestList(activeSearch, false);
   };
 
@@ -320,7 +381,11 @@ export function CommunityCandidateSkinsPage({
                   .join(" · ")}
               </p>
             </div>
-            {selected.owned && <span className={style.detailBadge}>我的作品</span>}
+            {selected.owned && (
+              <span className={style.detailBadge}>
+                {selected.visibility === "private" ? "私有" : "我的作品"}
+              </span>
+            )}
           </div>
           {selected.description && <p className={style.description}>{selected.description}</p>}
           {license && <p className={style.metrics}>{license}</p>}
@@ -381,11 +446,24 @@ export function CommunityCandidateSkinsPage({
               </div>
             </div>
           )}
+          {selected.owned && (
+            <button
+              type="button"
+              className={`secondary ${style.action}`}
+              disabled={actionBusy || detailBusy}
+              onClick={() =>
+                void changeVisibility(selected.visibility === "private" ? "public" : "private")
+              }
+            >
+              {selected.visibility === "private" ? "公开" : "设为私有"}
+            </button>
+          )}
           <CommunitySkinModerationSection
             owned={selected.owned}
+            unpublishable={selected.visibility === "public"}
             actionBusy={actionBusy}
             ratingDescription="我的评分（安装后可评，可重新选择）"
-            unpublishMessage={`下架后其他用户无法再下载，已安装的本地皮肤会保留。确定下架“${selected.name}”吗？`}
+            unpublishMessage={`下架后其他用户无法再下载，下载数和评分会清空；本地皮肤会保留并以私有方式同步。只想不让别人看到，可以改用“设为私有”。确定下架“${selected.name}”吗？`}
             confirmUnpublish={confirmUnpublish}
             onRate={(stars) => void rateSelected(stars)}
             onRequestUnpublish={() => setConfirmUnpublish(true)}
@@ -437,7 +515,7 @@ export function CommunityCandidateSkinsPage({
       )}
       {!listBusy && skins.length === 0 && (
         <p className={style.notice}>
-          {mineOnly ? "还没有已发布的候选窗皮肤。" : "暂时没有匹配的候选窗皮肤。"}
+          {mineOnly ? "你的皮肤库里还没有候选窗皮肤。" : "暂时没有匹配的候选窗皮肤。"}
         </p>
       )}
       <div className={style.grid}>

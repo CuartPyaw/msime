@@ -12,22 +12,26 @@ test("the desktop candidate-skin community invokes the host commands with camelC
   await community.detail(id);
   await community.preview(id);
   await community.install(id, true);
-  await community.packPreview("ink-wash");
-  await community.publish("ink-wash", id, "水墨", "淡墨");
+  await community.packPreview("ink-wash", "private");
+  await community.publish("ink-wash", id, "水墨", "淡墨", "private");
   await community.rate(id, 5);
   await community.unpublish(id);
+  await community.setVisibility(id, "public");
+  await community.sync();
 
   expect(invoke.mock.calls).toEqual([
     ["candidate_skin_community_list", { offset: 20, search: "水墨", mine: true }],
     ["candidate_skin_community_detail", { id }],
     ["candidate_skin_community_preview", { id }],
     ["candidate_skin_community_install", { id, replace: true }],
-    ["candidate_skin_community_pack_preview", { skinId: "ink-wash" }],
+    ["candidate_skin_community_pack_preview", { skinId: "ink-wash", visibility: "private" }],
     [
       "candidate_skin_community_publish",
-      { skinId: "ink-wash", id, name: "水墨", description: "淡墨" },
+      { skinId: "ink-wash", id, name: "水墨", description: "淡墨", visibility: "private" },
     ],
     ["candidate_skin_community_rate", { id, stars: 5 }],
     ["candidate_skin_community_unpublish", { id }],
+    ["candidate_skin_community_set_visibility", { id, visibility: "public" }],
+    ["candidate_skin_community_sync"],
   ]);
 });
