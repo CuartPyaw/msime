@@ -2933,10 +2933,12 @@ export function SettingsPage(props: SettingsPageProps) {
                   dirty={dirty}
                   showRestoreDefaults={Boolean(client.loadDefaultPreferences)}
                   onRestoreDefaults={onRestoreDefaults}
+                  onReload={canReloadSettingsPage(page) ? () => void reloadSettings() : undefined}
                 />
               </SettingsFormFrame>
             )}
-            {canReloadSettingsPage(page) && (
+            {/* With the form on screen 重新读取 sits in its action row; without it (a page with no form, or settings that failed to load) this is the only way back. */}
+            {canReloadSettingsPage(page) && !(draft && isSettingsFormPage(page)) && (
               <button className="secondary" disabled={busy} onClick={() => void reloadSettings()}>
                 重新读取
               </button>
