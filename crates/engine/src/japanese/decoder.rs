@@ -1,10 +1,13 @@
 //! The MSJPDT1 lemma dictionary (schemes-lang.md §5.7-§5.8, data-formats.md §8): tokens sorted by reading, a connection matrix and a string blob, all little-endian. Loaded once per path for the process.
 //!
-//! The file is read into memory rather than mapped: `memmap2::Mmap::map` is `unsafe`, which the workspace denies, and the reference's Windows build read it into a buffer the same way. Access is by offset with unaligned little-endian loads, as the C++ `memcpy` did.
+//! The file is mapped read-only, as japanese_sentence_decoder.cpp:101-125 did, so its 66 MB are clean, file-backed pages the system can evict under memory pressure (the iOS keyboard extension's limit) rather than dirty heap read on the first Japanese query. The mapping rests on the resource contract: `dict_japanese.dat` ships read-only in the resource bundle and a replacement arrives by rename, never by an in-place write, so a mapped inode keeps its bytes for as long as the dictionary lives (`replacing_a_model_file_never_alters_a_loaded_dictionary`). Access is by offset with unaligned little-endian loads, as the C++ `memcpy` did.
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, Weak};
+
+use memmap2::Mmap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JapaneseLemma {
@@ -40,7 +43,7 @@ struct Token {
 }
 
 pub struct JapaneseDictionary {
-    bytes: Vec<u8>,
+    bytes: Mmap,
     token_offset: usize,
     token_count: usize,
     connection_offset: usize,
@@ -79,11 +82,20 @@ fn best_ids(mut ids: Vec<u32>, limit: usize, cost: impl Fn(u32) -> i32) -> Vec<u
 
 impl JapaneseDictionary {
     /// `None` when the file is missing or fails any header, bounds or ordering check.
+    #[allow(unsafe_code)]
     pub fn load(path: &Path) -> Option<JapaneseDictionary> {
-        Self::parse(std::fs::read(path).ok()?)
+        let file = File::open(path).ok()?;
+        let metadata = file.metadata().ok()?;
+        // A directory or a file too short for the header is refused before anything is mapped.
+        if !metadata.is_file() || metadata.len() < HEADER_SIZE as u64 {
+            return None;
+        }
+        // SAFETY: a mapping is only sound while nothing changes the file underneath it. The model ships read-only with the resources and is replaced by rename, never written in place (module doc), so the mapped inode keeps its bytes for as long as the map lives.
+        let bytes = unsafe { Mmap::map(&file) }.ok()?;
+        Self::parse(bytes)
     }
 
-    fn parse(bytes: Vec<u8>) -> Option<JapaneseDictionary> {
+    fn parse(bytes: Mmap) -> Option<JapaneseDictionary> {
         if bytes.len() < HEADER_SIZE || &bytes[..8] != MAGIC {
             return None;
         }
@@ -402,8 +414,19 @@ pub(crate) mod test_model {
 mod tests {
     use super::*;
 
+    /// The same read-only mapping type `load` produces, over anonymous memory, so the checks run on in-memory bytes.
+    fn mapped(bytes: &[u8]) -> Mmap {
+        let mut map = memmap2::MmapMut::map_anon(bytes.len()).expect("anonymous map");
+        map.copy_from_slice(bytes);
+        map.make_read_only().expect("read-only map")
+    }
+
+    fn parse(bytes: impl AsRef<[u8]>) -> Option<JapaneseDictionary> {
+        JapaneseDictionary::parse(mapped(bytes.as_ref()))
+    }
+
     fn parsed(bytes: Vec<u8>) -> JapaneseDictionary {
-        JapaneseDictionary::parse(bytes).expect("valid model")
+        parse(bytes).expect("valid model")
     }
 
     fn surfaces(lemmas: &[JapaneseLemma]) -> Vec<&str> {
@@ -432,45 +455,78 @@ mod tests {
     fn truncated_or_corrupt_models_are_refused() {
         let valid = test_model::single("甲");
         for length in [0, 55, 77, valid.len() - 1] {
-            assert!(
-                JapaneseDictionary::parse(valid[..length].to_vec()).is_none(),
-                "{length}"
-            );
+            assert!(parse(&valid[..length]).is_none(), "{length}");
         }
         let mut invalid_offset = valid.clone();
         invalid_offset[24..32].fill(0xff);
-        assert!(JapaneseDictionary::parse(invalid_offset).is_none());
+        assert!(parse(invalid_offset).is_none());
         let mut invalid_reading = valid.clone();
         invalid_reading[60] = 0xff;
         invalid_reading[61] = 0xff;
-        assert!(JapaneseDictionary::parse(invalid_reading).is_none());
+        assert!(parse(invalid_reading).is_none());
 
         let root = tempfile::tempdir().expect("temporary directory");
         assert!(JapaneseDictionary::load(&root.path().join("absent.dat")).is_none());
         assert!(JapaneseDictionary::load(root.path()).is_none());
+        // Files shorter than the header, including an empty one, are refused before mapping.
+        for length in [0, HEADER_SIZE - 1] {
+            let short = root.path().join(format!("short-{length}.dat"));
+            std::fs::write(&short, &valid[..length]).expect("write short model");
+            assert!(JapaneseDictionary::load(&short).is_none(), "{length}");
+        }
+    }
+
+    /// `load` maps the file (the `bytes` field is a read-only `Mmap`, not an owned buffer) and every lookup, the matrix search included, reads through that mapping; unlinking the file does not disturb a loaded dictionary.
+    #[test]
+    fn a_mapped_model_answers_lookups_and_sentence_search() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        let path = root.path().join("dict_japanese.dat");
+        let file = test_model::bytes(
+            &[("かな", "仮名", 0, 0, 900), ("し", "詩", 0, 0, 400)],
+            1,
+            &[10],
+        );
+        std::fs::write(&path, &file).expect("write model");
+        let dictionary = JapaneseDictionary::load(&path).expect("model loads");
+        let _: &Mmap = &dictionary.bytes;
+        assert_eq!(dictionary.bytes.len(), file.len());
+        assert_eq!(&dictionary.bytes[..], &file[..]);
+        std::fs::remove_file(&path).expect("remove");
+
+        assert_eq!(surfaces(&dictionary.exact_lemmas("かな", 8)), vec!["仮名"]);
+        assert_eq!(surfaces(&dictionary.prefix_lemmas("か", 8)), vec!["仮名"]);
+        assert_eq!(dictionary.connection_cost(0, 0), 10);
+        let sentence = super::super::matrix::search_converted(
+            &dictionary,
+            &super::super::romaji::convert_romaji("kanasi"),
+            4,
+        );
+        // Sentence start, 仮名, 詩 and sentence end are each joined by the one 10-cost transition: 900 + 400 + 3 * 10.
+        assert_eq!(sentence[0].text, "仮名詩");
+        assert_eq!(sentence[0].cost, 1_330);
     }
 
     #[test]
     fn header_and_ordering_checks() {
         let mut bad_magic = test_model::single("甲");
         bad_magic[0] = b'X';
-        assert!(JapaneseDictionary::parse(bad_magic).is_none());
+        assert!(parse(bad_magic).is_none());
         let mut bad_version = test_model::single("甲");
         bad_version[8] = 2;
-        assert!(JapaneseDictionary::parse(bad_version).is_none());
+        assert!(parse(bad_version).is_none());
 
         let unsorted = test_model::bytes(&[("し", "市", 0, 0, 1), ("か", "蚊", 0, 0, 1)], 1, &[0]);
-        assert!(JapaneseDictionary::parse(unsorted).is_none());
+        assert!(parse(unsorted).is_none());
         let empty_reading = test_model::bytes(&[("", "空", 0, 0, 1)], 1, &[0]);
-        assert!(JapaneseDictionary::parse(empty_reading).is_none());
+        assert!(parse(empty_reading).is_none());
         let bad_id = test_model::bytes(&[("か", "蚊", 1, 0, 1)], 1, &[0]);
-        assert!(JapaneseDictionary::parse(bad_id).is_none());
+        assert!(parse(bad_id).is_none());
         let no_tokens = test_model::bytes(&[], 1, &[0]);
-        assert!(JapaneseDictionary::parse(no_tokens).is_none());
+        assert!(parse(no_tokens).is_none());
         // A string range that ends inside a character.
         let mut split = test_model::single("甲");
         split[60] = 5;
-        assert!(JapaneseDictionary::parse(split).is_none());
+        assert!(parse(split).is_none());
     }
 
     #[test]

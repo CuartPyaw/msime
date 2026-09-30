@@ -345,4 +345,59 @@ mod tests {
         assert_eq!(typo.sentence, "他事件");
         assert!(candidates.iter().all(|item| item.word != "他事件"));
     }
+
+    /// The keyboard-model rerank on the real dictionary, keystroke by keystroke, as a mobile host with the switch on runs it: every prefix of a nine-syllable reading is answered and the full reading carries the NeuralKeyboard row. This pins that the rerank is on the key path; its latency is measured by `crates/input-runtime/examples/rerank_latency.rs`, not here, because a debug `cargo test` timing would only be noise. Needs the dict-v2.0.1 resources with the keyboard model in `MSIME_EVAL_RESOURCES`.
+    #[test]
+    fn the_keyboard_rerank_answers_every_keystroke_on_the_real_dictionary() {
+        use crate::paths::RuntimePaths;
+        use crate::quanpin::dictionary::QuanpinDictionary;
+        use crate::types::{FuzzyPinyinOptions, SentenceAssociationOptions};
+
+        let Some(resources) = std::env::var_os("MSIME_EVAL_RESOURCES").map(PathBuf::from) else {
+            eprintln!(
+                "skipped: MSIME_EVAL_RESOURCES is not set to the dict-v2.0.1 resource directory"
+            );
+            return;
+        };
+        if !resources.join(assets::NEURAL_MODEL_KEYBOARD).is_file() {
+            eprintln!(
+                "skipped: {} is not in MSIME_EVAL_RESOURCES",
+                assets::NEURAL_MODEL_KEYBOARD
+            );
+            return;
+        }
+        let user = tempfile::tempdir().expect("user directory");
+        let paths = RuntimePaths {
+            resources: resources.clone(),
+            user_data: user.path().to_path_buf(),
+            cache: user.path().to_path_buf(),
+            dictionaries: resources,
+        };
+        let mut dictionary = QuanpinDictionary::new(&paths);
+        dictionary.set_sentence_association(SentenceAssociationOptions {
+            word_lattice: true,
+            neural_keyboard: true,
+            show_next_on_duplicate: true,
+        });
+        dictionary.set_rescoring_context("今天晚上");
+        let key = "womenyiqiquchifan";
+        let mut last = Vec::new();
+        for end in 1..=key.len() {
+            last = dictionary.query(&key[..end], "", 0, FuzzyPinyinOptions::default());
+            assert!(!last.is_empty(), "{}", &key[..end]);
+        }
+        let neural: Vec<&str> = last
+            .iter()
+            .filter(|item| item.source == CandidateSource::NeuralKeyboard)
+            .map(|item| item.word.as_str())
+            .collect();
+        assert_eq!(
+            neural.len(),
+            1,
+            "{:?}",
+            last.iter()
+                .map(|item| item.word.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
 }
