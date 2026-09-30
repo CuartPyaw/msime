@@ -627,8 +627,9 @@ fn spelling_table() -> &'static SpellingTable {
 
 impl SpellingTable {
     fn new(syllables: &[&str]) -> Self {
-        let mut seen = HashSet::new();
-        let mut by_code: HashMap<String, Vec<String>> = HashMap::new();
+        let prefix_capacity = syllables.iter().map(|syllable| syllable.len()).sum();
+        let mut seen = HashSet::with_capacity(prefix_capacity);
+        let mut by_code: HashMap<String, Vec<String>> = HashMap::with_capacity(prefix_capacity);
         let mut longest_code = 0;
         for syllable in syllables {
             for end in 1..=syllable.len() {
