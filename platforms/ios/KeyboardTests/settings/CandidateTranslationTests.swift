@@ -27,6 +27,24 @@ private struct TruncatingTranslationService: CandidateTranslationService {
   }
 }
 
+private final class BlockingTranslationService: CandidateTranslationService, @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  var callCount: Int {
+    lock.lock(); defer { lock.unlock() }
+    return count
+  }
+
+  func translate(words: [String], target: String) async throws -> [String] {
+    lock.lock()
+    count += 1
+    lock.unlock()
+    try await Task.sleep(nanoseconds: 5_000_000_000)
+    return words.map { _ in "hello" }
+  }
+}
+
 @MainActor
 final class CandidateTranslationTests: XCTestCase {
   func testOnlyCandidatesWithHanCharactersGoOutToTheNetwork() {
@@ -108,6 +126,20 @@ final class CandidateTranslationTests: XCTestCase {
     store.cancel()
     try await Task.sleep(nanoseconds: 900_000_000)
     XCTAssertTrue(service.calls.isEmpty)
+  }
+
+  func testCancelledRequestCanBeRetriedForTheSameCandidates() async throws {
+    let service = BlockingTranslationService()
+    let store = CandidateTranslationStore(service: service)
+    store.refresh(words: ["你好"], codes: ["EN"])
+    try await Task.sleep(nanoseconds: 900_000_000)
+    XCTAssertEqual(service.callCount, 1)
+
+    store.cancel()
+    store.refresh(words: ["你好"], codes: ["EN"])
+    try await Task.sleep(nanoseconds: 900_000_000)
+    XCTAssertEqual(service.callCount, 2)
+    store.cancel()
   }
 
   func testExpandedPanelRendersAnnotationsAndDeferredMenus() throws {
