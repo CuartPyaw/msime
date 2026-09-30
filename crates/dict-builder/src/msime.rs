@@ -141,37 +141,10 @@ pub struct CustomWord {
 pub fn parse_custom_words(text: &str) -> Result<Vec<CustomWord>> {
     let mut entries: IndexMap<(String, String), CustomWord> = IndexMap::new();
     for (number, line) in text::splitlines(text).into_iter().enumerate() {
-        let number = number + 1;
-        let stripped = text::strip(line);
-        if stripped.is_empty() || stripped.starts_with('#') {
+        let Some(entry) =
+            parse_custom_word(line).with_context(|| format!("custom/words.txt:{}", number + 1))?
+        else {
             continue;
-        }
-        let fields: Vec<&str> = stripped.split('\t').collect();
-        let [value, key, weight] = fields[..] else {
-            bail!("custom/words.txt:{number}: expected word, pinyin and weight: {line:?}");
-        };
-        let (value, key, weight) = (text::strip(value), text::strip(key), text::strip(weight));
-        if value.is_empty() {
-            bail!("custom/words.txt:{number}: the word is empty");
-        }
-        if !key.split('\'').all(|syllable| {
-            !syllable.is_empty() && syllable.bytes().all(|b| b.is_ascii_lowercase())
-        }) {
-            bail!("custom/words.txt:{number}: {key:?} is not quanpin separated by \"'\"");
-        }
-        if pinyin_table(key).is_none() {
-            bail!("custom/words.txt:{number}: {key:?} maps to no quanpin table");
-        }
-        let weight: i64 = weight.parse().with_context(|| {
-            format!("custom/words.txt:{number}: weight {weight:?} is not an integer")
-        })?;
-        if weight < 1 {
-            bail!("custom/words.txt:{number}: weight {weight} is below 1");
-        }
-        let entry = CustomWord {
-            value: value.to_owned(),
-            key: key.to_owned(),
-            weight,
         };
         match entries.get_mut(&(entry.key.clone(), entry.value.clone())) {
             Some(previous) if previous.weight >= entry.weight => {}
@@ -182,6 +155,42 @@ pub fn parse_custom_words(text: &str) -> Result<Vec<CustomWord>> {
         }
     }
     Ok(entries.into_values().collect())
+}
+
+/// One line of custom/words.txt: `None` for a blank or `#` comment line, an error naming the problem (without its location) for a malformed one. `check-words` validates contributed lines with this same function.
+pub fn parse_custom_word(line: &str) -> Result<Option<CustomWord>> {
+    let stripped = text::strip(line);
+    if stripped.is_empty() || stripped.starts_with('#') {
+        return Ok(None);
+    }
+    let fields: Vec<&str> = stripped.split('\t').collect();
+    let [value, key, weight] = fields[..] else {
+        bail!("expected word, pinyin and weight: {line:?}");
+    };
+    let (value, key, weight) = (text::strip(value), text::strip(key), text::strip(weight));
+    if value.is_empty() {
+        bail!("the word is empty");
+    }
+    if !key
+        .split('\'')
+        .all(|syllable| !syllable.is_empty() && syllable.bytes().all(|b| b.is_ascii_lowercase()))
+    {
+        bail!("{key:?} is not quanpin separated by \"'\"");
+    }
+    if pinyin_table(key).is_none() {
+        bail!("{key:?} maps to no quanpin table");
+    }
+    let weight: i64 = weight
+        .parse()
+        .with_context(|| format!("weight {weight:?} is not an integer"))?;
+    if weight < 1 {
+        bail!("weight {weight} is below 1");
+    }
+    Ok(Some(CustomWord {
+        value: value.to_owned(),
+        key: key.to_owned(),
+        weight,
+    }))
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
