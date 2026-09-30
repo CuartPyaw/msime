@@ -106,7 +106,11 @@ pub fn apply_fixed_positions(
         Vec::new()
     };
 
-    let mut dynamic_candidates = Vec::new();
+    let mut dynamic_candidates = if keep_dynamic_candidate_positions {
+        Vec::new()
+    } else {
+        Vec::with_capacity(candidates.len())
+    };
     if !keep_dynamic_candidate_positions {
         candidates.retain(|item| {
             if item.source.is_online() {
