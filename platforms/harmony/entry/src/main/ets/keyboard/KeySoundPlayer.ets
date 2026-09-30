@@ -65,7 +65,8 @@ export class KeySoundPlayer {
    */
   configure(settings: KeySoundSettings, stateRoot: string): void {
     const selection: KeySoundSelection = KeySoundPolicy.selection(settings);
-    const reload: boolean = selection.pack !== this.selection.pack
+    // After a play failure the pool is gone, so any settings change loads it again, as the failure message promises.
+    const reload: boolean = this.failed || selection.pack !== this.selection.pack
       || selection.melodyPack !== this.selection.melodyPack || stateRoot !== this.stateRoot;
     this.settings = settings;
     if (!reload) {

@@ -3270,7 +3270,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       if (value.commit_context?.typing_statistics !== false) {
         this.recordTypingStatistics(output, this.typingSource());
       }
-      if (!this.traits.password) {
+      if (!this.soundsSilencedByEditor()) {
         this.soundPlayer.commit();
       }
     }
@@ -4865,11 +4865,16 @@ export class KeyboardSession implements HardwareKeyTarget {
       MusicPolicy.active(this.editorAttributesKnown, this.traits.password, this.voiceRecording));
   }
 
+  /** Whether the editor forbids sounds: a password field, or one whose attributes have not arrived yet, since `traits` still describes the previous field until they do (as music waits for them). */
+  private soundsSilencedByEditor(): boolean {
+    return !this.editorAttributesKnown || this.traits.password;
+  }
+
   /**
    * The sound of a hardware key-down, on a 2in1 with key sounds on. Never in a password field: the rhythm of a password is what a key sound would give away.
    */
   hardwareKeySound(keyCode: number, unicodeChar: number, ctrl: boolean, alt: boolean, logo: boolean): void {
-    if (KeySoundPolicy.keysSilent(this.traits.password, this.isEnglish(), this.isEnglishCandidates())) {
+    if (KeySoundPolicy.keysSilent(this.soundsSilencedByEditor(), this.isEnglish(), this.isEnglishCandidates())) {
       return;
     }
     const keyClass: number = KeySoundPolicy.keyClass(keyCode, unicodeChar, ctrl, alt, logo);
@@ -4987,7 +4992,7 @@ export class KeyboardSession implements HardwareKeyTarget {
         const value: TypingStatisticsRecordResponse = JSON.parse(response) as TypingStatisticsRecordResponse;
         if (value.ok !== true) {
           KeyboardLog.error('typing statistics write refused');
-        } else if (typeof value.value?.milestone === 'number' && !this.traits.password) {
+        } else if (typeof value.value?.milestone === 'number' && !this.soundsSilencedByEditor()) {
           // host-api reports the milestone only while achievements are on; it plays the jingle itself on the desktop, and here the player does. Not over a password field, like every other sound.
           this.soundPlayer.achievement();
         }
