@@ -6,7 +6,9 @@ import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import javax.net.ssl.HttpsURLConnection;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -24,6 +26,7 @@ import org.json.JSONObject;
 public final class CommunityCatalog {
     private static final String ORIGIN = "https://api.msime.app";
     private static final int MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+    private static final int MAX_RESOURCE_RESPONSE_BYTES = 48 * 1024 * 1024;
     private static final int TIMEOUT_MILLIS = 30_000;
 
     /** One catalogue entry, flattened to what a list row shows. */
@@ -72,7 +75,7 @@ public final class CommunityCatalog {
             }
             try (InputStream input = connection.getInputStream()) {
                 return parse(kind, new JSONObject(
-                    new String(readBounded(input), StandardCharsets.UTF_8)));
+                    new String(readBounded(input, maximumResponseBytes(kind)), StandardCharsets.UTF_8)));
             }
         } catch (Exception | LinkageError error) {
             // 说出是哪一步断的。界面上仍然只有那一句，但把原因扔掉，下一次就还得从头猜。
@@ -86,17 +89,19 @@ public final class CommunityCatalog {
     private static Page parse(CommunityRequest.Kind kind, JSONObject root) {
         JSONArray values = root.optJSONArray(
             kind == CommunityRequest.Kind.SKIN ? "skins" : "items");
-        if (values == null) return new Page(List.of(), false, "");
-        if (exceedsPageLimit(values.length())) {
-            return new Page(List.of(), false, CommunityRequest.message(null, 500));
-        }
+        if (values == null) return new Page(List.of(), false, CommunityRequest.message(null, 500));
+        boolean hasMore = root.optBoolean("has_more", false);
         List<Item> items = new ArrayList<>(values.length());
+        Set<String> ids = new HashSet<>();
         for (int index = 0; index < values.length(); index++) {
             JSONObject value = values.optJSONObject(index);
             if (value == null) continue;
             String id = value.optString("id", "");
             String name = value.optString("name", "").trim();
             if (id.isEmpty() || name.isEmpty()) continue;
+            if (!ids.add(id)) {
+                return new Page(List.of(), false, CommunityRequest.message(null, 500));
+            }
             items.add(new Item(id, kind, name, value.optString("description", "").trim(),
                 value.optString("author", "").trim(),
                 value.optInt("saves", value.optInt("downloads", 0)),
@@ -104,12 +109,17 @@ public final class CommunityCatalog {
                 kind == CommunityRequest.Kind.SKIN ? value.optJSONObject("design")
                     : value.optJSONObject("content")));
         }
-        return new Page(List.copyOf(items), root.optBoolean("has_more", false), "");
+        if (invalidPage(values.length(), items.size(), hasMore)) {
+            return new Page(List.of(), false, CommunityRequest.message(null, 500));
+        }
+        return new Page(List.copyOf(items), hasMore, "");
     }
 
-    /** A page longer than the one the client asked for is a backend fault, not more results to show. Kept apart from parse so the JVM smoke can check it: the smokes run against android.jar, whose org.json classes are stubs that throw. */
-    private static boolean exceedsPageLimit(int length) {
-        return length > CommunityRequest.PAGE_SIZE;
+    /** A malformed page is a backend fault, not more results to show. Kept apart from parse so the JVM smoke can check it: the smokes run against android.jar, whose org.json classes are stubs that throw. */
+    static boolean invalidPage(int rawLength, int validLength, boolean hasMore) {
+        return rawLength > CommunityRequest.PAGE_SIZE
+            || validLength != rawLength
+            || (hasMore && validLength == 0);
     }
 
     /** The backend's own name for a failure, so the reader is told the specific thing. */
@@ -117,7 +127,7 @@ public final class CommunityCatalog {
         if (errors == null) return "";
         try (InputStream input = errors) {
             JSONObject root = new JSONObject(
-                new String(readBounded(input), StandardCharsets.UTF_8));
+                new String(readBounded(input, MAX_RESPONSE_BYTES), StandardCharsets.UTF_8));
             JSONObject error = root.optJSONObject("error");
             return error == null ? "" : error.optString("code", "");
         } catch (Exception error) {
@@ -125,12 +135,16 @@ public final class CommunityCatalog {
         }
     }
 
-    private static byte[] readBounded(InputStream input) throws Exception {
+    static int maximumResponseBytes(CommunityRequest.Kind kind) {
+        return kind == CommunityRequest.Kind.SKIN ? MAX_RESPONSE_BYTES : MAX_RESOURCE_RESPONSE_BYTES;
+    }
+
+    private static byte[] readBounded(InputStream input, int maximumBytes) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         byte[] buffer = new byte[8192];
         int count;
         while ((count = input.read(buffer)) != -1) {
-            if (output.size() + count > MAX_RESPONSE_BYTES)
+            if (output.size() + count > maximumBytes)
                 throw new IllegalStateException("community response too large");
             output.write(buffer, 0, count);
         }

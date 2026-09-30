@@ -195,7 +195,12 @@ pub(crate) fn split_import(text: &str, rime: bool, budget: usize) -> Option<Vec<
     } else {
         0
     };
-    let mut batches = Vec::new();
+    // Reserve an input-sized estimate up front so large imports do not
+    // repeatedly grow the batch list as each line boundary is discovered.
+    // The row limit can split earlier than the byte budget, so underestimating
+    // here is safe; a zero budget still needs room for the final empty batch.
+    let estimated_batches = text.len() / budget.max(1) + 1;
+    let mut batches = Vec::with_capacity(estimated_batches);
     let mut current = empty(0);
     let mut in_header = false;
     for (index, piece) in text.split_inclusive('\n').enumerate() {
