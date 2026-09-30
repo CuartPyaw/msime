@@ -89,14 +89,22 @@ pub fn validate(command: &CommandRow) -> Result<(), String> {
         return Err(format!("the title of {trigger} is empty or too long"));
     }
     let template = &command.template;
-    if template.trim().is_empty()
-        || crate::text::has_disallowed_control(template)
-        || !crate::text::is_bounded_utf16(template, MAX_TEXT_UTF16)
-    {
+    if template.trim().is_empty() || !crate::text::is_bounded_utf16(template, MAX_TEXT_UTF16) {
         return Err(format!("the template of {trigger} is empty or too long"));
+    }
+    // A candidate row shows one line, so a newline or tab would reach the application unseen: a line break in a terminal runs whatever follows it. `%n` and `%t` expand to them, so the expansion is checked too.
+    if crate::text::has_disallowed_control_with_allowed(template, &[]) {
+        return Err(format!(
+            "the template of {trigger} contains a control character"
+        ));
     }
     let expanded = expand_longest(template)
         .ok_or_else(|| format!("the template of {trigger} has an unknown placeholder"))?;
+    if crate::text::has_disallowed_control_with_allowed(&expanded, &[]) {
+        return Err(format!(
+            "the template of {trigger} contains a control character"
+        ));
+    }
     if !crate::text::is_bounded_utf16(&expanded, MAX_TEXT_UTF16) {
         return Err(format!("the template of {trigger} expands past the limit"));
     }

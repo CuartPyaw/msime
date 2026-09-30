@@ -53,8 +53,9 @@ pub enum MentionError {
 
 /// Why `entry` cannot be in the list, if it cannot.
 pub fn validate_entry(entry: &MentionEntry) -> Result<(), String> {
+    // A name or a place is one line: a candidate row cannot show a line break or tab it would commit.
     if entry.text.trim().is_empty()
-        || crate::text::has_disallowed_control(&entry.text)
+        || crate::text::has_disallowed_control_with_allowed(&entry.text, &[])
         || !crate::text::is_bounded_utf16(&entry.text, MAX_TEXT_UTF16)
     {
         return Err(format!("{} is empty or too long", entry.text));
@@ -195,6 +196,8 @@ mod tests {
             ("", ""),
             ("   ", ""),
             ("a\u{7}b", ""),
+            ("张三\nrm", ""),
+            ("a\tb", ""),
             ("张三", "Zhang"),
             ("张三", "zhang''san"),
             ("张三", "'zhang"),
