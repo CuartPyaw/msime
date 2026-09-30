@@ -181,7 +181,7 @@ pub fn merge_alternative_segmentations(
     merged.extend(primary_full);
     merged.extend(alternatives);
     merged.sort_by_key(|item| std::cmp::Reverse(item.weight));
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::with_capacity(merged.len());
     merged.retain(|item| seen.insert(item.word.clone()));
 
     if promote {
