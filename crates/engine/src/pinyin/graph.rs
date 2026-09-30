@@ -77,7 +77,7 @@ pub fn enumerate_complete_segmentations(
         }
     }
 
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(path_limit);
     if path_limit == 0 || graph.input_length == 0 || graph.edges.len() != graph.input_length + 1 {
         return result;
     }
