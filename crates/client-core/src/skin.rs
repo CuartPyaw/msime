@@ -4,6 +4,7 @@
 
 pub mod ai;
 pub mod candidate_community;
+pub mod candidate_sync;
 pub mod catalog;
 pub mod community;
 pub mod custom_library;

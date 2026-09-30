@@ -14,8 +14,8 @@ pub const USAGE: &str = "usage: msime-mcp [--options <runtime-options.json>] [--
 Serves the Model Context Protocol over stdio for 水杉输入法 (MSIME).
 
   --options <path>     The runtime-options document the input method hosts read. Defaults to MSIME_CLIENT_HOST_OPTIONS, then MSIME_IBUS_OPTIONS, then the platform's usual location.
-  --state-dir <path>   The directory holding preferences.json and typing-statistics.json. Defaults to MSIME_CLIENT_STATE_DIR, then the document's preferences_directory.
-  --allow-write        Offer the tools that change quick phrases and preferences. Without it the server is read-only.
+  --state-dir <path>   The directory holding preferences.json, typing-statistics.json and the skins folder. Defaults to MSIME_CLIENT_STATE_DIR, then the document's preferences_directory.
+  --allow-write        Offer the tools that change quick phrases and preferences and install candidate-window skins. Without it the server is read-only.
   --allow-dictionary-read
                        Offer the tools that read the user's own dictionary words and look up the candidates a code offers. With --allow-write as well, also the tools that add, reweight, remove and import words.
   --help, --version";
@@ -138,7 +138,7 @@ impl Config {
         Ok(document)
     }
 
-    /// The directory holding preferences.json and typing-statistics.json.
+    /// The directory holding preferences.json, typing-statistics.json and the skins folder.
     pub fn state_dir(&self, document: &Value) -> Result<PathBuf, String> {
         state_dir(self.state_dir.as_deref(), document, &self.options)
     }

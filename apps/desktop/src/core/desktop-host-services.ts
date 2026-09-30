@@ -1,6 +1,7 @@
 import type {
   CandidateSkinCommunityClient,
   CandidateSkinPackPreview,
+  CandidateSkinSyncReport,
   CommunityCandidateSkin,
   CommunityCandidateSkinPage,
   SkinCatalog,
@@ -25,15 +26,25 @@ export function createDesktopCandidateSkinCommunity(invoke: Invoke): CandidateSk
     preview: (id) => invoke<{ dataUrl: string }>("candidate_skin_community_preview", { id }),
     install: (id, replace) =>
       invoke<SkinCatalog>("candidate_skin_community_install", { id, replace }),
-    packPreview: (skinId) =>
-      invoke<CandidateSkinPackPreview>("candidate_skin_community_pack_preview", { skinId }),
-    publish: (skinId, id, name, description) =>
+    packPreview: (skinId, visibility) =>
+      invoke<CandidateSkinPackPreview>("candidate_skin_community_pack_preview", {
+        skinId,
+        visibility,
+      }),
+    publish: (skinId, id, name, description, visibility) =>
       invoke<CommunityCandidateSkin>("candidate_skin_community_publish", {
         skinId,
         id,
         name,
         description,
+        visibility,
       }),
+    setVisibility: (id, visibility) =>
+      invoke<CommunityCandidateSkin>("candidate_skin_community_set_visibility", {
+        id,
+        visibility,
+      }),
+    sync: () => invoke<CandidateSkinSyncReport>("candidate_skin_community_sync"),
     rate: (id, stars) => invoke<{ stars: number }>("candidate_skin_community_rate", { id, stars }),
     unpublish: (id) => invoke<{ deleted: boolean }>("candidate_skin_community_unpublish", { id }),
   };

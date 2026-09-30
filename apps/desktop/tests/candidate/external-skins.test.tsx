@@ -1223,6 +1223,8 @@ test("the theme page opens the candidate publish dialog outside the settings fie
     publish: vi.fn(),
     rate: vi.fn(),
     unpublish: vi.fn(),
+    setVisibility: vi.fn(),
+    sync: vi.fn(),
   };
   render(
     <SettingsPage
@@ -1241,7 +1243,9 @@ test("the theme page opens the candidate publish dialog outside the settings fie
   fireEvent.click(within(card).getByRole("button", { name: "发布到社区" }));
   const dialog = await screen.findByRole("dialog", { name: "发布候选窗皮肤" });
   expect(dialog.closest("fieldset")).toBeNull();
-  await waitFor(() => expect(communityCandidateSkins.packPreview).toHaveBeenCalledWith("sample"));
+  await waitFor(() =>
+    expect(communityCandidateSkins.packPreview).toHaveBeenCalledWith("sample", "public"),
+  );
   const name = await within(dialog).findByRole("textbox", { name: "发布皮肤名称" });
   // The dialog renders inside the settings form, and jsdom never performs implicit submission, so what keeps Enter from saving the draft in a browser is the keydown's default being prevented.
   expect(dialog.closest("form")).not.toBeNull();

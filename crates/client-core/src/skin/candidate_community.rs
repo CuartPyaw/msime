@@ -15,6 +15,7 @@ use crate::community::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
@@ -43,6 +44,12 @@ pub const MAX_PREVIEW_RESPONSE_BYTES: usize = 512 * 1024;
 pub const SERVER_BUILTIN_IDS: [&str; 4] = ["fluent", "wechat", "graphite", "willow_green"];
 
 const MAX_PUBLISH_RESPONSE_BYTES: usize = 64 * 1024;
+/// Largest sync listing: the per-user library cap of 100 rows at well under 1 KiB each, with room for the cap to grow.
+const MAX_SYNC_RESPONSE_BYTES: usize = 512 * 1024;
+/// Most rows one sync listing may carry, far above the server's per-user library cap.
+const MAX_SYNC_ENTRIES: usize = 1000;
+/// The query every list and detail request carries so the server includes `visibility`, `updated_at` and the signed-in user's private packages. Clients released before private packages existed read items with unknown fields refused, so the server sends the new fields only to clients that ask for them.
+const SYNC_FIELDS: &str = "fields=sync";
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(90);
 const MAX_RESOURCE_PATH_BYTES: usize = 256;
 const MANIFEST_FILE: &str = "skin.toml";
@@ -70,6 +77,15 @@ pub struct CandidateSkinLicense {
     pub source: String,
 }
 
+/// Who can see a package in the library. A private package is listed, previewed and downloadable only by its owner, and needs no asset license.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CandidateSkinVisibility {
+    #[default]
+    Public,
+    Private,
+}
+
 /// One published package as the gallery lists it. It never carries the manifest or any image bytes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -92,6 +108,15 @@ pub struct CandidateSkinItem {
     pub owned: bool,
     pub my_rating: u8,
     pub created_at: String,
+    /// Absent from a server that predates private packages, which only ever held public ones.
+    #[serde(default)]
+    pub visibility: CandidateSkinVisibility,
+    /// When the content or visibility last changed; `""` from a server that predates it.
+    #[serde(default)]
+    pub updated_at: String,
+    /// [`request_digest`] of the request that last set the content. The server sends it only for the signed-in user's own packages; `""` otherwise.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub request_sha256: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -128,19 +153,53 @@ pub struct CandidateSkinPublishRequest {
     pub description: String,
     pub manifest: String,
     pub files: BTreeMap<String, String>,
+    pub visibility: CandidateSkinVisibility,
 }
 
 impl CandidateSkinPublishRequest {
     /// The request that publishes `packed` under the listing `name` and `description`.
-    pub fn new(id: Uuid, name: String, description: String, packed: PackedSkin) -> Self {
+    pub fn new(
+        id: Uuid,
+        name: String,
+        description: String,
+        packed: PackedSkin,
+        visibility: CandidateSkinVisibility,
+    ) -> Self {
         Self {
             id,
             name,
             description,
             manifest: packed.manifest,
             files: packed.files,
+            visibility,
         }
     }
+}
+
+/// The body that replaces the content of a package the user already owns. The package id inside `manifest` must stay the same.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CandidateSkinReplaceRequest {
+    pub name: String,
+    pub description: String,
+    pub manifest: String,
+    pub files: BTreeMap<String, String>,
+}
+
+/// One row of the signed-in user's library as the sync listing returns it. `request_sha256` is [`request_digest`] of the request that last set its content.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CandidateSkinSyncEntry {
+    pub id: Uuid,
+    pub package_id: String,
+    pub request_sha256: String,
+    pub visibility: CandidateSkinVisibility,
+    pub updated_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CandidateSkinSyncList {
+    skins: Vec<CandidateSkinSyncEntry>,
 }
 
 #[derive(Deserialize)]
@@ -181,6 +240,22 @@ pub trait CandidateSkinCommunityApi: Send + Sync + 'static {
     ) -> Result<CandidateSkinPackage, AccountError>;
     fn rate_candidate_skin(&self, id: Uuid, stars: u8, token: &str) -> Result<(), AccountError>;
     fn unpublish_candidate_skin(&self, id: Uuid, token: &str) -> Result<(), AccountError>;
+    fn candidate_skin_sync_list(
+        &self,
+        token: &str,
+    ) -> Result<Vec<CandidateSkinSyncEntry>, AccountError>;
+    fn replace_candidate_skin(
+        &self,
+        id: Uuid,
+        request: &CandidateSkinReplaceRequest,
+        token: &str,
+    ) -> Result<CandidateSkinItem, AccountError>;
+    fn set_candidate_skin_visibility(
+        &self,
+        id: Uuid,
+        visibility: CandidateSkinVisibility,
+        token: &str,
+    ) -> Result<CandidateSkinItem, AccountError>;
 }
 
 impl CandidateSkinCommunityApi for BackendAccountClient {
@@ -197,7 +272,7 @@ impl CandidateSkinCommunityApi for BackendAccountClient {
         }
         let scope = if mine { "&scope=mine" } else { "" };
         let path = format!(
-            "/v1/community/candidate-skins?offset={offset}&q={}{scope}",
+            "/v1/community/candidate-skins?offset={offset}&q={}{scope}&{SYNC_FIELDS}",
             percent_encode(search)
         );
         let page = self.json::<CandidateSkinPage, ()>(Method::GET, &path, token, None)?;
@@ -213,7 +288,10 @@ impl CandidateSkinCommunityApi for BackendAccountClient {
         if id.is_nil() {
             return Err(AccountError::Invalid);
         }
-        let path = format!("/v1/community/candidate-skins/{}", id.hyphenated());
+        let path = format!(
+            "/v1/community/candidate-skins/{}?{SYNC_FIELDS}",
+            id.hyphenated()
+        );
         let item = self.json::<CandidateSkinItem, ()>(Method::GET, &path, token, None)?;
         validate_item(&item)?;
         if item.id != id {
@@ -321,6 +399,72 @@ impl CandidateSkinCommunityApi for BackendAccountClient {
         }
         Ok(())
     }
+
+    fn candidate_skin_sync_list(
+        &self,
+        token: &str,
+    ) -> Result<Vec<CandidateSkinSyncEntry>, AccountError> {
+        let list = self.json_with_limit::<CandidateSkinSyncList, ()>(
+            Method::GET,
+            "/v1/community/candidate-skins/sync",
+            Some(token),
+            None,
+            MAX_SYNC_RESPONSE_BYTES,
+        )?;
+        validate_sync_list(&list.skins)?;
+        Ok(list.skins)
+    }
+
+    fn replace_candidate_skin(
+        &self,
+        id: Uuid,
+        request: &CandidateSkinReplaceRequest,
+        token: &str,
+    ) -> Result<CandidateSkinItem, AccountError> {
+        validate_replace(id, request)?;
+        let path = format!("/v1/community/candidate-skins/{}", id.hyphenated());
+        let item = self.json_with_limits_timeout::<CandidateSkinItem, _>(
+            Method::PUT,
+            &path,
+            Some(token),
+            Some(request),
+            MAX_PUBLISH_BODY_BYTES,
+            MAX_PUBLISH_RESPONSE_BYTES,
+            TRANSFER_TIMEOUT,
+        )?;
+        validate_item(&item)?;
+        if item.id != id {
+            return Err(AccountError::Unavailable);
+        }
+        Ok(item)
+    }
+
+    fn set_candidate_skin_visibility(
+        &self,
+        id: Uuid,
+        visibility: CandidateSkinVisibility,
+        token: &str,
+    ) -> Result<CandidateSkinItem, AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
+        #[derive(Serialize)]
+        struct VisibilityRequest {
+            visibility: CandidateSkinVisibility,
+        }
+        let path = format!("/v1/community/candidate-skins/{}", id.hyphenated());
+        let item = self.json::<CandidateSkinItem, _>(
+            Method::PATCH,
+            &path,
+            Some(token),
+            Some(&VisibilityRequest { visibility }),
+        )?;
+        validate_item(&item)?;
+        if item.id != id || item.visibility != visibility {
+            return Err(AccountError::Unavailable);
+        }
+        Ok(item)
+    }
 }
 
 pub struct BackendCandidateSkinCommunityService<A: AccountApi, S: AccountSessionStorage> {
@@ -406,6 +550,46 @@ where
             api.unpublish_candidate_skin(id, token.ok_or(AccountError::Unauthorized)?)
         })
     }
+
+    /// Every package the signed-in user owns, private ones included, reduced to what sync compares.
+    pub fn sync_list(&self) -> Result<Vec<CandidateSkinSyncEntry>, AccountError> {
+        request_with_account_session(&self.api, &self.session, true, |api, token| {
+            api.candidate_skin_sync_list(token.ok_or(AccountError::Unauthorized)?)
+        })
+    }
+
+    pub fn replace(
+        &self,
+        id: Uuid,
+        request: &CandidateSkinReplaceRequest,
+    ) -> Result<CandidateSkinItem, AccountError> {
+        validate_replace(id, request)?;
+        request_with_account_session(&self.api, &self.session, true, |api, token| {
+            api.replace_candidate_skin(id, request, token.ok_or(AccountError::Unauthorized)?)
+        })
+    }
+
+    pub fn set_visibility(
+        &self,
+        id: Uuid,
+        visibility: CandidateSkinVisibility,
+    ) -> Result<CandidateSkinItem, AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
+        request_with_account_session(&self.api, &self.session, true, |api, token| {
+            api.set_candidate_skin_visibility(
+                id,
+                visibility,
+                token.ok_or(AccountError::Unauthorized)?,
+            )
+        })
+    }
+
+    /// The signed-in user's id, or `None` when signed out.
+    pub fn user_id(&self) -> Result<Option<String>, AccountError> {
+        self.session.status().map(|user| user.map(|user| user.id))
+    }
 }
 
 fn validate_query(offset: usize, search: &str) -> Result<(), AccountError> {
@@ -416,19 +600,69 @@ fn validate_query(offset: usize, search: &str) -> Result<(), AccountError> {
 }
 
 fn validate_publish(request: &CandidateSkinPublishRequest) -> Result<(), AccountError> {
-    if request.id.is_nil()
-        || !valid_name(&request.name)
-        || !valid_description(&request.description)
-        || request.manifest.is_empty()
-        || request.manifest.len() > MAX_MANIFEST_BYTES
-        || request.files.is_empty()
-        || request.files.len() > MAX_PACKAGE_FILES
-        || request
-            .files
+    if request.id.is_nil() {
+        return Err(AccountError::Invalid);
+    }
+    validate_content(
+        &request.name,
+        &request.description,
+        &request.manifest,
+        &request.files,
+    )
+}
+
+fn validate_replace(id: Uuid, request: &CandidateSkinReplaceRequest) -> Result<(), AccountError> {
+    if id.is_nil() {
+        return Err(AccountError::Invalid);
+    }
+    validate_content(
+        &request.name,
+        &request.description,
+        &request.manifest,
+        &request.files,
+    )
+}
+
+fn validate_content(
+    name: &str,
+    description: &str,
+    manifest: &str,
+    files: &BTreeMap<String, String>,
+) -> Result<(), AccountError> {
+    if !valid_name(name)
+        || !valid_description(description)
+        || manifest.is_empty()
+        || manifest.len() > MAX_MANIFEST_BYTES
+        || files.is_empty()
+        || files.len() > MAX_PACKAGE_FILES
+        || files
             .keys()
             .any(|path| !catalog::safe_resource(path, MAX_RESOURCE_PATH_BYTES))
     {
         return Err(AccountError::Invalid);
+    }
+    Ok(())
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+fn validate_sync_list(entries: &[CandidateSkinSyncEntry]) -> Result<(), AccountError> {
+    let mut ids = BTreeSet::new();
+    if entries.len() > MAX_SYNC_ENTRIES
+        || entries.iter().any(|entry| {
+            entry.id.is_nil()
+                || !ids.insert(entry.id)
+                || !valid_package_id(&entry.package_id)
+                || !is_sha256_hex(&entry.request_sha256)
+                || !crate::text::is_bounded_text(&entry.updated_at, 64)
+        })
+    {
+        return Err(AccountError::Unavailable);
     }
     Ok(())
 }
@@ -461,7 +695,7 @@ fn validate_item(item: &CandidateSkinItem) -> Result<(), AccountError> {
         || item.version.is_empty()
         || !crate::text::is_bounded_text(&item.version, 32)
         || !crate::text::is_bounded_text(&license.code, 120)
-        || license.assets.trim().is_empty()
+        || (item.visibility == CandidateSkinVisibility::Public && license.assets.trim().is_empty())
         || !crate::text::is_bounded_text(&license.assets, 120)
         || !crate::text::is_bounded_text(&license.source, 500)
         || item.size > MAX_PACKAGE_BYTES as u64
@@ -470,6 +704,8 @@ fn validate_item(item: &CandidateSkinItem) -> Result<(), AccountError> {
         || !valid_rating(item.rating_count, item.rating_average, item.my_rating)
         || item.created_at.is_empty()
         || !crate::text::is_bounded_text(&item.created_at, 64)
+        || !crate::text::is_bounded_text(&item.updated_at, 64)
+        || !(item.request_sha256.is_empty() || is_sha256_hex(&item.request_sha256))
     {
         return Err(AccountError::Unavailable);
     }
@@ -538,9 +774,12 @@ pub struct PackedSkin {
     pub manifest: String,
     /// Each referenced image by its package-relative path, in standard base64.
     pub files: BTreeMap<String, String>,
+    /// The manifest's license; each part `None` when a private package leaves it out.
     pub license: SkinLicense,
     /// The manifest name cut to the 32 characters a listing name allows, or the package id when that is not a valid listing name.
     pub suggested_name: String,
+    /// The manifest description cut to the 280 characters a listing description allows, or `""`.
+    pub suggested_description: String,
     /// Total bytes of the images.
     pub size: usize,
     pub file_count: usize,
@@ -589,21 +828,31 @@ fn shared_preview(summary: &SkinSummary) -> Result<&str, &'static str> {
 
 /// Build the publish payload for the installed package `id` under `root`: `skin.toml` verbatim and exactly the images it references. Every rule the server applies that the client can check is applied here, each with its own error code, so a package the server would refuse is refused before anything is uploaded. Image dimensions and decodability are left to the server, which re-encodes every image.
 pub fn pack(root: &Path, id: &str) -> Result<PackedSkin, &'static str> {
+    pack_as(root, id, CandidateSkinVisibility::Public)
+}
+
+/// [`pack`] for a package uploaded with `visibility`: a private package may leave out the asset license, which only a public listing has to declare.
+pub fn pack_as(
+    root: &Path,
+    id: &str,
+    visibility: CandidateSkinVisibility,
+) -> Result<PackedSkin, &'static str> {
     let summary = catalog::load_package(root, id).map_err(|_| PACKAGE)?;
     if SERVER_BUILTIN_IDS.contains(&id) {
         return Err(PACKAGE);
     }
     let preview = shared_preview(&summary)?;
-    let license = summary
-        .license
-        .clone()
-        .filter(|license| {
-            license
-                .assets
-                .as_deref()
-                .is_some_and(|assets| !assets.trim().is_empty())
-        })
-        .ok_or(LICENSE_REQUIRED)?;
+    let declared = summary.license.clone().filter(|license| {
+        license
+            .assets
+            .as_deref()
+            .is_some_and(|assets| !assets.trim().is_empty())
+    });
+    let license = match (declared, visibility) {
+        (Some(license), _) => license,
+        (None, CandidateSkinVisibility::Private) => summary.license.clone().unwrap_or_default(),
+        (None, CandidateSkinVisibility::Public) => return Err(LICENSE_REQUIRED),
+    };
     // The catalog bounds these by length only, while a listed item carrying a control character in them fails validate_item on every client, so the server refuses such a package and so does pack.
     if [
         Some(&summary.version),
@@ -671,6 +920,19 @@ pub fn pack(root: &Path, id: &str) -> Result<PackedSkin, &'static str> {
     } else {
         id.chars().take(32).collect()
     };
+    let description: String = summary
+        .description
+        .as_deref()
+        .unwrap_or_default()
+        .chars()
+        .take(280)
+        .collect();
+    let description = description.trim();
+    let suggested_description = if valid_description(description) {
+        description.to_owned()
+    } else {
+        String::new()
+    };
     Ok(PackedSkin {
         package_id: summary.id,
         manifest,
@@ -678,8 +940,29 @@ pub fn pack(root: &Path, id: &str) -> Result<PackedSkin, &'static str> {
         files,
         license,
         suggested_name,
+        suggested_description,
         size,
     })
+}
+
+/// Server `candidateRequestDigest`: SHA-256 over the name, description and manifest, each followed by a NUL, then for each file in byte order of its path the path, a NUL, the hex SHA-256 of its original bytes and a newline. It identifies content by what was uploaded, so it survives the server re-encoding every image. `files` are in standard base64, as a request carries them.
+pub fn request_digest(
+    name: &str,
+    description: &str,
+    manifest: &str,
+    files: &BTreeMap<String, String>,
+) -> Result<String, &'static str> {
+    let mut hasher = Sha256::new();
+    for part in [name, description, manifest] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    for (path, data) in files {
+        let bytes = BASE64.decode(data).map_err(|_| IMAGE_INVALID)?;
+        let sum = hex::encode(Sha256::digest(&bytes));
+        hasher.update(format!("{path}\0{sum}\n").as_bytes());
+    }
+    Ok(hex::encode(hasher.finalize()))
 }
 
 #[derive(Deserialize)]

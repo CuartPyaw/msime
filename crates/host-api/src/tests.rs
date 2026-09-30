@@ -1504,7 +1504,13 @@ fn a_picked_skin_folder_is_copied_in_through_the_c_abi() {
     let root = state.path().join("skins");
     let source = files.path().join("sakura");
     std::fs::create_dir_all(&source).unwrap();
-    std::fs::write(source.join("skin.toml"), "id = 'sakura'").unwrap();
+    // Import checks the whole manifest, so the folder carries a complete one.
+    std::fs::write(
+        source.join("skin.toml"),
+        "schema_version = 1\nid = 'sakura'\nname = 'Sakura'\nversion = '1.0'\nbase = 'system'\n\
+         [supports]\nlayouts = ['vertical']\nthemes = ['light']\n[candidate_window]\nmin_width_dip = 10\n",
+    )
+    .unwrap();
     let call = |request: String| {
         read(unsafe { msime_client_skin_import(request.as_ptr(), request.len()) })
     };

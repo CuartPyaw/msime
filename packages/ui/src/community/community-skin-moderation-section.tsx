@@ -6,6 +6,8 @@ export interface CommunitySkinModerationSectionProps {
   ratingDescription: string;
   unpublishMessage: string;
   unpublishDisabled?: boolean;
+  /** Whether the owner can take the skin down; a private candidate skin is only in its owner's library, so there is nothing to take down. */
+  unpublishable?: boolean;
   confirmUnpublish: boolean;
   onRate: (stars: number) => void;
   onRequestUnpublish: () => void;
@@ -21,6 +23,7 @@ export function CommunitySkinModerationSection({
   ratingDescription,
   unpublishMessage,
   unpublishDisabled = false,
+  unpublishable = true,
   confirmUnpublish,
   onRate,
   onRequestUnpublish,
@@ -52,7 +55,7 @@ export function CommunitySkinModerationSection({
           </div>
         </div>
       )}
-      {owned && (
+      {owned && unpublishable && (
         <button
           type="button"
           className="danger-text pt-0"

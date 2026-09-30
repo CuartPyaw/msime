@@ -46,6 +46,8 @@ export function mount() {
     publish: unavailable,
     rate: unavailable,
     unpublish: unavailable,
+    setVisibility: unavailable,
+    sync: unavailable,
   };
   const catalog: SkinCatalog = {
     directory: "/synthetic/skins",

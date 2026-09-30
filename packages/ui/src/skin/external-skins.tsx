@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { SkinCandidatePreview } from "./skin-candidate-preview";
 import { SkinToolbarPreview } from "./skin-toolbar-preview";
 import { useSkinImage, type SkinImageReader } from "./skin-image";
@@ -446,6 +446,7 @@ export function ExternalSkinDirectoryRow({
   scannable,
   openable,
   importsSkin,
+  status,
 }: {
   skins: SkinCatalogState;
   /** The host has a skin scanner. */
@@ -453,6 +454,8 @@ export function ExternalSkinDirectoryRow({
   /** The host can open the skin directory, or import a skin. */
   openable: boolean;
   importsSkin: boolean;
+  /** More about the directory under the scan result, such as how it last synced with the user's library. */
+  status?: ReactNode;
 }) {
   return (
     <>
@@ -474,6 +477,7 @@ export function ExternalSkinDirectoryRow({
                       ? "没有发现外部皮肤。"
                       : ""}
             </span>
+            {status}
             {skins.catalog?.directory && (
               <code className={settings.externalDirectory}>{skins.catalog.directory}</code>
             )}

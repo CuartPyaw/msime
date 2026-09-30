@@ -7,6 +7,7 @@ mod config;
 mod diagnostics;
 mod preferences;
 mod server;
+mod skins;
 mod statistics;
 mod words;
 

@@ -13,6 +13,7 @@ import {
   CommunityCandidateSkinsPage,
   type CandidateSkinCommunityClient,
 } from "./community-candidate-skins";
+import { CandidateSkinSyncStatus, useCandidateSkinSync } from "./candidate-skin-sync";
 import { ExternalSkinDirectoryRow, useSkinCatalog, type SkinCatalog } from "../skin/external-skins";
 import { GroupList } from "../core/platform-controls";
 import * as settings from "../settings/settings-style";
@@ -41,7 +42,7 @@ export interface CommunityPageProps {
   destinationKey?: string;
 }
 
-/** The community page: the external skin directory, which community installs land in, above the gallery the host supports. */
+/** The community page: the external skin directory, which community installs land in and which the signed-in user's library syncs with, above the gallery the host supports. */
 export function CommunityPage(props: CommunityPageProps): ReactNode {
   const {
     skins,
@@ -52,8 +53,17 @@ export function CommunityPage(props: CommunityPageProps): ReactNode {
     importsSkin = false,
   } = props;
   const local = useSkinCatalog(localSkins, openSkinDirectory, importsSkin);
+  const sync = useCandidateSkinSync(candidateSkins, () => void local.refresh());
   if (!skins && !resources && !candidateSkins) return null;
-  const gallery = <CommunityGallery {...props} onInstalled={() => void local.refresh()} />;
+  const gallery = (
+    <CommunityGallery
+      {...props}
+      onInstalled={() => {
+        void local.refresh();
+        sync.run();
+      }}
+    />
+  );
   if (!localSkins && !openSkinDirectory) return gallery;
   return (
     <>
@@ -64,6 +74,7 @@ export function CommunityPage(props: CommunityPageProps): ReactNode {
             scannable={!!localSkins}
             openable={!!openSkinDirectory}
             importsSkin={importsSkin}
+            status={candidateSkins && <CandidateSkinSyncStatus sync={sync} />}
           />
         </GroupList>
       </div>

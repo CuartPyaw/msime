@@ -134,6 +134,7 @@ async fn read_only_by_default() {
         [
             "get_preferences",
             "get_typing_statistics",
+            "list_candidate_skins",
             "list_quick_phrases",
             "read_diagnostic_log",
             "set_diagnostic_log"
@@ -157,7 +158,7 @@ async fn an_agent_manages_quick_phrases_and_preferences() {
     let directory = tempfile::tempdir().unwrap();
     let options = fixture(directory.path());
     let (client, _child) = start(&options, &["--allow-write"]).await;
-    assert_eq!(tool_names(&client).await.len(), 7);
+    assert_eq!(tool_names(&client).await.len(), 9);
 
     // Quick phrases: add, list, replace, remove, with a failure in the middle of a batch.
     let outcome = ok(
@@ -239,6 +240,32 @@ async fn an_agent_manages_quick_phrases_and_preferences() {
     assert_eq!(ok(&client, "get_preferences", json!({})).await, after);
     assert_eq!(ok(&client, "get_preferences", json!({})).await, after);
 
+    // Skins: install one from a manifest and a base64 preview, then see it listed; an existing one is replaced only when asked.
+    let skin = json!({
+        "package_id": "sunset",
+        "manifest": "schema_version = 1\nid = 'sunset'\nname = 'Sunset'\nversion = '1.0'\nbase = 'night'\npreview = 'preview.png'\n[supports]\nlayouts = ['vertical']\nthemes = ['dark']\n[candidate_window]\nmin_width_dip = 200\n",
+        "images": { "preview.png": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==" }
+    });
+    after_write_interval().await;
+    assert_eq!(
+        ok(&client, "create_candidate_skin", skin.clone()).await,
+        json!({ "id": "sunset", "replaced": false })
+    );
+    let listed = ok(&client, "list_candidate_skins", json!({})).await;
+    assert_eq!(listed["skins"][0]["id"], "sunset");
+    assert_eq!(listed["skins"][0]["synced"], false);
+    after_write_interval().await;
+    assert!(refused(&client, "create_candidate_skin", skin.clone())
+        .await
+        .contains("replace: true"));
+    let mut replacement = skin;
+    replacement["replace"] = json!(true);
+    after_write_interval().await;
+    assert_eq!(
+        ok(&client, "create_candidate_skin", replacement).await,
+        json!({ "id": "sunset", "replaced": true })
+    );
+
     // Statistics: nothing recorded yet, and off until the user turns them on.
     let statistics = ok(&client, "get_typing_statistics", json!({ "days": 3 })).await;
     assert_eq!(statistics["enabled"], false);
@@ -267,7 +294,7 @@ async fn an_agent_imports_reweighs_and_explains_dictionary_words() {
     client.cancel().await.unwrap();
 
     let (client, _child) = start(&options, &["--allow-write", "--allow-dictionary-read"]).await;
-    assert_eq!(tool_names(&client).await.len(), 11);
+    assert_eq!(tool_names(&client).await.len(), 13);
 
     let outcome = ok(
         &client,

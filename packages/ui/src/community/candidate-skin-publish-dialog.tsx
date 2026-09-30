@@ -13,6 +13,7 @@ import { CommunityErrorAlert } from "./community-error-alert";
 import type {
   CandidateSkinCommunityClient,
   CandidateSkinPackPreview,
+  CandidateSkinVisibility,
   CommunityCandidateSkin,
 } from "./community-candidate-skins";
 
@@ -22,7 +23,7 @@ type LocalSkinOption = { id: string; name: string };
 const packageLimit = "2 MB";
 
 const publishWarning =
-  "仅上传 skin.toml 与 PNG/JPEG 图片（需包含预览图）；单个文件不超过 1 MB、合计不超过 2 MB、每边不超过 2048 像素。服务器会重新编码图片并去除元数据。发布后无法修改，更新请发布新作品。";
+  "仅上传 skin.toml 与 PNG/JPEG 图片（需包含预览图）；单个文件不超过 1 MB、合计不超过 2 MB、每边不超过 2048 像素。服务器会重新编码图片并去除元数据。登录期间修改本地皮肤，会自动同步到这款作品。";
 
 function licenseLines(license: CandidateSkinPackPreview["license"]): string[] {
   return [
@@ -67,6 +68,7 @@ export function CandidateSkinPublishDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [agreed, setAgreed] = useState(false);
+  const [visibility, setVisibility] = useState<CandidateSkinVisibility>("public");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [signInRequired, setSignInRequired] = useState(false);
@@ -74,6 +76,8 @@ export function CandidateSkinPublishDialog({
   const [publicationId, setPublicationId] = useState(randomUuid);
   const clientGeneration = useRef(0);
   const packGeneration = useRef(0);
+  // The package whose name the form was filled from, so switching visibility re-checks the package without discarding a name the user typed.
+  const namedSkin = useRef("");
 
   useEffect(() => {
     const generation = ++clientGeneration.current;
@@ -114,11 +118,14 @@ export function CandidateSkinPublishDialog({
     }
     setPackLoading(true);
     void client
-      .packPreview(skinId)
+      .packPreview(skinId, visibility)
       .then((value) => {
         if (generation !== packGeneration.current) return;
         setPack(value);
-        setName(boundedGraphemes(value.suggestedName, 32));
+        if (namedSkin.current !== skinId) {
+          namedSkin.current = skinId;
+          setName(boundedGraphemes(value.suggestedName, 32));
+        }
       })
       .catch((packFailure) => {
         if (generation === packGeneration.current) setPackError(candidateSkinMessage(packFailure));
@@ -129,7 +136,7 @@ export function CandidateSkinPublishDialog({
     return () => {
       packGeneration.current++;
     };
-  }, [client, skinId]);
+  }, [client, skinId, visibility]);
 
   const normalizedName = name.trim();
   const normalizedDescription = description.trim();
@@ -152,6 +159,7 @@ export function CandidateSkinPublishDialog({
         publicationId,
         normalizedName,
         normalizedDescription,
+        visibility,
       );
       if (generation !== clientGeneration.current) return;
       await onPublished(published);
@@ -229,6 +237,27 @@ export function CandidateSkinPublishDialog({
             </select>
           </label>
         )}
+        <fieldset className={style.field} disabled={busy}>
+          <legend>谁可以看到</legend>
+          <label>
+            <input
+              type="radio"
+              name="candidate-skin-visibility"
+              checked={visibility === "public"}
+              onChange={() => setVisibility("public")}
+            />{" "}
+            公开（所有人可下载）
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="candidate-skin-visibility"
+              checked={visibility === "private"}
+              onChange={() => setVisibility("private")}
+            />{" "}
+            仅自己可见
+          </label>
+        </fieldset>
         {packLoading && <p role="status">正在检查皮肤包…</p>}
         {packError && (
           <div className={style.confirmation} role="alert">
@@ -256,7 +285,11 @@ export function CandidateSkinPublishDialog({
               description={description}
               agreed={agreed}
               busy={busy}
-              agreementText="我拥有发布所用素材的权利，并同意其他用户按上述授权免费下载使用"
+              agreementText={
+                visibility === "public"
+                  ? "我拥有发布所用素材的权利，并同意其他用户按上述授权免费下载使用"
+                  : "我拥有上传所用素材的权利"
+              }
               onNameChange={(value) => {
                 setPublicationId(randomUuid());
                 setName(boundedGraphemes(value, 32));
@@ -281,7 +314,7 @@ export function CandidateSkinPublishDialog({
               disabled={busy || !ready}
               onClick={() => void submit()}
             >
-              {busy ? "正在发布…" : "公开发布"}
+              {busy ? "正在发布…" : visibility === "public" ? "公开发布" : "保存到我的皮肤库"}
             </button>
           )}
         </div>

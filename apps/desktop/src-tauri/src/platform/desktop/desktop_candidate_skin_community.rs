@@ -5,16 +5,20 @@
 use crate::platform::account_helpers::{community_error, community_id, community_service_call};
 use crate::platform::desktop::desktop_account::Storage;
 use crate::{CommandError, RuntimeOptionsState, SkinCatalogResponse, SkinDirectoryState};
+use msime_client_core::account::AccountError;
 use msime_client_core::account::BackendAccountClient;
 use msime_client_core::skin::candidate_community::{
     self, BackendCandidateSkinCommunityService, CandidateSkinItem, CandidateSkinPackage,
-    CandidateSkinPage, CandidateSkinPublishRequest,
+    CandidateSkinPage, CandidateSkinVisibility,
+};
+use msime_client_core::skin::candidate_sync::{
+    self, CandidateSkinPublishError, CandidateSkinSyncReport,
 };
 use msime_client_core::skin::catalog::SkinLicense;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Manager, State};
 
 pub(crate) type CandidateSkinCommunityService =
     BackendCandidateSkinCommunityService<BackendAccountClient, Storage>;
@@ -52,6 +56,11 @@ fn package_error(code: &'static str) -> CommandError {
     CommandError { code }
 }
 
+/// Where sync remembers what it last saw of the skin root `root`: a sibling of it, so the root itself holds only packages.
+fn sync_state(root: &Path) -> PathBuf {
+    root.with_file_name(candidate_sync::STATE_FILE)
+}
+
 /// Install a downloaded package into `root` and rescan it, so the page and (on Linux) the input method see the new list at once.
 fn install_and_rescan(
     package: &CandidateSkinPackage,
@@ -60,6 +69,8 @@ fn install_and_rescan(
     runtime: &RuntimeOptionsState,
 ) -> Result<SkinCatalogResponse, CommandError> {
     candidate_community::install(&root, package, replace).map_err(package_error)?;
+    // Sync then knows where the package came from: someone else's publication stays out of the user's library.
+    candidate_sync::record_install(&sync_state(&root), &package.package_id, package.id);
     Ok(crate::rescan_skin_catalog(root, runtime))
 }
 
@@ -132,10 +143,12 @@ pub async fn candidate_skin_community_install(
 pub async fn candidate_skin_community_pack_preview(
     directory: State<'_, SkinDirectoryState>,
     skin_id: String,
+    // A private package may leave out the asset license; none checks as public.
+    visibility: Option<CandidateSkinVisibility>,
 ) -> Result<CandidateSkinPackPreview, CommandError> {
     let root = directory.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        candidate_community::pack(&root, &skin_id)
+        candidate_community::pack_as(&root, &skin_id, visibility.unwrap_or_default())
             .map(|packed| CandidateSkinPackPreview {
                 suggested_name: packed.suggested_name,
                 license: packed.license,
@@ -156,20 +169,27 @@ pub async fn candidate_skin_community_publish(
     id: String,
     name: String,
     description: String,
+    // None publishes publicly, as every page did before private packages.
+    visibility: Option<CandidateSkinVisibility>,
 ) -> Result<CandidateSkinItem, CommandError> {
     let id = community_id(&id)?;
     let service = Arc::clone(&state.service);
     let root = directory.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let packed = candidate_community::pack(&root, &skin_id).map_err(package_error)?;
-        service
-            .publish(&CandidateSkinPublishRequest::new(
-                id,
-                name,
-                description,
-                packed,
-            ))
-            .map_err(community_error)
+        candidate_sync::publish(
+            &root,
+            &sync_state(&root),
+            service.as_ref(),
+            &skin_id,
+            id,
+            name,
+            description,
+            visibility.unwrap_or_default(),
+        )
+        .map_err(|error| match error {
+            CandidateSkinPublishError::Package(code) => package_error(code),
+            CandidateSkinPublishError::Account(error) => community_error(error),
+        })
     })
     .await
     .map_err(|_| CommandError {
@@ -192,16 +212,73 @@ pub async fn candidate_skin_community_rate(
 }
 
 #[tauri::command]
+pub async fn candidate_skin_community_set_visibility(
+    state: State<'_, CandidateSkinCommunityState>,
+    id: String,
+    visibility: CandidateSkinVisibility,
+) -> Result<CandidateSkinItem, CommandError> {
+    let id = community_id(&id)?;
+    community_service_call(Arc::clone(&state.service), move |service| {
+        service.set_visibility(id, visibility)
+    })
+    .await
+}
+
+/// Taking a package down ends its sync too: the local copy stays, and the next run uploads it again as a new private row rather than deleting it as removed from the library.
+#[tauri::command]
 pub async fn candidate_skin_community_unpublish(
     state: State<'_, CandidateSkinCommunityState>,
+    directory: State<'_, SkinDirectoryState>,
     id: String,
 ) -> Result<CandidateSkinUnpublishResponse, CommandError> {
     let id = community_id(&id)?;
+    let state_path = sync_state(&directory.0);
     community_service_call(Arc::clone(&state.service), move |service| {
-        service.unpublish(id)
+        candidate_sync::unpublish(&state_path, service, id)
     })
     .await?;
     Ok(CandidateSkinUnpublishResponse { deleted: true })
+}
+
+/// Bring the skin root and the signed-in user's library in step, rescanning the root when the run changed it.
+fn sync_and_rescan(
+    service: &CandidateSkinCommunityService,
+    root: PathBuf,
+    runtime: &RuntimeOptionsState,
+) -> Result<CandidateSkinSyncReport, AccountError> {
+    let report = candidate_sync::sync_candidate_skins(&root, &sync_state(&root), service)?;
+    if report.changed_local() {
+        crate::rescan_skin_catalog(root, runtime);
+    }
+    Ok(report)
+}
+
+#[tauri::command]
+pub async fn candidate_skin_community_sync(
+    state: State<'_, CandidateSkinCommunityState>,
+    directory: State<'_, SkinDirectoryState>,
+    runtime: State<'_, RuntimeOptionsState>,
+) -> Result<CandidateSkinSyncReport, CommandError> {
+    let service = Arc::clone(&state.service);
+    let root = directory.0.clone();
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sync_and_rescan(&service, root, &runtime).map_err(community_error)
+    })
+    .await
+    .map_err(|_| CommandError {
+        code: "community_unavailable",
+    })?
+}
+
+/// One sync as the app starts, so skins made or changed while it was closed (by hand, or by the MCP server) reach the library without the community page being opened. Signed out it ends at the local session check, before any request.
+pub(crate) fn start_sync(app: &tauri::AppHandle) {
+    let service = Arc::clone(&app.state::<CandidateSkinCommunityState>().service);
+    let root = app.state::<SkinDirectoryState>().0.clone();
+    let runtime = app.state::<RuntimeOptionsState>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = sync_and_rescan(&service, root, &runtime);
+    });
 }
 
 #[cfg(test)]
@@ -250,6 +327,8 @@ mod tests {
         assert_eq!(response.catalog.packages.len(), 1);
         assert_eq!(response.catalog.packages[0].id, "sakura");
         assert!(response.catalog.issues.is_empty());
+        // The install is recorded beside the root, never inside it where the catalog would scan it.
+        assert!(directory.path().join(candidate_sync::STATE_FILE).is_file());
         #[cfg(target_os = "linux")]
         {
             let published: serde_json::Value =

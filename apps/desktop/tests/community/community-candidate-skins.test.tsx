@@ -6,6 +6,7 @@ import {
   CommunityCandidateSkinsPage,
   CommunityPage,
   type CandidateSkinCommunityClient,
+  type CandidateSkinSyncReport,
   type CommunityCandidateSkin,
   type CommunityCandidateSkinPage,
   type SkinCatalog,
@@ -33,6 +34,8 @@ function skin(id: string, name: string, overrides: Partial<CommunityCandidateSki
     owned: false,
     my_rating: 0,
     created_at: "2026-09-30T00:00:00Z",
+    visibility: "public",
+    updated_at: "2026-09-30T00:00:00Z",
     ...overrides,
   } satisfies CommunityCandidateSkin;
 }
@@ -64,6 +67,18 @@ function catalog(ids: string[]): SkinCatalog {
   };
 }
 
+function report(overrides: Partial<CandidateSkinSyncReport> = {}): CandidateSkinSyncReport {
+  return {
+    uploaded: [],
+    downloaded: [],
+    deleted_local: [],
+    deleted_cloud: [],
+    skipped: [],
+    stopped: null,
+    ...overrides,
+  };
+}
+
 function client(
   overrides: Partial<CandidateSkinCommunityClient> = {},
 ): CandidateSkinCommunityClient {
@@ -81,6 +96,12 @@ function client(
     publish: vi.fn().mockResolvedValue(first),
     rate: vi.fn().mockResolvedValue({ stars: 4 }),
     unpublish: vi.fn().mockResolvedValue({ deleted: true }),
+    setVisibility: vi.fn().mockImplementation(async (id: string, visibility) => ({
+      ...(id === first.id ? first : second),
+      owned: true,
+      visibility,
+    })),
+    sync: vi.fn().mockResolvedValue(report()),
     ...overrides,
   };
 }
@@ -383,7 +404,7 @@ test("publish dialog: a missing license shows only the sentence and 打开目录
   expect(
     await screen.findByText("发布前请在 skin.toml 的 [license] 中填写素材授权 assets。"),
   ).not.toBeNull();
-  expect(communityClient.packPreview).toHaveBeenCalledWith("ink-wash");
+  expect(communityClient.packPreview).toHaveBeenCalledWith("ink-wash", "public");
   expect(screen.queryByRole("textbox", { name: "发布皮肤名称" })).toBeNull();
   expect(screen.queryByRole("checkbox", { name: "确认拥有发布素材权利" })).toBeNull();
   expect(screen.queryByRole("button", { name: "公开发布" })).toBeNull();
@@ -444,7 +465,7 @@ test("publish dialog keeps the publication id on retry and renews it on edit", a
   expect((await screen.findByText("发布太频繁，请稍后再试。")).textContent).toBeTruthy();
   const firstId = publish.mock.calls[0][1];
   expect(publish.mock.calls[1][1]).toBe(firstId);
-  expect(publish.mock.calls[0]).toEqual(["ink-wash", firstId, "水墨", ""]);
+  expect(publish.mock.calls[0]).toEqual(["ink-wash", firstId, "水墨", "", "public"]);
 
   fireEvent.change(screen.getByRole("textbox", { name: "发布设计说明" }), {
     target: { value: " 淡墨 " },
@@ -465,5 +486,167 @@ test("the gallery publish button opens the dialog with local packages", async ()
   );
   fireEvent.click(await screen.findByRole("button", { name: "发布我的皮肤" }));
   expect(await screen.findByRole("dialog", { name: "发布候选窗皮肤" })).not.toBeNull();
-  await waitFor(() => expect(communityClient.packPreview).toHaveBeenCalledWith("ink-wash"));
+  await waitFor(() =>
+    expect(communityClient.packPreview).toHaveBeenCalledWith("ink-wash", "public"),
+  );
+});
+
+test("publish dialog: 仅自己可见 checks the package as private and keeps the typed name", async () => {
+  const privateSkin = { ...first, owned: true, visibility: "private" as const };
+  const publish = vi.fn().mockResolvedValue(privateSkin);
+  const communityClient = client({ publish });
+  const onPublished = vi.fn();
+  render(
+    <CandidateSkinPublishDialog
+      client={communityClient}
+      initialSkinId="ink-wash"
+      onClose={vi.fn()}
+      onPublished={onPublished}
+    />,
+  );
+  const name = (await screen.findByRole("textbox", { name: "发布皮肤名称" })) as HTMLInputElement;
+  expect((screen.getByRole("radio", { name: /公开/ }) as HTMLInputElement).checked).toBe(true);
+  fireEvent.change(name, { target: { value: "我的水墨" } });
+  fireEvent.click(screen.getByRole("radio", { name: "仅自己可见" }));
+  await waitFor(() =>
+    expect(communityClient.packPreview).toHaveBeenLastCalledWith("ink-wash", "private"),
+  );
+  await screen.findByRole("checkbox", { name: "确认拥有发布素材权利" });
+  expect((screen.getByRole("textbox", { name: "发布皮肤名称" }) as HTMLInputElement).value).toBe(
+    "我的水墨",
+  );
+  expect(screen.queryByRole("button", { name: "公开发布" })).toBeNull();
+  fireEvent.click(screen.getByRole("checkbox", { name: "确认拥有发布素材权利" }));
+  fireEvent.click(screen.getByRole("button", { name: "保存到我的皮肤库" }));
+  await waitFor(() => expect(onPublished).toHaveBeenCalledWith(privateSkin));
+  expect(publish.mock.calls[0].slice(2)).toEqual(["我的水墨", "", "private"]);
+});
+
+test("owners switch a package between public and private, and only public ones are taken down", async () => {
+  const hidden = { ...first, owned: true, visibility: "private" as const };
+  const communityClient = client({
+    list: vi.fn().mockResolvedValue({ skins: [hidden], has_more: false }),
+    detail: vi.fn().mockResolvedValue(hidden),
+  });
+  render(<CommunityCandidateSkinsPage client={communityClient} />);
+  expect(await screen.findByText("我的作品 · 私有")).not.toBeNull();
+  await openDetail();
+  expect(screen.getByText("私有")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "下架这款皮肤" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "公开" }));
+  await waitFor(() =>
+    expect(communityClient.setVisibility).toHaveBeenCalledWith(first.id, "public"),
+  );
+  expect(await screen.findByText("已公开，其他用户现在可以下载这款皮肤。")).not.toBeNull();
+  expect(screen.getByRole("button", { name: "下架这款皮肤" })).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "设为私有" }));
+  await waitFor(() =>
+    expect(communityClient.setVisibility).toHaveBeenLastCalledWith(first.id, "private"),
+  );
+  expect(await screen.findByText("已设为私有，只有你能看到这款皮肤。")).not.toBeNull();
+});
+
+test("a refused switch to public shows the fixed sentence and keeps the package private", async () => {
+  const hidden = { ...first, owned: true, visibility: "private" as const };
+  render(
+    <CommunityCandidateSkinsPage
+      client={client({
+        list: vi.fn().mockResolvedValue({ skins: [hidden], has_more: false }),
+        detail: vi.fn().mockResolvedValue(hidden),
+        setVisibility: vi.fn().mockRejectedValue({ code: "community_invalid", message: "raw" }),
+      })}
+    />,
+  );
+  await openDetail();
+  fireEvent.click(screen.getByRole("button", { name: "公开" }));
+  expect((await screen.findByRole("alert")).textContent).toBe("内容无效，请修改后重试。");
+  expect(screen.getByText("私有")).not.toBeNull();
+});
+
+function communityPage(communityClient: CandidateSkinCommunityClient, localSkins = vi.fn()) {
+  localSkins.mockResolvedValue(catalog(["ink-wash"]));
+  render(
+    <CommunityPage
+      theme="light"
+      candidateSkins={communityClient}
+      localSkins={localSkins}
+      openSkinDirectory={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+  return localSkins;
+}
+
+test("the community page syncs as it opens and rescans after a run that changed the directory", async () => {
+  const sync = vi
+    .fn()
+    .mockResolvedValue(report({ uploaded: ["ink-wash"], downloaded: ["paper-cut"] }));
+  const localSkins = communityPage(client({ sync }));
+  expect(await screen.findByText("已同步：上传 1 款，下载 1 款。")).not.toBeNull();
+  expect(sync).toHaveBeenCalledOnce();
+  // One scan as the page opens, one for what the sync downloaded.
+  await waitFor(() => expect(localSkins).toHaveBeenCalledTimes(2));
+});
+
+test("a run with nothing to do says so and does not rescan", async () => {
+  const localSkins = communityPage(client());
+  expect(await screen.findByText("本地皮肤已与云端皮肤库同步。")).not.toBeNull();
+  await settle();
+  expect(localSkins).toHaveBeenCalledOnce();
+});
+
+test("sync names each package it left out, and why uploads stopped, in fixed sentences", async () => {
+  communityPage(
+    client({
+      sync: vi.fn().mockResolvedValue(
+        report({
+          skipped: [
+            { package_id: "styled", code: "candidate_skin_file_type" },
+            { package_id: "moved", code: "account_conflict" },
+            { package_id: "offline", code: "account_unavailable" },
+            { package_id: "shared", code: "candidate_skin_public_kept" },
+          ],
+          stopped: "candidate_skin_library_limit",
+        }),
+      ),
+    }),
+  );
+  expect(
+    await screen.findByText("本地皮肤已与云端皮肤库同步。 云端皮肤库已满 100 款，其余皮肤未上传。"),
+  ).not.toBeNull();
+  expect(screen.getByText("4 款皮肤未同步")).not.toBeNull();
+  expect(screen.getByText("styled：仅支持 PNG 或 JPEG 图片，且不能包含样式表。")).not.toBeNull();
+  expect(screen.getByText("moved：云端的同名作品属于另一个皮肤包，未覆盖。")).not.toBeNull();
+  expect(screen.getByText("offline：暂时无法同步，下次再试。")).not.toBeNull();
+  expect(
+    screen.getByText("shared：这是公开作品，删除本地皮肤不会下架它；如需下架，请在社区中操作。"),
+  ).not.toBeNull();
+});
+
+test("signed out, the row says sign-in turns sync on; other failures stay fixed sentences", async () => {
+  communityPage(client({ sync: vi.fn().mockRejectedValue({ code: "community_unauthorized" }) }));
+  expect(
+    await screen.findByText("登录后，本地皮肤会自动同步到你的云端皮肤库，默认仅自己可见。"),
+  ).not.toBeNull();
+  cleanup();
+  communityPage(
+    client({ sync: vi.fn().mockRejectedValue({ code: "community_unavailable", message: "raw" }) }),
+  );
+  expect(await screen.findByText("同步失败：社区暂时不可用，请稍后重试。")).not.toBeNull();
+});
+
+test("an install from the gallery syncs again, queued behind a run in progress", async () => {
+  const running = deferred<CandidateSkinSyncReport>();
+  const sync = vi
+    .fn()
+    .mockReturnValueOnce(running.promise)
+    .mockResolvedValue(report({ uploaded: ["ink-wash"] }));
+  communityPage(client({ sync }));
+  await openDetail();
+  // The pre-install scan finds ink-wash, so the install asks first.
+  fireEvent.click(screen.getByRole("button", { name: "一键安装" }));
+  fireEvent.click(await screen.findByRole("button", { name: "替换安装" }));
+  expect(await screen.findByText("已安装到外部皮肤。")).not.toBeNull();
+  expect(sync).toHaveBeenCalledOnce();
+  await act(async () => running.resolve(report()));
+  await waitFor(() => expect(sync).toHaveBeenCalledTimes(2));
 });
