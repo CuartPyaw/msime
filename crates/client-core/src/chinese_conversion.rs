@@ -29,10 +29,14 @@ struct Table {
     longest: usize,
 }
 
+fn source_line_capacity(sources: &[&str]) -> usize {
+    sources.iter().map(|source| source.lines().count()).sum()
+}
+
 impl Table {
     /// Parse OpenCC's text format. Earlier sources win on duplicate keys, which is what the union group does when two members match the same length.
     fn parse(sources: &[&'static str]) -> Self {
-        let mut entries = HashMap::new();
+        let mut entries = HashMap::with_capacity(source_line_capacity(sources));
         let mut longest = 0;
         for source in sources {
             for line in source.lines() {
@@ -214,5 +218,10 @@ mod tests {
         assert_eq!(table.longest_prefix("abc"), Some((2, "pair")));
         assert_eq!(table.longest_prefix("a"), Some((1, "first")));
         assert_eq!(table.longest, 2);
+    }
+
+    #[test]
+    fn table_capacity_estimate_counts_source_lines() {
+        assert_eq!(source_line_capacity(&["a\tb\nc\td\n", "e\tf\n"]), 3);
     }
 }
