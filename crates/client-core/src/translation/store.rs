@@ -10,7 +10,7 @@ use crate::translation::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 const MAX_RECORD_BYTES: u64 = 4096;
@@ -143,14 +143,6 @@ impl TranslationGlossStore {
         ))
     }
 
-    fn reject_symlinked_roots(&self) -> Result<(), GlossStoreError> {
-        if let Some(parent) = self.root.parent() {
-            reject_symlink(parent)?;
-        }
-        reject_symlink(&self.root)?;
-        Ok(())
-    }
-
     /// Only the English target setting persists, matching Windows glossary rules.
     /// Unsupported inputs are misses; malformed existing records are errors.
     /// Call on an IO worker, not the input event thread.
@@ -166,8 +158,10 @@ impl TranslationGlossStore {
         let Some(key) = direction.key(text) else {
             return Ok(None);
         };
-        self.reject_symlinked_roots()?;
         let path = self.path(direction, &key);
+        // The direction directory is a storage root of its own: `root/en-zh` being
+        // a link would let a record be read from wherever that link points.
+        reject_symlink(path.parent().ok_or(GlossStoreError::InvalidRecord)?)?;
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -225,8 +219,14 @@ impl TranslationGlossStore {
         if bytes.len() as u64 > MAX_RECORD_BYTES {
             return Err(GlossStoreError::InvalidRecord);
         }
-        self.reject_symlinked_roots()?;
-        fs::create_dir_all(directory)?;
+        // The helper the other storage modules use: it rejects a link at the
+        // directory or at any ancestor before `create_dir_all` can follow one.
+        if !crate::storage::create_directory_and_check(directory)? {
+            return Err(GlossStoreError::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "learned translation directory is not a real directory",
+            )));
+        }
         // NamedTempFile creates private files and persist atomically replaces only
         // this key; concurrent independent keys cannot lose each other's writes.
         let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
@@ -410,6 +410,72 @@ mod tests {
         assert!(matches!(
             TranslationGlossStore::new(blocked).remember("en", En, "hello", "你好"),
             Err(GlossStoreError::Io(_))
+        ));
+    }
+    /// `root` itself may be real while a direction directory below it is not.
+    /// `root/en-zh` being a link means a write lands outside the host's
+    /// directory and a read takes a record from wherever it points, so both
+    /// directions are checked against the directory they actually use.
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_link_at_the_direction_directory_for_both_directions() {
+        use std::os::unix::fs::symlink;
+
+        for direction in [En, Zh] {
+            let user = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            let store = TranslationGlossStore::new(user.path());
+            std::fs::create_dir_all(&store.root).unwrap();
+            let linked = store.root.join(direction.directory());
+            symlink(outside.path(), &linked).unwrap();
+
+            let (text, gloss) = match direction {
+                En => ("hello", "你好"),
+                Zh => ("测试", "test"),
+            };
+            assert!(matches!(
+                store.remember("en", direction, text, gloss),
+                Err(GlossStoreError::Io(_))
+            ));
+            assert!(
+                !outside.path().join(direction.directory()).exists(),
+                "nothing may be created through the link"
+            );
+            assert_eq!(
+                std::fs::read_dir(outside.path())
+                    .map(|d| d.count())
+                    .unwrap_or(0),
+                0,
+                "no record may be written through the link"
+            );
+            assert!(
+                store.lookup("en", direction, text).is_err(),
+                "a record read through the link would be someone else's"
+            );
+        }
+    }
+
+    /// A record that is itself a link stays `InvalidRecord`, as before: only a
+    /// link at an ancestor or at the direction directory is an IO failure.
+    #[cfg(unix)]
+    #[test]
+    fn keeps_record_links_distinct_from_directory_links() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let store = TranslationGlossStore::new(root.path());
+        store.remember("en", En, "hello", "你好").unwrap();
+
+        let record = store.path(En, "hello");
+        let moved = outside.path().join("moved.json");
+        std::fs::write(&moved, std::fs::read(&record).unwrap()).unwrap();
+        std::fs::remove_file(&record).unwrap();
+        symlink(&moved, &record).unwrap();
+
+        assert!(matches!(
+            store.lookup("en", En, "hello"),
+            Err(GlossStoreError::InvalidRecord)
         ));
     }
 }
