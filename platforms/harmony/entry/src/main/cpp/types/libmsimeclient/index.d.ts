@@ -73,6 +73,14 @@ export const typingStatistics: (request: string) => string;
  */
 export const keySoundPack: (request: string) => string;
 /**
+ * `{state_root,sound_packs,pack}` in, as for `keySoundPack`; the validated tracks of that music pack out: `{id,name,license,tracks,max_track_seconds}`, the tracks as absolute paths in play order. Reads the pack from disk: not for the key path.
+ */
+export const musicPack: (request: string) => string;
+/**
+ * The 扩展 page's pack store: `{state_root,sound_packs,action}` in, with `action.operation` one of `catalog`, `import` `{source}` (an absolute path inside this sandbox), `remove` `{kind,id}`, `load_mentions` and `save_mentions` `{entries}`. Answers `{ok,value}` or `{ok:false,error,detail?}`, the error one of the desktop shell's codes and the detail the rule a refused pack or name broke.
+ */
+export const plugins: (request: string) => string;
+/**
  * Decodes the WAV sample at `sample` once per semitone and writes each note to `<directory>/note-<index>.wav` at 48 kHz, pitched as a playback rate. Resolves with the files in semitone order; rejects a sample that is not WAV, lasts longer than `maxMillis`, or decodes past its declared length.
  */
 export const keySoundRenderNotes: (

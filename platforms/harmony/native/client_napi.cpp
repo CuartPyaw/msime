@@ -213,6 +213,8 @@ TEXT_ENTRY(SnapshotInspect, msime_client_snapshot_inspect)
 TEXT_ENTRY(SnapshotQueue, msime_client_snapshot_queue)
 TEXT_ENTRY(CloudRequestUrl, msime_client_cloud_request_url)
 TEXT_ENTRY(KeySoundPack, msime_client_key_sound_pack)
+TEXT_ENTRY(MusicPack, msime_client_music_pack)
+TEXT_ENTRY(Plugins, msime_client_plugins)
 TEXT_ENTRY(Create, msime_client_create)
 
 struct SnapshotRestoreWork {
@@ -1027,6 +1029,8 @@ static napi_value Init(napi_env env, napi_value exports) {
         ENTRY("onlineQuery", OnlineQuery),
         ENTRY("cloudRequestUrl", CloudRequestUrl),
         ENTRY("keySoundPack", KeySoundPack),
+        ENTRY("musicPack", MusicPack),
+        ENTRY("plugins", Plugins),
         ENTRY("keySoundRenderNotes", KeySoundRenderNotes),
         ENTRY("aiRequestForQuery", AiRequestForQuery),
         ENTRY("aiHttpRequest", AiHttpRequest),
