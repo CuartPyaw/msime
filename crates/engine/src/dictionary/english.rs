@@ -85,7 +85,7 @@ impl EnglishDictionary {
         let Ok(mut rows) = statement.query((prefix, upper_bound.as_str(), sql_limit(limit))) else {
             return Vec::new();
         };
-        let mut candidates = Vec::new();
+        let mut candidates = Vec::with_capacity(limit);
         loop {
             match rows.next() {
                 Ok(Some(row)) => {
