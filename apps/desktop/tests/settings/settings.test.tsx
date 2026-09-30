@@ -4295,10 +4295,9 @@ test("a picker used over a built-in theme customizes that theme, and the package
   expect(card.querySelector("[data-skin-preview]")?.getAttribute("data-preview-theme")).toBe(
     "dark",
   );
-  expect(screen.queryByRole("button", { name: "自定义主题不使用外部皮肤" })).toBeNull();
 });
 
-test("the custom theme is a card of the theme picker and its package can be removed", async () => {
+test("choosing the custom theme card drops its package and keeps the rest of the custom theme", async () => {
   const saved = {
     ...initial,
     preferences: {
@@ -4314,11 +4313,12 @@ test("the custom theme is a card of the theme picker and its package can be remo
   await screen.findByRole("button", { name: "保存设置" });
   fireEvent.click(screen.getByRole("button", { name: "主题" }));
   const card = screen.getByRole("article", { name: "自定义" });
-  expect(within(card).getByText("外部皮肤 sample")).not.toBeNull();
-  fireEvent.click(within(card).getByRole("switch", { name: "自定义" }));
-  fireEvent.click(screen.getByRole("button", { name: "自定义主题不使用外部皮肤" }));
+  // The package has its own card in the carousel, so the custom card no longer names it.
   expect(within(card).getByText("外部皮肤、候选颜色与自定义键盘")).not.toBeNull();
-  expect(screen.queryByRole("button", { name: "自定义主题不使用外部皮肤" })).toBeNull();
+  fireEvent.click(within(card).getByRole("switch", { name: "自定义" }));
+  expect(within(card).getByRole("switch", { name: "自定义" }).getAttribute("aria-checked")).toBe(
+    "true",
+  );
   fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
   await screen.findByText("设置已保存。");
   expect(save).toHaveBeenLastCalledWith(7, {

@@ -84,7 +84,7 @@ export function ThemeCarousel({ labels, selectedIndex, children }: ThemeCarousel
           {labels.map((label, slide) => (
             <button
               type="button"
-              key={label}
+              key={slide}
               className={settings.themeCarouselDot(slide === index)}
               aria-label={`查看${label}`}
               aria-current={slide === index ? "true" : undefined}

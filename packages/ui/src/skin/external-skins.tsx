@@ -136,7 +136,8 @@ export function usePreviewBackground(
   };
 }
 
-function ExternalSkinCard({
+/** One scanned package as a card of the theme carousel, drawn with the built-in theme cards' own styles. */
+export function ExternalSkinCard({
   skin,
   selected,
   layout,
@@ -150,7 +151,8 @@ function ExternalSkinCard({
   onPublish,
 }: {
   skin: ExternalSkin;
-  selected: string;
+  /** The custom theme is in use and draws this package. */
+  selected: boolean;
   layout: string;
   /** Choosing a package passes its manifest base, which the custom theme is then drawn over. */
   onSelect: (id: string, base: ExternalSkin["base"]) => void;
@@ -159,6 +161,7 @@ function ExternalSkinCard({
   readToolbarCss?: ToolbarCssReader;
   revision: number;
   activeTheme: "dark" | "light";
+  /** The host draws a floating toolbar the skin styles. The Linux hosts present the toolbar as an input method menu, so their cards preview only the candidate window. */
   toolbarPreview: boolean;
   /** Offers the package to the community; absent on hosts without the candidate-skin community. */
   onPublish?: (id: string) => void;
@@ -216,39 +219,44 @@ function ExternalSkinCard({
     ...customCandidateStyle(skin.base, undefined, palette),
     ...skinGeometryStyle(skin, theme),
   } as CSSProperties;
+  const note = `${settings.skinCardDescription} ${settings.externalResourceNote}`;
   return (
     <article
       aria-label={skin.name}
-      className={`skin-card${selected === skin.id ? " selected" : ""}${decorated ? " external-skin-decorated" : ""}`}
+      // `external-skin-decorated` is the `@utility` that lays out the decoration band inside the preview.
+      className={`${settings.skinCard(selected)}${decorated ? " external-skin-decorated" : ""}`}
     >
-      <div className="skin-card-header">
-        <div className="skin-card-body">
-          <span className="skin-card-title">{skin.name}</span>
-          <span className="external-skin-meta">
-            {[skin.id, skin.version && `v${skin.version}`, skin.author].filter(Boolean).join(" · ")}
+      <div className={settings.skinCardHeader} data-skin-card-header="">
+        <div className={settings.skinCardBody}>
+          <span className={settings.skinCardTitle}>
+            {skin.name} ({theme === "dark" ? "Dark" : "Light"})
+            {selected && <span className={settings.skinCardInUse}>使用中</span>}
           </span>
-          <span className="skin-card-description">
+          <span className={settings.skinCardDescription}>
             {compatible
               ? skin.description || `基于 ${themeEntry(skin.base).title}`
               : `当前布局或明暗模式不受支持（${skin.layouts.join("/")}，${skin.themes.join("/")}）`}
           </span>
+          <span className={settings.externalMeta}>
+            {[skin.id, skin.version && `v${skin.version}`, skin.author].filter(Boolean).join(" · ")}
+          </span>
         </div>
-        <div className="skin-card-actions">
+        <div className={settings.skinCardActions}>
           <button
             type="button"
             role="switch"
             aria-label={skin.name}
-            aria-checked={selected === skin.id}
+            aria-checked={selected}
             disabled={!compatible}
-            className="skin-selection-switch"
+            className={settings.skinSwitch(selected)}
             onClick={() => onSelect(skin.id, skin.base)}
           >
-            <span />
+            <span className={settings.skinSwitchKnob(selected)} />
           </button>
           {fixed === null && (
             <button
               type="button"
-              className="skin-preview-switch"
+              className={settings.skinPreviewSwitch}
               onClick={() => setOverride(theme === "dark" ? "light" : "dark")}
             >
               {theme === "dark" ? "预览浅色" : "预览深色"}
@@ -257,7 +265,7 @@ function ExternalSkinCard({
           {onPublish && (
             <button
               type="button"
-              className="skin-preview-switch"
+              className={settings.skinPreviewSwitch}
               onClick={() => onPublish(skin.id)}
             >
               发布到社区
@@ -300,70 +308,59 @@ function ExternalSkinCard({
         )}
       </div>
       {paletteFailed && (
-        <p role="status" className="skin-card-description external-skin-resource-note">
+        <p role="status" className={note}>
           当前浏览器无法隐藏皮肤的选中条，其余配色照常预览。
         </p>
       )}
       {(image?.failed || decodeFailed || background.failed) && (
-        <p role="status" className="skin-card-description external-skin-resource-note">
+        <p role="status" className={note}>
           皮肤图片加载失败，保留基础预览。可刷新皮肤重试。
         </p>
       )}
       {(decoration || skin.background) && !readImage && (
-        <p className="skin-card-description external-skin-resource-note">
-          当前宿主不支持皮肤图片预览。
-        </p>
+        <p className={note}>当前宿主不支持皮肤图片预览。</p>
       )}
       {toolbarPreview && skin.toolbarStylesheet && !readToolbarCss && (
-        <p className="skin-card-description external-skin-resource-note">
-          当前宿主不支持外部工具栏样式。
-        </p>
+        <p className={note}>当前宿主不支持外部工具栏样式。</p>
       )}
       {toolbarState === "failed" && (
-        <p role="status">工具栏样式加载失败，保留基础预览。可刷新皮肤重试。</p>
+        <p role="status" className={note}>
+          工具栏样式加载失败，保留基础预览。可刷新皮肤重试。
+        </p>
       )}
       {toolbarState === "partial" && (
-        <p role="status">已应用工具栏基础样式；关联资源及部分规则尚未支持。</p>
+        <p role="status" className={note}>
+          已应用工具栏基础样式；关联资源及部分规则尚未支持。
+        </p>
       )}
     </article>
   );
 }
 
-export function ExternalSkins({
-  scan,
-  openDirectory,
-  importsSkin = false,
-  readImage,
-  readFont,
-  readToolbarCss,
-  selected,
-  layout,
-  onSelect,
-  activeTheme = "dark",
-  toolbarPreview = true,
-  onPublish,
-}: {
-  scan?: () => Promise<SkinCatalog>;
-  openDirectory?: () => Promise<void>;
-  /**
-   * The host copies a skin the user points at, instead of opening a folder for them to drop one
-   * into. Its skin folder is inside an application sandbox, so there is nothing to open — the
-   * button has to say what it actually does, or it promises a folder that never appears.
-   */
-  importsSkin?: boolean;
-  readImage?: SkinImageReader;
-  readFont?: SkinFontReader;
-  readToolbarCss?: ToolbarCssReader;
-  selected: string;
-  layout: string;
-  /** Choosing a package passes its manifest base, which the custom theme is then drawn over. */
-  onSelect: (id: string, base: ExternalSkin["base"]) => void;
-  activeTheme?: "dark" | "light";
-  /** The host draws a floating toolbar the skin styles. The Linux hosts present the toolbar as an input method menu, so their cards preview only the candidate window. */
-  toolbarPreview?: boolean;
-  /** Offers a scanned package to the candidate-skin community; each card then shows 发布到社区. */
-  onPublish?: (id: string) => void;
-}) {
+export type SkinCatalogState = {
+  /** The last catalog a scan returned; a failed scan keeps it. */
+  catalog: SkinCatalog | null;
+  /** Bumped by every scan that lands, so package images are read again even when the manifests did not change. */
+  revision: number;
+  busy: boolean;
+  failed: boolean;
+  refresh: () => Promise<void>;
+  opening: boolean;
+  openFailed: boolean;
+  /** Opens the skin directory, or imports a skin on a host that copies one in. */
+  openFolder: () => Promise<void>;
+};
+
+/**
+ * The scanned external skin catalog and the directory actions around it, for the theme page's carousel and its 外部皮肤 row.
+ *
+ * `importsSkin`: the host copies a skin the user points at, instead of opening a folder for them to drop one into. Its skin folder is inside an application sandbox, so there is nothing to open, and the catalog is scanned again once the import answers.
+ */
+export function useSkinCatalog(
+  scan: (() => Promise<SkinCatalog>) | undefined,
+  openDirectory: (() => Promise<void>) | undefined,
+  importsSkin: boolean,
+): SkinCatalogState {
   const [catalog, setCatalog] = useState<SkinCatalog | null>(null);
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -409,7 +406,7 @@ export function ExternalSkins({
     setCatalog(null);
     setBusy(false);
     setFailed(false);
-    // Scan as the page opens, as the native fallback page (SkinSettingsView) does. Waiting for a manual refresh left the list empty while the custom theme card already named the package in use, so the skin in use looked missing. The refresh button stays for folders copied in while the page is open.
+    // Scan as the page opens, as the native fallback page (SkinSettingsView) does. Waiting for a manual refresh left the carousel without the package in use, so the skin in use looked missing. The refresh button stays for folders copied in while the page is open.
     void refresh();
     return () => {
       generation.current++;
@@ -437,90 +434,5 @@ export function ExternalSkins({
       }
     }
   }
-  return (
-    <section aria-label="外部皮肤" className="external-skins">
-      <div className="external-skin-heading">
-        <div>
-          <div className="section-title">外部皮肤</div>
-          <p className="skin-card-description">
-            {importsSkin
-              ? "点“导入皮肤”，选中包含 skin.toml 的皮肤文件夹。文件夹名只能用小写字母、数字和 . _ -，同名皮肤会被替换。"
-              : "把包含 skin.toml 的皮肤文件夹复制到下面的目录，然后刷新。"}
-          </p>
-          <code className="external-skin-directory">
-            {catalog?.directory || "扫描后显示客户端皮肤目录"}
-          </code>
-        </div>
-        <div className="external-skin-actions">
-          <button
-            type="button"
-            className="skin-preview-switch"
-            disabled={!openDirectory || opening}
-            onClick={() => void openFolder()}
-          >
-            {opening
-              ? importsSkin
-                ? "正在导入…"
-                : "正在打开…"
-              : importsSkin
-                ? "导入皮肤"
-                : "打开目录"}
-          </button>
-          <button
-            type="button"
-            className="skin-preview-switch"
-            disabled={!scan || busy}
-            onClick={() => void refresh()}
-          >
-            {busy ? "正在扫描…" : "刷新皮肤"}
-          </button>
-        </div>
-      </div>
-      {openFailed && (
-        <p role="alert">{importsSkin ? "导入皮肤失败，请重试。" : "无法打开皮肤目录，请重试。"}</p>
-      )}
-      {failed && <p role="alert">读取皮肤目录失败，请重试。{catalog && "仍显示上次扫描结果。"}</p>}
-      <div role="status">
-        {!scan
-          ? "当前宿主不支持扫描外部皮肤。"
-          : busy
-            ? "正在读取皮肤目录。"
-            : !catalog
-              ? "尚未扫描。点击“刷新皮肤”读取皮肤目录。"
-              : !catalog.packages.length
-                ? "没有发现外部皮肤。"
-                : ""}
-      </div>
-      <div className="skin-grid">
-        {catalog?.packages.map((skin) => (
-          <ExternalSkinCard
-            key={skin.id}
-            skin={skin}
-            selected={selected}
-            layout={layout}
-            onSelect={onSelect}
-            readImage={readImage}
-            readFont={readFont}
-            readToolbarCss={readToolbarCss}
-            revision={revision}
-            activeTheme={activeTheme}
-            toolbarPreview={toolbarPreview}
-            onPublish={onPublish}
-          />
-        ))}
-      </div>
-      {!!catalog?.issues.length && (
-        <details className="external-skin-diagnostics">
-          <summary>已忽略 {catalog.issues.length} 个无效皮肤目录</summary>
-          <ul>
-            {catalog.issues.map((issue, index) => (
-              <li key={index}>
-                {issue.folder}：{issue.reason}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </section>
-  );
+  return { catalog, revision, busy, failed, refresh, opening, openFailed, openFolder };
 }

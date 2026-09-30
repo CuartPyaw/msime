@@ -11,7 +11,7 @@ import {
 } from "../../theme/global-theme";
 import { SkinCandidatePreview } from "../../skin/skin-candidate-preview";
 import { SkinToolbarPreview } from "../../skin/skin-toolbar-preview";
-import { ExternalSkins } from "../../skin/external-skins";
+import { ExternalSkinCard, useSkinCatalog } from "../../skin/external-skins";
 import { CandidateSkinPublishDialog } from "../../community/candidate-skin-publish-dialog";
 import { ScreenKeyboardPreview } from "../../keyboard/screen-keyboard-preview";
 import { TouchKeyboardSkinEditor } from "../../keyboard/touch-keyboard-skin-editor";
@@ -39,7 +39,6 @@ export function SkinSettingsPage() {
     linuxPlatform,
     mobilePlatform,
     host,
-    snapshot,
     draft,
     setDraft,
     busy,
@@ -74,6 +73,12 @@ export function SkinSettingsPage() {
   const [publishSkinId, setPublishSkinId] = useState<string | null>(null);
   const [published, setPublished] = useState(false);
   const candidateSkins = client.communityCandidateSkins;
+  const importsSkin = host?.skin_directory_import === true;
+  const skins = useSkinCatalog(client.scanSkinCatalog, client.openSkinDirectory, importsSkin);
+  const packages = skins.catalog?.packages ?? [];
+  // A package is part of the custom theme, so its card is the one in use while the custom theme draws it; the 自定义 card is then the custom theme without a package.
+  const skinInUse = globalTheme === "custom" ? (draft.custom_theme?.candidate_skin ?? null) : null;
+  const packageInUse = packages.findIndex((skin) => skin.id === skinInUse);
   return (
     <>
       <fieldset disabled={busy} hidden={page !== "skin"} aria-label="主题">
@@ -82,17 +87,23 @@ export function SkinSettingsPage() {
           <CandidatePanelLimitSection limit={host.candidate_panel_limit} />
         )}
         <ThemeCarousel
-          labels={themeCatalog.map((entry) => entry.title)}
-          selectedIndex={Math.max(
-            themeCatalog.findIndex((entry) => entry.id === globalTheme),
-            0,
-          )}
+          labels={[
+            ...themeCatalog.map((entry) => entry.title),
+            ...packages.map((skin) => skin.name),
+          ]}
+          selectedIndex={
+            packageInUse >= 0
+              ? themeCatalog.length + packageInUse
+              : Math.max(
+                  themeCatalog.findIndex((entry) => entry.id === globalTheme),
+                  0,
+                )
+          }
         >
           {themeCatalog.map((entry) => {
             const id = entry.id;
-            const selected = globalTheme === id;
-            // The custom card draws what the custom theme is assembled from: its base and pickers here, and its package in the external skin list below.
-            const customPackage = id === "custom" ? draft.custom_theme?.candidate_skin : null;
+            // The custom card draws what the custom theme is assembled from without a package: its base and pickers. Each package has its own card after the built-in ones.
+            const selected = globalTheme === id && (id !== "custom" || !skinInUse);
             const fixedAppearance =
               id === "custom"
                 ? themeEntry(draft.custom_theme?.base ?? "system").appearance
@@ -108,9 +119,7 @@ export function SkinSettingsPage() {
                       {selected && <span className={settings.skinCardInUse}>使用中</span>}
                     </span>
                     <span className={settings.skinCardDescription}>
-                      {customPackage
-                        ? `外部皮肤 ${customPackage}`
-                        : globalThemeDescription(entry, linuxPlatform)}
+                      {globalThemeDescription(entry, linuxPlatform)}
                     </span>
                   </div>
                   <div className={settings.skinCardActions}>
@@ -120,7 +129,17 @@ export function SkinSettingsPage() {
                       aria-label={entry.title}
                       aria-checked={selected}
                       className={settings.skinSwitch(selected)}
-                      onClick={() => onPreferencesChange({ global_theme: id })}
+                      onClick={() =>
+                        onPreferencesChange(
+                          id === "custom"
+                            ? // Choosing the custom card itself drops the package and keeps the rest of the custom theme, drawn over its own base.
+                              {
+                                global_theme: "custom",
+                                custom_theme: { ...draft.custom_theme, candidate_skin: null },
+                              }
+                            : { global_theme: id },
+                        )
+                      }
                     >
                       <span className={settings.skinSwitchKnob(selected)} />
                     </button>
@@ -183,7 +202,42 @@ export function SkinSettingsPage() {
               </article>
             );
           })}
+          {packages.map((skin) => (
+            <ExternalSkinCard
+              key={`package:${skin.id}`}
+              skin={skin}
+              selected={skin.id === skinInUse}
+              // A host that draws one layout judges a skin by that layout, not by a setting it ignores.
+              layout={host?.fixed_candidate_layout ?? draft.candidate_layout ?? "vertical"}
+              // The package's manifest base becomes the custom theme's base, which is what `resolve()` draws under the package, so the previews match and removing the package keeps that base.
+              onSelect={(id, base) =>
+                onPreferencesChange({
+                  global_theme: "custom",
+                  custom_theme: { ...draft.custom_theme, base, candidate_skin: id },
+                })
+              }
+              readImage={client.readSkinImage}
+              readFont={client.readSkinFont}
+              readToolbarCss={client.readSkinToolbarCss}
+              revision={skins.revision}
+              activeTheme={candidatePreviewTheme}
+              toolbarPreview={!linuxPlatform}
+              onPublish={
+                candidateSkins
+                  ? (id) => {
+                      setPublished(false);
+                      setPublishSkinId(id);
+                    }
+                  : undefined
+              }
+            />
+          ))}
         </ThemeCarousel>
+        {published && (
+          <p role="status" className={settings.externalMeta}>
+            已发布到社区。
+          </p>
+        )}
         <div className={settings.groups}>
           <GroupList title="外观">
             <Row title="颜色模式" description="设置窗口和各界面的默认明暗模式">
@@ -194,6 +248,79 @@ export function SkinSettingsPage() {
                 onChange={(theme) => onPreferencesChange({ theme })}
               />
             </Row>
+            <Row
+              title="外部皮肤"
+              description={
+                <>
+                  {importsSkin
+                    ? "点“导入皮肤”，选中包含 skin.toml 的皮肤文件夹。文件夹名只能用小写字母、数字和 . _ -，同名皮肤会被替换。"
+                    : "把包含 skin.toml 的皮肤文件夹复制到下面的目录，然后刷新。"}
+                  <span role="status" className="block">
+                    {!client.scanSkinCatalog
+                      ? "当前宿主不支持扫描外部皮肤。"
+                      : skins.busy
+                        ? "正在读取皮肤目录。"
+                        : !skins.catalog
+                          ? "尚未扫描。点击“刷新皮肤”读取皮肤目录。"
+                          : !skins.catalog.packages.length
+                            ? "没有发现外部皮肤。"
+                            : ""}
+                  </span>
+                  {skins.catalog?.directory && (
+                    <code className={settings.externalDirectory}>{skins.catalog.directory}</code>
+                  )}
+                </>
+              }
+            >
+              <button
+                type="button"
+                className="secondary"
+                disabled={!client.openSkinDirectory || skins.opening}
+                onClick={() => void skins.openFolder()}
+              >
+                {skins.opening
+                  ? importsSkin
+                    ? "正在导入…"
+                    : "正在打开…"
+                  : importsSkin
+                    ? "导入皮肤"
+                    : "打开目录"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={!client.scanSkinCatalog || skins.busy}
+                onClick={() => void skins.refresh()}
+              >
+                {skins.busy ? "正在扫描…" : "刷新皮肤"}
+              </button>
+            </Row>
+            {(skins.openFailed || skins.failed || !!skins.catalog?.issues.length) && (
+              <div className={settings.groupBlock}>
+                {skins.openFailed && (
+                  <p role="alert" className={settings.externalMeta}>
+                    {importsSkin ? "导入皮肤失败，请重试。" : "无法打开皮肤目录，请重试。"}
+                  </p>
+                )}
+                {skins.failed && (
+                  <p role="alert" className={settings.externalMeta}>
+                    读取皮肤目录失败，请重试。{skins.catalog && "仍显示上次扫描结果。"}
+                  </p>
+                )}
+                {!!skins.catalog?.issues.length && (
+                  <details className={settings.externalDiagnostics}>
+                    <summary>已忽略 {skins.catalog.issues.length} 个无效皮肤目录</summary>
+                    <ul>
+                      {skins.catalog.issues.map((issue, index) => (
+                        <li key={index}>
+                          {issue.folder}：{issue.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
           </GroupList>
           <GroupList title="自定义主题">
             {mobileKeyboardFeedback?.candidatePaletteFollowsDesktop !== undefined && (
@@ -264,67 +391,6 @@ export function SkinSettingsPage() {
             )}
           </GroupList>
         </div>
-        {snapshot?.candidate_skin_catalog && (
-          <div className={settings.externalMeta} role="status">
-            外部皮肤目录：
-            {snapshot.candidate_skin_catalog.scanned
-              ? `已扫描（${snapshot.candidate_skin_catalog.packages.length} 个）`
-              : "尚未扫描"}
-            {snapshot.candidate_skin_catalog.issues?.length
-              ? `，${snapshot.candidate_skin_catalog.issues.length} 个问题`
-              : ""}
-          </div>
-        )}
-        <ExternalSkins
-          activeTheme={candidatePreviewTheme}
-          scan={client.scanSkinCatalog}
-          openDirectory={client.openSkinDirectory}
-          importsSkin={host?.skin_directory_import === true}
-          readImage={client.readSkinImage}
-          readFont={client.readSkinFont}
-          readToolbarCss={client.readSkinToolbarCss}
-          selected={globalTheme === "custom" ? (draft.custom_theme?.candidate_skin ?? "") : ""}
-          // A host that draws one layout judges a skin by that layout, not by a setting it ignores.
-          layout={host?.fixed_candidate_layout ?? draft.candidate_layout ?? "vertical"}
-          // An external package is part of the custom theme, so choosing one selects that theme.
-          // The package's manifest base becomes the custom theme's base, which is what `resolve()` draws under the package, so the previews match and removing the package keeps that base.
-          onSelect={(id, base) =>
-            onPreferencesChange({
-              global_theme: "custom",
-              custom_theme: { ...draft.custom_theme, base, candidate_skin: id },
-            })
-          }
-          toolbarPreview={!linuxPlatform}
-          onPublish={
-            candidateSkins
-              ? (id) => {
-                  setPublished(false);
-                  setPublishSkinId(id);
-                }
-              : undefined
-          }
-        />
-        {published && (
-          <p role="status" className={settings.externalMeta}>
-            已发布到社区。
-          </p>
-        )}
-        {draft.custom_theme?.candidate_skin && (
-          <div className={settings.externalMeta}>
-            <button
-              type="button"
-              className="secondary"
-              // Removing the package keeps the rest of the custom theme and the selection: it is then drawn over its own base.
-              onClick={() =>
-                onPreferencesChange({
-                  custom_theme: { ...draft.custom_theme, candidate_skin: null },
-                })
-              }
-            >
-              自定义主题不使用外部皮肤
-            </button>
-          </div>
-        )}
         <div className={settings.groups}>
           {/* Each surface can still hold its own light or dark over the colour mode; the design folds these under 高级 on the theme page. */}
           <ThemeSettingsSection

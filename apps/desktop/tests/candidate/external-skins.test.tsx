@@ -1,8 +1,30 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
-import { ExternalSkins, selectedBarCss } from "../../../../packages/ui/src/skin/external-skins";
-import { SettingsPage, type SkinCatalog, type Snapshot } from "@msime/ui";
+import type { ComponentProps } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+  waitFor,
+} from "@testing-library/react";
+import {
+  ExternalSkinCard,
+  selectedBarCss,
+  useSkinCatalog,
+} from "../../../../packages/ui/src/skin/external-skins";
+import * as settingsStyle from "../../../../packages/ui/src/settings/settings-style";
+import { themeCatalog } from "../../../../packages/ui/src/theme/global-theme";
+import {
+  SettingsPage,
+  type ExternalSkin,
+  type SettingsClient,
+  type SkinCatalog,
+  type Snapshot,
+} from "@msime/ui";
 import { utilityCss } from "../support/utility-css";
 
 const geometryCss = utilityCss("external-skin-decorated");
@@ -56,6 +78,7 @@ const catalog: SkinCatalog = {
     },
   ],
 };
+const sample = catalog.packages[0];
 const initial: Snapshot = {
   format_version: 1,
   revision: 3,
@@ -68,7 +91,43 @@ const initial: Snapshot = {
     chinese_punctuation: true,
   },
 };
-const props = { selected: "", layout: "horizontal", onSelect: vi.fn() };
+
+// One package card on its own, as the theme carousel draws it.
+const cardProps = {
+  selected: false,
+  layout: "horizontal",
+  onSelect: vi.fn(),
+  revision: 1,
+  activeTheme: "dark" as const,
+  toolbarPreview: true,
+};
+function packageCard(
+  skin: ExternalSkin,
+  props: Partial<ComponentProps<typeof ExternalSkinCard>> = {},
+) {
+  return <ExternalSkinCard {...cardProps} skin={skin} {...props} />;
+}
+
+// The theme page, where each package is a card of the carousel and the directory is the 外部皮肤 row of the 外观 group.
+function openSkinPage(client: Partial<SettingsClient> = {}) {
+  return render(
+    <SettingsPage
+      initialPage="skin"
+      client={{ load: async () => initial, save: vi.fn(), ...client }}
+    />,
+  );
+}
+async function skinRow(): Promise<HTMLElement> {
+  const title = await screen.findByText("外部皮肤", { selector: "[data-row-title]" });
+  return title.closest("div")!;
+}
+// The row's group, which also holds the directory alerts and the ignored-folder list.
+async function skinGroup(): Promise<HTMLElement> {
+  return (await skinRow()).parentElement!;
+}
+function carousel(): HTMLElement {
+  return screen.getByRole("region", { name: "主题列表" });
+}
 
 test("external skin selected-bar flag emits a scoped hide rule", () => {
   expect(selectedBarCss("scope", { showSelectedBar: false })).toEqual([
@@ -77,9 +136,9 @@ test("external skin selected-bar flag emits a scoped hide rule", () => {
   expect(selectedBarCss("scope", { showSelectedBar: true })).toEqual([]);
   expect(selectedBarCss("scope", null)).toEqual([]);
 });
-// The list scans once as it mounts; a manual refresh is clicked once that scan has settled and the button is back.
+// The page scans once as it mounts; a manual refresh is clicked once that scan has settled and the button is back.
 async function refresh() {
-  fireEvent.click(await screen.findByRole("button", { name: "刷新皮肤" }));
+  fireEvent.click(await within(await skinRow()).findByRole("button", { name: "刷新皮肤" }));
 }
 
 test("settings forwards the declared toolbar reader using only package id", async () => {
@@ -92,7 +151,7 @@ test("settings forwards the declared toolbar reader using only package id", asyn
         readSkinToolbarCss,
         scanSkinCatalog: async () => ({
           ...catalog,
-          packages: [{ ...catalog.packages[0], toolbarStylesheet: "toolbar.css" }],
+          packages: [{ ...sample, toolbarStylesheet: "toolbar.css" }],
         }),
       }}
     />,
@@ -118,7 +177,7 @@ test("settings forwards the font reader with package id and relative name", asyn
           readSkinToolbarCss: async () => ".sample {}",
           scanSkinCatalog: async () => ({
             ...catalog,
-            packages: [{ ...catalog.packages[0], toolbarStylesheet: "toolbar.css" }],
+            packages: [{ ...sample, toolbarStylesheet: "toolbar.css" }],
           }),
         }}
       />,
@@ -134,23 +193,15 @@ test("settings forwards the font reader with package id and relative name", asyn
 
 test("the selection bar sheet follows the drawn mode and disappears when cards unmount", async () => {
   const mounted = render(
-    <ExternalSkins
-      {...props}
-      scan={async () => ({
-        ...catalog,
-        packages: [
-          {
-            ...catalog.packages[0],
-            candidate: {
-              dark: { surface: "#123456", showSelectedBar: false },
-              light: { surface: "#abcdef" },
-            },
-          },
-        ],
-      })}
-    />,
+    packageCard({
+      ...sample,
+      candidate: {
+        dark: { surface: "#123456", showSelectedBar: false },
+        light: { surface: "#abcdef" },
+      },
+    }),
   );
-  const card = await screen.findByRole("article");
+  const card = screen.getByRole("article");
   expect(card.querySelector("style")).toBeNull();
   await waitFor(() => expect(document.adoptedStyleSheets).toHaveLength(1));
   expect(drawn(card, "--cand-bg")).toBe("#123456");
@@ -165,20 +216,7 @@ test("the selection bar sheet follows the drawn mode and disappears when cards u
 
 test("missing adopted stylesheets reports fallback without injecting inline styles", async () => {
   Reflect.deleteProperty(document, "adoptedStyleSheets");
-  render(
-    <ExternalSkins
-      {...props}
-      scan={async () => ({
-        ...catalog,
-        packages: [
-          {
-            ...catalog.packages[0],
-            candidate: { dark: { showSelectedBar: false }, light: {} },
-          },
-        ],
-      })}
-    />,
-  );
+  render(packageCard({ ...sample, candidate: { dark: { showSelectedBar: false }, light: {} } }));
   await screen.findByText("当前浏览器无法隐藏皮肤的选中条，其余配色照常预览。");
   expect(screen.getByRole("article").querySelector("style")).toBeNull();
 });
@@ -187,7 +225,7 @@ const imageCatalog: SkinCatalog = {
   ...catalog,
   packages: [
     {
-      ...catalog.packages[0],
+      ...sample,
       preview: "images/top.png",
       decorationTopDip: 32,
       decorationWidthDip: 150,
@@ -212,21 +250,19 @@ test("image data URLs preserve bytes and reject non-image or invalid payloads", 
 });
 
 test("one host image read feeds both preview layouts and refresh reloads unchanged manifests", async () => {
-  const readImage = vi.fn().mockResolvedValue(imageData);
-  const mounted = render(
-    <ExternalSkins {...props} scan={async () => imageCatalog} readImage={readImage} />,
-  );
-  expect(readImage).not.toHaveBeenCalled();
-  const card = await screen.findByRole("article");
+  const readSkinImage = vi.fn().mockResolvedValue(imageData);
+  const mounted = openSkinPage({ scanSkinCatalog: async () => imageCatalog, readSkinImage });
+  expect(readSkinImage).not.toHaveBeenCalled();
+  const card = await screen.findByRole("article", { name: "Sample skin" });
   await waitFor(() => expect(card.querySelectorAll("img.skin-decoration-image")).toHaveLength(2));
-  expect(readImage).toHaveBeenCalledExactlyOnceWith("sample", "images/top.png");
+  expect(readSkinImage).toHaveBeenCalledExactlyOnceWith("sample", "images/top.png");
   expect(card.querySelector("img.skin-decoration-image")?.getAttribute("src")).toBe(
     skinImageUrl(imageData),
   );
   fireEvent.click(within(card).getByRole("button", { name: "预览浅色" }));
-  expect(readImage).toHaveBeenCalledTimes(1);
+  expect(readSkinImage).toHaveBeenCalledTimes(1);
   await refresh();
-  await waitFor(() => expect(readImage).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(readSkinImage).toHaveBeenCalledTimes(2));
   mounted.unmount();
 });
 
@@ -253,15 +289,15 @@ test("settings forwards image reader and existing CSP permits image data without
 });
 
 test("image read and decode failures retain base preview and can be retried", async () => {
-  const readImage = vi
+  const readSkinImage = vi
     .fn()
     .mockRejectedValueOnce(new Error("private diagnostic"))
     .mockResolvedValue(imageData);
-  render(<ExternalSkins {...props} scan={async () => imageCatalog} readImage={readImage} />);
+  openSkinPage({ scanSkinCatalog: async () => imageCatalog, readSkinImage });
   await screen.findByText("皮肤图片加载失败，保留基础预览。可刷新皮肤重试。");
   expect(screen.queryByText("private diagnostic")).toBeNull();
   await refresh();
-  const card = screen.getByRole("article");
+  const card = screen.getByRole("article", { name: "Sample skin" });
   await waitFor(() => expect(card.querySelector("img.skin-decoration-image")).not.toBeNull());
   fireEvent.error(card.querySelector("img.skin-decoration-image")!);
   expect(card.querySelector("img.skin-decoration-image")).toBeNull();
@@ -272,7 +308,7 @@ test("image read and decode failures retain base preview and can be retried", as
 
 test("old image response cannot replace current resource after catalog refresh", async () => {
   let finish!: (image: SkinImage) => void;
-  const readImage = vi
+  const readSkinImage = vi
     .fn()
     .mockImplementationOnce(
       () =>
@@ -281,10 +317,10 @@ test("old image response cannot replace current resource after catalog refresh",
         }),
     )
     .mockResolvedValue({ ...imageData, bytes: [2] });
-  render(<ExternalSkins {...props} scan={async () => imageCatalog} readImage={readImage} />);
-  await waitFor(() => expect(readImage).toHaveBeenCalledTimes(1));
+  openSkinPage({ scanSkinCatalog: async () => imageCatalog, readSkinImage });
+  await waitFor(() => expect(readSkinImage).toHaveBeenCalledTimes(1));
   await refresh();
-  const card = screen.getByRole("article");
+  const card = screen.getByRole("article", { name: "Sample skin" });
   await waitFor(() =>
     expect(card.querySelector("img.skin-decoration-image")?.getAttribute("src")).toContain("Ag=="),
   );
@@ -294,35 +330,23 @@ test("old image response cannot replace current resource after catalog refresh",
 
 test("images are not requested without decoration and optional hosts remain usable", async () => {
   const readImage = vi.fn();
-  const scan = async () => ({
-    ...imageCatalog,
-    packages: [{ ...imageCatalog.packages[0], decorationTopDip: 0, decorationWidthDip: 0 }],
-  });
-  const mounted = render(<ExternalSkins {...props} scan={scan} readImage={readImage} />);
-  await screen.findByRole("article");
+  const mounted = render(
+    packageCard(
+      { ...imageCatalog.packages[0], decorationTopDip: 0, decorationWidthDip: 0 },
+      { readImage },
+    ),
+  );
+  screen.getByRole("article");
   expect(readImage).not.toHaveBeenCalled();
-  mounted.rerender(<ExternalSkins {...props} scan={async () => imageCatalog} />);
+  mounted.rerender(packageCard(imageCatalog.packages[0]));
   await screen.findByText("当前宿主不支持皮肤图片预览。");
 });
 
 test("decorated previews preserve upstream geometry in both layouts without decorating toolbar", async () => {
   render(
-    <ExternalSkins
-      {...props}
-      scan={async () => ({
-        ...catalog,
-        packages: [
-          {
-            ...catalog.packages[0],
-            minWidthDip: 280.5,
-            decorationTopDip: 32.5,
-            decorationWidthDip: 150,
-          },
-        ],
-      })}
-    />,
+    packageCard({ ...sample, minWidthDip: 280.5, decorationTopDip: 32.5, decorationWidthDip: 150 }),
   );
-  const card = await screen.findByRole("article");
+  const card = screen.getByRole("article");
   expect(card.classList.contains("external-skin-decorated")).toBe(true);
   const preview = card.querySelector<HTMLElement>("[data-skin-preview]")!;
   expect(preview.style.getPropertyValue("--msime-skin-min-width")).toBe("280.5px");
@@ -349,18 +373,8 @@ test.each([
 ])(
   "invalid or absent decoration %s/%s retains plain candidate markup",
   async (decorationTopDip, decorationWidthDip) => {
-    render(
-      <ExternalSkins
-        {...props}
-        scan={async () => ({
-          ...catalog,
-          packages: [
-            { ...catalog.packages[0], minWidthDip: Infinity, decorationTopDip, decorationWidthDip },
-          ],
-        })}
-      />,
-    );
-    const card = await screen.findByRole("article");
+    render(packageCard({ ...sample, minWidthDip: Infinity, decorationTopDip, decorationWidthDip }));
+    const card = screen.getByRole("article");
     expect(card.classList.contains("external-skin-decorated")).toBe(false);
     expect(card.querySelector(".containerParent")).toBeNull();
     const preview = card.querySelector<HTMLElement>("[data-skin-preview]")!;
@@ -377,23 +391,23 @@ test("refresh removes stale geometry and independent cards do not inherit it", a
       ...catalog,
       packages: [
         {
-          ...catalog.packages[0],
+          ...sample,
           decorationTopDip: 500,
           decorationWidthDip: 1000,
           minWidthDip: 1000,
         },
-        { ...catalog.packages[0], id: "plain", name: "Plain" },
+        { ...sample, id: "plain", name: "Plain" },
       ],
     })
     .mockResolvedValue(catalog);
-  render(<ExternalSkins {...props} scan={scan} />);
+  openSkinPage({ scanSkinCatalog: scan });
   const card = await screen.findByRole("article", { name: "Sample skin" });
   expect(card.querySelectorAll(".containerParent")).toHaveLength(2);
   expect(
     screen.getByRole("article", { name: "Plain" }).querySelector(".containerParent"),
   ).toBeNull();
   await refresh();
-  await act(async () => {});
+  await waitFor(() => expect(screen.queryByRole("article", { name: "Plain" })).toBeNull());
   expect(card.querySelector(".containerParent")).toBeNull();
   expect(card.classList.contains("external-skin-decorated")).toBe(false);
 });
@@ -451,25 +465,17 @@ test("geometry stylesheet overhangs the mascot into the card, above it, as every
 
 test("a card draws one declared mode over its base, never the other mode beneath it", async () => {
   render(
-    <ExternalSkins
-      {...props}
-      scan={async () => ({
-        ...catalog,
-        packages: [
-          {
-            ...catalog.packages[0],
-            base: "paper",
-            themes: ["light"],
-            candidate: {
-              dark: { surface: "#123456", text: "#112233" },
-              light: { accent: "#aa0000" },
-            },
-          },
-        ],
-      })}
-    />,
+    packageCard({
+      ...sample,
+      base: "paper",
+      themes: ["light"],
+      candidate: {
+        dark: { surface: "#123456", text: "#112233" },
+        light: { accent: "#aa0000" },
+      },
+    }),
   );
-  const card = await screen.findByRole("article");
+  const card = screen.getByRole("article");
   // Paper fixes the light mode; its surface and text show through where the light palette is silent.
   expect(drawn(card, "--cand-bg")).toBe("#F7F5F0");
   expect(drawn(card, "--cand-text")).toBe("#1A1E1B");
@@ -479,19 +485,20 @@ test("a card draws one declared mode over its base, never the other mode beneath
 });
 
 test("open directory is explicit, path-free and independent of scanning and selection", async () => {
-  const openDirectory = vi.fn().mockResolvedValue(undefined);
-  const scan = vi.fn().mockResolvedValue(catalog);
-  const onSelect = vi.fn();
-  render(
-    <ExternalSkins {...props} openDirectory={openDirectory} scan={scan} onSelect={onSelect} />,
-  );
-  expect(openDirectory).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
-  await screen.findByRole("button", { name: "打开目录" });
-  expect(openDirectory).toHaveBeenCalledWith();
-  // Only the scan the list makes as it mounts; opening the folder does not rescan.
-  expect(scan).toHaveBeenCalledTimes(1);
-  expect(onSelect).not.toHaveBeenCalled();
+  const openSkinDirectory = vi.fn().mockResolvedValue(undefined);
+  const scanSkinCatalog = vi.fn().mockResolvedValue(catalog);
+  const save = vi.fn();
+  openSkinPage({ openSkinDirectory, scanSkinCatalog, save });
+  const card = await screen.findByRole("article", { name: "Sample skin" });
+  expect(openSkinDirectory).not.toHaveBeenCalled();
+  const row = await skinRow();
+  fireEvent.click(within(row).getByRole("button", { name: "打开目录" }));
+  await within(row).findByRole("button", { name: "打开目录" });
+  expect(openSkinDirectory).toHaveBeenCalledWith();
+  // Only the scan the page makes as it mounts; opening the folder does not rescan.
+  expect(scanSkinCatalog).toHaveBeenCalledTimes(1);
+  expect(within(card).getByRole("switch").getAttribute("aria-checked")).toBe("false");
+  expect(save).not.toHaveBeenCalled();
 });
 
 test("settings forwards the open directory capability", async () => {
@@ -506,24 +513,28 @@ test("settings forwards the open directory capability", async () => {
 });
 
 test("directory opener is disabled when unavailable and retries sanitized failures", async () => {
-  const mounted = render(<ExternalSkins {...props} />);
-  expect((screen.getByRole("button", { name: "打开目录" }) as HTMLButtonElement).disabled).toBe(
-    true,
-  );
-  const openDirectory = vi
+  const mounted = openSkinPage();
+  expect(
+    (within(await skinRow()).getByRole("button", { name: "打开目录" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  mounted.unmount();
+  const openSkinDirectory = vi
     .fn()
     .mockImplementationOnce(() => {
       throw new Error("private diagnostic");
     })
     .mockResolvedValue(undefined);
-  mounted.rerender(<ExternalSkins {...props} openDirectory={openDirectory} />);
-  fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
-  expect((await screen.findByRole("alert")).textContent).toBe("无法打开皮肤目录，请重试。");
+  openSkinPage({ openSkinDirectory });
+  const row = await skinRow();
+  fireEvent.click(within(row).getByRole("button", { name: "打开目录" }));
+  const group = await skinGroup();
+  expect((await within(group).findByRole("alert")).textContent).toBe("无法打开皮肤目录，请重试。");
   expect(screen.queryByText("private diagnostic")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
-  await screen.findByRole("button", { name: "打开目录" });
-  expect(screen.queryByRole("alert")).toBeNull();
-  expect(openDirectory).toHaveBeenCalledTimes(2);
+  fireEvent.click(within(row).getByRole("button", { name: "打开目录" }));
+  await within(row).findByRole("button", { name: "打开目录" });
+  expect(within(group).queryByRole("alert")).toBeNull();
+  expect(openSkinDirectory).toHaveBeenCalledTimes(2);
 });
 
 test("opening deduplicates requests and ignores late failures after host replacement", async () => {
@@ -534,29 +545,170 @@ test("opening deduplicates requests and ignores late failures after host replace
         reject = fail;
       }),
   );
-  const mounted = render(<ExternalSkins {...props} openDirectory={openDirectory} />);
-  fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
-  fireEvent.click(screen.getByRole("button", { name: "正在打开…" }));
+  const { result, rerender } = renderHook(
+    ({ open }: { open: () => Promise<void> }) => useSkinCatalog(undefined, open, false),
+    { initialProps: { open: openDirectory as () => Promise<void> } },
+  );
+  act(() => void result.current.openFolder());
+  expect(result.current.opening).toBe(true);
+  act(() => void result.current.openFolder());
   expect(openDirectory).toHaveBeenCalledTimes(1);
-  mounted.rerender(<ExternalSkins {...props} openDirectory={async () => {}} />);
+  rerender({ open: async () => {} });
   await act(async () => reject(new Error("synthetic")));
-  expect(screen.queryByRole("alert")).toBeNull();
-  expect((screen.getByRole("button", { name: "打开目录" }) as HTMLButtonElement).disabled).toBe(
-    false,
+  expect(result.current.openFailed).toBe(false);
+  expect(result.current.opening).toBe(false);
+});
+
+test("the page opening scans the catalog and its row shows the directory and diagnostics", async () => {
+  let finish!: (result: SkinCatalog) => void;
+  const scan = vi.fn(
+    () =>
+      new Promise<SkinCatalog>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  openSkinPage({ scanSkinCatalog: scan });
+  const row = await skinRow();
+  // The scan starts in an effect once the page has rendered.
+  await waitFor(() =>
+    expect(within(row).getByRole("status").textContent).toBe("正在读取皮肤目录。"),
+  );
+  const busy = within(row).getByRole("button", { name: "正在扫描…" }) as HTMLButtonElement;
+  expect(busy.disabled).toBe(true);
+  // The busy button cannot start a second scan.
+  fireEvent.click(busy);
+  expect(scan).toHaveBeenCalledTimes(1);
+  await act(async () => finish(catalog));
+  const card = await screen.findByRole("article", { name: "Sample skin" });
+  expect(scan).toHaveBeenCalledExactlyOnceWith();
+  expect(within(row).getByText(catalog.directory)).toBeTruthy();
+  expect(within(row).getByRole("status").textContent).toBe("");
+  expect(within(card).getByText("sample · v1 · Example")).toBeTruthy();
+  const group = await skinGroup();
+  expect(within(group).getByText("已忽略 1 个无效皮肤目录")).toBeTruthy();
+  expect(within(group).getByText("Bad：invalid manifest")).toBeTruthy();
+  expect(card.querySelectorAll("[data-skin-stage]")).toHaveLength(3);
+  // The packages are carousel cards now; the separate section below the page is gone.
+  expect(screen.queryByRole("region", { name: "外部皮肤" })).toBeNull();
+});
+
+test("external skins join the theme carousel after the built-in themes", async () => {
+  openSkinPage({
+    scanSkinCatalog: async () => ({
+      ...catalog,
+      packages: [sample, { ...sample, id: "second", name: "Second skin" }],
+    }),
+  });
+  await screen.findByRole("article", { name: "Second skin" });
+  const slides = within(carousel())
+    .getAllByRole("article")
+    .map((article) => article.getAttribute("aria-label"));
+  expect(slides).toEqual([
+    ...themeCatalog.map((entry) => entry.title),
+    "Sample skin",
+    "Second skin",
+  ]);
+  expect(within(carousel()).getByRole("button", { name: "查看Second skin" })).toBeTruthy();
+  const total = themeCatalog.length + 2;
+  expect(within(carousel()).getByText(`1 / ${total}`)).toBeTruthy();
+});
+
+test("a host without a catalog scanner has no package cards and says so in the row", async () => {
+  openSkinPage();
+  const row = await skinRow();
+  expect(within(row).getByRole("status").textContent).toBe("当前宿主不支持扫描外部皮肤。");
+  expect(within(carousel()).getAllByRole("article")).toHaveLength(themeCatalog.length);
+  expect(within(carousel()).getByText(`1 / ${themeCatalog.length}`)).toBeTruthy();
+});
+
+test("an external card is styled as the built-in theme cards are", async () => {
+  openSkinPage({ scanSkinCatalog: async () => catalog });
+  const card = await screen.findByRole("article", { name: "Sample skin" });
+  const builtin = screen.getByRole("article", { name: "夜青" });
+  expect(card.className).toBe(builtin.className);
+  const toggle = within(card).getByRole("switch");
+  expect(toggle.className).toBe(within(builtin).getByRole("switch").className);
+  expect(toggle.className).toBe(settingsStyle.skinSwitch(false));
+  expect(toggle.classList.contains("skin-selection-switch")).toBe(false);
+  expect(toggle.firstElementChild?.className).toBe(settingsStyle.skinSwitchKnob(false));
+  // The title carries the drawn mode as the built-in titles do.
+  expect(card.querySelector("[data-skin-card-header] span")?.textContent).toBe(
+    "Sample skin (Dark)",
+  );
+  expect(within(card).getByRole("button", { name: "预览浅色" }).className).toBe(
+    settingsStyle.skinPreviewSwitch,
   );
 });
 
-test("catalog is scanned as the list mounts and displays host directory, metadata and diagnostics", async () => {
-  const scan = vi.fn().mockResolvedValue(catalog);
-  render(<ExternalSkins {...props} scan={scan} />);
-  expect(screen.getByRole("status").textContent).toContain("正在读取皮肤目录");
+test("choosing a package makes it the custom theme's skin, and the 自定义 card drops it", async () => {
+  const save = vi.fn().mockImplementation(async (_revision, preferences) => ({
+    ...initial,
+    revision: 4,
+    preferences,
+  }));
+  openSkinPage({
+    save,
+    scanSkinCatalog: async () => ({ ...catalog, packages: [{ ...sample, base: "paper" }] }),
+  });
   const card = await screen.findByRole("article", { name: "Sample skin" });
-  expect(scan).toHaveBeenCalledExactlyOnceWith();
-  expect(screen.getByText(catalog.directory)).toBeTruthy();
-  expect(within(card).getByText("sample · v1 · Example")).toBeTruthy();
-  expect(screen.getByText("已忽略 1 个无效皮肤目录")).toBeTruthy();
-  expect(screen.getByText("Bad：invalid manifest")).toBeTruthy();
-  expect(card.querySelectorAll("[data-skin-stage]")).toHaveLength(3);
+  const custom = screen.getByRole("article", { name: "自定义" });
+  fireEvent.click(within(card).getByRole("switch"));
+  expect(within(card).getByRole("switch").getAttribute("aria-checked")).toBe("true");
+  expect(within(card).getByText("使用中")).toBeTruthy();
+  expect(card.className).toBe(settingsStyle.skinCard(true));
+  // The custom theme is in use, but through the package's card.
+  expect(within(custom).getByRole("switch").getAttribute("aria-checked")).toBe("false");
+  expect(within(custom).queryByText("使用中")).toBeNull();
+  expect(within(custom).getByText("外部皮肤、候选颜色与自定义键盘")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  await screen.findByText("设置已保存。");
+  expect(save).toHaveBeenLastCalledWith(3, {
+    ...initial.preferences,
+    global_theme: "custom",
+    custom_theme: { base: "paper", candidate_skin: "sample" },
+  });
+  fireEvent.click(within(custom).getByRole("switch"));
+  expect(within(custom).getByRole("switch").getAttribute("aria-checked")).toBe("true");
+  expect(within(card).getByRole("switch").getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  await waitFor(() =>
+    expect(save).toHaveBeenLastCalledWith(4, {
+      ...initial.preferences,
+      global_theme: "custom",
+      custom_theme: { base: "paper", candidate_skin: null },
+    }),
+  );
+});
+
+test("the carousel opens on the package card when the custom theme draws a package", async () => {
+  openSkinPage({
+    load: async () => ({
+      ...initial,
+      preferences: {
+        ...initial.preferences,
+        global_theme: "custom",
+        custom_theme: { candidate_skin: "sample" },
+      },
+    }),
+    scanSkinCatalog: async () => catalog,
+  });
+  const card = await screen.findByRole("article", { name: "Sample skin" });
+  const count = themeCatalog.length + 1;
+  await waitFor(() =>
+    expect(
+      within(carousel())
+        .getByRole("button", { name: "查看Sample skin" })
+        .getAttribute("aria-current"),
+    ).toBe("true"),
+  );
+  expect(within(carousel()).getByText(`${count} / ${count}`)).toBeTruthy();
+  expect(within(card).getByRole("switch").getAttribute("aria-checked")).toBe("true");
+  expect(within(card).getByText("使用中")).toBeTruthy();
+  expect(
+    within(screen.getByRole("article", { name: "自定义" }))
+      .getByRole("switch")
+      .getAttribute("aria-checked"),
+  ).toBe("false");
 });
 
 test("external selection enters the revisioned draft; preview toggles never save or select", async () => {
@@ -591,41 +743,29 @@ test("external selection enters the revisioned draft; preview toggles never save
 });
 
 test("light-only skin compatibility follows actual theme, not card override", async () => {
-  const scan = vi
-    .fn()
-    .mockResolvedValue({ ...catalog, packages: [{ ...catalog.packages[0], themes: ["light"] }] });
+  const lightOnly = { ...sample, themes: ["light"] };
   const onSelect = vi.fn();
-  const view = render(
-    <ExternalSkins {...props} onSelect={onSelect} scan={scan} activeTheme="dark" />,
-  );
-  const toggle = await screen.findByRole("switch");
-  expect((toggle as HTMLButtonElement).disabled).toBe(true);
-  view.rerender(<ExternalSkins {...props} onSelect={onSelect} scan={scan} activeTheme="light" />);
-  expect((toggle as HTMLButtonElement).disabled).toBe(false);
+  const view = render(packageCard(lightOnly, { onSelect, activeTheme: "dark" }));
+  const toggle = screen.getByRole("switch") as HTMLButtonElement;
+  expect(toggle.disabled).toBe(true);
+  view.rerender(packageCard(lightOnly, { onSelect, activeTheme: "light" }));
+  expect(toggle.disabled).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "预览深色" }));
-  expect((toggle as HTMLButtonElement).disabled).toBe(false);
+  expect(toggle.disabled).toBe(false);
   fireEvent.click(toggle);
   expect(onSelect).toHaveBeenCalledExactlyOnceWith("sample", "system");
-  view.rerender(<ExternalSkins {...props} onSelect={onSelect} scan={scan} activeTheme="dark" />);
-  expect((toggle as HTMLButtonElement).disabled).toBe(true);
+  view.rerender(packageCard(lightOnly, { onSelect, activeTheme: "dark" }));
+  expect(toggle.disabled).toBe(true);
   expect(
     view.container.querySelector("[data-skin-preview]")?.getAttribute("data-preview-theme"),
   ).toBe("light");
-  expect(scan).toHaveBeenCalledTimes(1);
 });
 
 test("a package over a built-in base is drawn in that base's mode whatever the host mode", async () => {
-  const night = { ...catalog.packages[0], base: "night" as const, themes: ["light"] };
+  const night = { ...sample, base: "night" as const, themes: ["light"] };
   const onSelect = vi.fn();
-  const view = render(
-    <ExternalSkins
-      {...props}
-      onSelect={onSelect}
-      scan={async () => ({ ...catalog, packages: [night] })}
-      activeTheme="light"
-    />,
-  );
-  const card = await screen.findByRole("article", { name: "Sample skin" });
+  const view = render(packageCard(night, { onSelect, activeTheme: "light" }));
+  const card = screen.getByRole("article", { name: "Sample skin" });
   // Night fixes the dark mode, so there is no mode to switch the preview to.
   expect(card.querySelector("[data-skin-preview]")?.getAttribute("data-preview-theme")).toBe(
     "dark",
@@ -638,14 +778,7 @@ test("a package over a built-in base is drawn in that base's mode whatever the h
   expect(toggle.disabled).toBe(false);
   fireEvent.click(toggle);
   expect(onSelect).toHaveBeenCalledExactlyOnceWith("sample", "night");
-  view.rerender(
-    <ExternalSkins
-      {...props}
-      onSelect={onSelect}
-      scan={async () => ({ ...catalog, packages: [night] })}
-      activeTheme="dark"
-    />,
-  );
+  view.rerender(packageCard(night, { onSelect, activeTheme: "dark" }));
   expect(toggle.disabled).toBe(false);
 });
 
@@ -686,23 +819,16 @@ test("settings synchronize all cards and reset local overrides on candidate them
 
 test("manifest compatibility follows actual layout and dark host theme, not preview override", async () => {
   const onSelect = vi.fn();
-  const mounted = render(
-    <ExternalSkins {...props} onSelect={onSelect} scan={async () => catalog} layout="vertical" />,
-  );
-  const toggle = await screen.findByRole("switch", { name: "Sample skin" });
-  expect((toggle as HTMLButtonElement).disabled).toBe(true);
+  const mounted = render(packageCard(sample, { onSelect, layout: "vertical" }));
+  const toggle = screen.getByRole("switch", { name: "Sample skin" }) as HTMLButtonElement;
+  expect(toggle.disabled).toBe(true);
   fireEvent.click(toggle);
   fireEvent.click(screen.getByRole("button", { name: "预览浅色" }));
-  expect((toggle as HTMLButtonElement).disabled).toBe(true);
+  expect(toggle.disabled).toBe(true);
   expect(onSelect).not.toHaveBeenCalled();
   mounted.unmount();
-  render(
-    <ExternalSkins
-      {...props}
-      scan={async () => ({ ...catalog, packages: [{ ...catalog.packages[0], themes: ["light"] }] })}
-    />,
-  );
-  expect(((await screen.findByRole("switch")) as HTMLButtonElement).disabled).toBe(true);
+  render(packageCard({ ...sample, themes: ["light"] }));
+  expect((screen.getByRole("switch") as HTMLButtonElement).disabled).toBe(true);
 });
 
 test("settings without a layout use the same vertical default for skin compatibility", async () => {
@@ -730,16 +856,17 @@ test("errors retain last catalog, hide raw exception and permit retry to empty r
     .mockResolvedValueOnce(catalog)
     .mockRejectedValueOnce(new Error("sensitive diagnostic"))
     .mockResolvedValueOnce({ directory: catalog.directory, packages: [], issues: [] });
-  render(<ExternalSkins {...props} scan={scan} />);
-  await screen.findByRole("article");
+  openSkinPage({ scanSkinCatalog: scan });
+  await screen.findByRole("article", { name: "Sample skin" });
+  const group = await skinGroup();
   await refresh();
-  expect((await screen.findByRole("alert")).textContent).toContain("仍显示上次扫描结果");
+  expect((await within(group).findByRole("alert")).textContent).toContain("仍显示上次扫描结果");
   expect(screen.queryByText("sensitive diagnostic")).toBeNull();
-  expect(screen.getByRole("article")).toBeTruthy();
+  expect(screen.getByRole("article", { name: "Sample skin" })).toBeTruthy();
   await refresh();
-  await screen.findByText("没有发现外部皮肤。");
-  expect(screen.queryByRole("article")).toBeNull();
-  expect(screen.queryByRole("alert")).toBeNull();
+  await within(group).findByText("没有发现外部皮肤。");
+  expect(screen.queryByRole("article", { name: "Sample skin" })).toBeNull();
+  expect(within(group).queryByRole("alert")).toBeNull();
 });
 
 test("late old-host result cannot overwrite current catalog; busy scan cannot be duplicated", async () => {
@@ -750,69 +877,66 @@ test("late old-host result cannot overwrite current catalog; busy scan cannot be
         resolve = done;
       }),
   );
-  const mounted = render(<ExternalSkins {...props} scan={scan} />);
-  fireEvent.click(screen.getByRole("button", { name: "正在扫描…" }));
-  expect(scan).toHaveBeenCalledTimes(1);
-  mounted.rerender(
-    <ExternalSkins {...props} scan={async () => ({ ...catalog, packages: [], issues: [] })} />,
+  const { result, rerender } = renderHook(
+    ({ scan }: { scan: () => Promise<SkinCatalog> }) => useSkinCatalog(scan, undefined, false),
+    { initialProps: { scan: scan as () => Promise<SkinCatalog> } },
   );
-  await screen.findByText("没有发现外部皮肤。");
+  expect(result.current.busy).toBe(true);
+  act(() => void result.current.refresh());
+  expect(scan).toHaveBeenCalledTimes(1);
+  rerender({ scan: async () => ({ ...catalog, packages: [], issues: [] }) });
+  await waitFor(() => expect(result.current.catalog?.packages).toEqual([]));
+  const revision = result.current.revision;
   await act(async () => resolve(catalog));
-  expect(screen.queryByRole("article")).toBeNull();
+  expect(result.current.catalog?.packages).toEqual([]);
+  expect(result.current.revision).toBe(revision);
 });
 
 test("unavailable hosts and synchronous scan exceptions are handled", async () => {
-  const mounted = render(<ExternalSkins {...props} />);
-  expect((screen.getByRole("button", { name: "刷新皮肤" }) as HTMLButtonElement).disabled).toBe(
-    true,
-  );
-  mounted.rerender(
-    <ExternalSkins
-      {...props}
-      scan={() => {
-        throw new Error("synthetic");
-      }}
-    />,
-  );
-  expect(await screen.findByRole("alert")).toBeTruthy();
-  expect((screen.getByRole("button", { name: "刷新皮肤" }) as HTMLButtonElement).disabled).toBe(
-    false,
-  );
+  const mounted = openSkinPage();
+  expect(
+    (within(await skinRow()).getByRole("button", { name: "刷新皮肤" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  mounted.unmount();
+  openSkinPage({
+    scanSkinCatalog: () => {
+      throw new Error("synthetic");
+    },
+  });
+  const group = await skinGroup();
+  expect((await within(group).findByRole("alert")).textContent).toBe("读取皮肤目录失败，请重试。");
+  expect(
+    (within(await skinRow()).getByRole("button", { name: "刷新皮肤" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(false);
 });
 
 test("manifest text is escaped and palette cannot inject CSS or resource URLs", async () => {
   const hostile = "</style><img src=x onerror=alert(1)>";
   render(
-    <ExternalSkins
-      {...props}
-      scan={async () => ({
-        ...catalog,
-        packages: [
-          {
-            ...catalog.packages[0],
-            name: hostile,
-            candidate: {
-              dark: {
-                surface: "red;} body{display:none}",
-                text: "url(https://invalid.example)",
-                accent: "#123456",
-                showSelectedBar: false,
-              },
-              light: {},
-            },
-          },
-        ],
-      })}
-    />,
+    packageCard({
+      ...sample,
+      name: hostile,
+      candidate: {
+        dark: {
+          surface: "red;} body{display:none}",
+          text: "url(https://invalid.example)",
+          accent: "#123456",
+          showSelectedBar: false,
+        },
+        light: {},
+      },
+    }),
   );
-  const card = await screen.findByRole("article", { name: hostile });
+  const card = screen.getByRole("article", { name: hostile });
   expect(card.querySelector("img[src=x]")).toBeNull();
   // Colours reach the preview only as normalized `--cand-*` values; anything else is dropped, never written into a rule.
   expect(drawn(card, "--accent-strong")).toBe("#123456");
   expect(drawn(card, "--cand-bg")).toBe("");
   expect(drawn(card, "--cand-text")).toBe("");
+  await waitFor(() => expect(previewCss(card)).toContain("display:none"));
   const css = previewCss(card);
-  expect(css).toContain("display:none");
   expect(css).not.toContain("body");
   expect(css).not.toContain("url(");
 });
@@ -820,12 +944,17 @@ test("manifest text is escaped and palette cannot inject CSS or resource URLs", 
 test("an import host lists the imported skin without a manual refresh", async () => {
   const scan = vi.fn().mockResolvedValue({ directory: "/skins", packages: [], issues: [] });
   const openDirectory = vi.fn().mockResolvedValue(undefined);
-  render(<ExternalSkins {...props} importsSkin openDirectory={openDirectory} scan={scan} />);
-  expect(screen.getByText(/选中包含 skin.toml 的皮肤文件夹/)).toBeTruthy();
-  expect(screen.queryByText(/复制到下面的目录/)).toBeNull();
-  await screen.findByText("没有发现外部皮肤。");
+  openSkinPage({
+    host: { platform: "harmony", skin_directory_import: true } as never,
+    openSkinDirectory: openDirectory,
+    scanSkinCatalog: scan,
+  });
+  const row = await skinRow();
+  expect(within(row).getByText(/选中包含 skin.toml 的皮肤文件夹/)).toBeTruthy();
+  expect(within(row).queryByText(/复制到下面的目录/)).toBeNull();
+  await within(row).findByText("没有发现外部皮肤。");
   expect(scan).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "导入皮肤" }));
+  fireEvent.click(within(row).getByRole("button", { name: "导入皮肤" }));
   await waitFor(() => expect(scan).toHaveBeenCalledTimes(2));
   expect(openDirectory).toHaveBeenCalledTimes(1);
 });
@@ -833,10 +962,17 @@ test("an import host lists the imported skin without a manual refresh", async ()
 test("an import that fails does not rescan", async () => {
   const scan = vi.fn().mockResolvedValue({ directory: "/skins", packages: [], issues: [] });
   const openDirectory = vi.fn().mockRejectedValue(new Error("synthetic"));
-  render(<ExternalSkins {...props} importsSkin openDirectory={openDirectory} scan={scan} />);
-  fireEvent.click(screen.getByRole("button", { name: "导入皮肤" }));
-  expect((await screen.findByRole("alert")).textContent).toBe("导入皮肤失败，请重试。");
-  // Only the scan the list makes as it mounts.
+  openSkinPage({
+    host: { platform: "harmony", skin_directory_import: true } as never,
+    openSkinDirectory: openDirectory,
+    scanSkinCatalog: scan,
+  });
+  const row = await skinRow();
+  await within(row).findByText("没有发现外部皮肤。");
+  fireEvent.click(within(row).getByRole("button", { name: "导入皮肤" }));
+  const group = await skinGroup();
+  expect((await within(group).findByRole("alert")).textContent).toBe("导入皮肤失败，请重试。");
+  // Only the scan the page makes as it mounts.
   expect(scan).toHaveBeenCalledTimes(1);
 });
 
@@ -868,33 +1004,16 @@ test("a host that draws one layout judges skins by it, not by the shared setting
 
 test("a host without a floating toolbar previews only the candidate window and reads no toolbar css", async () => {
   const readToolbarCss = vi.fn().mockResolvedValue(null);
-  render(
-    <ExternalSkins
-      {...props}
-      scan={async () => ({
-        ...catalog,
-        packages: [{ ...catalog.packages[0], toolbarStylesheet: "toolbar.css" }],
-      })}
-      toolbarPreview={false}
-    />,
-  );
-  const card = await screen.findByRole("article", { name: "Sample skin" });
+  const withToolbarCss = { ...sample, toolbarStylesheet: "toolbar.css" };
+  render(packageCard(withToolbarCss, { toolbarPreview: false }));
+  const card = screen.getByRole("article", { name: "Sample skin" });
   expect(card.querySelectorAll("[data-skin-stage]")).toHaveLength(2);
   // No reader was passed either, yet the card must not claim the toolbar styles are unsupported: there is no toolbar for them to style.
   expect(within(card).queryByText("当前宿主不支持外部工具栏样式。")).toBeNull();
   cleanup();
-  render(
-    <ExternalSkins
-      {...props}
-      scan={async () => ({
-        ...catalog,
-        packages: [{ ...catalog.packages[0], toolbarStylesheet: "toolbar.css" }],
-      })}
-      readToolbarCss={readToolbarCss}
-      toolbarPreview={false}
-    />,
-  );
-  await screen.findByRole("article", { name: "Sample skin" });
+  render(packageCard(withToolbarCss, { readToolbarCss, toolbarPreview: false }));
+  screen.getByRole("article", { name: "Sample skin" });
+  await act(async () => {});
   expect(readToolbarCss).not.toHaveBeenCalled();
 });
 
@@ -910,7 +1029,7 @@ test("the Linux skin page describes the candidate window only", async () => {
         host: { platform: "linux" } as never,
         scanSkinCatalog: async () => ({
           ...catalog,
-          packages: [{ ...catalog.packages[0], toolbarStylesheet: "toolbar.css" }],
+          packages: [{ ...sample, toolbarStylesheet: "toolbar.css" }],
         }),
       }}
     />,
@@ -946,39 +1065,26 @@ test("the Windows skin page keeps the toolbar preview", async () => {
 });
 
 // The keys a msime-skins package adds: its own decoration image and alignment, a background, a card radius and a toolbar palette.
-const styledCatalog: SkinCatalog = {
-  ...catalog,
-  packages: [
-    {
-      ...catalog.packages[0],
-      preview: "preview.png",
-      decorationTopDip: 104,
-      decorationWidthDip: 96,
-      decorationImage: "assets/character.png",
-      decorationAlign: "left",
-      cornerRadiusDip: 12,
-      background: { image: "assets/background.png", fit: "stretch", opacity: 0.35 },
-      toolbar: {
-        cornerRadiusDip: 8,
-        dark: { background: "#141B33", handle: "#5B9BFF", icon: "red;background:url(x)" },
-        light: { background: "#F4F8FF" },
-      },
-    },
-  ],
+const styledSkin: ExternalSkin = {
+  ...sample,
+  preview: "preview.png",
+  decorationTopDip: 104,
+  decorationWidthDip: 96,
+  decorationImage: "assets/character.png",
+  decorationAlign: "left",
+  cornerRadiusDip: 12,
+  background: { image: "assets/background.png", fit: "stretch", opacity: 0.35 },
+  toolbar: {
+    cornerRadiusDip: 8,
+    dark: { background: "#141B33", handle: "#5B9BFF", icon: "red;background:url(x)" },
+    light: { background: "#F4F8FF" },
+  },
 };
 
 test("a styled package draws its decoration image, alignment, background, radius and toolbar", async () => {
   const readImage = vi.fn().mockResolvedValue(imageData);
-  render(
-    <ExternalSkins
-      {...props}
-      activeTheme="dark"
-      toolbarPreview
-      scan={async () => styledCatalog}
-      readImage={readImage}
-    />,
-  );
-  const card = await screen.findByRole("article");
+  render(packageCard(styledSkin, { activeTheme: "dark", toolbarPreview: true, readImage }));
+  const card = screen.getByRole("article");
   await waitFor(() => expect(card.querySelectorAll("img.skin-background-image")).toHaveLength(2));
   // The decoration comes from `decorationImage`, not the preview.
   expect(readImage).toHaveBeenCalledWith("sample", "assets/character.png");
@@ -1011,8 +1117,8 @@ test("a background that fails to load keeps the plain card and says so", async (
     if (relative === "assets/background.png") throw new Error("synthetic");
     return imageData;
   });
-  render(<ExternalSkins {...props} scan={async () => styledCatalog} readImage={readImage} />);
-  const card = await screen.findByRole("article");
+  render(packageCard(styledSkin, { readImage }));
+  const card = screen.getByRole("article");
   expect(await within(card).findByText(/皮肤图片加载失败/)).toBeTruthy();
   expect(card.querySelector("img.skin-background-image")).toBeNull();
   expect(card.querySelectorAll("img.skin-decoration-image")).toHaveLength(2);
@@ -1042,15 +1148,14 @@ test("the geometry stylesheet aligns the decoration and clips the background to 
 });
 
 test("发布到社区 appears only when the host can publish candidate skins", async () => {
-  const scan = vi.fn().mockResolvedValue(catalog);
-  const plain = render(<ExternalSkins {...props} scan={scan} />);
-  const card = await screen.findByRole("article", { name: "Sample skin" });
+  const plain = render(packageCard(sample));
+  const card = screen.getByRole("article", { name: "Sample skin" });
   expect(within(card).queryByRole("button", { name: "发布到社区" })).toBeNull();
   plain.unmount();
 
   const onPublish = vi.fn();
-  render(<ExternalSkins {...props} scan={scan} onPublish={onPublish} />);
-  const publishable = await screen.findByRole("article", { name: "Sample skin" });
+  render(packageCard(sample, { onPublish }));
+  const publishable = screen.getByRole("article", { name: "Sample skin" });
   fireEvent.click(within(publishable).getByRole("button", { name: "发布到社区" }));
   expect(onPublish).toHaveBeenCalledExactlyOnceWith("sample");
 });
