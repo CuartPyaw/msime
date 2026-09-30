@@ -34,6 +34,16 @@ export enum MusicChange {
   RELOAD,
 }
 
+/** What the player that holds a track is sent to bring playback to what the session asks for. */
+export enum MusicStep {
+  /** Nothing: playback already matches, a play() or pause() sent earlier has not settled yet, or the player is between states that take neither. */
+  NONE,
+  PLAY,
+  PAUSE,
+  /** Let the player go: the system stopped it when another app took the audio focus, and a stopped player cannot play again without being prepared, so the track is opened afresh when music may play. */
+  RELEASE,
+}
+
 /** `MusicPreferences::default()`'s volume. */
 const DEFAULT_VOLUME: number = 30;
 
@@ -117,5 +127,46 @@ export class MusicPolicy {
   /** The track after `index`, starting over after the last. */
   static next(index: number, count: number): number {
     return count <= 0 ? 0 : (index + 1) % count;
+  }
+}
+
+/**
+ * Which play() or pause() the player holding a track is sent, one at a time.
+ *
+ * AVPlayer changes its `state` only once a play() or pause() has finished, so a decision read from `state` while one is in flight is made against the state being left: a pause sent while a play is pending reads 'paused' and is never sent, a second play() is refused as an invalid-state call. The desktop player re-checks on every tick; this one sends nothing while a command is pending and re-checks once the player settles on 'playing' or 'paused', so whatever the session said last is what playback ends up matching.
+ */
+export class MusicTransport {
+  private pending: boolean = false;
+
+  /** What to send a player in `state` for music that `wanted` to play or not. A PLAY or PAUSE is taken as sent. */
+  step(wanted: boolean, state: string): MusicStep {
+    if (state === "stopped") {
+      return MusicStep.RELEASE;
+    }
+    if (this.pending) {
+      return MusicStep.NONE;
+    }
+    let step: MusicStep = MusicStep.NONE;
+    if (!wanted && state === "playing") {
+      step = MusicStep.PAUSE;
+    } else if (wanted && (state === "prepared" || state === "paused")) {
+      step = MusicStep.PLAY;
+    }
+    this.pending = step !== MusicStep.NONE;
+    return step;
+  }
+
+  /** The player reported `state`. True when that settles a command sent here, so the caller steps again against what the session says now. A pause the system made on its own is not answered with a play: music does not take the audio focus back from the app that just claimed it. */
+  settled(state: string): boolean {
+    if (!this.pending || (state !== "playing" && state !== "paused")) {
+      return false;
+    }
+    this.pending = false;
+    return true;
+  }
+
+  /** The player was let go, with whatever it was sent. */
+  reset(): void {
+    this.pending = false;
   }
 }

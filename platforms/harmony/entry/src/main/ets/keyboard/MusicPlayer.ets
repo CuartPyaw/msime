@@ -11,7 +11,9 @@ import fs from '@ohos.file.fs';
 import common from '@ohos.app.ability.common';
 import client from 'libmsimeclient.so';
 import { KeyboardLog, describeError } from './KeyboardLog';
-import { MUSIC_OFF, MusicChange, MusicPackTracks, MusicPolicy, MusicSettings } from './MusicPolicy';
+import {
+  MUSIC_OFF, MusicChange, MusicPackTracks, MusicPolicy, MusicSettings, MusicStep, MusicTransport
+} from './MusicPolicy';
 
 interface MusicPackRequest {
   state_root: string;
@@ -42,6 +44,8 @@ export class MusicPlayer {
   /** Whether each track's declared length is within the pack bound, by path, for the pack in `pack`. */
   private readonly checked: Map<string, boolean> = new Map<string, boolean>();
   private player: media.AVPlayer | undefined = undefined;
+  /** The play() or pause() `player` was sent and has not settled yet. */
+  private readonly transport: MusicTransport = new MusicTransport();
   /** The playing track's descriptor, which has to stay open until its player is released. */
   private file: fs.File | undefined = undefined;
 
@@ -101,24 +105,25 @@ export class MusicPlayer {
   /** Bring playback to what the settings and the session ask for: paused while music may not play, playing or being opened while it may. */
   private update(): void {
     const player: media.AVPlayer | undefined = this.player;
-    if (!this.active || !this.settings.enabled || this.failed) {
-      if (player !== undefined && player.state === 'playing') {
+    const wanted: boolean = this.active && this.settings.enabled && !this.failed;
+    if (player !== undefined) {
+      const step: MusicStep = this.transport.step(wanted, player.state);
+      if (step === MusicStep.PAUSE) {
         // Pausing is what keeps music out of a password field, so a pause that fails lets the player go instead.
         player.pause().catch((error: Object): void => {
           this.fail(player, error);
         });
-      }
-      return;
-    }
-    if (player !== undefined) {
-      if (player.state === 'prepared' || player.state === 'paused') {
+      } else if (step === MusicStep.PLAY) {
         player.play().catch((error: Object): void => {
           this.fail(player, error);
         });
       }
-      return;
+      if (step !== MusicStep.RELEASE) {
+        return;
+      }
+      this.release();
     }
-    if (this.opening || this.soundPacks.length === 0) {
+    if (!wanted || this.opening || this.soundPacks.length === 0) {
       return;
     }
     this.opening = true;
@@ -233,6 +238,14 @@ export class MusicPlayer {
       } else if (state === 'prepared') {
         player.setVolume(MusicPolicy.gain(this.settings));
         this.update();
+      } else if (state === 'playing' || state === 'paused') {
+        // The session may have changed its mind while a play() or pause() was in flight; playback is brought to what it says now.
+        if (this.transport.settled(state)) {
+          this.update();
+        }
+      } else if (state === 'stopped') {
+        // Another app took the audio focus and the system stopped this player. Letting it go frees its descriptor at once; the track is opened afresh on the next activation rather than now, so music does not take the focus straight back.
+        this.release();
       } else if (state === 'completed') {
         this.advance(player);
       }
@@ -279,6 +292,7 @@ export class MusicPlayer {
   private release(): void {
     this.generation += 1;
     this.opening = false;
+    this.transport.reset();
     const player: media.AVPlayer | undefined = this.player;
     const file: fs.File | undefined = this.file;
     this.player = undefined;

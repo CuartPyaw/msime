@@ -272,6 +272,8 @@ import {
   MusicChange,
   MusicPolicy,
   MusicSettings,
+  MusicStep,
+  MusicTransport,
 } from "../entry/src/main/ets/keyboard/MusicPolicy";
 import {
   EmojiPanelKeyAction,
@@ -10892,5 +10894,65 @@ group("background music follows the desktop player's rules", () => {
   check(
     MusicPolicy.next(0, 3) === 1 && MusicPolicy.next(2, 3) === 0 && MusicPolicy.next(0, 1) === 0,
     "tracks play in order and start over after the last",
+  );
+});
+
+group("background music sends one play or pause at a time and settles on the latest wish", () => {
+  const flip: MusicTransport = new MusicTransport();
+  check(flip.step(true, "paused") === MusicStep.PLAY, "a paused track plays once music may play");
+  check(
+    flip.step(false, "paused") === MusicStep.NONE && flip.step(true, "paused") === MusicStep.NONE,
+    "an active true -> false -> true flip while the play is in flight sends nothing more",
+  );
+  check(flip.settled("playing"), "the play settling asks for another look");
+  check(flip.step(true, "playing") === MusicStep.NONE, "and music that may play keeps playing");
+
+  const password: MusicTransport = new MusicTransport();
+  check(password.step(true, "prepared") === MusicStep.PLAY, "a prepared track is played");
+  check(
+    password.step(false, "prepared") === MusicStep.NONE,
+    "focus moving to a password field while the play is in flight sends no second command",
+  );
+  check(
+    password.settled("playing") && password.step(false, "playing") === MusicStep.PAUSE,
+    "but once the play settles the track is paused, so a password field never hears music",
+  );
+
+  const back: MusicTransport = new MusicTransport();
+  check(back.step(false, "playing") === MusicStep.PAUSE, "leaving a field pauses the track");
+  check(
+    back.step(true, "playing") === MusicStep.NONE,
+    "the next field's attributes arriving while the pause is in flight send nothing yet",
+  );
+  check(
+    back.settled("paused") && back.step(true, "paused") === MusicStep.PLAY,
+    "the player settling on paused while music may play results in a play",
+  );
+
+  const interrupted: MusicTransport = new MusicTransport();
+  check(
+    !interrupted.settled("paused"),
+    "a pause the system made on its own is not answered with a play",
+  );
+  check(
+    interrupted.step(true, "stopped") === MusicStep.RELEASE &&
+      interrupted.step(false, "stopped") === MusicStep.RELEASE,
+    "a player the system stopped is let go, to be opened afresh",
+  );
+  const pending: MusicTransport = new MusicTransport();
+  pending.step(true, "paused");
+  check(
+    pending.step(true, "stopped") === MusicStep.RELEASE,
+    "a stop overrides a play still in flight, which will never settle",
+  );
+  pending.reset();
+  check(
+    pending.step(true, "paused") === MusicStep.PLAY,
+    "a released player's pending command does not hold up the next one",
+  );
+  check(
+    new MusicTransport().step(true, "initialized") === MusicStep.NONE &&
+      new MusicTransport().step(false, "prepared") === MusicStep.NONE,
+    "a player between states, or one not yet playing, is left alone",
   );
 });
