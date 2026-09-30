@@ -65,8 +65,8 @@ pub fn search_converted(
     let reading = conversion.hiragana.as_str();
     let pending = conversion.pending.as_str();
     let mut output = Output {
-        items: Vec::new(),
-        seen: HashSet::new(),
+        items: Vec::with_capacity(limit),
+        seen: HashSet::with_capacity(limit),
         limit,
     };
     if limit == 0 {
