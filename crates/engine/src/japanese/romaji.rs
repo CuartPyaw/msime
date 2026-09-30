@@ -2,6 +2,7 @@
 //!
 //! The table, the `n` rules, the sokuon rules and the pending tail are IME behaviour the provider's dictionary lookups depend on, so they stay hand-written; `wana_kana` has its own table (じゃ is `ja`, a lone `n` is kept as a letter) and no notion of a pending tail. The plain hiragana-to-katakana shift is `wana_kana`'s.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -366,10 +367,15 @@ fn romaji_at(text: &str) -> Option<(&'static str, &'static str)> {
         .copied()
 }
 
-/// :182-240, using the inverted table's preferred spellings. Katakana is folded to hiragana first by the plain code-point shift; `wana_kana`'s own katakana conversion rewrites an inner ー as a vowel, which would lose the long-vowel mark this has to keep.
-pub fn hiragana_to_romaji(kana: &str) -> String {
-    let hiragana: String = kana
-        .chars()
+fn hiragana_input(kana: &str) -> Cow<'_, str> {
+    let has_katakana = kana.chars().any(|character| {
+        let code_point = u32::from(character);
+        (KATAKANA_TO_HIRAGANA_FIRST..=KATAKANA_TO_HIRAGANA_LAST).contains(&code_point)
+    });
+    if !has_katakana {
+        return Cow::Borrowed(kana);
+    }
+    kana.chars()
         .map(|character| {
             let code_point = u32::from(character);
             if (KATAKANA_TO_HIRAGANA_FIRST..=KATAKANA_TO_HIRAGANA_LAST).contains(&code_point) {
@@ -378,9 +384,15 @@ pub fn hiragana_to_romaji(kana: &str) -> String {
                 character
             }
         })
-        .collect();
-    let mut romaji = String::new();
-    let mut rest = hiragana.as_str();
+        .collect::<String>()
+        .into()
+}
+
+/// :182-240, using the inverted table's preferred spellings. Katakana is folded to hiragana first by the plain code-point shift; `wana_kana`'s own katakana conversion rewrites an inner ー as a vowel, which would lose the long-vowel mark this has to keep.
+pub fn hiragana_to_romaji(kana: &str) -> String {
+    let hiragana = hiragana_input(kana);
+    let mut romaji = String::with_capacity(kana.len());
+    let mut rest = hiragana.as_ref();
     while let Some(character) = rest.chars().next() {
         if let Some(after) = rest.strip_prefix(SOKUON) {
             // A sokuon doubles the next kana's consonant; before a vowel or at the end it has to be spelled out.
@@ -419,6 +431,8 @@ pub fn next_kana_variant(kana: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
 
     #[track_caller]
@@ -443,6 +457,13 @@ mod tests {
         // Each reading has several equally long spellings; the table's spelling tiebreak pins the choice.
         assert_eq!(hiragana_to_romaji("かんじ"), "kanji");
         assert_eq!(hiragana_to_romaji("しゃしん"), "shashin");
+    }
+
+    #[test]
+    fn hiragana_view_borrows_already_normalized_input() {
+        assert!(matches!(hiragana_input("かな"), Cow::Borrowed("かな")));
+        assert_eq!(hiragana_input("カナ").as_ref(), "かな");
+        assert_eq!(hiragana_input("かナ").as_ref(), "かな");
     }
 
     #[test]
