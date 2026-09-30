@@ -2065,7 +2065,14 @@ impl PreferencesStore {
             crate::bounded_io::read_bounded_file(File::open(&path)?, MAX_DOCUMENT_BYTES, || {
                 PreferencesError::DocumentTooLarge
             })?;
-        let mut snapshot: PreferencesSnapshot = serde_json::from_slice(&bytes)?;
+        let mut document: serde_json::Value = serde_json::from_slice(&bytes)?;
+        if let Some(preferences) = document
+            .get_mut("preferences")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            migrate_retired_skin_fields(preferences);
+        }
+        let mut snapshot: PreferencesSnapshot = serde_json::from_value(document)?;
         if snapshot.format_version != 1 {
             return Err(PreferencesError::UnsupportedFormat);
         }
@@ -2284,6 +2291,85 @@ impl PreferencesStore {
     }
 }
 
+/// The candidate colour pickers #1187 moved from the top level into `custom_theme.candidate_colors`, old key and new.
+const RETIRED_CANDIDATE_COLORS: [(&str, &str); 7] = [
+    ("candidate_text_color", "text"),
+    ("candidate_number_color", "number"),
+    ("candidate_accent_color", "accent"),
+    ("candidate_selected_color", "selected"),
+    ("candidate_hover_color", "hover"),
+    ("candidate_surface_color", "surface"),
+    ("candidate_border_color", "border"),
+];
+
+/// The built-in candidate skins before #1187. They are not external packages, though the current folder-name rule would accept their ids as such.
+const RETIRED_BUILTIN_SKINS: [&str; 4] = ["fluent", "wechat", "graphite", "willow_green"];
+
+/// Move the skin settings #1187 replaced with `global_theme` and `custom_theme` into their replacements, for documents written before it.
+///
+/// `Preferences` refuses the old keys so nothing writes them again, which left every document saved by an older build unreadable: the whole load failed and a host could not start. The read path therefore rewrites them in memory first (the file is not rewritten, as with the voice providers). An external candidate package, the candidate colour pickers and a custom touch keyboard design become the custom theme and select it. The retired built-in looks (`fluent`, `wechat`, `graphite`, `willow_green` and the touch keyboard presets) have no counterpart and fall back to the defaults, and a colour or design the current checks refuse is dropped rather than failing the document. Whatever the document already says in the new fields wins.
+fn migrate_retired_skin_fields(preferences: &mut serde_json::Map<String, serde_json::Value>) {
+    let skin = preferences.remove("candidate_skin");
+    let keyboard_skin = preferences.remove("touch_keyboard_skin");
+    let keyboard_design = preferences.remove("custom_touch_keyboard_skin");
+    let colors: Vec<(&str, serde_json::Value)> = RETIRED_CANDIDATE_COLORS
+        .iter()
+        .filter_map(|(old, new)| {
+            preferences
+                .remove(*old)
+                .filter(|value| {
+                    value
+                        .as_str()
+                        .is_some_and(|color| crate::is_hex_color(color, &[6]))
+                })
+                .map(|value| (*new, value))
+        })
+        .collect();
+    let package = skin
+        .as_ref()
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| {
+            !RETIRED_BUILTIN_SKINS.contains(id) && crate::skin::catalog::is_external_id(id)
+        })
+        .map(str::to_owned);
+    let design = keyboard_design.filter(|design| {
+        keyboard_skin.as_ref().and_then(serde_json::Value::as_str) == Some("custom")
+            && serde_json::from_value::<TouchKeyboardSkinDesign>(design.clone())
+                .is_ok_and(|design| design.validate())
+    });
+    if package.is_none() && colors.is_empty() && design.is_none() {
+        return;
+    }
+    let custom = preferences
+        .entry("custom_theme")
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    let Some(custom) = custom.as_object_mut() else {
+        return;
+    };
+    if let Some(package) = package {
+        custom
+            .entry("candidate_skin")
+            .or_insert(serde_json::Value::String(package));
+    }
+    if !colors.is_empty() {
+        if let Some(pickers) = custom
+            .entry("candidate_colors")
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+            .as_object_mut()
+        {
+            for (key, value) in colors {
+                pickers.entry(key).or_insert(value);
+            }
+        }
+    }
+    if let Some(design) = design {
+        custom.entry("keyboard").or_insert(design);
+    }
+    preferences
+        .entry("global_theme")
+        .or_insert_with(|| serde_json::Value::String("custom".to_owned()));
+}
+
 /// Whether `preferences` is a document `load` would accept.
 fn acceptable_preferences(candidate: &serde_json::Map<String, serde_json::Value>) -> bool {
     serde_json::from_value::<Preferences>(serde_json::Value::Object(candidate.clone())).is_ok_and(
@@ -2303,15 +2389,16 @@ fn salvage_preferences(
         return Ok((default, false));
     };
     // A snapshot keeps its settings under `preferences`; a bare settings object at the root is accepted too.
-    let source = match document.get("preferences") {
-        Some(serde_json::Value::Object(source)) => source,
+    let mut source = match document.get("preferences") {
+        Some(serde_json::Value::Object(source)) => source.clone(),
         _ => match document {
-            serde_json::Value::Object(source) => source,
+            serde_json::Value::Object(source) => source.clone(),
             _ => return Ok((default, false)),
         },
     };
+    migrate_retired_skin_fields(&mut source);
     let mut kept = false;
-    for (key, value) in source {
+    for (key, value) in &source {
         let mut candidate = salvaged.clone();
         candidate.insert(key.clone(), value.clone());
         if acceptable_preferences(&candidate) {
