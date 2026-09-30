@@ -129,7 +129,14 @@ fn reranked_block(
     };
     let pick =
         keyboard.and_then(|keyboard| take(keyboard, CandidateSource::NeuralKeyboard, already));
-    lattice.into_iter().chain(pick).collect()
+    let mut block = Vec::with_capacity(2);
+    if let Some(row) = lattice {
+        block.push(row);
+    }
+    if let Some(row) = pick {
+        block.push(row);
+    }
+    block
 }
 
 /// The count of leading dictionary rows that answer the whole key: canonical key equal to the joined syllables, or covering every syllable (WL:625-641, WL:372-381). A prefix-range row with the same character count (滚球 for typed gun'qi) is not an exact hit and must not pin a correctly pronounced sentence behind it.
