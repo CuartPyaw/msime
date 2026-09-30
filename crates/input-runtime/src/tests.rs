@@ -3250,6 +3250,33 @@ fn a_mark_on_a_bare_slash_or_at_is_not_a_pick() {
         .dispatch(Action::Command(Command::CommitRaw))
         .unwrap();
     assert_eq!(raw.commit.as_deref(), Some("/"));
+    // A host flush (focus moving, the host inserting text) keeps the literal prefix too.
+    for open in *b"/@" {
+        character(&mut runtime, open);
+        let flushed = runtime.dispatch(Action::Finish).unwrap();
+        assert_eq!(
+            flushed.commit.as_deref(),
+            Some(&*char::from(open).to_string())
+        );
+        assert_eq!(flushed.view.local_mode, "none");
+    }
+}
+
+// Whether `/` and `@` open a mode follows the punctuation mode, so the view the host and the punctuation route read changes with it at once rather than at the next key.
+#[test]
+fn punctuation_mode_changes_refresh_the_mode_symbols() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = generated_mode_runtime(directory.path());
+    assert_eq!(runtime.view().spelling_symbols, "/@");
+    runtime.set_chinese_punctuation_enabled(false).unwrap();
+    assert!(runtime.view().spelling_symbols.is_empty());
+    runtime.set_chinese_punctuation_enabled(true).unwrap();
+    assert_eq!(runtime.view().spelling_symbols, "/@");
+    runtime.set_punctuation_lock(2).unwrap();
+    assert!(runtime.view().spelling_symbols.is_empty());
+    runtime.set_punctuation_lock(0).unwrap();
+    let opened = runtime.dispatch(Action::Punctuation(b'/')).unwrap();
+    assert_eq!(opened.view.local_mode, "command");
 }
 
 #[test]

@@ -208,7 +208,8 @@ impl Runtime<Session> {
     pub fn set_chinese_punctuation_enabled(&mut self, enabled: bool) -> Result<(), RuntimeError> {
         self.engine
             .set_chinese_punctuation_enabled(enabled)
-            .map_err(|error| RuntimeError::Engine(error.to_string()))
+            .map_err(|error| RuntimeError::Engine(error.to_string()))?;
+        self.refresh_idle_spelling_symbols()
     }
 
     pub fn online_query(&self) -> Result<Option<OnlineQuery>, RuntimeError> {
@@ -460,7 +461,16 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     pub fn set_punctuation_lock(&mut self, lock: u8) -> Result<(), RuntimeError> {
-        self.engine.set_punctuation_lock(lock)
+        self.engine.set_punctuation_lock(lock)?;
+        self.refresh_idle_spelling_symbols()
+    }
+
+    /// With nothing composed, whether `/` and `@` open their modes follows the punctuation mode and lock, so the cached `spelling_symbols` that `punctuation` and the host read is taken again. A composition keeps its view: its symbols do not depend on either.
+    fn refresh_idle_spelling_symbols(&mut self) -> Result<(), RuntimeError> {
+        if self.cached.editing_text.is_empty() {
+            self.refresh()?;
+        }
+        Ok(())
     }
 
     pub fn set_dedicated_english(&mut self, enabled: bool) -> Result<(), RuntimeError> {
@@ -1819,6 +1829,8 @@ impl<E: InputEngine> Runtime<E> {
             }
             Action::Punctuation(value) => self.punctuation(value),
             Action::PunctuationAscii(value) => self.punctuation_ascii(value),
+            // A bare `/` or `@` flushes as the literal prefix, as on the punctuation routes; finishing would commit the list's first row.
+            Action::Finish if self.bare_mode_prefix() => self.engine.command(Command::CommitRaw),
             Action::Finish => self.engine.finish(self.engine_index(self.highlighted)),
             Action::Character { value, shift } if wubi_top_commit => self
                 .engine
