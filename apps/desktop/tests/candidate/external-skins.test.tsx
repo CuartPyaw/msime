@@ -410,7 +410,7 @@ test("refresh removes stale geometry and independent cards do not inherit it", a
   expect(card.classList.contains("external-skin-decorated")).toBe(false);
 });
 
-test("geometry stylesheet retains upstream stacking, dimensions and candidate-only scope", () => {
+test("geometry stylesheet overhangs the mascot into the card, above it, as every host draws it", () => {
   const style = document.createElement("style");
   style.textContent = geometryCss;
   document.head.append(style);
@@ -419,17 +419,39 @@ test("geometry stylesheet retains upstream stacking, dimensions and candidate-on
     const parent = rules.find(
       (rule) => rule.selectorText === ".external-skin-decorated .candidate .containerParent",
     )!;
+    // The stage is the band taller than the card, and shrinks to the card so the edges it aligns to are the card's.
     expect(parent.style.getPropertyValue("padding-top")).toBe(
       "var(--msime-skin-decoration-top, 0px)",
     );
-    const ornament = rules.find((rule) => rule.selectorText?.endsWith("::before"))!;
-    expect(ornament.style.getPropertyValue("height")).toBe("118px");
-    expect(ornament.style.getPropertyValue("pointer-events")).toBe("none");
-    expect(ornament.style.getPropertyValue("z-index")).toBe("0");
+    expect(parent.style.getPropertyValue("width")).toBe("fit-content");
+    expect(
+      parent.style.getPropertyValue("--msime-skin-decoration-bottom").replace(/\s+/g, ""),
+    ).toBe("calc(var(--msime-skin-decoration-top,0px)+var(--msime-candidate-pad-y,0px))");
+    const mascot = rules.find((rule) =>
+      rule.selectorText?.split(/,\s*/).includes(".external-skin-decorated .skin-decoration-image"),
+    )!;
+    expect(mascot.selectorText).toContain("::before");
+    // Bottom pad_y below the card's top edge, at most band + pad_y tall, never squashed.
+    expect(mascot.style.getPropertyValue("bottom")).toBe(
+      "calc(100% - var(--msime-skin-decoration-bottom))",
+    );
+    expect(mascot.style.getPropertyValue("width")).toBe("var(--msime-skin-decoration-width, 0px)");
+    expect(mascot.style.getPropertyValue("height")).toBe("auto");
+    expect(mascot.style.getPropertyValue("max-height")).toBe("var(--msime-skin-decoration-bottom)");
+    expect(mascot.style.getPropertyValue("object-fit")).toBe("contain");
+    expect(mascot.style.getPropertyValue("object-position")).toBe("right bottom");
+    // Right by default: card_right - pad_x - width, never left of the card.
+    expect(mascot.style.getPropertyValue("left").replace(/\s+/g, "")).toBe(
+      "max(0px,calc(100%-var(--msime-candidate-pad-x,0px)-var(--msime-skin-decoration-width,0px)))",
+    );
+    expect(mascot.style.getPropertyValue("pointer-events")).toBe("none");
     const container = rules.find(
       (rule) => rule.selectorText === ".external-skin-decorated .candidate .container",
     )!;
-    expect(container.style.getPropertyValue("z-index")).toBe("1");
+    // Drawn over the card.
+    expect(Number(mascot.style.getPropertyValue("z-index"))).toBeGreaterThan(
+      Number(container.style.getPropertyValue("z-index")),
+    );
     expect(container.style.getPropertyValue("min-width")).toBe(
       "max(7em, var(--msime-skin-min-width, 0px))",
     );
@@ -1028,9 +1050,20 @@ test("a background that fails to load keeps the plain card and says so", async (
 
 test("the geometry stylesheet aligns the decoration and clips the background to the card", () => {
   const card = utilityCss("skin-card-preview").replace(/\s+/g, "");
-  expect(geometryCss.replace(/\s+/g, "")).toContain(
-    '[data-decoration-align="left"].skin-decoration-image',
+  const geometry = geometryCss.replace(/\s+/g, "");
+  // Aligned against the card with its own padding: left at pad_x, centre on the card.
+  expect(geometry).toMatch(
+    /\[data-decoration-align="left"\]\.skin-decoration-image,[^{]*\{left:var\(--msime-candidate-pad-x,0px\);object-position:leftbottom;/,
   );
+  expect(geometry).toMatch(
+    /\[data-decoration-align="center"\]\.skin-decoration-image,[^{]*\{left:max\(0px,calc\(50%-var\(--msime-skin-decoration-width,0px\)\/2\)\);object-position:centerbottom;/,
+  );
+  // pad_x / pad_y are the card's own padding, one name for both.
+  expect(card).toContain("--msime-candidate-pad-x:1px;--msime-candidate-pad-y:2px;");
+  expect(card).toContain("--msime-candidate-pad-x:2px;--msime-candidate-pad-y:2px;");
+  expect(
+    card.match(/padding:var\(--msime-candidate-pad-y\)var\(--msime-candidate-pad-x\)/g),
+  ).toHaveLength(2);
   expect(card).toContain("border-radius:var(--msime-skin-radius,6px)");
   expect(card).toContain(
     ".container:has(>.skin-background-image){position:relative;overflow:hidden",
