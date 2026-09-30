@@ -103,7 +103,8 @@ export function SkinSettingsPage() {
           {themeCatalog.map((entry) => {
             const id = entry.id;
             // The custom card draws what the custom theme is assembled from without a package: its base and pickers. Each package has its own card after the built-in ones.
-            const selected = globalTheme === id && (id !== "custom" || !skinInUse);
+            // A package the custom theme names but the scan did not list (removed, not scanned yet, or a host without a scanner) is drawn as the custom theme over its base, so the 自定义 card stays the one in use.
+            const selected = globalTheme === id && (id !== "custom" || packageInUse < 0);
             const fixedAppearance =
               id === "custom"
                 ? themeEntry(draft.custom_theme?.base ?? "system").appearance
