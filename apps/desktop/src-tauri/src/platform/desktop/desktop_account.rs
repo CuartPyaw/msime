@@ -1,13 +1,13 @@
 //! Desktop account commands shared by the macOS, Windows and Linux shells.
 //!
-//! The nine commands, their state and the blocking-call bridge are the same on all three desktop hosts; only where the session tokens are kept differs. Each platform module owns its [`AccountSessionStorage`](msime_client_core::account::AccountSessionStorage) implementation and a thin `setup` that builds it and hands it to [`manage`]: the macOS Keychain item written by the Swift backend, the per-user Windows Credential Manager, or an owner-only file in the Linux shared state directory. The React surface only receives the same redacted DTOs as the mobile hosts; the tokens never leave this process.
+//! The ten commands, their state and the blocking-call bridge are the same on all three desktop hosts; only where the session tokens are kept differs. Each platform module owns its [`AccountSessionStorage`](msime_client_core::account::AccountSessionStorage) implementation and a thin `setup` that builds it and hands it to [`manage`]: the macOS Keychain item written by the Swift backend, the per-user Windows Credential Manager, or an owner-only file in the Linux shared state directory. The React surface only receives the same redacted DTOs as the mobile hosts; the tokens never leave this process.
 
 use crate::platform::account_helpers::call_session;
 use crate::platform::desktop::desktop_candidate_skin_community::CandidateSkinCommunityState;
 use crate::shared::account_dto::{
     providers_response, ChallengeResponse, ProfileResponse, ProvidersResponse, StatusResponse,
 };
-use msime_client_core::account::{BackendAccountClient, BackendAccountSession};
+use msime_client_core::account::{AccountError, BackendAccountClient, BackendAccountSession};
 use msime_client_core::skin::candidate_community::BackendCandidateSkinCommunityService;
 use std::sync::Arc;
 use tauri::Manager;
@@ -85,6 +85,23 @@ pub async fn account_login(
     call_session(&state.session, move |session| {
         session
             .sign_in(&challenge_id, &code)
+            .map(|user| StatusResponse {
+                user: Some(user.into()),
+            })
+    })
+    .await
+}
+
+/// Signs in with Google in the system browser. The session binds a loopback listener, the backend builds the authorization URL and later exchanges the code with its own PKCE verifier and client secret; this command only supplies the browser launch. It returns once the browser redirects back, the user denies access, or five minutes pass.
+#[tauri::command]
+pub async fn account_google_login(
+    state: tauri::State<'_, AccountState>,
+) -> Result<StatusResponse, crate::CommandError> {
+    call_session(&state.session, |session| {
+        session
+            .sign_in_google_with_browser(|url| {
+                crate::launch_external_url(url).map_err(|_| AccountError::Unavailable)
+            })
             .map(|user| StatusResponse {
                 user: Some(user.into()),
             })

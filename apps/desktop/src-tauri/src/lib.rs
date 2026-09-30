@@ -3994,6 +3994,12 @@ fn open_external_url_blocking(url: &str) -> Result<(), HostActionError> {
             code: "invalid_url",
         });
     }
+    launch_external_url(url)
+}
+
+/// Hands an https URL the caller has already validated to the default browser. None of the launch paths goes through a shell (`open` and `xdg-open` receive it as one argument, Windows uses ShellExecuteW), which is what lets the Google sign-in pass an authorization URL with `&`-separated query parameters that `external_url_is_safe` refuses for page-supplied links.
+#[cfg(not(target_os = "android"))]
+fn launch_external_url(url: &str) -> Result<(), HostActionError> {
     #[cfg(target_os = "macos")]
     let result = std::process::Command::new("open").arg(url).status();
     #[cfg(target_os = "linux")]
@@ -4937,6 +4943,8 @@ pub fn run() {
             android_account::account_login,
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
             desktop_account::account_login,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            desktop_account::account_google_login,
             #[cfg(target_os = "android")]
             android_account::account_profile,
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
