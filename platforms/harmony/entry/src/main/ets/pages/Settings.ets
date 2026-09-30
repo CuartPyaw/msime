@@ -11,6 +11,7 @@ import http from '@ohos.net.http';
 import webSocket from '@ohos.net.webSocket';
 import util from '@ohos.util';
 import fs from '@ohos.file.fs';
+import fileUri from '@ohos.file.fileuri';
 import { KeyboardLog, describeError } from '../keyboard/KeyboardLog';
 import { KeyboardSession } from '../keyboard/KeyboardSession';
 import { StagedResources } from '../keyboard/StagedResources';
@@ -26,6 +27,9 @@ import { PreferenceRevisionPolicy } from '../keyboard/input/PreferenceRevisionPo
 import { PreferencesErrorCode } from '../keyboard/settings/PreferencesErrorCode';
 import picker from '@ohos.file.picker';
 import { SkinImportPolicy } from '../keyboard/skin/SkinImportPolicy';
+import {
+  PickedEntryKind, PluginFolderScan, PluginImportPolicy, PluginImportRefusal
+} from '../keyboard/settings/PluginImportPolicy';
 import EntryAbility from '../entryability/EntryAbility';
 import { ImeEnabledState, OnboardingState, OnboardingStatePolicy }
   from '../keyboard/input/OnboardingStatePolicy';
@@ -908,7 +912,7 @@ class SettingsBridge {
   /**
    * Installs a pack folder or `.zip` file the user picks with the system picker.
    *
-   * What the picker hands back is a document URI the native library cannot open, so the pick is copied into a private staging directory first and installed from there by `msime_client_plugins`, which checks it by the same rules as every other host and leaves nothing installed when it refuses. The staging copy is removed however the import ends. The reply is the installed pack, or null when the user closed the picker, which is not a failure.
+   * What the picker hands back is a document URI the native library cannot open, so the pick is copied into a private staging directory first, under a fixed name rather than the picked one, and installed from there by `msime_client_plugins` on a worker thread, which checks it by the same rules as every other host and leaves nothing installed when it refuses. The copy stops at client-core's bounds (`PluginImportPolicy`), so a wrong pick is refused before it is copied whole. The staging copy is removed however the import ends, after the worker has finished with it. The reply is the installed pack, or null when the user closed the picker, which is not a failure.
    */
   private async importPlugin(document: string): Promise<string> {
     const context: common.UIAbilityContext | undefined = this.context;
@@ -938,29 +942,35 @@ class SettingsBridge {
     if (picked.length === 0) {
       return JSON.stringify({ ok: true, value: null });
     }
-    // The picked name, so a folder copies to a known place and an archive keeps the extension the import goes by.
-    const name: string | null = SkinImportPolicy.pickedName(picked[0]);
-    if (name === null) {
-      return JSON.stringify({ ok: false, error: 'plugin_unsupported_source' });
-    }
     const staging: string = `${context.cacheDir}/plugin-import/${util.generateRandomUUID(false)}`;
     try {
       fs.mkdirSync(staging, true);
+      let source: string;
       if (folder) {
-        await fs.copyDir(picked[0], staging, 1);
+        source = `${staging}/${PluginImportPolicy.FOLDER_NAME}`;
+        const refusal: PluginImportRefusal | null =
+          await this.copyPluginFolder(new fileUri.FileUri(picked[0]).path, source);
+        if (refusal !== null) {
+          return JSON.stringify(refusal);
+        }
       } else {
+        source = `${staging}/${PluginImportPolicy.ARCHIVE_NAME}`;
         const file: fs.File = fs.openSync(picked[0], fs.OpenMode.READ_ONLY);
         try {
-          await fs.copyFile(file.fd, `${staging}/${name}`);
+          const refusal: PluginImportRefusal | null = PluginImportPolicy.archive(fs.statSync(file.fd).size);
+          if (refusal !== null) {
+            return JSON.stringify(refusal);
+          }
+          await fs.copyFile(file.fd, source);
         } finally {
           fs.closeSync(file);
         }
       }
-      const action: PluginImportAction = { operation: 'import', source: `${staging}/${name}` };
+      const action: PluginImportAction = { operation: 'import', source: source };
       const call: PluginImportCall = {
         state_root: this.stateDirectory, sound_packs: this.soundPacks(), action: action
       };
-      const reply: string = client.plugins(JSON.stringify(call));
+      const reply: string = await client.pluginsAsync(JSON.stringify(call));
       KeyboardLog.info('plugin import answered');
       return reply;
     } catch (error) {
@@ -975,6 +985,31 @@ class SettingsBridge {
         KeyboardLog.error(`plugin import staging not removed: ${describeError(error)}`);
       }
     }
+  }
+
+  /**
+   * Copy the top level of a picked pack folder to `destination`, or answer why it cannot be a pack without copying anything. Every entry is looked at before the first byte is copied, and the look stops at the first entry that rules the folder out: a subfolder, a link, or more files or bytes than any pack may hold.
+   */
+  private async copyPluginFolder(picked: string, destination: string): Promise<PluginImportRefusal | null> {
+    const scan: PluginFolderScan = new PluginFolderScan();
+    for (const name of fs.listFileSync(picked)) {
+      if (PluginImportPolicy.hidden(name)) {
+        continue;
+      }
+      const stat: fs.Stat = fs.lstatSync(`${picked}/${name}`);
+      const kind: PickedEntryKind = stat.isSymbolicLink() ? PickedEntryKind.LINK
+        : stat.isDirectory() ? PickedEntryKind.DIRECTORY
+        : stat.isFile() ? PickedEntryKind.FILE : PickedEntryKind.OTHER;
+      const refusal: PluginImportRefusal | null = scan.take(name, kind, stat.size);
+      if (refusal !== null) {
+        return refusal;
+      }
+    }
+    fs.mkdirSync(destination);
+    for (const name of scan.files) {
+      await fs.copyFile(`${picked}/${name}`, `${destination}/${name}`);
+    }
+    return null;
   }
 
   /** The shared settings page uses the same validated catalog as desktop presenters. */

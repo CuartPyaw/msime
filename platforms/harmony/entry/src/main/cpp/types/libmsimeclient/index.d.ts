@@ -81,6 +81,10 @@ export const musicPack: (request: string) => string;
  */
 export const plugins: (request: string) => string;
 /**
+ * `plugins` on a worker thread, for an `import`, which extracts or copies up to a music pack's size and validates it before swapping it into place. Resolves with the same answer `plugins` returns; rejects only when the worker produced no answer.
+ */
+export const pluginsAsync: (request: string) => Promise<string>;
+/**
  * Decodes the WAV sample at `sample` once per semitone and writes each note to `<directory>/note-<index>.wav` at 48 kHz, pitched as a playback rate. Resolves with the files in semitone order; rejects a sample that is not WAV, lasts longer than `maxMillis`, or decodes past its declared length.
  */
 export const keySoundRenderNotes: (

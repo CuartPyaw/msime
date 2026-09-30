@@ -300,6 +300,11 @@ import {
 import { HttpAsrConfigurationPolicy } from "../entry/src/main/ets/keyboard/input/HttpAsrConfigurationPolicy";
 import { SkinImportPolicy } from "../entry/src/main/ets/keyboard/skin/SkinImportPolicy";
 import {
+  PickedEntryKind,
+  PluginFolderScan,
+  PluginImportPolicy,
+} from "../entry/src/main/ets/keyboard/settings/PluginImportPolicy";
+import {
   SmartPunctuationSpacePolicy,
   SpaceConvertDecision,
 } from "../entry/src/main/ets/keyboard/input/SmartPunctuationSpacePolicy";
@@ -10954,5 +10959,70 @@ group("background music sends one play or pause at a time and settles on the lat
     new MusicTransport().step(true, "initialized") === MusicStep.NONE &&
       new MusicTransport().step(false, "prepared") === MusicStep.NONE,
     "a player between states, or one not yet playing, is left alone",
+  );
+});
+
+group("a picked pack is copied for import only within client-core's bounds", () => {
+  const MIB: number = 1024 * 1024;
+  const pack: PluginFolderScan = new PluginFolderScan();
+  check(
+    pack.take("plugin.toml", PickedEntryKind.FILE, 400) === null &&
+      pack.take("rain.ogg", PickedEntryKind.FILE, 12 * MIB) === null,
+    "a pack's files are taken",
+  );
+  check(pack.files.join(",") === "plugin.toml,rain.ogg", "and are what gets copied");
+  check(
+    PluginImportPolicy.hidden(".DS_Store") && !PluginImportPolicy.hidden("plugin.toml"),
+    "hidden names are left behind, as client-core's folder copy leaves them",
+  );
+
+  const nested = new PluginFolderScan().take("Photos", PickedEntryKind.DIRECTORY, 0);
+  check(
+    nested !== null && nested.error === "plugin_invalid" && nested.detail === "Photos 是子文件夹",
+    "a folder with a subfolder is refused before anything is copied, as client-core refuses it",
+  );
+  const linked = new PluginFolderScan().take("sample.wav", PickedEntryKind.LINK, 0);
+  check(linked !== null && linked.detail === "sample.wav 是符号链接", "and so is a symbolic link");
+  check(
+    new PluginFolderScan().take("fifo", PickedEntryKind.OTHER, 0)?.detail === "fifo 不是普通文件",
+    "and anything that is not a plain file",
+  );
+
+  const oversized = new PluginFolderScan().take("movie.mp4", PickedEntryKind.FILE, 16 * MIB + 1);
+  check(
+    oversized !== null && oversized.error === "plugin_invalid" && oversized.detail === "扩展包太大",
+    "a file larger than any pack allows stops the scan",
+  );
+  check(
+    new PluginFolderScan().take("track.ogg", PickedEntryKind.FILE, 16 * MIB) === null,
+    "16 MiB is still one file's limit",
+  );
+  const total: PluginFolderScan = new PluginFolderScan();
+  for (let index: number = 0; index < 4; index++) {
+    total.take(`track-${index}.ogg`, PickedEntryKind.FILE, 16 * MIB);
+  }
+  check(
+    total.take("notice.txt", PickedEntryKind.FILE, 2 * MIB) === null &&
+      total.take("extra.txt", PickedEntryKind.FILE, 1)?.detail === "扩展包太大",
+    "the whole copy stops past 66 MiB",
+  );
+  const crowded: PluginFolderScan = new PluginFolderScan();
+  for (let index: number = 0; index < 16; index++) {
+    crowded.take(`${index}.wav`, PickedEntryKind.FILE, 1);
+  }
+  check(
+    crowded.take("16.wav", PickedEntryKind.FILE, 1)?.detail === "扩展包太大",
+    "a folder with more files than a pack may hold, such as Downloads, is refused at the seventeenth",
+  );
+
+  check(PluginImportPolicy.archive(80 * MIB) === null, "an 80 MiB archive may be copied");
+  const archive = PluginImportPolicy.archive(80 * MIB + 1);
+  check(
+    archive !== null && archive.error === "plugin_archive" && archive.detail === "压缩包太大",
+    "a larger one is refused before it is copied",
+  );
+  check(
+    PluginImportPolicy.ARCHIVE_NAME.endsWith(".zip"),
+    "the staged archive keeps the extension client-core goes by, whatever the picked name",
   );
 });

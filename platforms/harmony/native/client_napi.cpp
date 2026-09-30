@@ -357,6 +357,51 @@ static napi_value VoiceHotwords(napi_env env, napi_callback_info info) {
     return promise;
 }
 
+// A pack import extracts or copies up to a music pack's size and validates it before swapping it into place, which the header says belongs on a worker thread, so it runs as async work and answers through a promise. The small catalog, remove and name-list calls stay on the synchronous `plugins` entry.
+struct PluginsWork {
+    napi_async_work work = nullptr;
+    napi_deferred deferred = nullptr;
+    std::string request;
+    char *result = nullptr;
+};
+
+static void executePlugins(napi_env, void *data) {
+    auto *work = static_cast<PluginsWork *>(data);
+    work->result = msime_client_plugins(
+        reinterpret_cast<const uint8_t *>(work->request.data()), work->request.size());
+}
+
+static void completePlugins(napi_env env, napi_status status, void *data) {
+    auto *work = static_cast<PluginsWork *>(data);
+    settleVoicePromise(env, status, work->deferred, work->result, "Plugin worker failed");
+    napi_delete_async_work(env, work->work);
+    delete work;
+}
+
+static napi_value PluginsAsync(napi_env env, napi_callback_info info) {
+    std::vector<napi_value> argv;
+    auto *work = new PluginsWork();
+    if (!arguments(env, info, 1, argv) || !argumentText(env, argv[0], work->request)) {
+        delete work;
+        return invalid(env, "Expected a plugins request");
+    }
+    napi_value promise = nullptr;
+    napi_value resource = nullptr;
+    if (napi_create_promise(env, &work->deferred, &promise) != napi_ok
+            || napi_create_string_utf8(env, "MSIME plugins", NAPI_AUTO_LENGTH, &resource) != napi_ok
+            || napi_create_async_work(env, nullptr, resource, executePlugins, completePlugins, work,
+                &work->work) != napi_ok) {
+        delete work;
+        return invalid(env, "Unable to create plugin worker");
+    }
+    if (napi_queue_async_work(env, work->work) != napi_ok) {
+        napi_delete_async_work(env, work->work);
+        delete work;
+        return invalid(env, "Unable to queue plugin worker");
+    }
+    return promise;
+}
+
 // A model install blocks for the whole download, so it runs as async work; progress is reported on that worker thread and crosses to the JS thread through a thread-safe function holding a copy of each document.
 struct VoiceModelInstallWork {
     napi_async_work work = nullptr;
@@ -1031,6 +1076,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         ENTRY("keySoundPack", KeySoundPack),
         ENTRY("musicPack", MusicPack),
         ENTRY("plugins", Plugins),
+        ENTRY("pluginsAsync", PluginsAsync),
         ENTRY("keySoundRenderNotes", KeySoundRenderNotes),
         ENTRY("aiRequestForQuery", AiRequestForQuery),
         ENTRY("aiHttpRequest", AiHttpRequest),
