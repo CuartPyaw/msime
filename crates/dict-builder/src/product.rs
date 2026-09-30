@@ -36,6 +36,9 @@ const FEATURES: [&str; 8] = [
 ];
 const REPOSITORY: &str = "metasequoiaime/msime";
 const SOURCE_PATH: &str = "resources/dictionary-sources";
+/// The shared custom dictionary (custom words and translations), pinned under this name in the sources lock. Its files sit at the repository root.
+const CUSTOM_DICTIONARY: &str = "msime-customdict";
+const CUSTOM_DICTIONARY_REPOSITORY: &str = "metasequoiaime/msime-customdict";
 
 #[derive(Serialize)]
 struct Manifest {
@@ -48,7 +51,7 @@ struct Manifest {
     format_contract_commit: String,
     custom_dictionary_commit: String,
     custom_dictionary_repository: &'static str,
-    custom_dictionary_path: String,
+    custom_dictionary_path: &'static str,
     references: IndexMap<String, Reference>,
     mozc_revision: String,
     features: [&'static str; 8],
@@ -213,6 +216,10 @@ pub fn verify(out: &Path, complete: bool) -> Result<()> {
 
 pub fn write_manifest(out: &Path, repository: &Path, lock: &Lock, complete: bool) -> Result<()> {
     let source = provenance(repository)?;
+    let custom_dictionary = lock
+        .references
+        .get(CUSTOM_DICTIONARY)
+        .with_context(|| format!("{CUSTOM_DICTIONARY} is not pinned in the sources lock"))?;
     let mut files = IndexMap::new();
     for name in SHIPPING_ARTIFACTS {
         let path = out.join(name);
@@ -234,9 +241,9 @@ pub fn write_manifest(out: &Path, repository: &Path, lock: &Lock, complete: bool
         },
         sqlite_journal_mode: "delete",
         format_contract_commit: source.commit.clone(),
-        custom_dictionary_commit: source.commit.clone(),
-        custom_dictionary_repository: REPOSITORY,
-        custom_dictionary_path: format!("{SOURCE_PATH}/custom"),
+        custom_dictionary_commit: custom_dictionary.commit.clone(),
+        custom_dictionary_repository: CUSTOM_DICTIONARY_REPOSITORY,
+        custom_dictionary_path: ".",
         references: lock
             .references
             .iter()

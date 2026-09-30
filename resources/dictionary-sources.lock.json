@@ -11,6 +11,10 @@
     "rime-ice": {
       "repository": "https://github.com/iDvel/rime-ice.git",
       "commit": "9e66b0729083b37d217312294f6d516c8d7234be"
+    },
+    "msime-customdict": {
+      "repository": "https://github.com/metasequoiaime/msime-customdict.git",
+      "commit": "44534415786a53c5bd36520dd1267be37d43e457"
     }
   },
   "mozc": {
@@ -24,6 +28,18 @@
     "attribution": "中文维基百科 (zhwiki) 20260901 pages-articles dump, https://dumps.wikimedia.org/zhwiki/20260901/"
   },
   "files": [
+    {
+      "path": "custom/words.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-customdict/44534415786a53c5bd36520dd1267be37d43e457/words.txt",
+      "sha256": "59e189b701a616129df3a184c8d71eb29b420619fdee6d40680ea7df37829d88",
+      "size": 907
+    },
+    {
+      "path": "custom/translations.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-customdict/44534415786a53c5bd36520dd1267be37d43e457/translations.txt",
+      "sha256": "39f999b2a15d58f2a48e1980c875cf0686bfa3486d7bff439fd7a7dfb3c72b25",
+      "size": 7964
+    },
     {
       "path": "cn/SingleCharsAllV1.txt",
       "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/e92a9c7c64e262f30218ca9aaad5f40d0b18cf89/dictionary/cn/SingleCharsAllV1.txt",

@@ -11,14 +11,16 @@ target/release/msime-dict-build --list
 
 ## Inputs
 
-- `resources/dictionary-sources.lock.json` pins every third-party or large input by URL, size and SHA-256: the lexicons at a fixed msime-engine commit, ECDICT, Mozc's OSS dictionary and the zhwiki dump part the n-gram tables count. They are downloaded into `--cache` on first use (about 500 MB) and reused while they still match; `--offline` refuses to download.
-- `resources/dictionary-sources/` holds the hand-maintained inputs: custom words and translations, quick phrases, the emoji, kaomoji and symbol tables, the single-character whitelist additions, and `pinyin-overrides.txt`.
+- `resources/dictionary-sources.lock.json` pins every third-party or large input by URL, size and SHA-256: the lexicons at a fixed msime-engine commit, the shared custom dictionary, ECDICT, Mozc's OSS dictionary and the zhwiki dump part the n-gram tables count. They are downloaded into `--cache` on first use (about 500 MB) and reused while they still match; `--offline` refuses to download.
+- The custom words and translations (`words.txt`, `translations.txt`) live in the shared custom dictionary [metasequoiaime/msime-customdict](https://github.com/metasequoiaime/msime-customdict), which msime and MSIME-Windows both consume through the dictionary release. The lock pins them at a fixed commit as `custom/words.txt` and `custom/translations.txt`.
+- `resources/dictionary-sources/` holds the other hand-maintained inputs: quick phrases, the emoji, kaomoji and symbol tables, the single-character whitelist additions, and `pinyin-overrides.txt`.
 
 Inputs without a redistribution grant (`src/licensing.rs`) are left out unless `--include-unlicensed` is given; such a build is for local evaluation and must not be released.
 
 ## Changing the data
 
 - Edit the files under `resources/dictionary-sources/` and rebuild.
+- Custom words and translations are changed in msime-customdict. To take its new state, move the `msime-customdict` reference and the two `custom/` entries in the lock to the new commit (URL, size and SHA-256), rebuild, and compare.
 - Emoji, kaomoji and symbol keywords get their pinyin from the `pinyin` crate one character at a time. When a new polyphone keyword needs its phrase reading, add `keyword<TAB>item<TAB>item...` to `pinyin-overrides.txt`.
 - To move a pinned input, change its URL, size and SHA-256 in the lock in the same commit, rebuild, and compare the result with the previous release before publishing.
 

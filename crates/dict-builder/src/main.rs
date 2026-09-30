@@ -30,7 +30,7 @@ use crate::sources::{Lock, Sources};
 enum Stage {
     /// Quanpin tables in msime.db (tbl_{1..7,others}_{initial})
     Quanpin,
-    /// custom/words.txt merged into the quanpin tables
+    /// custom/words.txt (pinned from msime-customdict) merged into the quanpin tables
     CustomWords,
     /// 86 wubi table in msime.db
     Wubi,
@@ -40,7 +40,7 @@ enum Stage {
     English,
     /// Bidirectional gloss tables in english.db, derived from ECDICT (reads msime.db)
     EnglishGlosses,
-    /// custom/translations.txt over the gloss tables
+    /// custom/translations.txt (pinned from msime-customdict) over the gloss tables
     CustomTranslations,
     /// emoji tables in others.db
     Emoji,
@@ -153,7 +153,7 @@ impl Build {
             }
             Stage::CustomWords => {
                 let words = msime::parse_custom_words(&text::read(
-                    &self.sources.repository("custom/words.txt")?,
+                    &self.sources.pinned("custom/words.txt")?,
                 )?)?;
                 let counts = msime::apply_custom_words(&mut self.database("msime.db")?, &words)?;
                 Ok(format!(
@@ -221,7 +221,7 @@ impl Build {
             }
             Stage::CustomTranslations => {
                 let entries = english::parse_custom_translations(&text::read(
-                    &self.sources.repository("custom/translations.txt")?,
+                    &self.sources.pinned("custom/translations.txt")?,
                 )?)?;
                 english::apply_custom_translations(&mut self.database("english.db")?, &entries)?;
                 Ok(format!("{} overrides", entries.len()))
