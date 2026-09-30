@@ -3922,8 +3922,10 @@ show_selected_bar = true
             NSImageView *decoration = (id)chrome.subviews.lastObject;
             assert([decoration isKindOfClass:NSImageView.class] && decoration.image);
             assert(panel.frame.size.width >= 240);
-            assert(decoration.frame.size.width == 120 && decoration.frame.size.height == 48);
-            assert(NSMaxX(decoration.frame) == chrome.bounds.size.width && NSMaxY(decoration.frame) == chrome.bounds.size.height);
+            // The 48pt band above the card is transparent and the square fixture, too tall at 120pt wide for the band plus the card's inset it overhangs, shrinks whole to that room: flush with the window's top, the inset in from the card's right edge.
+            const CGFloat overhang = decoration.frame.size.height - 48;
+            assert(chrome.cardTopInset == 48 && overhang > 0 && decoration.frame.size.width == decoration.frame.size.height);
+            assert(NSMaxX(decoration.frame) == chrome.bounds.size.width - overhang && NSMaxY(decoration.frame) == chrome.bounds.size.height);
             MSIMECandidateButton *first = PageButton(chrome, 0);
             assert(NSMaxY(first.frame) <= NSMinY(decoration.frame));
             assert(first.showSelectedBar == [theme isEqual:NSAppearanceNameDarkAqua]);
@@ -3933,6 +3935,9 @@ show_selected_bar = true
             NSBitmapImageRep *bitmap = [chrome bitmapImageRepForCachingDisplayInRect:chrome.bounds];
             [chrome cacheDisplayInRect:chrome.bounds toBitmapImageRep:bitmap];
             assert(bitmap && [[controller valueForKey:@"view"] isEqual:before]);
+            // Left of the right-aligned mascot the band is see-through; the card under it is filled.
+            assert([bitmap colorAtX:2 y:2].alphaComponent < 0.01);
+            assert([bitmap colorAtX:2 y:(NSInteger)(bitmap.pixelsHigh * 0.8)].alphaComponent > 0.99);
         }
     }
     // No disk reads while typing/rendering: removal takes effect only on explicit reload.
@@ -4032,7 +4037,9 @@ background = "#F4F8FF"
         assert(chrome.backgroundImage == styled.backgroundImage && chrome.backgroundFit == msime::mac::BackgroundFit::stretch && chrome.backgroundOpacity == 1.0);
         NSImageView *decoration = (id)chrome.subviews.lastObject;
         assert([decoration isKindOfClass:NSImageView.class] && decoration.image == styled.decorationImage);
-        assert(NSMinX(decoration.frame) == 0.0 && decoration.frame.size.width == 60 && decoration.imageAlignment == NSImageAlignTopLeft);
+        // Left-aligned: in from the card's left edge by the same inset its bottom overhangs the card's top edge (the card starts 48pt down, under the band).
+        const CGFloat overhang = NSHeight(chrome.bounds) - 48 - NSMinY(decoration.frame);
+        assert(overhang > 0 && NSMinX(decoration.frame) == overhang && decoration.frame.size.width == decoration.frame.size.height);
         // The translation colour is the package's on every row in the mode that declares one; elsewhere the rows keep the number colour.
         for (NSView *view in chrome.subviews) {
             if (![view isKindOfClass:MSIMECandidateButton.class] || view.tag < 0) continue;
@@ -4067,7 +4074,7 @@ background = "#F4F8FF"
     [controller appearanceChanged:nil];
     MSIMECandidateChromeView *chrome = (id)panel.contentView;
     NSImageView *decoration = (id)chrome.subviews.lastObject;
-    assert([decoration isKindOfClass:NSImageView.class] && decoration.imageAlignment == NSImageAlignTop);
+    assert([decoration isKindOfClass:NSImageView.class]);
     assert(std::abs(NSMidX(decoration.frame) - NSWidth(chrome.bounds) / 2) < 0.01);
     panel.appearance = nil;
     std::filesystem::remove_all(root);

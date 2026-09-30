@@ -5670,7 +5670,8 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
     candidatePanel.hasNextPage = page + 1 < pageCount;
     _panel.opaque = NO;
     _panel.backgroundColor = NSColor.clearColor;
-    const CGFloat decorationHeight = skin.decorationTopDip;
+    // The band above the card that the decoration stands in, transparent; none without an image to put there, as on Windows.
+    const CGFloat decorationHeight = _appearance.decorationImage ? MAX(0.0, skin.decorationTopDip) : 0.0;
     const CGFloat height = pageGeometry.rowsHeight + 2 * inset + decorationHeight + headerHeight;
     const CGFloat headerBottom = height - inset - decorationHeight - headerHeight;
     // Gloss replies keep the candidate IDs and all panel structure stable. Repaint those rows in
@@ -5814,15 +5815,15 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
                                  width - 2 * inset - (paging ? pageControlsWidth + MSIMECandidatePageIndicatorGap : 0), preeditHeight);
         [content addSubview:label];
     }
-    if (decorationHeight > 0 && _appearance.decorationImage) {
-        // Flush with the edge the manifest aligns it to (right unless it says otherwise), and pinned to the same edge inside its frame.
-        const CGFloat decorationLeft = msime::mac::DecorationLeft(skin.decorationAlign, width, skin.decorationWidthDip);
-        NSImageView *decoration = [[NSImageView alloc] initWithFrame:NSMakeRect(decorationLeft, height - decorationHeight, skin.decorationWidthDip, decorationHeight)];
+    content.cardTopInset = decorationHeight;
+    const NSSize decorationSize = _appearance.decorationImage.size;
+    if (const auto placed = msime::mac::DecorationPlacement(skin.decorationAlign, width, inset, decorationHeight, skin.decorationWidthDip,
+                                                            decorationSize.width, decorationSize.height)) {
+        // Added last so it sits over the card's top edge and the top row, which is what the overlap is for. It takes no clicks.
+        NSImageView *decoration = [[NSImageView alloc] initWithFrame:NSMakeRect(placed->x, height - placed->top - placed->height, placed->width, placed->height)];
+        decoration.identifier = @"candidate-decoration";
         decoration.image = _appearance.decorationImage;
-        decoration.imageScaling = NSImageScaleProportionallyUpOrDown;
-        decoration.imageAlignment = skin.decorationAlign == msime::mac::DecorationAlign::left     ? NSImageAlignTopLeft
-                                    : skin.decorationAlign == msime::mac::DecorationAlign::center ? NSImageAlignTop
-                                                                                                  : NSImageAlignTopRight;
+        decoration.imageScaling = NSImageScaleAxesIndependently;
         decoration.wantsLayer = YES;
         [content addSubview:decoration];
     }

@@ -624,7 +624,8 @@ surface = "#123456"
         NSBitmapImageRep *withDecoration = Draw(preview);
         const CGFloat scale = withDecoration.pixelsWide / preview.bounds.size.width;
         if (argc == 2) assert([[withDecoration representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@(argv[1]) atomically:YES]);
-        NSColor *red = [[withDecoration colorAtX:(preview.bounds.size.width - 60) * scale y:80 * scale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+        // The square image keeps its aspect at 120pt wide, so it fills the lower part of the 180pt band down to 6pt over the card (y 96-216 below the panel's top at 30).
+        NSColor *red = [[withDecoration colorAtX:(preview.bounds.size.width - 60) * scale y:150 * scale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
         // ColorSync may convert the fixture through the display profile; test visible red,
         // not byte identity between an image profile and the window's backing color space.
         assert(red.alphaComponent > .99 && red.redComponent > .8 &&
@@ -681,13 +682,17 @@ background = "#FF00FF"
                styledSkin.decorationAlign == msime::mac::DecorationAlign::left && !styledSkin.backgroundPath.empty());
         NSBitmapImageRep *styledBitmap = Draw(preview);
         const CGFloat styledScale = styledBitmap.pixelsWide / preview.bounds.size.width;
-        // The 横排候选 panel starts 30pt down at the 14pt inset: the decoration band, then the card.
-        NSColor *mascot = [[styledBitmap colorAtX:(14 + 60) * styledScale y:80 * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+        // The 横排候选 panel starts 30pt down at the 14pt inset: the transparent decoration band, then the card at 210. The left-aligned mascot is 6pt in from the card's edge and spans y 96-216, over the card's top edge.
+        NSColor *mascot = [[styledBitmap colorAtX:(14 + 60) * styledScale y:150 * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
         // Visible green, allowing for the ColorSync conversion noted above (a pure green fixture lands near 0.5, 0.97, 0.37 on a wide-gamut display).
         assert(mascot.greenComponent > .8 && mascot.greenComponent - mascot.redComponent > .3 && mascot.greenComponent - mascot.blueComponent > .3);
         NSColor *rightOfBand = [[styledBitmap colorAtX:(preview.bounds.size.width - 60) * styledScale y:80 * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
         assert(!(rightOfBand.greenComponent - rightOfBand.redComponent > .3));
         const CGFloat cardTop = 30 + 180;
+        NSColor *overCard = [[styledBitmap colorAtX:(14 + 60) * styledScale y:(cardTop + 3) * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+        assert(overCard.greenComponent > .8 && overCard.greenComponent - overCard.blueComponent > .3);
+        NSColor *aboveMascot = [[styledBitmap colorAtX:(14 + 60) * styledScale y:60 * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+        assert(!(aboveMascot.greenComponent - aboveMascot.redComponent > .3) && !(aboveMascot.blueComponent - aboveMascot.redComponent > .5));
         NSColor *background = [[styledBitmap colorAtX:(preview.bounds.size.width / 2) * styledScale y:(cardTop + 3) * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
         assert(background.blueComponent > .8 && background.blueComponent - background.redComponent > .5);
         // Clipped to the 24pt corner: the card's own top-left pixel is the canvas, not the image.

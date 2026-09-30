@@ -299,6 +299,8 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
 @property(nonatomic, strong) NSImage *backgroundImage;
 @property(nonatomic) msime::mac::BackgroundFit backgroundFit;
 @property(nonatomic) CGFloat backgroundOpacity;
+// The transparent band above the card that a skin's decoration stands in. The fill, background image and stroke cover only the card below it.
+@property(nonatomic) CGFloat cardTopInset;
 @end
 @implementation MSIMECandidateChromeView
 - (BOOL)isOpaque { return NO; }
@@ -322,13 +324,15 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
 - (void)drawRect:(NSRect)dirtyRect
 {
     (void)dirtyRect;
-    NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:self.bounds
+    // Not flipped: the band is the top of the bounds, the card everything under it.
+    const NSRect bounds = NSMakeRect(NSMinX(self.bounds), NSMinY(self.bounds), NSWidth(self.bounds),
+                                     MAX(0.0, NSHeight(self.bounds) - MAX(0.0, self.cardTopInset)));
+    NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:bounds
                                                          xRadius:self.cornerRadius
                                                          yRadius:self.cornerRadius];
     [(self.fillColor != nil ? self.fillColor : NSColor.windowBackgroundColor) setFill];
     [path fill];
     NSImage *background = self.backgroundImage;
-    const NSRect bounds = self.bounds;
     const auto rects = background != nil && self.backgroundOpacity > 0.0
         ? msime::mac::BackgroundRects(self.backgroundFit, {NSMinX(bounds), NSMinY(bounds), NSWidth(bounds), NSHeight(bounds)},
                                       background.size.width, background.size.height)
