@@ -157,16 +157,18 @@ fn is_han(ch: char) -> bool {
 
 /// Every toneless reading of one character, most common first.
 fn readings(ch: char) -> Vec<String> {
-    let mut readings: Vec<String> = Vec::new();
     if let Some(multi) = ch.to_pinyin_multi() {
+        let mut readings: Vec<String> = Vec::with_capacity(multi.count());
         for reading in multi {
             let reading = normalize_syllable(reading.plain());
             if !reading.is_empty() && !readings.contains(&reading) {
                 readings.push(reading);
             }
         }
+        readings
+    } else {
+        Vec::new()
     }
-    readings
 }
 
 /// `Lü3` -> `lv`: lowercase, tone digits and marks dropped, `ü` written `v`.
