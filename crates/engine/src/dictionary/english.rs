@@ -270,7 +270,7 @@ pub fn load_custom_translations(path: &Path) -> CustomTranslations {
     if size > MAX_CUSTOM_TRANSLATION_BYTES {
         return translations;
     }
-    let mut text = Vec::new();
+    let mut text = Vec::with_capacity(size as usize);
     if file
         .take(MAX_CUSTOM_TRANSLATION_BYTES + 1)
         .read_to_end(&mut text)
