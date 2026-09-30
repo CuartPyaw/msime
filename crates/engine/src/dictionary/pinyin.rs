@@ -216,7 +216,9 @@ impl PinyinDatabase {
         for (table, table_keys) in &keys_by_table {
             // Ordered by weight, so the first rows of each key are its best.
             for row in self.batch_rows(table, table_keys, usize::MAX) {
-                let slot = result.entry(row.key.clone()).or_default();
+                let slot = result
+                    .entry(row.key.clone())
+                    .or_insert_with(|| Vec::with_capacity(per_key_limit));
                 if slot.len() < per_key_limit {
                     slot.push(row);
                 }
