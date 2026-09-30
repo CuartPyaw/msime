@@ -203,24 +203,31 @@ pub fn status(
     let store = VocabularyProgressStore::new(directory);
     // Bundled books first: they are the ones a fresh profile can start from, and the picker should
     // not make a user scroll past their own imports to find 中考.
-    let mut wordbooks: Vec<WordbookSummary> = builtin::load(resources)?
-        .iter()
-        .map(|book| WordbookSummary {
-            id: book.id.clone(),
-            name: book.name.clone(),
-            total: book.entries.len(),
-            builtin: true,
-        })
-        .collect();
+    let builtins = builtin::load(resources)?;
+    let mut wordbooks = Vec::with_capacity(builtins.len());
+    wordbooks.extend(builtins.iter().map(|book| WordbookSummary {
+        id: book.id.clone(),
+        name: book.name.clone(),
+        total: book.entries.len(),
+        builtin: true,
+    }));
     wordbooks.extend(library.list()?);
     let document = store.load()?;
     let settings = document.settings.clone();
 
     // A selected book that is no longer in the library is reported as an empty queue rather than
     // as an error: the user deleted it, and the page should offer the picker instead of a failure.
-    let selected = selected_book(&library, resources, &settings.wordbook)?;
+    let imported = if settings.wordbook.is_empty() || builtin::is_builtin(&settings.wordbook) {
+        None
+    } else {
+        library.load(&settings.wordbook)?
+    };
+    let selected = builtins
+        .iter()
+        .find(|book| book.id == settings.wordbook)
+        .or(imported.as_ref());
 
-    let (queue, due, introducing, remaining) = match selected.as_ref() {
+    let (queue, due, introducing, remaining) = match selected {
         None => (Vec::new(), 0, 0, 0),
         Some(book) => {
             let built = build_queue(

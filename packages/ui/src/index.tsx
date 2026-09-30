@@ -1,17 +1,18 @@
 import { useConfirm } from "./core/confirm";
 import { NavItem } from "./core/platform-controls";
-import { mobilePageTitle, mobileTabIcon, mobileTabTitle } from "./settings/mobile-tab-helpers";
+import { mobilePageTitle } from "./settings/mobile-tab-helpers";
 import {
   desktopDownloadUrl,
   documentationUrl,
   fallbackAppVersion,
   windowIcons,
 } from "./settings/app-resources";
-import { unreadablePreferencesMessage } from "./settings/preferences-recovery-message";
 import { useSettingsWindowInteractions } from "./settings/use-settings-window-interactions";
 import { updateCandidateColor, updateCustomKeyboard } from "./settings/theme-selection-updates";
 import { useSettingsNavigation } from "./settings/use-settings-navigation";
 import { useSettingsContentScrollReset } from "./settings/use-settings-content-scroll-reset";
+import { MobileSettingsTabs } from "./settings/mobile-settings-tabs";
+import { SettingsPageHeader } from "./settings/settings-page-header";
 import {
   mobilePrimaryPageIds,
   mobileTabForPage,
@@ -32,7 +33,7 @@ import { clipboardHistoryEnabled } from "./settings/clipboard-history-preference
 import { settingsThemePreferences } from "./settings/settings-theme-preferences";
 import type { VoiceDeviceReader } from "./voice/voice-device-picker";
 import type { LocalVoiceModelClient } from "./voice/local-models";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   type DictionaryEntry,
   type LocalDictionaryFormat,
@@ -93,11 +94,10 @@ export {
   type DictionaryConfirmOptions,
   type UseDictionaryManagerOptions,
 } from "./settings/use-dictionary-manager";
-import { SettingsActionsFooter } from "./settings/settings-actions-footer";
-import {
-  InputSourceStartupNotice,
-  type InputSourceStartupStatus,
-} from "./settings/input-source-startup-notice";
+import { SettingsFormFooter } from "./settings/settings-form-footer";
+import { SettingsPageStatus } from "./settings/settings-page-status";
+import type { InputSourceStartupStatus } from "./settings/input-source-startup-notice";
+import { SettingsFormFrame } from "./settings/settings-form-frame";
 import { useProviderCredentials } from "./settings/use-provider-credentials";
 import { useFeedbackReport } from "./settings/use-feedback-report";
 import { useDataDirectory } from "./settings/use-data-directory";
@@ -331,7 +331,6 @@ export {
 } from "./settings/settings-capabilities";
 import { useAiAssistant } from "./settings/use-ai-assistant";
 export { useAiAssistant, type UseAiAssistantOptions } from "./settings/use-ai-assistant";
-import { validCandidateFonts } from "./candidate/candidate-font-family";
 import type { FontCatalogReader } from "./candidate/font-catalog";
 import {
   isPolishCustomSlot,
@@ -2682,32 +2681,11 @@ export function SettingsPage(props: SettingsPageProps) {
       <div className={settings.body} data-settings-body="">
         {/* A bottom tab bar. `order-2` seats it below the content while the DOM keeps it ahead, so assistive technology and keyboard focus still reach the navigation first, and the bottom padding clears the gesture inset. Hidden above phone width, where the sidebar serves. */}
         {mobilePlatform && (
-          <nav className={settings.mobileTabBar} aria-label="主要功能">
-            {mobilePrimaryPages.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={settings.mobileTab(mobileActiveTab === item.id)}
-                aria-current={mobileActiveTab === item.id ? "page" : undefined}
-                onClick={() => selectMobileTab(item.id)}
-              >
-                <span className={settings.mobileTabPill(mobileActiveTab === item.id)}>
-                  {/* Drawn as a mask over the text colour, so the selected tab takes the accent and every glyph follows the theme; an `<img>` of a `currentColor` stroke renders it black. */}
-                  <span
-                    className={settings.mobileTabIcon}
-                    style={
-                      {
-                        "--tab-icon": `url("${mobileTabIcon(item.id, item.icon)}")`,
-                      } as CSSProperties
-                    }
-                    data-tab-icon={mobileTabIcon(item.id, item.icon)}
-                    aria-hidden="true"
-                  />
-                </span>
-                {mobileTabTitle(item.id, item.title)}
-              </button>
-            ))}
-          </nav>
+          <MobileSettingsTabs
+            tabs={mobilePrimaryPages}
+            activeTab={mobileActiveTab}
+            onSelect={selectMobileTab}
+          />
         )}
         <nav
           className={`${settings.sidebar} ${ipadSidebarShown ? "" : "ipad:hidden"}`}
@@ -2789,66 +2767,26 @@ export function SettingsPage(props: SettingsPageProps) {
               </button>
             )}
             {!macShell && (
-              <header
-                className={`${settings.pageHeader} ${
-                  mobilePlatform && untitledOnPhone.includes(page) ? "max-phone:sr-only" : ""
-                }`}
-              >
-                <h1 className={settings.pageTitle} id="page-title">
-                  {pageTitle}
-                </h1>
-              </header>
+              <SettingsPageHeader
+                title={pageTitle}
+                hiddenOnPhone={mobilePlatform && untitledOnPhone.includes(page)}
+              />
             )}
-            {error && (
-              <p role="alert" className="error">
-                {error}
-                {error === unreadablePreferencesMessage && client.recoverPreferences && (
-                  <>
-                    {" "}
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={busy}
-                      onClick={() => void recoverPreferences()}
-                    >
-                      修复配置文件…
-                    </button>
-                  </>
-                )}
-              </p>
-            )}
-            {notice && (
-              <p role="status" className="notice">
-                {notice}
-                {recoveredBackup && client.openPreferencesDirectory && (
-                  <>
-                    {" "}
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() =>
-                        void client
-                          .openPreferencesDirectory?.()
-                          .catch(() => setError("无法打开配置文件所在的文件夹。"))
-                      }
-                    >
-                      {macosPlatform ? "在 Finder 中显示" : "打开所在文件夹"}
-                    </button>
-                  </>
-                )}
-              </p>
-            )}
-            {inputSourceStartup &&
-              (inputSourceStartup.action !== "up_to_date" ||
-                inputSourceStartup.enabled === false) && (
-                <InputSourceStartupNotice
-                  status={inputSourceStartup}
-                  onOpenSettings={() => client.inputSourceStartup?.openSettings()}
-                  onDismiss={() => setInputSourceStartup(null)}
-                  onError={setError}
-                />
-              )}
-            {busy && !draft && <p role="status">正在读取设置…</p>}
+            <SettingsPageStatus
+              error={error}
+              notice={notice}
+              busy={busy}
+              recoveredBackup={recoveredBackup}
+              canRecover={Boolean(client.recoverPreferences)}
+              onRecover={() => void recoverPreferences()}
+              openPreferencesDirectory={client.openPreferencesDirectory}
+              macos={macosPlatform}
+              onError={setError}
+              draft={draft}
+              inputSourceStartup={inputSourceStartup}
+              onOpenSettings={() => client.inputSourceStartup?.openSettings()}
+              onDismiss={() => setInputSourceStartup(null)}
+            />
             {client.home && draft && page === "home" && (
               <HomePage
                 preferences={draft}
@@ -2985,7 +2923,9 @@ export function SettingsPage(props: SettingsPageProps) {
               page !== "chat" &&
               page !== "more" &&
               page !== "community" && (
-                <form
+                <SettingsFormFrame
+                  showReload={false}
+                  busy={busy}
                   onSubmit={(event) => {
                     event.preventDefault();
                     void save();
@@ -3039,20 +2979,14 @@ export function SettingsPage(props: SettingsPageProps) {
                     />
                     <AboutSettingsPage />
                   </SettingsFormContext.Provider>
-                  {!validCandidateFonts(draft) && (
-                    <p role="alert">
-                      请在候选窗口页修正字体：名称不能为空、不能含控制字符或超过 128 个 UTF-8
-                      字节，补充字体最多 32 项。
-                    </p>
-                  )}
-                  <SettingsActionsFooter
+                  <SettingsFormFooter
+                    draft={draft}
                     busy={busy}
                     dirty={dirty}
-                    canSave={validCandidateFonts(draft)}
                     showRestoreDefaults={Boolean(client.loadDefaultPreferences)}
                     onRestoreDefaults={() => void restoreDefaults()}
                   />
-                </form>
+                </SettingsFormFrame>
               )}
             {page !== "typing-statistics" &&
               page !== "vocabulary" &&
