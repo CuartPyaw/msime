@@ -1072,6 +1072,10 @@ export {
   CloudDictionaryKindTabs,
   type CloudDictionaryKindTabsProps,
 } from "./keyboard/cloud-dictionary-kind-tabs";
+export {
+  CloudDictionaryKindSelect,
+  type CloudDictionaryKindSelectProps,
+} from "./keyboard/cloud-dictionary-kind-select";
 export type { EmojiCatalogGroup } from "./emoji/emoji-catalog";
 export {
   customTranslationsExample,
