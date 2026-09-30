@@ -15,6 +15,7 @@ import {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const preferences: Snapshot = {
@@ -43,22 +44,25 @@ function label(offset: number): string {
   return `${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
-const initialStatistics: TypingStatistics = {
-  enabled: true,
-  total: 23,
-  days: { [key(0)]: 4, [key(-1)]: 6, [key(-8)]: 10 },
-  detail: {
-    characters: { han: 4, latin: 6, emoji: 10 },
-    sources: { quanpin: 4, english: 6, ai: 10 },
-  },
-  dailyDetails: {
-    [key(0)]: { characters: { han: 4 }, sources: { quanpin: 4 } },
-    [key(-1)]: { characters: { latin: 6 }, sources: { english: 6 } },
-    [key(-8)]: { characters: { emoji: 10 }, sources: { ai: 10 } },
-  },
-};
+// Built on each call so the day keys follow the clock the test runs under, including a faked one.
+function initialStatistics(): TypingStatistics {
+  return {
+    enabled: true,
+    total: 23,
+    days: { [key(0)]: 4, [key(-1)]: 6, [key(-8)]: 10 },
+    detail: {
+      characters: { han: 4, latin: 6, emoji: 10 },
+      sources: { quanpin: 4, english: 6, ai: 10 },
+    },
+    dailyDetails: {
+      [key(0)]: { characters: { han: 4 }, sources: { quanpin: 4 } },
+      [key(-1)]: { characters: { latin: 6 }, sources: { english: 6 } },
+      [key(-8)]: { characters: { emoji: 10 }, sources: { ai: 10 } },
+    },
+  };
+}
 
-function status(statistics: TypingStatistics = initialStatistics): TypingStatisticsStatus {
+function status(statistics: TypingStatistics = initialStatistics()): TypingStatisticsStatus {
   return { statistics, availability: "ready", lastWrittenMs: Date.now() };
 }
 
@@ -211,6 +215,9 @@ test("mobile trend includes a calendar heatmap that selects a day", async () => 
 });
 
 test("desktop statistics show a 12-month calendar heatmap with Monday-first weeks", async () => {
+  // The heatmap spans 53 weeks, so on some days a cell from last year shares its 月日 label with a recent day and the by-name lookups below match two cells (on 2026-10-01, 9月29日 twice). A fixed Wednesday keeps the days this test names unique; only Date is faked, so the async queries keep real timers.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 5, 17, 12));
   const typingStatistics = {
     load: vi.fn().mockResolvedValue(status()),
     setEnabled: vi.fn(),
@@ -330,13 +337,13 @@ test("a statistics mutation from a replaced client cannot overwrite the current 
   await waitFor(() =>
     expect((screen.getByLabelText("记录打字统计") as HTMLInputElement).checked).toBe(true),
   );
-  pending.resolve(status({ ...initialStatistics, enabled: false, total: 0, days: {} }));
+  pending.resolve(status({ ...initialStatistics(), enabled: false, total: 0, days: {} }));
   await Promise.resolve();
   expect((screen.getByLabelText("记录打字统计") as HTMLInputElement).checked).toBe(true);
 });
 
 test("statistics toggle refreshes immediately and reset requires confirmation without re-enabling", async () => {
-  const disabled = { ...initialStatistics, enabled: false };
+  const disabled = { ...initialStatistics(), enabled: false };
   const cleared: TypingStatistics = {
     enabled: false,
     total: 0,
@@ -385,7 +392,7 @@ test("never-written status explains the empty local-only data channel", async ()
 
 test("candidate positions show a first-candidate rate and keep rank order", async () => {
   const statistics: TypingStatistics = {
-    ...initialStatistics,
+    ...initialStatistics(),
     selections: { ranks: [30, 6, 3, 0, 0, 0, 0, 0, 1], beyond: 10 },
   };
   const typingStatistics = {
