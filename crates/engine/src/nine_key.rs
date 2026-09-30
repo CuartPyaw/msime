@@ -326,7 +326,7 @@ impl NineKeySession {
             .dictionary
             .get_or_insert_with(|| QuanpinDictionary::new(&self.paths));
         let mut queried = HashSet::new();
-        let mut candidates = Vec::new();
+        let mut candidates = Vec::with_capacity(CANDIDATE_LIMIT);
         for path in alternatives {
             let mut full = self.locked.clone();
             full.extend(path);
