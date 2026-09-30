@@ -170,13 +170,29 @@ fn insert_mixed_rows(
     emoji: Vec<WordItem>,
     kaomoji: Vec<WordItem>,
 ) -> Vec<WordItem> {
-    let mut seen: HashSet<String> = candidates.iter().map(|item| item.word.clone()).collect();
-    let mut unique = |rows: Vec<WordItem>| -> Vec<WordItem> {
-        rows.into_iter()
-            .filter(|item| seen.insert(item.word.clone()))
-            .collect()
-    };
-    let groups = [unique(english), unique(emoji), unique(kaomoji)];
+    // Borrow the existing words while filtering; release those borrows before moving rows into the result groups.
+    let mut seen: HashSet<&str> = candidates.iter().map(|item| item.word.as_str()).collect();
+    let english_unique = unique_mask(&english, &mut seen);
+    let emoji_unique = unique_mask(&emoji, &mut seen);
+    let kaomoji_unique = unique_mask(&kaomoji, &mut seen);
+    drop(seen);
+    let groups: [Vec<WordItem>; 3] = [
+        english
+            .into_iter()
+            .zip(english_unique)
+            .filter_map(|(item, unique)| unique.then_some(item))
+            .collect(),
+        emoji
+            .into_iter()
+            .zip(emoji_unique)
+            .filter_map(|(item, unique)| unique.then_some(item))
+            .collect(),
+        kaomoji
+            .into_iter()
+            .zip(kaomoji_unique)
+            .filter_map(|(item, unique)| unique.then_some(item))
+            .collect(),
+    ];
 
     let has_source = |source| candidates.iter().any(|item| item.source == source);
     let mut slot = if has_source(CandidateSource::AiSuggestion) {
@@ -201,6 +217,12 @@ fn insert_mixed_rows(
         candidates.extend(rows);
     }
     candidates
+}
+
+fn unique_mask<'a>(rows: &'a [WordItem], seen: &mut HashSet<&'a str>) -> Vec<bool> {
+    rows.iter()
+        .map(|item| seen.insert(item.word.as_str()))
+        .collect()
 }
 
 #[cfg(test)]
