@@ -680,7 +680,7 @@ impl SpellingTable {
         let mut suffix: Vec<Vec<Path>> = vec![Vec::new(); length + 1];
         suffix[length].push(Vec::new());
         for offset in (0..length).rev() {
-            let mut result = Vec::new();
+            let mut result = Vec::with_capacity(PATH_LIMIT);
             for end in offset + 1..=length.min(offset + self.longest_code) {
                 let Some(pieces) = self.by_code.get(&digits[offset..end]) else {
                     continue;
