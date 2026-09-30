@@ -116,7 +116,7 @@ fn read(
     let matched_code = initials.join("'");
     let mut statement = connection.prepare_cached(&sql)?;
     let mut rows = statement.query(rusqlite::params![jianpin, super::sql_limit(scan_limit)])?;
-    let mut candidates = Vec::new();
+    let mut candidates = Vec::with_capacity(limit);
     while let Some(row) = rows.next()? {
         let Some(value) = row.get::<_, Option<String>>(1)? else {
             continue;
