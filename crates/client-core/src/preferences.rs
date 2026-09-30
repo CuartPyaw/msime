@@ -438,33 +438,47 @@ pub enum CharacterWidthPreference {
     Fullwidth,
 }
 
-/// Candidate sentence-association sources. Dictionary and Google sources keep their historical
-/// defaults; neural rerankers are opt-in because they add model work while typing or settling.
+/// Candidate sentence-association sources. The dictionary lattice keeps its historical default; neural rerankers are opt-in because they add model work while typing or settling.
+/// The private unit field absorbs a retired key; it is not a non-exhaustive marker.
+#[allow(clippy::manual_non_exhaustive)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SentenceAssociationPreferences {
     #[serde(default = "enabled_by_default")]
     pub word_lattice: bool,
-    #[serde(default = "enabled_by_default")]
-    pub google: bool,
+    /// Runs the desktop sentence model as the input runtime's settled reranker once typing pauses, when a host has installed it; the Engine never loads that model.
     #[serde(default)]
     pub neural_desktop: bool,
     #[serde(default)]
     pub neural_keyboard: bool,
     #[serde(default)]
     pub show_next_on_duplicate: bool,
+    /// The retired Google decoder switch. Documents saved before the decoder was dropped still carry `google`; it is accepted and discarded so they keep loading, and the next save no longer writes it.
+    #[serde(
+        rename = "google",
+        default,
+        skip_serializing,
+        deserialize_with = "discard_retired_value"
+    )]
+    retired_google: (),
 }
 
 impl Default for SentenceAssociationPreferences {
     fn default() -> Self {
         Self {
             word_lattice: true,
-            google: true,
             neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
+            retired_google: (),
         }
     }
+}
+
+fn discard_retired_value<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<(), D::Error> {
+    serde::de::IgnoredAny::deserialize(deserializer).map(|_| ())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -728,7 +742,7 @@ pub struct VoiceInputPreferences {
     pub asr_endpoint: String,
     #[serde(default)]
     pub asr_model: String,
-    /// Absolute path to the on-device model the `local` provider runs: either an installed model directory (one containing `msime-model.json`, see `voice::local_models`) or a Whisper model file. Nothing is uploaded and no endpoint or token applies. Any absolute form the host OS uses is accepted, since the same document is read on Windows.
+    /// Absolute path to the installed model directory the `local` provider runs (one containing `msime-model.json`, see `voice::local_models`). Nothing is uploaded and no endpoint or token applies. Only the path's shape is checked here, since the same document is read on every OS: any absolute form the host OS uses is accepted, and the recognizer finds its files only through `msime-model.json`, so a path without one is a missing model rather than an invalid document. A document from a build that also took a single model file therefore still loads.
     #[serde(default)]
     pub asr_model_path: String,
     /// Optional `https://` prefix placed in front of every local model download URL (ghproxy-style), for networks where GitHub release downloads are slow or blocked. Empty downloads from the catalog URLs as they are.
@@ -1659,7 +1673,7 @@ fn default_shuangpin_helpcode() -> HelpcodePreferences {
     }
 }
 
-/// Persisted recognition provider identifiers. Hosts expose only the providers they implement: `system` is the platform speech adapter, not a cloud profile, and `local` is an on-device model (an installed sherpa-onnx model directory or a Whisper model file) named by `asr_model_path`, which needs a host built with the recognizer behind it.
+/// Persisted recognition provider identifiers. Hosts expose only the providers they implement: `system` is the platform speech adapter, not a cloud profile, and `local` is an installed on-device sherpa-onnx model directory named by `asr_model_path`, which needs a host built with the recognizer behind it.
 pub const ASR_PROVIDERS: [&str; 8] = [
     "doubao",
     "siliconflow",
@@ -1735,10 +1749,7 @@ impl Preferences {
     /// same promise has to be kept from the other direction: start at `Default` and carry the
     /// service configuration across.
     ///
-    /// The endpoint, provider and model travel with the token rather than resetting beside it. A
-    /// key left pointing at a default endpoint is worse than either keeping the pair or clearing
-    /// it, because nothing on the page says the two no longer belong together. `asr_model_path`
-    /// travels for the same reason: it is a file the user went and found.
+    /// The endpoint, provider and model travel with the token rather than resetting beside it. A key left pointing at a default endpoint is worse than either keeping the pair or clearing it, because nothing on the page says the two no longer belong together. `asr_model_path` travels for the same reason: it is a model the user went and downloaded.
     ///
     /// `fuzzy_pinyin.seeded` is not a setting at all -- it records that the one-time seeding has
     /// happened -- so clearing it would silently re-seed rules the user had turned off.
@@ -2050,12 +2061,10 @@ impl PreferencesStore {
                 "preferences document is not a regular file",
             )));
         }
-        let bytes = match File::open(&path) {
-            Ok(file) => crate::bounded_io::read_bounded_file(file, MAX_DOCUMENT_BYTES, || {
+        let bytes =
+            crate::bounded_io::read_bounded_file(File::open(&path)?, MAX_DOCUMENT_BYTES, || {
                 PreferencesError::DocumentTooLarge
-            })?,
-            Err(error) => return Err(error.into()),
-        };
+            })?;
         let mut snapshot: PreferencesSnapshot = serde_json::from_slice(&bytes)?;
         if snapshot.format_version != 1 {
             return Err(PreferencesError::UnsupportedFormat);

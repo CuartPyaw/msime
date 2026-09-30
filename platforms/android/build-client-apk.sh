@@ -7,15 +7,14 @@ cd "$repo_root"
 resource_dir=${1:?usage: build-client-apk.sh <verified-resource-directory> [arm64-v8a|x86_64]}
 abi=${2:-arm64-v8a}
 case "$abi" in
-  arm64-v8a) tauri_target=aarch64; dependency_triplet=arm64-msime-android ;;
-  x86_64) tauri_target=x86_64; dependency_triplet=x64-msime-android ;;
+  arm64-v8a) tauri_target=aarch64 ;;
+  x86_64) tauri_target=x86_64 ;;
   *) echo "Unsupported ABI" >&2; exit 1 ;;
 esac
 android_sdk=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}
 [[ -n "$android_sdk" ]] || { echo "Android SDK required" >&2; exit 1; }
 [[ -f "$android_sdk/platforms/android-36/android.jar" && -x "$android_sdk/build-tools/35.0.0/apksigner" ]] || { echo "Android API 36 and build-tools 35 required" >&2; exit 1; }
 android_ndk=${MSIME_ANDROID_NDK:-$android_sdk/ndk/28.2.13676358}
-android_dependencies="$repo_root/target/android-deps/$abi/$dependency_triplet"
 tauri_android_dir=${TAURI_ANDROID_DIR:-}
 if [[ -z "$tauri_android_dir" ]]; then
   tauri_manifest=$(cargo metadata --locked --format-version 1 | node -e '
@@ -49,6 +48,13 @@ cargo run --quiet -p msime-client-core --example verify_resources --locked -- "$
 mkdir -p "$assets/native-notices"
 cp -R target/android/notices/. "$assets/native-notices/"
 cp LICENSE "$assets/client-LICENSE.txt"
+# Helpcode tables are not part of the dictionary release; the repository carries them in resources/helpcodes. Bootstrap extracts them into helpcodes/ under the resource directory, where the Engine reads them (crates/engine/src/assets.rs names the six files), and replaces them whenever the package changes.
+mkdir -p "$assets/helpcodes"
+for table in helpcode.txt zrm_helpcode_big_unique.txt shouyou2_0_helpcode.txt shouyouplus_helpcode.txt xiaohe_helpcode.txt jiajia_helpcode.txt; do
+  cp "resources/helpcodes/$table" "$assets/helpcodes/$table"
+done
+cp resources/helpcodes/ENGINE-NOTICE.md "$assets/helpcodes/NOTICE.md"
+cp resources/helpcodes/NOTICE.md "$assets/helpcodes/NOTICE-jiajia.md"
 # Optional non-English candidate glosses (scripts/build_offline_glosses.py). Bootstrap extracts them beside the resources, where the Engine looks for one zh-<lang>.db per target language; without them only English is glossed offline.
 glosses_source=${MSIME_OFFLINE_GLOSSES:-$repo_root/target/offline-glosses}
 rm -rf "$assets/offline-glosses"
@@ -59,8 +65,7 @@ if compgen -G "$glosses_source/zh-*.db" >/dev/null && [ -f "$glosses_source/offl
 else
   echo "no offline glosses at $glosses_source; candidates are glossed offline in English only"
 fi
-ANDROID_HOME="$android_sdk" NDK_HOME="$android_ndk" MSIME_ANDROID_NDK="$android_ndk" \
-  MSIME_ANDROID_DEPS="$android_dependencies" TAURI_ANDROID_DIR="$tauri_android_dir" \
+ANDROID_HOME="$android_sdk" NDK_HOME="$android_ndk" TAURI_ANDROID_DIR="$tauri_android_dir" \
   pnpm --filter @msime/desktop tauri android build --apk --target "$tauri_target" --ci
 unsigned="$repo_root/apps/desktop/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk"
 [[ -f "$unsigned" ]] || { echo "Expected Tauri APK not produced" >&2; exit 1; }

@@ -21,13 +21,15 @@ REDIRECT_TARGETS = {"asr": "/asr/success", "polish": "/polish/success"}
 
 class SharedVoiceHandler(http.server.BaseHTTPRequestHandler):
     counts = collections.Counter()
+    bodies = {}
 
     def log_message(self, *_args):
         pass
 
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        request = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         self.counts[self.path] += 1
+        self.bodies[self.path] = (self.headers.get("Content-Type", ""), request)
         mode, scenario = self.path.strip("/").split("/")
         status = 200
         payload = {"text": "synthetic result"} if mode == "asr" else {
@@ -74,6 +76,14 @@ with LoopbackHTTPServer(("127.0.0.1", 0), SharedVoiceHandler) as server:
         subprocess.run([sys.argv[1], "asr", "siliconflow", url, "success"],
                        check=True, timeout=10, env=environment)
         assert SharedVoiceHandler.counts["/asr/retry"] == 2
+        # The upload itself: the model, the language component of the host's zh-CN tag for OpenAI, and the recording as a WAV file part. SiliconFlow is sent no language field at all.
+        content_type, body = SharedVoiceHandler.bodies["/asr/success"]
+        assert content_type.startswith("multipart/form-data; boundary="), content_type
+        assert b'name="model"\r\n\r\nfixture\r\n' in body
+        assert b'name="language"\r\n\r\nzh\r\n' in body
+        assert b'name="file"; filename="audio.wav"\r\nContent-Type: audio/wav\r\n\r\nRIFF' in body
+        assert b"WAVEfmt " in body
+        assert b'name="language"' not in SharedVoiceHandler.bodies["/asr/retry"][1]
     finally:
         server.shutdown()
         worker.join(timeout=5)

@@ -9,7 +9,7 @@ permissions: {contents: write}
 concurrency: {group: release-macos, cancel-in-progress: false}
 jobs:
   release:
-    # arm64: the Homebrew boost, fmt and spdlog on this runner are arm64-only, so the package is built for Apple silicon and the asset name says so.
+    # arm64: the package is built for Apple silicon and the asset name says so. The reason was the arm64-only Homebrew boost, fmt and spdlog the C++ Engine linked; the Rust engine links none of them, so a universal package is now a separate decision rather than a constraint.
     runs-on: macos-15
     timeout-minutes: 120
     # Mapped here because secrets.* cannot appear in a step's if:. All are optional; see the signing comment below and platforms/macos/README.md (发布包). The names are the ones the repository's Developer ID secrets were stored under; reading any other name gives an empty string, which silently turns every release into an ad-hoc, un-notarized package.
@@ -33,7 +33,7 @@ jobs:
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           echo "value=$version" >> "$GITHUB_OUTPUT"
       - name: Install dependencies
-        run: brew install boost fmt spdlog nlohmann-json
+        run: brew install nlohmann-json
       # platforms/macos/CMakeLists.txt makes an empty MSIME_SPARKLE_ROOT a FATAL_ERROR, so the
       # configure below cannot run without this. Same pinned version, same digest and same cache key
       # as ci-macos.yml -- the digest lives beside the version in CMakeLists.txt.
@@ -91,7 +91,7 @@ jobs:
       # stage-resources.sh stages target/offline-glosses when it is there and package-release.sh embeds it.
       - name: Fetch the locked offline candidate glosses
         run: python3 scripts/fetch_offline_glosses.py
-      # Fetches the locked Engine and the pinned dictionaries, builds the Release host library, the input method bundle and the Tauri settings app that embeds both, signs them (Developer ID when the secrets are present, ad-hoc otherwise), checks the embedded resources and signatures inside the mounted DMG, notarizes when the Apple ID secrets are present, and writes SHA256SUMS.
+      # Fetches the pinned dictionaries, builds the Release host library, the input method bundle and the Tauri settings app that embeds both, signs them (Developer ID when the secrets are present, ad-hoc otherwise), checks the embedded resources and signatures inside the mounted DMG, notarizes when the Apple ID secrets are present, and writes SHA256SUMS.
       - name: Build macOS package
         env:
           VERSION: "${{ steps.version.outputs.value }}"

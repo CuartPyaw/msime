@@ -17,7 +17,9 @@ use crate::platform::macos::macos_panel_session;
 use crate::voice::cancel_voice;
 use crate::{DictionaryHostOptions, HostActionError, PanelInputState};
 use msime_client_core::host_surface::{PanelPlacement, PanelSurface, SurfaceRoute};
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::Manager;
+#[cfg(not(mobile))]
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 pub(crate) fn panel_accepts_focus(label: &str) -> bool {
     label != "keyboard-panel"

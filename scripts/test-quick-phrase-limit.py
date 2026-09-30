@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
 """The quick-phrase length limit agrees with the pipe field it is a limit on.
 
-A quick phrase is finally written into the Windows candidate pipe's text field,
-whose size the Engine declares in `contracts/ipc_protocol_limits.h`. Everything
-that accepts a phrase has to refuse one longer than that field, or the phrase is
-taken, stored, and then truncated on its way to the editor - the kind of failure
-that appears once, at use, far from where it was entered.
+A quick phrase is finally written into the Windows candidate pipe's text field, whose size `shared/contracts/ipc_protocol_limits.h` declares. Everything that accepts a phrase has to refuse one longer than that field, or the phrase is taken, stored, and then truncated on its way to the editor - the kind of failure that appears once, at use, far from where it was entered.
 
-The value lived as the bare literal `199` in four places across three crates,
-none of them attached to the header that decides it. It is now one constant, and
-this compares that constant with the header. Moving `engine-lock.json` is what
-would change the field; that is exactly when nothing else would notice.
+The value lived as the bare literal `199` in four places across three crates, none of them attached to the header that decides it. It is now one constant, and this compares that constant with the header. Resizing the field in the header is what would change the limit; that is exactly when nothing else would notice.
 """
 
 from __future__ import annotations
@@ -20,7 +13,7 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-CONTRACT = ROOT / "vendor/MSIME-Engine/contracts/ipc_protocol_limits.h"
+CONTRACT = ROOT / "shared/contracts/ipc_protocol_limits.h"
 CONSTANT = ROOT / "crates/client-core/src/dictionary/import.rs"
 # Crates that accept a quick phrase. A bare literal here is the thing this guard exists to stop.
 SEARCH = ["crates/client-core/src", "crates/host-api/src"]
@@ -65,9 +58,11 @@ def stray_literals(limit: int) -> list[str]:
 def main() -> int:
     contract = contract_limit()
     if contract is None:
-        print("skipped: the Engine contract header is not present")
-        print("  run python3 scripts/fetch_engine.py to prepare it")
-        return 0
+        print(
+            f"FAIL {CONTRACT.relative_to(ROOT)} no longer declares CandidateTextMaxLength in a form this reads",
+            file=sys.stderr,
+        )
+        return 1
     declared = declared_limit()
     if declared is None:
         print("FAIL MAX_QUICK_PHRASE_UTF16 is no longer a plain constant", file=sys.stderr)

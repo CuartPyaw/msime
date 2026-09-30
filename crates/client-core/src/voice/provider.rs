@@ -31,7 +31,7 @@ pub struct MobileVoiceProviderConfiguration {
     pub enable_punctuation: bool,
     pub enable_ddc: bool,
     pub boosting_table_id: String,
-    /// The on-device model for provider `local` (an installed model directory or a Whisper file); empty for every network provider, which carry an endpoint and token instead.
+    /// The installed on-device model directory for provider `local`; empty for every network provider, which carry an endpoint and token instead.
     pub model_path: String,
 }
 
@@ -304,7 +304,7 @@ mod tests {
         let mut preferences = Preferences::default();
         preferences.voice_input.asr_provider = "openai".into();
         preferences.voice_input.asr_token = "synthetic-token".into();
-        preferences.voice_input.asr_model_path = "/models/ggml.bin".into();
+        preferences.voice_input.asr_model_path = "/models/x-asr-zh-en-streaming".into();
         let configuration = mobile_voice_provider_configuration(&preferences).unwrap();
         assert!(configuration.model_path.is_empty());
     }

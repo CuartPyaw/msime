@@ -36,23 +36,14 @@ for argument in "$@"; do
   esac
 done
 
-# vcpkg supplies SQLite and the other native dependencies the Engine bridge
-# links on Windows. Derived from VCPKG_ROOT when that is set; export
-# MSIME_VCPKG_PREFIX directly for an installed tree somewhere else. Without one
-# of the two the bridge build fails in a way that looks like a code error but is
-# not, so the Windows branch below says so out loud rather than leaving it to be
-# guessed from a compiler message.
+# vcpkg supplies curl, fmt, nlohmann-json and utfcpp, the native dependencies the Windows host links. Derived from VCPKG_ROOT when that is set; export MSIME_VCPKG_PREFIX directly for an installed tree somewhere else. Without one of the two the Windows CMake build fails in a way that looks like a code error but is not, so the Windows branch below says so out loud rather than leaving it to be guessed from a compiler message.
 : "${MSIME_VCPKG_PREFIX:=${VCPKG_ROOT:+$VCPKG_ROOT/installed/x64-windows-static-md}}"
 : "${MSIME_NATIVE_BUILD:=target/win-full}"
 # The pipe-only configuration builds the protocol tests without the Rust host
 # library. It is a separate CMake configuration, so nothing in the ordinary
 # build covers it - and a configuration nobody runs is one that rots.
 : "${MSIME_PIPE_BUILD:=target/windows-pipe}"
-# platforms/macos was covered by nothing. It stopped compiling at some point and
-# nobody found out, and the 103 tests behind that break had never reported at
-# all. Configured directories only: the build needs a pinned Sparkle and a
-# prepared engine state, so a machine without them skips this the way it already
-# skips the Windows phases.
+# platforms/macos was covered by nothing. It stopped compiling at some point and nobody found out, and the 103 tests behind that break had never reported at all. Configured directories only: the build needs a pinned Sparkle, so a machine without it skips this the way it already skips the Windows phases.
 : "${MSIME_MACOS_BUILD:=target/macos-isolated}"
 # The Foundation-only part of shared/apple-bridge. It costs two translation units and no
 # dependency at all, so unlike the phase above it configures itself: the bridges shared with
@@ -84,17 +75,13 @@ fi
 apple_host=0
 case "$(uname -s 2>/dev/null)" in Darwin) apple_host=1 ;; esac
 
-# Only the Windows host gets its CMake search path from vcpkg. This used to be
-# exported unconditionally from a hardcoded prefix, which meant a macOS run
-# overwrote the CMAKE_PREFIX_PATH the README asks for - `$(brew --prefix)`, the
-# one thing that lets CMake find Boost, fmt and spdlog there - with a path that
-# does not exist on the machine.
+# Only the Windows host gets its CMake search path from vcpkg. This used to be exported unconditionally from a hardcoded prefix, which meant a macOS run overwrote the CMAKE_PREFIX_PATH the README asks for - `$(brew --prefix)`, the one thing that lets CMake find the Homebrew libraries there - with a path that does not exist on the machine.
 if [ "$windows_host" -eq 1 ]; then
   if [ -n "$MSIME_VCPKG_PREFIX" ]; then
     export CMAKE_PREFIX_PATH="$MSIME_VCPKG_PREFIX"
     export CXXFLAGS="-I$MSIME_VCPKG_PREFIX/include"
   else
-    echo "note: neither MSIME_VCPKG_PREFIX nor VCPKG_ROOT is set; the Engine bridge will not find its vcpkg dependencies"
+    echo "note: neither MSIME_VCPKG_PREFIX nor VCPKG_ROOT is set; the Windows build will not find its vcpkg dependencies"
   fi
 fi
 
@@ -131,17 +118,6 @@ compare() {
     echo "$phase: at baseline"
   fi
 }
-
-# A stale engine tree fails the build with undeclared-identifier errors that look
-# exactly like a code break - this script's own first run lost time to that.
-# Check it before blaming the source.
-note "vendored engine"
-if python3 scripts/fetch_engine.py; then
-  echo "vendored engine: at the locked commit"
-else
-  fail "vendor/MSIME-Engine could not be prepared from engine-lock.json"
-  echo "  until then every build error below may be an artefact of the stale tree"
-fi
 
 # The special checks below run inline here because they need this script's locks or toolchains; scripts/run-checks.sh names them in special_checks, and its registry phase fails when this file stops invoking them. Everything else under scripts/test-*.py is discovered and run by that script, sourced further down.
 
@@ -189,7 +165,7 @@ python3 scripts/test-windows-native-run.py || fail "windows tests on this host"
 note "harmony settings bundle"
 python3 scripts/test-harmony-settings-bundle.py || fail "harmony settings bundle"
 
-# The contract checks themselves: the registry phase and every other scripts/test-*.py, discovered by file name. Sourced rather than run so the output and this script's failure count stay as they were; the contracts workflow runs the same file on its own. It has to stay after fetch_engine.py above and after the three inline special phases just above.
+# The contract checks themselves: the registry phase and every other scripts/test-*.py, discovered by file name. Sourced rather than run so the output and this script's failure count stay as they were; the contracts workflow runs the same file on its own. It has to stay after the three inline special phases just above.
 # shellcheck source=scripts/run-checks.sh
 . scripts/run-checks.sh
 
@@ -231,13 +207,8 @@ note "compile: android target"
 # imports gated for the wrong targets. Checking the target here is what makes
 # the next one fail in a minute instead of at packaging time.
 #
-# Skipped rather than required: it needs the pinned NDK, the Rust Android
-# target and the vcpkg dependency prefix that platforms/android/build-native.sh
-# installs, the same way the native phases below skip when unconfigured.
-# The SDK's default location counts as configuration too. Neither ANDROID_SDK_ROOT nor
-# ANDROID_HOME is set by the Android Studio installer on macOS, so a machine with the pinned NDK,
-# the Rust targets and the built dependency prefix still skipped this phase - which reads as "not
-# available here" when everything it needs is sitting in the standard directory.
+# Skipped rather than required: it needs the pinned NDK and the Rust Android target, the same way the native phases below skip when unconfigured.
+# The SDK's default location counts as configuration too. Neither ANDROID_SDK_ROOT nor ANDROID_HOME is set by the Android Studio installer on macOS, so a machine with the pinned NDK and the Rust target still skipped this phase - which reads as "not available here" when everything it needs is sitting in the standard directory.
 android_sdk=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}
 if [ -z "$android_sdk" ] && [ -d "$HOME/Library/Android/sdk" ]; then
   android_sdk="$HOME/Library/Android/sdk"
@@ -249,19 +220,17 @@ case $(uname -s) in
   *) android_host_tag="" ;;
 esac
 android_clang="$android_ndk/toolchains/llvm/prebuilt/$android_host_tag/bin/aarch64-linux-android28-clang"
-android_deps="$root/target/android-deps/arm64-v8a/arm64-msime-android"
-if [ -n "$android_host_tag" ] && [ -x "$android_clang" ] && [ -d "$android_deps" ] \
+if [ -n "$android_host_tag" ] && [ -x "$android_clang" ] \
   && rustup target list --installed 2>/dev/null | grep -q '^aarch64-linux-android$'; then
   env "CC_aarch64_linux_android=$android_clang" \
     "CXX_aarch64_linux_android=${android_clang}++" \
     "AR_aarch64_linux_android=$android_ndk/toolchains/llvm/prebuilt/$android_host_tag/bin/llvm-ar" \
     "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$android_clang" \
     "ANDROID_NDK_HOME=$android_ndk" "MSIME_ANDROID_NDK=$android_ndk" \
-    "MSIME_ANDROID_DEPS=$android_deps" \
     cargo check -p msime-desktop --target aarch64-linux-android --lib --locked 2>&1 | tail -3
   [ "${PIPESTATUS[0]}" -eq 0 ] || fail "cargo check --target aarch64-linux-android"
 else
-  echo "skipped: pinned NDK, aarch64-linux-android target or android-deps not present"
+  echo "skipped: pinned NDK or aarch64-linux-android target not present"
 fi
 
 # The Java half. `cargo check` above compiles the Rust the service calls into and says nothing about
@@ -347,10 +316,6 @@ if [ "$(uname -s 2>/dev/null)" = "Linux" ]; then
   cargo check -p msime-desktop --locked --all-targets 2>&1 | tail -3
   [ "${PIPESTATUS[0]}" -eq 0 ] || fail "cargo check -p msime-desktop (linux)"
 elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  # The Engine archive is fetched into vendor/, which a fresh worktree does not
-  # have; mount whichever tree already holds it rather than downloading it again
-  # inside the container. Without one the container fetches it itself.
-  linux_vendor="$(python3 scripts/fetch_engine.py --borrowable)"
   mkdir -p "$root/target/linux-desktop-check"
   linux_desktop_image="msime-linux-desktop-check:$(printf %s "$root" | shasum | cut -c1-12)"
   # The build log is kept rather than discarded, so an apt failure shows apt's own message instead of only an exit code; once the image is cached the build is a few lines of CACHED.
@@ -359,11 +324,9 @@ elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     > "$root/target/linux-desktop-check/image.log" 2>&1; then
     docker run --rm \
       -v "$root":/source \
-      ${linux_vendor:+-v "$linux_vendor":/source/vendor:ro} \
       -v "$root/target/linux-desktop-check":/ctarget \
       -w /source \
       -e CARGO_TARGET_DIR=/ctarget \
-      ${linux_vendor:+-e MSIME_SKIP_ENGINE_FETCH=1} \
       "$linux_desktop_image" \
       cargo check -p msime-desktop --locked --all-targets --message-format short \
       > "$root/target/linux-desktop-check/check.log" 2>&1
@@ -433,9 +396,7 @@ elif [ -n "$cross_vcpkg" ]; then
   # directory level short by a move. None of it was subtle; nothing was looking.
   # Once, into a log: unlike the CMake phases above this one costs minutes even
   # incrementally, so it is not run twice to get both the message and the code.
-  # Built dependencies live beside the vcpkg tree that produced them, so every
-  # worktree on this machine shares one rather than each rebuilding curl and
-  # boost before it can compile anything of ours.
+  # Built dependencies live beside the vcpkg tree that produced them, so every worktree on this machine shares one rather than each rebuilding curl before it can compile anything of ours.
   cross_deps="$(dirname "$cross_vcpkg")/windows-native-deps"
   # One cross build per machine at a time. The vcpkg checkout and the built
   # dependencies are both shared, and this repository is worked in several
@@ -481,9 +442,7 @@ elif [ -n "$cross_vcpkg" ]; then
   # before a Windows packaging attempt, while still avoiding a second native
   # host build.
   if [ "${cross_build_ok:-0}" -eq 1 ]; then
-    windows_deps="$cross_deps/x64/x64-mingw-static"
-    MSIME_WINDOWS_DEPS="$windows_deps" \
-      cargo check -p msime-desktop --target x86_64-pc-windows-gnu --lib --locked 2>&1 | tail -3
+    cargo check -p msime-desktop --target x86_64-pc-windows-gnu --lib --locked 2>&1 | tail -3
     [ "${PIPESTATUS[0]}" -eq 0 ] || fail "cargo check -p msime-desktop (windows GNU)"
     echo "msime-desktop (windows GNU): checks"
   fi
@@ -517,6 +476,31 @@ macos_configured() {
   [ -f "$MSIME_MACOS_BUILD/build.ninja" ] || [ -f "$MSIME_MACOS_BUILD/Makefile" ]
 }
 
+# Rebuild the Rust host library the configured macOS build actually links, which is MSIME_HOST_LIBRARY in its cache and not necessarily target/debug: platforms/macos/README.md configures target/macos-isolated against target/macos-cargo. Nothing else in this script builds that copy, so without this a host-api ABI change failed the macOS compile with undefined symbols until someone rebuilt it by hand. A library outside target/ is built the way the README builds it, with the same deployment flags, because the cc build scripts fingerprint CFLAGS and CXXFLAGS and a different set would rebuild the C objects there on every alternation between the two. The README's CMAKE_PREFIX_PATH is left out: nothing in msime-host-api's build graph reads it. One inside target/ is built without them, like every other cargo step here that writes there, for the same reason.
+build_macos_host_library() {
+  local library profile_dir cargo_dir profile
+  library=$(sed -n 's/^MSIME_HOST_LIBRARY:[A-Z]*=//p' "$MSIME_MACOS_BUILD/CMakeCache.txt" 2>/dev/null | head -1)
+  if [ -z "$library" ]; then
+    echo "macos: $MSIME_MACOS_BUILD/CMakeCache.txt names no MSIME_HOST_LIBRARY"
+    return 1
+  fi
+  profile_dir=$(dirname "$library")
+  # CMake's default is platforms/macos/../../target/debug/..., so the directory is resolved rather than compared as text. It is created first because deleting a broken artefact directory and letting it rebuild is the documented repair (AGENTS.md), and that must not turn into a failed stage.
+  cargo_dir=$(mkdir -p "$(dirname "$profile_dir")" 2>/dev/null && cd "$(dirname "$profile_dir")" && pwd -P) || {
+    echo "macos: cannot create $(dirname "$profile_dir")"
+    return 1
+  }
+  # Cargo writes the dev profile to debug/; every other profile to a directory of its own name.
+  profile=$(basename "$profile_dir")
+  [ "$profile" = debug ] && profile=dev
+  if [ "$cargo_dir" = "$(cd target 2>/dev/null && pwd -P)" ]; then
+    cargo build -p msime-host-api --locked --profile "$profile" 2>&1 | tail -2
+  else
+    CFLAGS="-mmacosx-version-min=13.0" CXXFLAGS="-mmacosx-version-min=13.0" CMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+      CARGO_TARGET_DIR="$cargo_dir" cargo build -p msime-host-api --locked --profile "$profile" 2>&1 | tail -2
+  fi
+}
+
 # The one dependency that configure refuses without. It was recorded as absent from this machine
 # and it was not - the same wrong call as the container runtime, the Android SDK, Xcode and DevEco,
 # and this is the target platform, so a skip here costs more than any of them. Look where a copy
@@ -537,8 +521,7 @@ macos_sparkle_root() {
 if [ "$apple_host" -eq 1 ] && ! macos_configured; then
   if sparkle_root=$(macos_sparkle_root); then
     note "configure: macos"
-    # The workspace stage above checks rather than builds, so the static library configure insists
-    # on may not exist yet even though everything needed to produce it does.
+    # The workspace stage above checks rather than builds, so the static library configure insists on may not exist yet even though everything needed to produce it does. This only has to make it exist; the compile stage below rebuilds whichever library the configured build links.
     [ -f target/debug/libmsime_host_api.a ] ||
       cargo build -p msime-host-api >/dev/null 2>&1 ||
       echo "macos: could not build msime-host-api"
@@ -553,8 +536,13 @@ fi
 
 note "compile: macos"
 if macos_configured; then
-  cmake --build "$MSIME_MACOS_BUILD" --parallel 2>&1 | grep -E "error:|symbol\(s\) not found" | head -5
-  cmake --build "$MSIME_MACOS_BUILD" --parallel >/dev/null 2>&1 || fail "macos build"
+  if build_macos_host_library; then
+    cmake --build "$MSIME_MACOS_BUILD" --parallel 2>&1 | grep -E "error:|symbol\(s\) not found" | head -5
+    cmake --build "$MSIME_MACOS_BUILD" --parallel >/dev/null 2>&1 || fail "macos build"
+  else
+    # Linking against the stale copy would only report its missing symbols as a macOS break.
+    fail "cargo build -p msime-host-api (macos host library)"
+  fi
 else
   echo "skipped: $MSIME_MACOS_BUILD not configured"
 fi
@@ -632,12 +620,18 @@ fi
 
 note "rust tests"
 : > "$collected.rust"
+# The neural sentence model tests (msime-engine's lattice::neural and settling tests, msime-input-runtime's settle test) skip without the shipped models, and neither model is in the repository. Fetch the pinned pair so they run here; the path is absolute because cargo runs each test binary from its own crate directory. A failed fetch is not a test failure: the tests skip and say why.
+if python3 scripts/fetch_neural_model.py --out "$root/target/neural-model" > "$collected.neural-model" 2>&1; then
+  export MSIME_NEURAL_MODEL_DIR="$root/target/neural-model"
+else
+  echo "neural model tests: skipped ($(tail -1 "$collected.neural-model"))"
+fi
 # msime-host-macos and msime-desktop were missing from this list, and a crate nobody tests is not the
 # worst of it: cargo's exit status is not the verdict here (known failures make it non-zero), so a crate that does not build at
 # all collects no failing names and is reported as being at baseline. msime-desktop did not link on macOS
-# for that reason, and its 86 tests had never run. msime-engine-bridge and msime-tauri-mobile-platform
+# for that reason, and its 86 tests had never run. msime-engine and msime-tauri-mobile-platform
 # were missing too, and nothing else runs their tests on the host target.
-for package in msime-client-core msime-engine-bridge msime-host-api msime-input-runtime msime-host-windows \
+for package in msime-client-core msime-engine msime-host-api msime-input-runtime msime-host-windows \
   msime-host-macos msime-mcp-server msime-tauri-mobile-platform msime-desktop; do
   # A package that does not build produces no failing test names, which reads as "at baseline" - which is
   # how msime-desktop went unbuildable on macOS without anything noticing. Say so instead.
@@ -689,7 +683,7 @@ note "clippy: first-party crates"
 # before its Tauri build script will run, which makes "clippy failed" and
 # "frontend not built" indistinguishable on a developer machine.
 clippy_failed=""
-for crate in msime-client-core msime-engine-bridge msime-host-api msime-host-macos \
+for crate in msime-client-core msime-engine msime-host-api msime-host-macos \
              msime-host-windows msime-input-runtime msime-mcp-server msime-tauri-mobile-platform; do
   cargo clippy -p "$crate" --all-targets -- -D warnings >/dev/null 2>&1 ||
     clippy_failed="$clippy_failed  $crate"$'\n'
@@ -780,15 +774,7 @@ else
 fi
 
 note "reranker keystroke latency"
-# convert_eval answers whether reranking ranks correctly. This answers what it costs, and the two
-# move independently: a model swap, a wider lattice or a larger candidate page all change the
-# number. The benchmark has existed since 418b4fb78 and nothing ever ran it, so the frame budget it
-# checks was never actually enforced, and it was over it when this stage was added: p95 20.64ms
-# against 16.00ms, 9.8% of keystrokes past a frame. Resuming candidate scoring across keystrokes in
-# chinese-ime-lm brought that to 8.39ms and no keystroke over the budget, so this now gates rather
-# than records. The measurement is machine-dependent, which is why it is compared as a pass/fail
-# name against known-failures.txt rather than as a committed millisecond figure. It needs the sentence
-# model, which the resource lock ships, so the eval's own guard covers it too.
+# convert_eval answers whether reranking ranks correctly. This answers what it costs, and the two move independently: a model swap, a wider lattice or a larger candidate page all change the number. The benchmark has existed since 418b4fb78 and nothing ever ran it, so the frame budget it checks was never actually enforced, and it was over it when this stage was added: p95 20.64ms against 16.00ms, 9.8% of keystrokes past a frame. Resuming candidate scoring across keystrokes in chinese-ime-lm brought that under the budget, so this now gates rather than records; with the Rust engine the last run was p95 9.50ms, with 2 of 1320 keystrokes (0.2%) over 16ms. The measurement is machine-dependent, which is why it is compared as a pass/fail name against known-failures.txt rather than as a committed millisecond figure. It needs the sentence model, which the resource lock ships, so the eval's own guard covers it too.
 if [ -n "${MSIME_EVAL_RESOURCES:-}" ] && [ -d "${MSIME_EVAL_RESOURCES:-}" ]; then
   if [ -f "$MSIME_EVAL_RESOURCES/sentence-model.safetensors" ]; then
     : > "$collected".latency

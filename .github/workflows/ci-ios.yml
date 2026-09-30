@@ -63,15 +63,15 @@ jobs:
             case "$path" in
               platforms/ios/*)
                 echo "build=true" >> "$GITHUB_OUTPUT"; echo "iOS 改动: $path"; exit 0 ;;
-              shared/*|vendor/*|engine-lock.json|.github/workflows/ci-ios.yml)
+              shared/*|.github/workflows/ci-ios.yml)
                 echo "build=true" >> "$GITHUB_OUTPUT"; echo "共享输入改动: $path"; exit 0 ;;
               # 同 ci-macos.yml:工作区清单与工具链,以及 build-native.sh 的 cargo build -p msime-host-api
               # 和它依赖的三个 crate(client-core 的 example 也由本工作流运行)。
-              Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/*|crates/host-api/*|crates/client-core/*|crates/engine-bridge/*|crates/input-runtime/*)
+              Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/*|crates/host-api/*|crates/client-core/*|crates/engine/*|crates/input-runtime/*)
                 echo "build=true" >> "$GITHUB_OUTPUT"; echo "Rust 输入改动: $path"; exit 0 ;;
-              # 同 ci-macos.yml:scripts/ 下只有真正进得了这条构建的才触发。iOS 的工作流引用 fetch_engine.py,apply_engine_* 是 fetch_engine.py 执行的 Engine overlay。run_ui_tests.sh 在 platforms/ios/scripts/ 下,已由 platforms/ios/* 覆盖。
+              # 同 ci-macos.yml:scripts/ 下只有真正进得了这条构建的才触发。run_ui_tests.sh 在 platforms/ios/scripts/ 下,已由 platforms/ios/* 覆盖。
               # fetch_voice_runtime.py 与它读的 lock 决定 MSIMEApp 嵌入的 sherpa-onnx 运行时。
-              scripts/apply_engine_*|scripts/fetch_engine.py|scripts/fetch_voice_runtime.py|resources/voice-runtime.lock.json)
+              scripts/fetch_voice_runtime.py|resources/voice-runtime.lock.json)
                 echo "build=true" >> "$GITHUB_OUTPUT"; echo "构建脚本改动: $path"; exit 0 ;;
             esac
           done <<< "$changed"
@@ -100,16 +100,13 @@ jobs:
         with: {persist-credentials: false}
       - name: Install project generator
         run: |
-          brew install boost fmt spdlog nlohmann-json xcodegen
+          brew install xcodegen
           if ! command -v pod >/dev/null 2>&1; then
             brew install cocoapods
           fi
           pod --version
       - name: Test shared account transport and session lifecycle
         run: swift test --package-path shared/backend
-      # CMake prepares the Engine on configure, but the checks below read it first. The fetch is a no-op once the tree matches the lock, so the later configure pays nothing.
-      - name: Prepare the locked Engine archive
-        run: python3 scripts/fetch_engine.py
       - name: Validate keyboard configuration
         run: |
           python3 platforms/ios/tests/settings/ProjectConfigurationTests.py
@@ -121,12 +118,12 @@ jobs:
           mkdir -p target/resources
           resource_dir="$(cargo run --quiet -p msime-client-core --example install_resources -- target/resources)"
           bash platforms/ios/stage-resources.sh "$resource_dir"
-      # project.yml gives the unit targets `LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]: $(SRCROOT)/../../target/ios/simulator` and `-lmsime_host_api`, and nothing in this job produced that directory, so the test build reached the linker and stopped at "library 'msime_host_api' not found". build-native.sh is what fills it; it needs the Rust simulator target installed and a prefix carrying Boost's CMake config, which the brew install above provides. Not added to the Intel handwriting job: that simulator is x86_64 and build-native.sh's simulator variant is aarch64-apple-ios-sim.
+      # project.yml gives the unit targets `LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]: $(SRCROOT)/../../target/ios/simulator` and `-lmsime_host_api`, and nothing in this job produced that directory, so the test build reached the linker and stopped at "library 'msime_host_api' not found". build-native.sh is what fills it; it needs only the Rust simulator target installed. Not added to the Intel handwriting job: that simulator is x86_64 and build-native.sh's simulator variant is aarch64-apple-ios-sim.
       - name: Build the iOS host library
         run: |
           set -euo pipefail
           rustup target add aarch64-apple-ios-sim
-          MSIME_IOS_DEPS="$(brew --prefix)" bash platforms/ios/build-native.sh simulator
+          bash platforms/ios/build-native.sh simulator
           test -f target/ios/simulator/libmsime_host_api.a
       - name: Generate Xcode project
         run: |
@@ -198,16 +195,13 @@ jobs:
         with: {persist-credentials: false}
       - name: Install project generator
         run: |
-          brew install boost fmt spdlog nlohmann-json xcodegen
+          brew install xcodegen
           if ! command -v pod >/dev/null 2>&1; then
             brew install cocoapods
           fi
           pod --version
       - name: Test shared account transport and session lifecycle
         run: swift test --package-path shared/backend
-      # CMake prepares the Engine on configure, but the checks below read it first. The fetch is a no-op once the tree matches the lock, so the later configure pays nothing.
-      - name: Prepare the locked Engine archive
-        run: python3 scripts/fetch_engine.py
       - name: Validate keyboard configuration
         run: |
           python3 platforms/ios/tests/settings/ProjectConfigurationTests.py
@@ -219,12 +213,12 @@ jobs:
           mkdir -p target/resources
           resource_dir="$(cargo run --quiet -p msime-client-core --example install_resources -- target/resources)"
           bash platforms/ios/stage-resources.sh "$resource_dir"
-      # project.yml gives the unit targets `LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]: $(SRCROOT)/../../target/ios/simulator` and `-lmsime_host_api`, and nothing in this job produced that directory, so the test build reached the linker and stopped at "library 'msime_host_api' not found". build-native.sh is what fills it; it needs the Rust simulator target installed and a prefix carrying Boost's CMake config, which the brew install above provides. Not added to the Intel handwriting job: that simulator is x86_64 and build-native.sh's simulator variant is aarch64-apple-ios-sim.
+      # project.yml gives the unit targets `LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]: $(SRCROOT)/../../target/ios/simulator` and `-lmsime_host_api`, and nothing in this job produced that directory, so the test build reached the linker and stopped at "library 'msime_host_api' not found". build-native.sh is what fills it; it needs only the Rust simulator target installed. Not added to the Intel handwriting job: that simulator is x86_64 and build-native.sh's simulator variant is aarch64-apple-ios-sim.
       - name: Build the iOS host library
         run: |
           set -euo pipefail
           rustup target add aarch64-apple-ios-sim
-          MSIME_IOS_DEPS="$(brew --prefix)" bash platforms/ios/build-native.sh simulator
+          bash platforms/ios/build-native.sh simulator
           test -f target/ios/simulator/libmsime_host_api.a
       - name: Generate Xcode project
         run: |
@@ -290,13 +284,11 @@ jobs:
         with: {persist-credentials: false}
       - name: Install project generator
         run: |
-          brew install boost fmt spdlog nlohmann-json xcodegen
+          brew install xcodegen
           if ! command -v pod >/dev/null 2>&1; then
             brew install cocoapods
           fi
           pod --version
-      - name: Prepare the locked Engine archive
-        run: python3 scripts/fetch_engine.py
       - name: Package iOS dictionary
         run: |
           mkdir -p target/resources

@@ -40,7 +40,7 @@ export function VoiceSettingsPage() {
     showVoiceStreamPreedit,
     showVoiceCaptureDevices,
     captureBackendOptions,
-    desktopPanels,
+    showVoiceHotkeys,
     draft,
     setDraft,
     busy,
@@ -111,8 +111,7 @@ export function VoiceSettingsPage() {
             />
           </GroupList>
         )}
-        {linuxPlatform &&
-          isAsrServiceProvider(voiceInput.asr_provider ?? "doubao") &&
+        {linuxPlatform && isAsrServiceProvider(voiceInput.asr_provider ?? "doubao") && (
           <VoiceCredentialControl
             available={Boolean(client.providerCredentials)}
             kind="asr"
@@ -124,7 +123,8 @@ export function VoiceSettingsPage() {
             providerCredentialBusy={providerCredentialBusy}
             providerCredentialMessages={providerCredentialMessages}
             runVoiceCredential={runVoiceCredential}
-          />}
+          />
+        )}
         {linuxPlatform && client.testApiCredential && (
           <GroupList title="检查识别配置">
             <div className={settings.groupBlock}>
@@ -237,7 +237,7 @@ export function VoiceSettingsPage() {
             </div>
           </GroupList>
         )}
-        {desktopPanels && (
+        {showVoiceHotkeys && (
           <VoiceHotkeysSection
             platform={
               macosPlatform
@@ -246,7 +246,9 @@ export function VoiceSettingsPage() {
                   ? "windows"
                   : linuxPlatform
                     ? "linux"
-                    : "other"
+                    : harmonyPlatform
+                      ? "harmony"
+                      : "other"
             }
             values={draft.voice_input ?? {}}
             onChange={(key, checked) =>

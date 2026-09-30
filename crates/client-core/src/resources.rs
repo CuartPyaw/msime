@@ -13,16 +13,8 @@ use std::path::{Path, PathBuf};
 #[serde(deny_unknown_fields)]
 pub struct Artifact {
     pub name: String,
-    /// Download location. Empty when the artifact is supplied by the Engine tree instead; see
-    /// `engine_path`.
-    #[serde(default)]
+    /// HTTPS download location.
     pub url: String,
-    /// Path inside the pinned Engine checkout, for artifacts that ship with the Engine rather than
-    /// with the dictionary release. The Engine is already pinned by commit and archive SHA-256 in
-    /// engine-lock.json, so republishing the same bytes in the dictionary release would create a
-    /// second source of truth for them.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub engine_path: String,
     pub sha256: String,
     pub size: u64,
 }
@@ -80,11 +72,7 @@ impl ResourceSet {
                 || !names.insert(artifact.name.to_ascii_lowercase())
                 || !hex(&artifact.sha256, 64)
                 || artifact.size > 2 * 1024 * 1024 * 1024
-                // Exactly one source, and a download must be HTTPS. An artifact with both, or
-                // with neither, is a manifest that cannot be resolved unambiguously.
-                || artifact.url.is_empty() == artifact.engine_path.is_empty()
-                || (!artifact.url.is_empty() && !artifact.url.starts_with("https://"))
-                || !portable_relative_path(&artifact.engine_path)
+                || !artifact.url.starts_with("https://")
             {
                 return Err(ResourceError::InvalidManifest);
             }
@@ -97,17 +85,6 @@ impl ResourceSet {
         let encoded = serde_json::to_vec(self).map_err(|_| ResourceError::InvalidManifest)?;
         Ok(hex::encode(Sha256::digest(encoded)))
     }
-}
-
-/// An Engine path must stay inside the checkout on every host, so it is checked as text rather
-/// than with `Path`, which would read `C:` or `a\b` as ordinary components on Linux: forward-slash
-/// segments of the same characters a name allows, none empty, `.` or `..`. Empty is left to the
-/// one-source rule.
-fn portable_relative_path(path: &str) -> bool {
-    path.is_empty()
-        || path.split('/').all(|segment| {
-            !matches!(segment, "" | "." | "..") && crate::is_ascii_identifier_with_dots(segment)
-        })
 }
 
 /// Remove stages an installer left when it was killed mid-download. Only called under the
@@ -167,6 +144,7 @@ impl ResourceStore {
         Ok(destination)
     }
 
+    /// Check that `directory` holds exactly the artifacts `specification` pins, each with its pinned length and SHA-256, and nothing else. Two exceptions: a real `helpcodes/` directory is let through for the Engine's helpcode tables, and a regular file named in `RETIRED_ARTIFACTS` that the specification does not pin is deleted in place rather than refused. That deletion is the only write `verify` makes; if it fails the directory is refused as before.
     pub fn verify(
         &self,
         directory: &Path,
@@ -206,6 +184,9 @@ impl ResourceStore {
                 )));
             }
             if !expected.contains(name) {
+                if RETIRED_ARTIFACTS.contains(&name) && remove_retired(&entry.path()) {
+                    continue;
+                }
                 return Err(ResourceError::ExistingGeneration(format!(
                     "{name} in {} is not in the pinned resource set",
                     directory.display()
@@ -239,6 +220,18 @@ impl ResourceStore {
 
 /// Where the Engine looks for helpcode tables, relative to the resource directory (`helpcodes/…` in its asset contract).
 const HELPCODE_DIRECTORY: &str = "helpcodes";
+/// Files an earlier lock pinned and the current one no longer does. A directory a user downloaded for a previous release still holds them, and nothing else there needs replacing, so `verify` deletes such a regular file instead of refusing the whole directory. Only exact names listed here are touched; a directory or symlink by that name, and every other unpinned entry, is still refused.
+///
+/// `dict_pinyin.dat` was the googlepinyinime system dictionary, which the Rust engine does not use.
+const RETIRED_ARTIFACTS: &[&str] = &["dict_pinyin.dat"];
+
+/// Delete a retired artifact, reporting whether it is gone. Another host verifying the same directory at the same moment may have removed it first, which counts as gone. Any other failure, such as a read-only packaged directory, leaves the file in place and lets `verify` refuse the directory as before, so the host still reports the dictionary as outdated.
+fn remove_retired(path: &Path) -> bool {
+    match fs::remove_file(path) {
+        Ok(()) => true,
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    }
+}
 /// Verification markers are generated locally and contain only the pinned
 /// artifact names and metadata. Keep a corrupt or replaced marker from
 /// allocating without bound before it is discarded as a cache miss.
@@ -288,9 +281,7 @@ fn copy_verified(
 /// `verify` reads every artifact to recompute its SHA-256. That is the right thing to do once,
 /// and the wrong thing to do on every launch: the desktop set is 169 MB, which costs about half a
 /// second of hashing before the first keystroke can be served, every time the Server process
-/// starts. The Engine is already handled this way - `scripts/fetch_engine.py` writes a marker
-/// naming what it prepared and skips the work when it matches - and this is the same idea for the
-/// dictionaries.
+/// starts.
 ///
 /// What the marker cannot do is replace the hashes. It records the identity of the *set* and, per
 /// file, the size and modification time the verified bytes had. A file whose size or mtime moved is
@@ -432,7 +423,6 @@ mod tests {
             artifacts: vec![Artifact {
                 name: "msime.db".into(),
                 url: "https://example.invalid/msime.db".into(),
-                engine_path: String::new(),
                 sha256: hex::encode(Sha256::digest(b"fixture")),
                 size: 7,
             }],
@@ -442,29 +432,15 @@ mod tests {
         Box::new(Cursor::new(bytes.to_vec()))
     }
     #[test]
-    fn an_artifact_names_exactly_one_source() {
-        let with = |url: &str, engine: &str| {
+    fn an_artifact_needs_an_https_url() {
+        let with = |url: &str| {
             let mut set = specification();
             set.artifacts[0].url = url.into();
-            set.artifacts[0].engine_path = engine.into();
             set.validate()
         };
-        assert!(with("https://example.invalid/a", "").is_ok());
-        assert!(with("", "googlepinyinime-rev/data/dict_pinyin.dat").is_ok());
-        // Neither source, or both, leaves the artifact unresolvable.
-        assert!(with("", "").is_err());
-        assert!(with("https://example.invalid/a", "data/a.dat").is_err());
-        // A download must still be HTTPS, and an Engine path must stay inside the checkout.
-        assert!(with("http://example.invalid/a", "").is_err());
-        assert!(with("", "../escape.dat").is_err());
-        assert!(with("", "/absolute.dat").is_err());
-        // Windows would re-root these on join, so they are refused on every host.
-        for path in [
-            "C:/x.dat", "C:x.dat", "a\\b.dat", "\\x.dat", "a//b", "./a", "a/",
-        ] {
-            assert!(with("", path).is_err(), "{path}");
-        }
-        assert!(with("", "data/a..b.dat").is_ok());
+        assert!(with("https://example.invalid/a").is_ok());
+        assert!(with("").is_err());
+        assert!(with("http://example.invalid/a").is_err());
     }
 
     #[test]
@@ -568,6 +544,95 @@ mod tests {
         fs::create_dir(path.join("extra")).unwrap();
         assert!(store.verify(&path, &spec).is_err());
     }
+    #[test]
+    fn verification_deletes_a_retired_artifact_and_nothing_else() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ResourceStore::new(root.path());
+        let spec = specification();
+        let path = store.install(&spec, |_| Ok(source(b"fixture"))).unwrap();
+        // A directory downloaded for a release whose lock still pinned `dict_pinyin.dat`.
+        fs::write(path.join("dict_pinyin.dat"), b"retired").unwrap();
+        store.verify(&path, &spec).unwrap();
+        assert!(!path.join("dict_pinyin.dat").exists());
+        assert_eq!(fs::read(path.join("msime.db")).unwrap(), b"fixture");
+        // Only a regular file by that exact name is deleted.
+        fs::create_dir(path.join("dict_pinyin.dat")).unwrap();
+        assert!(matches!(
+            store.verify(&path, &spec),
+            Err(ResourceError::ExistingGeneration(_))
+        ));
+        assert!(path.join("dict_pinyin.dat").is_dir());
+        fs::remove_dir(path.join("dict_pinyin.dat")).unwrap();
+        // A symlink by that name is refused, and neither it nor its target is touched.
+        #[cfg(unix)]
+        {
+            let target = root.path().join("outside.dat");
+            fs::write(&target, b"outside").unwrap();
+            std::os::unix::fs::symlink(&target, path.join("dict_pinyin.dat")).unwrap();
+            assert!(matches!(
+                store.verify(&path, &spec),
+                Err(ResourceError::ExistingGeneration(_))
+            ));
+            assert!(fs::symlink_metadata(path.join("dict_pinyin.dat"))
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert_eq!(fs::read(&target).unwrap(), b"outside");
+            fs::remove_file(path.join("dict_pinyin.dat")).unwrap();
+        }
+        for other in ["DICT_PINYIN.DAT", "dict_pinyin.dat.bak", "extra.db"] {
+            fs::write(path.join(other), b"unpinned").unwrap();
+            assert!(matches!(
+                store.verify(&path, &spec),
+                Err(ResourceError::ExistingGeneration(_))
+            ));
+            assert!(path.join(other).is_file());
+            fs::remove_file(path.join(other)).unwrap();
+        }
+        store.verify(&path, &spec).unwrap();
+    }
+
+    #[test]
+    fn a_retired_name_that_the_lock_pins_is_verified_and_kept() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ResourceStore::new(root.path());
+        let mut spec = specification();
+        spec.artifacts.push(Artifact {
+            name: "dict_pinyin.dat".into(),
+            url: "https://example.invalid/dict_pinyin.dat".into(),
+            ..spec.artifacts[0].clone()
+        });
+        let path = store.install(&spec, |_| Ok(source(b"fixture"))).unwrap();
+        store.verify(&path, &spec).unwrap();
+        assert_eq!(fs::read(path.join("dict_pinyin.dat")).unwrap(), b"fixture");
+        // Pinned, it is checked like any other artifact instead of being deleted.
+        fs::write(path.join("dict_pinyin.dat"), b"altered").unwrap();
+        assert!(store.verify(&path, &spec).is_err());
+        assert_eq!(fs::read(path.join("dict_pinyin.dat")).unwrap(), b"altered");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_retired_artifact_that_cannot_be_deleted_still_refuses_the_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let store = ResourceStore::new(root.path());
+        let spec = specification();
+        let path = store.install(&spec, |_| Ok(source(b"fixture"))).unwrap();
+        fs::write(path.join("dict_pinyin.dat"), b"retired").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o555)).unwrap();
+        // Root ignores the mode, so there is no read-only directory to test with.
+        if fs::write(path.join("probe"), b"").is_ok() {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+        let result = store.verify(&path, &spec);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        // The error host-api maps to `dictionary_outdated:`, the same answer as before the file was retired.
+        assert!(matches!(result, Err(ResourceError::ExistingGeneration(_))));
+        assert!(path.join("dict_pinyin.dat").is_file());
+    }
+
     #[test]
     fn rejects_path_aliases_and_duplicate_names() {
         for name in [

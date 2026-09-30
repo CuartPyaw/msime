@@ -37,9 +37,9 @@ REFERENCE = reference_root(ROOT)
 # trusting it.
 REVIEWED: dict[str, str] = {
     "**contracts:** sync engine product lock contract": (
-        "Engine-side release plumbing. The Engine is pinned here by engine-lock.json and "
-        "scripts/fetch_engine.py, which is this repository's equivalent and is checked by the "
-        "vendored-engine stage of verify-local.sh."
+        "Engine-side release plumbing for an Engine released on its own. Nothing is pinned here: "
+        "the input engine is the workspace crate crates/engine, built and tested with the rest of "
+        "this repository, so there is no separately released product to lock."
     ),
     "**contracts:** verify shared product lock primitives": (
         "Same release plumbing as the bullet above."
@@ -114,11 +114,11 @@ REVIEWED: dict[str, str] = {
 
 # The `feat:` commits of the fixed source that no changelog bullet above stands for, keyed by commit subject exactly as `git log --format=%s` prints it. A subject shared by two commits (a cherry-pick or a re-land) is one feature and one entry.
 #
-# Same rule as REVIEWED: name where it landed. Paths starting with "Engine " are inside the locked Engine tree that scripts/fetch_engine.py produces, not this repository. An answer beginning "Not ported" or "Partly ported" is a known parity gap, not a review that found the feature.
+# Same rule as REVIEWED: name where it landed. An answer beginning "Not ported" or "Partly ported" is a known parity gap, not a review that found the feature.
 REVIEWED_COMMITS: dict[str, str] = {
     "feat(engine): 新增加加辅助码（拼音加加），第六套辅助码方案": (
-        "scripts/apply_engine_jiajia_helpcode.py registers the table carried in "
-        "resources/helpcodes/jiajia_helpcode.txt with the locked Engine; `jiajia` is a helpcode "
+        "crates/engine/src/assets.rs registers the table carried in "
+        "resources/helpcodes/jiajia_helpcode.txt as the sixth scheme; `jiajia` is a helpcode "
         "scheme in crates/client-core/src/preferences.rs and platforms/windows/installer/config.default.toml."
     ),
     "feat: 输入统计（DLL 采集、Server 聚合存储与设置页展示）": (
@@ -132,23 +132,20 @@ REVIEWED_COMMITS: dict[str, str] = {
         "checks before install, pinned by scripts/test-installer-prerequisites.py."
     ),
     "feat(engine): 整句候选把词格排到 Google 解码器之前": (
-        "Partly ported. Quanpin: Engine quanpin/quanpin_dictionary.cpp no longer puts the Google "
-        "sentence back in front unconditionally; it keeps the seat only when "
-        "WholeSentenceComparison::lattice_outranks_fallback (Engine quanpin/word_lattice.h) says the "
-        "lattice is not better by fallback_margin - a scored decision, because the lattice scorer "
-        "here is not KenLM. Shuangpin: Engine shuangpin/shuangpin_dictionary.cpp still moves the "
-        "Google sentence ahead of the lattice row after merge_lattice_candidates, the post-step the "
-        "reference deleted."
+        "Settled by dropping the Google decoder: crates/engine/src/quanpin/dictionary.rs and "
+        "crates/engine/src/shuangpin/dictionary.rs build the sentence block from the lattice alone, "
+        "inserted by crates/engine/src/lattice/merge.rs, so no Google sentence is left to put in "
+        "front of it in either scheme."
     ),
     "feat(installer): 打包时生成并安装词格语言模型 sc.lm": (
         "Deliberately absent with the KenLM scorer below: the lattice reads bigram.bin/trigram.bin, "
         "which ship with the pinned dictionary release in resources/desktop-dictionary.lock.json."
     ),
     "feat(engine): 词格整句改用 kenlm 三元模型打分": (
-        "Deliberately absent: the locked Engine scores lattice paths with its own bigram/trigram "
-        "tables (Engine quanpin/ngram_table.h, quanpin/word_lattice.cpp), calibrated on this "
-        "repository's sentence sets; scripts/apply_engine_lattice_reading.py keeps the reference's "
-        "exact-reading fix without the KenLM model."
+        "Deliberately absent: crates/engine scores lattice paths with its own bigram/trigram "
+        "tables (crates/engine/src/lattice/ngram.rs, crates/engine/src/lattice/decode.rs), "
+        "calibrated on this repository's sentence sets; crates/engine/src/lattice/merge.rs keeps "
+        "the reference's exact-reading fix without the KenLM model."
     ),
     "feat(windows): Ctrl+左右键按分词移动光标": (
         "platforms/windows/src/input/InputKeyPolicy.h is_segment_caret_key (Ctrl only) maps to "
@@ -226,14 +223,14 @@ REVIEWED_COMMITS: dict[str, str] = {
         "platforms/windows/installer/config.default.toml."
     ),
     "feat(engine): ü 系拼写别名归一，非标准拼法候选带轻标记": (
-        "Partly ported. The alias normalisation is in the locked Engine through "
-        "scripts/apply_engine_quanpin_autocorrect_parity.py (its docstring lists 94abc08e). The light "
+        "Partly ported. The alias normalisation is in crates/engine/src/pinyin/syllables.rs and "
+        "crates/engine/src/pinyin/autocorrect.rs (reference commit 94abc08e). The light "
         "`*` marker is not drawn on Windows: the view carries `corrected` per candidate but "
         "platforms/windows/src/candidate/CandidatePresentation.h never reads it."
     ),
     "feat(engine): 全拼纠错补齐漏字/多字，k-best 切分按词频消解歧义": (
-        "scripts/apply_engine_quanpin_autocorrect_parity.py with "
-        "scripts/engine-overlays/quanpin-autocorrect-parity.patch (its docstring lists 3c2f3ae3)."
+        "crates/engine/src/pinyin/autocorrect.rs and crates/engine/src/pinyin/typos.rs, with the "
+        "typo edges in crates/engine/src/quanpin/typo_edges.rs (reference commit 3c2f3ae3)."
     ),
     "feat(installer): 出厂配置模板补模糊音播种标记": (
         "fuzzy_seeded in platforms/windows/installer/config.default.toml."
@@ -325,10 +322,10 @@ REVIEWED_COMMITS: dict[str, str] = {
         "packages/ui/src/candidate/appearance-candidate-preview.tsx and the theme cards of packages/ui/src/index.tsx."
     ),
     "feat(composition): support phrase creation from incomplete pinyin": (
-        "In the locked Engine: InputSession::update_creating_word_progress in Engine "
-        "core/input_session_composition.cpp accumulates canonical pinyin per pick; the Windows side "
+        "update_creating_word_progress in crates/engine/src/session/composition.rs accumulates "
+        "canonical pinyin per pick; the Windows side "
         "keeps the picked prefix in platforms/windows/src/ipc/ReplyComposer.cpp. "
-        "crates/engine-bridge/examples/phrase_creation_dictionary.rs checks the stored phrase."
+        "crates/engine/examples/phrase_creation_dictionary.rs checks the stored phrase."
     ),
     "feat: add word-to-character setting": (
         "word_to_character and word_to_character_keys in platforms/windows/installer/config.default.toml."

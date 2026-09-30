@@ -48,7 +48,7 @@ macOS 的同类文档是 [macos-parity.md](macos-parity.md)，方法一致：先
 - **内容**：小鹤双拼的 `K` 同时承载 `ing` 与 `uai`，手写表只列了 `ing`，于是打 `guai`（`g`+`k`）的那个键上没有任何 `uai` 的提示。其余三个方案内容一致——但一致是运气，不是机制。
 - **格式**：来源的 `" / "` 表示「声母 / 韵母」的分界，同一侧的多个单位用空格分隔；手写表把 `" / "` 当成通用分隔符，于是 `V` 读作 `ui / zh / ü`（三个并列项），而来源读作 `zh / ui ü`（声母 `zh`，韵母 `ui` 和 `ü`）；手道方案的 `E` 甚至排成 `e / sh`，把韵母排到了声母前面。
 
-修法是按目标的分层把它接回引擎，而不是修那张表：`crates/engine-bridge` 的 `shuangpin_key_hints(profile)` 从 `GetShuangpinProfile` 展开，`crates/host-api` 以 `msime_client_shuangpin_key_hints` 发布，iOS 键盘读这个 ABI。未知方案名返回空表而不回落到默认方案——给键盘贴上一套它没在跑的方案，比不贴更糟。这条路径同时对 Android 与 HarmonyOS 的触摸键面可用。
+修法是按目标的分层把它接回引擎，而不是修那张表：`crates/engine/src/shuangpin/hints.rs` 的 `shuangpin_key_hints(profile)` 从引擎自己的双拼方案表展开（当初是已删除的 `crates/engine-bridge` 从 C++ Engine 的 `GetShuangpinProfile` 展开），`crates/host-api` 以 `msime_client_shuangpin_key_hints` 发布，iOS 键盘读这个 ABI。未知方案名返回空表而不回落到默认方案——给键盘贴上一套它没在跑的方案，比不贴更糟。这条路径同时对 Android 与 HarmonyOS 的触摸键面可用。
 
 来源的 `uses_shuangpin` 门控在目标侧由 `View.scheme` 承担：引擎无论什么方案都带着一个 profile 被构建，所以 `View.shuangpin_profile` 任何时候都非空，只有 scheme 才说明键面是不是在跑它。
 

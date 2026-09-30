@@ -1,28 +1,16 @@
 MSIME for macOS — bundled third-party notices
 =====================================================
 
-This application embeds msime-engine at the locked revision recorded by
-engine-lock.json. The complete project license is GPL-3.0.txt. The Engine
-notice, dictionary and helpcode notices, and the component license texts are
-included beside this file in the Licenses directory.
+The input engine (crates/engine) is part of this project and is covered by the complete project license, GPL-3.0.txt. The dictionary and helpcode notices and the component license texts are included beside this file in the Licenses directory.
 
 Components included by the macOS client include:
 
-* msime-engine and its dictionary/helpcode data — GPL-3.0 and the notices
-  supplied by the Engine distribution.
-* googlepinyinime-rev — Apache License 2.0.
-* utfcpp — Boost Software License 1.0.
-* miniaudio — MIT or public domain (upstream dual-license text included).
-* whisper.cpp / ggml — MIT License.
-* zinnia and the bundled handwriting model — the notices supplied with the
-  Engine resources.
+* The dictionary and helpcode data — the terms given in the dictionary and helpcode notices beside this file.
+* zinnia — the handwriting recognizer in crates/engine is a port of it (Zinnia-LICENSE.txt). The settings app also ships the Tegaki zh_CN handwriting model that recognizer reads, with the model's own license (HandwritingModel-LICENSE.txt) beside it in its handwriting resources.
 * sherpa-onnx (Contents/Frameworks/libsherpa-onnx-c-api.dylib, loaded by the Contents/MacOS/msime-voice-local helper for on-device speech recognition) — Apache License 2.0 (sherpa-onnx-Apache-2.0.txt).
 * ONNX Runtime, statically linked into the sherpa-onnx library as its inference backend — MIT License (onnxruntime-MIT.txt), with the notices of the components ONNX Runtime itself bundles in onnxruntime-ThirdPartyNotices.txt.
 * Offline candidate glosses for French, Japanese, Spanish, Russian, German and Korean (offline-glosses/zh-*.db, when installed) — adapted from the English Wiktionary by Wiktionary contributors, CC BY-SA 4.0; the attribution, source revision and changes are in offline-glosses-NOTICE.txt beside those files.
 
 The speech recognition models are not part of this application; the settings page downloads them on request, and each model directory carries its own license.
 
-The source tree retains each upstream notice. This collection is not a
-license-completeness or redistribution-authorization assessment; nested
-archives and distribution-specific dependencies must retain their own terms.
-The exact Engine revision and resource hashes are verified before packaging.
+The source tree retains each upstream notice. This collection is not a license-completeness or redistribution-authorization assessment; nested archives and distribution-specific dependencies must retain their own terms. The pinned resource hashes are verified before packaging.

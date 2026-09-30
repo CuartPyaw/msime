@@ -244,6 +244,14 @@ int main() {
         // No token: Windows asks for one before recording rather than failing after the user has spoken.
         [controller toggleVoiceInput:nil];
         assert(!capture.active && presentation.failure == MSIMEVoiceFailureMissingToken);
+        // `local` holding a Whisper model file, not an installed model directory, refuses before recording too, rather than starting the system recognizer.
+        NSMutableDictionary *whisperFile = [toggleArguments mutableCopy];
+        whisperFile[@"MSIMEClientVoiceASRProvider"] = @"local";
+        whisperFile[@"MSIMEClientVoiceASRModelPath"] = @"/synthetic/ggml-large-v3-turbo.bin";
+        [defaults setVolatileDomain:whisperFile forName:NSArgumentDomain];
+        assert(![controller usesNativeDoubaoVoice] && ![controller usesNativeHTTPVoice]);
+        [controller toggleVoiceInput:nil];
+        assert(!capture.active && presentation.failure == MSIMEVoiceFailureMissingLocalModel);
         NSMutableDictionary *withToken = [toggleArguments mutableCopy];
         withToken[@"MSIMEClientVoiceASRToken"] = @"synthetic-token";
         [defaults setVolatileDomain:withToken forName:NSArgumentDomain];

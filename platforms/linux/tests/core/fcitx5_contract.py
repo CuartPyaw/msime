@@ -84,11 +84,11 @@ for host_source in (source, ibus_source):
     assert 'candidate_local_mode_label(mode)' in host_source
     for stale in ('"phrase"', '"abbreviation"', '"english"', '"japanese"'):
         assert f'mode == {stale}' not in host_source
-# Every name the Engine bridge emits in local_mode, except "none", has a label in the shared table.
-bridge = (root.parents[1] / "crates/engine-bridge/native/bridge.cpp").read_text()
-mode_names = bridge[bridge.index("const char* local_mode_name("):]
-mode_names = mode_names[:mode_names.index("throw std::logic_error")]
-emitted = re.findall(r'return "([a-z_]+)";', mode_names)
+# Every name the Engine emits in local_mode, except "none", has a label in the shared table.
+engine_types = (root.parents[1] / "crates/engine/src/types.rs").read_text()
+mode_names = engine_types[engine_types.index("impl LocalInputMode {"):]
+mode_names = mode_names[:mode_names.index("\n}\n")]
+emitted = re.findall(r'=> "([a-z_]+)",', mode_names)
 assert "none" in emitted and len(emitted) > 1
 labels = (root / "src/candidates/CandidateLocalModeLabels.h").read_text()
 for name in emitted:

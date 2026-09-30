@@ -1106,6 +1106,8 @@ export interface HostCapabilities {
   mode_switch_shortcuts: boolean;
   panel_shortcuts: boolean;
   number_row_selection?: boolean;
+  /** The host answers the voice recording shortcuts from an attached hardware keyboard without having desktop panel windows (a HarmonyOS phone), so the page offers their switches there too. */
+  voice_hotkeys?: boolean;
   voice_capture_devices: boolean;
   candidate_font_controls: boolean;
   candidate_preedit_font?: boolean;
@@ -1149,7 +1151,6 @@ export { useCandidatePreviewTheme } from "./candidate/candidate-preview-theme";
 /** Local whole-sentence candidate sources and optional neural reranking. */
 export type SentenceAssociationPreferences = {
   word_lattice?: boolean;
-  google?: boolean;
   neural_desktop?: boolean;
   neural_keyboard?: boolean;
   show_next_on_duplicate?: boolean;
@@ -1365,7 +1366,7 @@ export type VoiceInputPreferences = {
   polish_enabled?: boolean;
   polish_text?: boolean;
   asr_model?: string;
-  /** Absolute path the `local` provider loads: an installed model directory (one holding msime-model.json) or a Whisper model file. */
+  /** Absolute path the `local` provider loads: an installed model directory (one holding msime-model.json). */
   asr_model_path?: string;
   /** Optional `https://` prefix put in front of every model download URL (a ghproxy-style mirror); empty downloads from the catalog URLs as-is. */
   asr_model_mirror?: string;
@@ -1529,7 +1530,7 @@ export interface SettingsClient {
    */
   openDiagnosticLogDirectory?: () => Promise<void>;
   /**
-   * Write an exported document into the user's Downloads folder and resolve to the absolute path written, which may carry a " (2)" suffix when the name was taken. A host whose webview drops download links (the macOS WKWebView cancels them) offers this; without it the page falls back to a download link.
+   * Write an exported document into the user's Downloads folder and resolve to the absolute path written, which may carry a " (2)" suffix when the name was taken. A host that asks where to save (the Harmony save picker) resolves null when the user closes the picker, and may reject with an Error whose message is shown as is. A host whose webview drops download links (the macOS WKWebView cancels them) offers this; without it the page falls back to a download link.
    */
   saveExport?: (name: string, contents: string) => Promise<string | null>;
   load(): Promise<Snapshot>;
@@ -1611,8 +1612,7 @@ export interface SettingsClient {
     }>;
   };
   /**
-   * Ask the host for a file path, resolving to null when the user cancels. A local speech model is loaded
-   * by path and a file input hands back contents instead, so only the host can answer this.
+   * Ask the host for an installed local speech model directory (one holding msime-model.json), resolving to null when the user cancels. The model is loaded by path and a file input hands back contents instead, so only the host can answer this.
    */
   pickVoiceModelPath?: () => Promise<string | null>;
   /** The host's on-device speech model store; hosts that provide it offer the `local` provider with a model manager. */
@@ -1730,6 +1730,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showFullwidthChord,
     clientHostedPlatform,
     desktopPanels,
+    showVoiceHotkeys,
   } = capabilities;
   const {
     fullwidthChord,
@@ -2022,8 +2023,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     candidateEnglishGloss,
     englishSuggestions,
     inputModeHUD,
-  } =
-    settingsInputPreferences(draft);
+  } = settingsInputPreferences(draft);
   const touchKeyboardSchemes = draft?.touch_keyboard_schemes ?? {
     enabled: allTouchKeyboardSchemes,
   };
@@ -2180,8 +2180,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     category: initialCommunityCategory,
     scope: initialCommunityScope,
     initialMine: initialCommunityMine,
-  } =
-    communityDestinationView(communityDestination);
+  } = communityDestinationView(communityDestination);
   return {
     client,
     confirmation,
@@ -2237,6 +2236,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     platformNetworkDescription,
     platformAboutDescription,
     desktopPanels,
+    showVoiceHotkeys,
     snapshot,
     draft,
     setDraft,

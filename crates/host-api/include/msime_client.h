@@ -172,6 +172,8 @@ char *msime_client_resolve_theme(const uint8_t *request, size_t length);
  * second copy of the keymap. An unknown profile name yields an empty object
  * rather than the default profile's hints. */
 char *msime_client_shuangpin_key_hints(const uint8_t *profile, size_t length);
+/* The double-pinyin codes of the whole zero-initial syllables for one profile name, as a JSON object mapping each syllable to its two-key code, e.g. {"a":"aa","ang":"ah",...}. Read out of the Engine's own profile tables. An unknown profile name yields an empty object. */
+char *msime_client_shuangpin_zero_initials(const uint8_t *profile, size_t length);
 /* Load PreferencesStore from an absolute UTF-8 directory, without a session.
  * May block on disk/file lock: use a worker thread. Returns PreferencesSnapshot.
  * Missing file returns shared defaults; malformed/future files return errors.

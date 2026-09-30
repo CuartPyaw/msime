@@ -400,7 +400,7 @@ test("the settings page picks a model and a mirror into the saved preferences", 
 
   const card = within(await screen.findByRole("listitem", { name: "快速整句" }));
   fireEvent.click(card.getByRole("button", { name: "使用" }));
-  expect(((await screen.findByLabelText("Whisper 模型文件")) as HTMLInputElement).value).toBe(
+  expect(((await screen.findByLabelText("本地模型目录")) as HTMLInputElement).value).toBe(
     sense.path,
   );
   fireEvent.change(screen.getByLabelText("模型下载镜像"), {

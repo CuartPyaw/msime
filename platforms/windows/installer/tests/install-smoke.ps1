@@ -65,7 +65,7 @@ Check ($usersModify.Count -gt 0) 'DataDir grants Users modify'
 $label = (& icacls $app.DataDir) -join "`n"
 Check ($label.Contains('Mandatory Label\Medium Mandatory Level')) 'DataDir carries a medium integrity label'
 
-# The notices must carry the supplemental Rust and npm sections that the release collects, not only the vcpkg prefixes and the Engine.
+# The notices must carry the supplemental Rust and npm sections that the release collects, not only the vcpkg prefixes and the repository notices.
 $notices = Join-Path $pf64 'THIRD_PARTY_NOTICES.txt'
 $text = if (Test-Path -LiteralPath $notices) { Get-Content -LiteralPath $notices -Raw -Encoding utf8 } else { '' }
 Check ($text.Contains('Rust crates statically linked into the MSIME host library and binaries')) 'installed notices contain the Rust crate section'

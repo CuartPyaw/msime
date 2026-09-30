@@ -10,9 +10,9 @@
 
 Rust 侧的实现在 `crates/host-api/src/dictionary_snapshot.rs`（记录解析在 `dictionary_snapshot/record.rs`）。`inspect` 先校验完整的 NDJSON 信封——头尾顺序、整段 body 的校验和、分类顺序和记录边界都属于云端格式的一部分；Engine 记录更深一层的、按方案区分的校验放在 prepare 阶段。准备句柄登记在进程内的注册表里，`activate` 只接受未过期的句柄并比对期望版本，发布前做原子替换，失败时把原目录搬回来；回滚之后留下的空备份目录才会被删掉，`remove_dir` 对非空目录的拒绝正是这里要的保护——那时备份可能是用户词库仅剩的一份。
 
-`shared/apple-bridge/DictionarySnapshotBridge.{h,mm}` 是 macOS 宿主与 iOS 键盘共用的那层记录流/状态版本适配，`shared/snapshot`（Swift Package）负责快照文件格式本身的校验与上传。
+记录流与状态版本的适配全部在 host-api 的 C ABI 之后，宿主不再有自己的 C++ 桥接层；`shared/snapshot`（Swift Package）负责快照文件格式本身的校验与上传。
 
-凭据和网络请求留在 Swift 后端，不进入 `client-core`。`engine-bridge` 的 `EngineSession.snapshot()` 返回的是编辑串/候选这类输入状态，与词库快照无关。
+凭据和网络请求留在 Swift 后端，不进入 `client-core`。引擎会话的 `snapshot()`（`crates/engine/src/host/session.rs`）返回的是编辑串/候选这类输入状态，与词库快照无关。
 
 ## 边界
 

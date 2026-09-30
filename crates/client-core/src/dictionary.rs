@@ -20,10 +20,7 @@ pub fn is_han_character(character: char) -> bool {
 
 /// Whether `code` is a usable English input code.
 ///
-/// The code is what the user types; the word beside it is what that types out, and the two need
-/// not be the same text - `dont` types out `don't`. The reference accepts any non-empty word
-/// beside a code of letters, hyphens and apostrophes (`IsAsciiWord` in its `dictionary_manager`),
-/// and the Engine agrees since `scripts/apply_engine_english_display.py`.
+/// The code is what the user types; the word beside it is what that types out, and the two need not be the same text - `dont` types out `don't`. The reference accepts any non-empty word beside a code of letters, hyphens and apostrophes (`IsAsciiWord` in its `dictionary_manager`), and the Engine's personal-dictionary check (`validate_personal_dictionary_entry` in `msime-engine`) lowercases the code and accepts the same three kinds of byte.
 ///
 /// One predicate because five places ask this question - the import parser, the personal-word
 /// transport check, both sides of the account validator, and the host API's own entry check - and

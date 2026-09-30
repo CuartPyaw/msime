@@ -10,7 +10,10 @@ param(
     [string]$ServerDirectory = 'server',
     # Deprecated compatibility argument; UI assets are embedded in Tauri now.
     [string]$UiHtmlDirectory = 'ui-html',
-    [string]$HelpCodeDirectory = 'vendor/MSIME-Engine/helpcode',
+    # The helpcode tables, one flat directory; only its *.txt tables are staged, and its notices go into THIRD_PARTY_NOTICES.txt through Collect-Notices.ps1.
+    [string]$HelpCodeDirectory = 'resources/helpcodes',
+    # The zinnia handwriting model with its licence, relative to RepoRoot, as scripts/fetch_handwriting_model.py downloads them against resources/handwriting-model.lock.json. Without the model the package installs without offline handwriting.
+    [string]$HandwritingDirectory = 'target/handwriting-model',
     # Deprecated: both resource layouts now use DesktopResourcesDirectory.
     [string]$DictionaryDirectory = 'MetasequoiaImeDict',
     [string]$ServerReleaseDirectory = '',
@@ -119,7 +122,7 @@ $factoryConfig = Join-Path $PSScriptRoot 'config.default.toml'
 $iconSource = Join-Path $PSScriptRoot 'assets\icons'
 $audioSource = Join-Path $PSScriptRoot 'assets\audios'
 $pinyinTable = Join-Path $PSScriptRoot 'assets/tables/pinyin.txt'
-$helpcodeSource = Join-Path $RepoRoot (Join-Path $HelpCodeDirectory 'helpcodes')
+$helpcodeSource = Join-Path $RepoRoot $HelpCodeDirectory
 # 品牌标识。这个目录只放 ServerResources.rc 要编译进 Server 的那一个图标。
 # 语言栏与工具栏的状态图标不在这里：它们在 tsf/assets 下，由 MetasequoiaIME.rc 编进 TSF DLL，
 # 运行时走 MAKEINTRESOURCE。这里曾经有它们的一份逐字节副本，随包装到用户磁盘、且因为
@@ -141,11 +144,10 @@ $japaneseModel = Join-Path $resourceSource 'dict_japanese.dat'
 $japaneseModelLicense = Join-Path $resourceSource 'mozc_dictionary_oss_README.txt'
 $englishDb = Join-Path $resourceSource 'english.db'
 $othersDb = Join-Path $resourceSource 'others.db'
-# 手写模型与其授权/来源声明。Tauri 侧按可执行文件旁的 handwriting\handwriting-zh_CN.model
-# 查找，因此这三个文件与 Server 一起落在 server_exe 下，而不是 app_data。
-$handwritingModel = Join-Path $RepoRoot 'vendor\MSIME-Engine\handwriting\models\handwriting-zh_CN.model'
-$handwritingLicense = Join-Path $RepoRoot 'vendor\MSIME-Engine\handwriting\models\HandwritingModel-LICENSE.txt'
-$handwritingProvenance = Join-Path $RepoRoot 'vendor\MSIME-Engine\handwriting\provenance.json'
+# 手写模型与其授权声明。Tauri 侧按可执行文件旁的 handwriting\handwriting-zh_CN.model 查找，因此这两个文件与 Server 一起落在 server_exe 下，而不是 app_data。来源由 resources/handwriting-model.lock.json 记录，不再随包附 provenance.json。
+$handwritingSource = Join-Path $RepoRoot $HandwritingDirectory
+$handwritingModel = Join-Path $handwritingSource 'handwriting-zh_CN.model'
+$handwritingLicense = Join-Path $handwritingSource 'HandwritingModel-LICENSE.txt'
 
 Assert-PathExists -LiteralPath $RepoRoot -Description '源码仓库根目录'
 if (-not (Test-Path -LiteralPath $desktopSource -PathType Leaf)) {
@@ -195,6 +197,9 @@ if (-not $Light) {
     Assert-PathExists -LiteralPath $factoryConfig -Description '出厂配置 default_config\config.default.toml'
     Assert-PathExists -LiteralPath $pinyinTable -Description '完整拼音音节表 pinyin.txt'
     Assert-PathExists -LiteralPath $helpcodeSource -Description '辅助码目录'
+    if (-not (Get-ChildItem -LiteralPath $helpcodeSource -File -Filter '*.txt')) {
+        throw "辅助码目录中没有码表：$helpcodeSource"
+    }
     Assert-PathExists -LiteralPath $dictionaryDb -Description '词库数据库 msime.db'
     Assert-PathExists -LiteralPath $japaneseModel -Description '日语整句模型 dict_japanese.dat'
     Assert-PathExists -LiteralPath $japaneseModelLicense -Description 'Mozc 日语词典授权声明'
@@ -230,9 +235,7 @@ if 'weight' not in names or pk != ['word', 'display']:
 
 $hasHandwritingModel = Test-Path -LiteralPath $handwritingModel -PathType Leaf
 if ($hasHandwritingModel) {
-    foreach ($notice in @($handwritingLicense, $handwritingProvenance)) {
-        Assert-PathExists -LiteralPath $notice -Description '手写模型随附声明'
-    }
+    Assert-PathExists -LiteralPath $handwritingLicense -Description '手写模型随附声明'
 }
 
 # On-device speech recognition. The Server loads sherpa-onnx-c-api.dll with LoadLibrary from its own directory, and onnxruntime.dll and its provider bridge resolve beside it, so all three ride in server_exe. Build-Client.ps1 stages them into the Server output; a separately fetched runtime directory is the fallback. The set is all or nothing: a partial one would install a recognizer that fails at first use, so it is refused here, before any previous staging is replaced. With none of them the package installs without local recognition, and a dictation set to the local provider says the component cannot be loaded.
@@ -293,7 +296,8 @@ else {
 
     $targetHelpcodes = Join-Path $targetAppData 'helpcodes'
     Reset-Directory -LiteralPath $targetHelpcodes
-    Copy-DirectoryContents -Source $helpcodeSource -Destination $targetHelpcodes
+    Get-ChildItem -LiteralPath $helpcodeSource -File -Filter '*.txt' |
+        Copy-Item -Destination $targetHelpcodes -Force
 }
 
 $targetHtml = Join-Path $targetAppData 'html'
@@ -413,9 +417,7 @@ if ($hasHandwritingModel) {
     $targetHandwriting = Join-Path $targetServer 'handwriting'
     New-Item -ItemType Directory -Path $targetHandwriting -Force | Out-Null
     Copy-Item -LiteralPath $handwritingModel -Destination $targetHandwriting -Force
-    foreach ($notice in @($handwritingLicense, $handwritingProvenance)) {
-        Copy-Item -LiteralPath $notice -Destination $targetHandwriting -Force
-    }
+    Copy-Item -LiteralPath $handwritingLicense -Destination $targetHandwriting -Force
 } else {
     Write-Host "未找到手写模型，跳过：$handwritingModel"
 }

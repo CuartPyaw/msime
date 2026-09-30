@@ -1,0 +1,440 @@
+//! Engine-level tests over throwaway dictionaries: `test_shuangpin.cpp`, the shuangpin cases of `test_input_session.cpp` and `test_runtime_isolation.cpp` that exercise the engine itself, the double-helpcode cache overlay, online rows, initial expansion and the candidate lookup. A real-dictionary smoke test runs when `MSIME_EVAL_RESOURCES` names the dict-v2.0.1 resource directory.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use rusqlite::Connection;
+use tempfile::TempDir;
+
+use super::profile::profile;
+use super::ShuangpinEngine;
+use crate::assets;
+use crate::helpcode::HelpcodeKeymap;
+use crate::paths::RuntimePaths;
+use crate::types::{
+    fuzzy_rule, CandidateSource, FuzzyPinyinOptions, QueryRequest, SchemeType,
+    SentenceAssociationOptions, ShuangpinProfileKind, WordItem,
+};
+
+struct Fixture {
+    _root: TempDir,
+    paths: RuntimePaths,
+}
+
+impl Fixture {
+    /// One directory for all four roots, as the reference tests did.
+    fn new(sql: &str) -> Self {
+        let root = tempfile::tempdir().expect("fixture directory");
+        let directory = root.path().to_path_buf();
+        let paths = RuntimePaths {
+            resources: directory.clone(),
+            user_data: directory.clone(),
+            cache: directory.clone(),
+            dictionaries: directory,
+        };
+        Connection::open(paths.dictionary(assets::MAIN_DICTIONARY))
+            .expect("fixture dictionary")
+            .execute_batch(sql)
+            .expect("fixture rows");
+        Self { _root: root, paths }
+    }
+
+    fn engine(&self, kind: ShuangpinProfileKind) -> ShuangpinEngine {
+        ShuangpinEngine::new(profile(kind), &self.paths)
+    }
+
+    fn weight(&self, table: &str, key: &str, value: &str) -> Option<i64> {
+        Connection::open(self.paths.dictionary(assets::MAIN_DICTIONARY))
+            .expect("fixture dictionary")
+            .query_row(
+                &format!("SELECT weight FROM \"{table}\" WHERE key = ?1 AND value = ?2"),
+                [key, value],
+                |row| row.get(0),
+            )
+            .ok()
+    }
+}
+
+fn request(typed: &str, helpcode: bool) -> QueryRequest {
+    QueryRequest {
+        scheme: SchemeType::Shuangpin,
+        raw_input: typed.to_ascii_lowercase(),
+        raw_input_with_cases: typed.to_string(),
+        enable_shuangpin_helpcode: helpcode,
+        valid: true,
+        ..QueryRequest::default()
+    }
+}
+
+fn keymap(codes: &[(&str, &str)]) -> HelpcodeKeymap {
+    HelpcodeKeymap::from_codes(
+        codes
+            .iter()
+            .map(|(character, code)| (character.to_string(), code.to_string()))
+            .collect::<HashMap<_, _>>(),
+    )
+}
+
+fn words(candidates: &[WordItem]) -> Vec<&str> {
+    candidates.iter().map(|item| item.word.as_str()).collect()
+}
+
+fn index_of(candidates: &[WordItem], word: &str) -> usize {
+    candidates
+        .iter()
+        .position(|item| item.word == word)
+        .unwrap_or_else(|| panic!("{word} missing from {:?}", words(candidates)))
+}
+
+/// A manual delimiter leaves empty pieces in the whole-input segmentation, so several of its shorter prefix groups are the same `ni` group; the reference appended each group whole and listed 你 and 拟 once per group. A word keeps its first, longest-prefix seat (decision 2026-09-30).
+#[test]
+fn prefix_groups_list_a_word_once() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_n VALUES('ni', 'n', '你', 10000),('ni', 'n', '拟', 9000);",
+    );
+    let microsoft = profile(ShuangpinProfileKind::Microsoft);
+    let mut dictionary = super::dictionary::ShuangpinDictionary::new(microsoft, &fixture.paths);
+    let segmentation = super::utils::pinyin_segmentation("ni'nni", microsoft);
+    assert_eq!(segmentation, "ni'''nn'i");
+    let rows = dictionary.generate_series("ni'nni", &segmentation, "");
+    assert_eq!(words(&rows), ["你", "拟"]);
+}
+
+const TRAILING_HELPCODE: &str = "BEGIN;CREATE TABLE tbl_1_s(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_s VALUES('shi', 's', '使', 200);INSERT INTO tbl_1_s VALUES('shi', 's', '是', 100);COMMIT;";
+
+/// Xiaohe reads `ui` as shi, so `uiu` is a complete syllable plus the single helpcode `u`, while `ui'u` is the same syllable followed by a user-delimited segment (test_shuangpin.cpp:129-158, golden sp_xiaohe_trailing_helpcode).
+#[test]
+fn manual_delimiter_disables_single_helpcode() {
+    let fixture = Fixture::new(TRAILING_HELPCODE);
+    let codes = keymap(&[("使", "ab"), ("是", "uc")]);
+    // Each query on its own engine, so no cache of one raw input answers another.
+    let query = |typed: &str, helpcode: bool| {
+        fixture
+            .engine(ShuangpinProfileKind::Xiaohe)
+            .query(&request(typed, helpcode), Some(&codes))
+    };
+
+    let undelimited = query("uiu", true);
+    assert!(index_of(&undelimited, "是") < index_of(&undelimited, "使"));
+    // The reference listed the whole-input answer after the reordered rows again, [是, 使, 是, 使]; each word keeps its first seat (decision 2026-09-30).
+    assert_eq!(words(&undelimited), ["是", "使"]);
+    assert!(undelimited.iter().all(|item| item.pinyin == "ui"));
+
+    let delimited = query("ui'u", true);
+    assert!(index_of(&delimited, "使") < index_of(&delimited, "是"));
+    assert_eq!(words(&delimited), ["使", "是"]);
+    let without_helpcode = query("ui'u", false);
+    assert_eq!(words(&delimited), words(&without_helpcode));
+}
+
+const HELPCODE_FILTER: &str = "CREATE TABLE tbl_2_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_2_n VALUES('ni''hao', 'nh', '你好', 200);INSERT INTO tbl_2_n VALUES('ni''hao', 'nh', '拟好', 100);INSERT INTO tbl_2_n VALUES('ni''hao', 'nh', '𠀀方案𠮷', 90);INSERT INTO tbl_2_n VALUES('ni''hao', 'nh', 'C语言 2', 80);INSERT INTO tbl_2_n VALUES('ni''hao', 'nh', 'GitHub', 70);CREATE TABLE tbl_1_h(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_1_h VALUES('hao','h','好',100);CREATE TABLE tbl_3_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);";
+
+fn helpcode_filter_keymap() -> HelpcodeKeymap {
+    keymap(&[("你", "ab"), ("拟", "cd"), ("好", "ef")])
+}
+
+/// Golden sp_helpcode_filter (test_input_session.cpp:1009-1067): matched rows, then the full input read as pinyin, then the rest, each word once (decision 2026-09-30; the reference listed a word again in every later list that answered it).
+#[test]
+fn single_and_double_helpcodes_filter_the_base() {
+    let fixture = Fixture::new(HELPCODE_FILTER);
+    let codes = helpcode_filter_keymap();
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+
+    let plain = engine.query(&request("nihc", true), Some(&codes));
+    assert_eq!(
+        words(&plain),
+        ["你好", "拟好", "𠀀方案𠮷", "C语言 2", "GitHub"]
+    );
+    assert!(plain
+        .iter()
+        .all(|item| item.pinyin == "nihc" && item.canonical_pinyin == "ni'hao"));
+
+    let lowercase = engine.query(&request("nihcc", true), Some(&codes));
+    assert_eq!(
+        words(&lowercase),
+        ["拟好", "你好", "𠀀方案𠮷", "C语言 2", "GitHub"]
+    );
+
+    let uppercase = engine.query(&request("nihcA", true), Some(&codes));
+    assert_eq!(
+        words(&uppercase),
+        ["你好", "拟好", "𠀀方案𠮷", "C语言 2", "GitHub"]
+    );
+
+    assert!(engine
+        .query(&request("nihcAB", true), Some(&codes))
+        .is_empty());
+    assert!(engine
+        .query(&request("nihcAE", true), Some(&codes))
+        .is_empty());
+    // With the setting off the same letters are plain pinyin again.
+    assert!(!engine
+        .query(&request("nihcAE", false), Some(&codes))
+        .is_empty());
+}
+
+#[test]
+fn profiles_decode_their_own_codes() {
+    let fixture = Fixture::new(
+        "BEGIN;CREATE TABLE tbl_2_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_2_n VALUES('ni''hao', 'nh', '你好', 100);INSERT INTO tbl_2_n VALUES('ni''hao', 'nh', '拟好', 50);COMMIT;",
+    );
+    // Golden sp_ziranma_nihao: ziranma spells hao `hk`; `hc` is `h'c`.
+    let mut ziranma = fixture.engine(ShuangpinProfileKind::Ziranma);
+    let hk = ziranma.query(&request("nihk", false), None);
+    assert_eq!(words(&hk), ["你好", "拟好"]);
+    assert!(hk.iter().all(|item| item.pinyin == "nihk"));
+    let hc = ziranma.query(&request("nihc", false), None);
+    assert_eq!(words(&hc), ["你好", "拟好"]);
+    assert!(hc.iter().all(|item| item.pinyin == "nih"));
+
+    // Golden sp_microsoft_semicolon.
+    let mut microsoft = fixture.engine(ShuangpinProfileKind::Microsoft);
+    assert!(microsoft.query(&request("b;", false), None).is_empty());
+    let semicolon = microsoft.query(&request("nihkb;", false), None);
+    assert_eq!(words(&semicolon), ["你好", "拟好"]);
+    assert!(semicolon.iter().all(|item| item.pinyin == "nihk"));
+    let split = microsoft.query(&request("nihcb;", false), None);
+    assert!(split.iter().all(|item| item.pinyin == "nih"));
+}
+
+/// overlays.md §5.1: a double-helpcode entry is keyed by its codes, and an online row lands only under the combination it was inserted for.
+#[test]
+fn online_rows_follow_the_query_cache() {
+    let fixture = Fixture::new(HELPCODE_FILTER);
+    let codes = helpcode_filter_keymap();
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let cloud = vec!["妮好".to_string()];
+
+    let double = request("nihcAB", true);
+    assert!(engine.query(&double, Some(&codes)).is_empty());
+    assert!(engine.insert_online_words(&double, &cloud, CandidateSource::CloudSuggestion));
+    assert_eq!(words(&engine.query(&double, Some(&codes))), ["妮好"]);
+    // Another code pair has its own, never-queried entry.
+    let other = request("nihcAE", true);
+    assert!(!engine.insert_online_words(&other, &cloud, CandidateSource::CloudSuggestion));
+    assert!(engine.query(&other, Some(&codes)).is_empty());
+
+    let single = request("nihcc", true);
+    engine.query(&single, Some(&codes));
+    assert!(engine.insert_online_words(&single, &cloud, CandidateSource::CloudSuggestion));
+    let listed = engine.query(&single, Some(&codes));
+    assert_eq!(listed[1].word, "妮好");
+    assert_eq!(listed[1].source, CandidateSource::CloudSuggestion);
+
+    // The plain series entry is created when absent and read by the next query.
+    let plain = request("ni'hc", true);
+    assert!(engine.insert_online_words(&plain, &cloud, CandidateSource::CloudSuggestion));
+    assert_eq!(words(&engine.query(&plain, Some(&codes))), ["妮好"]);
+    let series = request("nihc", false);
+    engine.query(&series, None);
+    let ai: Vec<String> = ["甲", "乙", "甲"]
+        .iter()
+        .map(|word| word.to_string())
+        .collect();
+    assert!(engine.insert_online_words(&series, &ai, CandidateSource::AiSuggestion));
+    let listed = engine.query(&series, None);
+    assert_eq!(words(&listed)[..4], ["你好", "拟好", "甲", "乙"]);
+    assert!(!engine.insert_online_words(&series, &["".to_string()], CandidateSource::AiSuggestion));
+}
+
+#[test]
+fn initial_letter_expands_past_the_cap() {
+    let mut sql =
+        String::from("BEGIN;CREATE TABLE tbl_1_s(key TEXT, jp TEXT, value TEXT, weight INTEGER);");
+    for index in 0..30 {
+        sql.push_str(&format!(
+            "INSERT INTO tbl_1_s VALUES('shi', 's', '字{index:02}', {});",
+            1000 - index
+        ));
+    }
+    sql.push_str("INSERT INTO tbl_1_s VALUES('si', 's', '四', 1);COMMIT;");
+    let fixture = Fixture::new(&sql);
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let typed = request("u", false);
+    let mut candidates = engine.query(&typed, None);
+    assert_eq!(candidates.len(), 24);
+    // Xiaohe `u` is the `sh` initial, so `si` stays out.
+    assert!(candidates
+        .iter()
+        .all(|item| item.pinyin == "u" && item.canonical_pinyin == "shi"));
+    assert!(engine.expand_initial_candidates(&typed, &mut candidates));
+    assert_eq!(candidates.len(), 30);
+    assert!(!engine.expand_initial_candidates(&typed, &mut candidates));
+    assert!(!engine.expand_initial_candidates(&request("ui", false), &mut candidates));
+}
+
+#[test]
+fn fuzzy_rows_take_the_typed_keys() {
+    let fixture = Fixture::new(
+        "BEGIN;CREATE TABLE tbl_1_z(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_z VALUES('zi', 'z', '字', 50);INSERT INTO tbl_1_z VALUES('zhi', 'z', '之', 100);COMMIT;",
+    );
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let mut typed = request("zi", false);
+    assert_eq!(words(&engine.query(&typed, None)), ["字"]);
+    typed.fuzzy_pinyin = FuzzyPinyinOptions {
+        rules: fuzzy_rule::Z_ZH,
+    };
+    let fuzzy = engine.query(&typed, None);
+    assert_eq!(words(&fuzzy), ["字", "之"]);
+    assert_eq!(fuzzy[1].pinyin, "zi");
+    assert!(fuzzy[1].fuzzy);
+}
+
+/// A fixed row missing from the list is looked up by its canonical quanpin key (user_dictionary positions).
+#[test]
+fn find_candidate_reads_the_canonical_key() {
+    let fixture = Fixture::new(HELPCODE_FILTER);
+    let engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let found = engine.find_candidate("ni'hao", "拟好").expect("row");
+    assert_eq!(
+        Some(found.weight),
+        fixture.weight("tbl_2_n", "ni'hao", "拟好")
+    );
+    assert_eq!(found.pinyin, "ni'hao");
+    assert_eq!(found.source, CandidateSource::Database);
+    assert!(engine.find_candidate("ni'hao", "妮好").is_none());
+}
+
+#[test]
+fn word_lattice_switch_controls_the_sentence_row() {
+    let fixture = Fixture::new(
+        "BEGIN;CREATE TABLE tbl_1_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_n VALUES('ni', 'n', '你', 100);CREATE TABLE tbl_1_h(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_h VALUES('hao', 'h', '好', 100);COMMIT;",
+    );
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let mut typed = request("nihc", false);
+    let with_lattice = engine.query(&typed, None);
+    let sentence = with_lattice
+        .iter()
+        .find(|item| item.source == CandidateSource::Generated)
+        .unwrap_or_else(|| panic!("no lattice row in {:?}", words(&with_lattice)));
+    assert_eq!(sentence.word, "你好");
+    assert!(sentence.sentence_association);
+    assert_eq!(sentence.pinyin, "nihc");
+
+    typed.sentence_association = SentenceAssociationOptions {
+        word_lattice: false,
+        ..SentenceAssociationOptions::default()
+    };
+    let without = engine.query(&typed, None);
+    assert!(without
+        .iter()
+        .all(|item| item.source != CandidateSource::Generated));
+    assert!(words(&without).contains(&"你"));
+}
+
+/// test_shuangpin.cpp:144-159: an exact dictionary entry for the whole code keeps row 0; the lattice sentence is inserted after it.
+#[test]
+fn exact_entry_leads_the_lattice_sentence() {
+    let fixture = Fixture::new(
+        "BEGIN;CREATE TABLE tbl_4_a(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_4_a VALUES('an''quan''bao''wei', 'aqbw', '安全保卫', 6000);CREATE TABLE tbl_2_a(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_2_a VALUES('an''quan', 'aq', '安全', 9000);CREATE TABLE tbl_2_b(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_2_b VALUES('bao''wei', 'bw', '包围', 9000);COMMIT;",
+    );
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let candidates = engine.query(&request("anqrbcww", false), None);
+    assert_eq!(
+        words(&candidates).first(),
+        Some(&"安全保卫"),
+        "{:?}",
+        words(&candidates)
+    );
+    let sentence = candidates
+        .iter()
+        .find(|item| item.source == CandidateSource::Generated)
+        .unwrap_or_else(|| panic!("no lattice row in {:?}", words(&candidates)));
+    assert_eq!(sentence.word, "安全包围");
+}
+
+#[test]
+fn missing_dictionary_answers_empty() {
+    let root = tempfile::tempdir().expect("fixture directory");
+    let directory: PathBuf = root.path().to_path_buf();
+    let paths = RuntimePaths {
+        resources: directory.clone(),
+        user_data: directory.clone(),
+        cache: directory.clone(),
+        dictionaries: directory,
+    };
+    let mut engine = ShuangpinEngine::new(profile(ShuangpinProfileKind::Xiaohe), &paths);
+    assert!(engine.query(&request("nihc", true), None).is_empty());
+    assert!(engine.query(&request("u", true), None).is_empty());
+    assert!(!paths.dictionary(assets::MAIN_DICTIONARY).exists());
+    let mut invalid = request("nihc", false);
+    invalid.valid = false;
+    assert!(engine.query(&invalid, None).is_empty());
+    assert!(engine.query(&request("'", false), None).is_empty());
+}
+
+/// The shipped dictionary answers the common readings; skipped without the resource bundle.
+#[test]
+fn real_dictionary_answers_common_readings() {
+    let Some(resources) = std::env::var_os("MSIME_EVAL_RESOURCES") else {
+        eprintln!("skipped: MSIME_EVAL_RESOURCES is not set to the dict-v2.0.1 resource directory");
+        return;
+    };
+    let user = tempfile::tempdir().expect("user directory");
+    let resources = PathBuf::from(resources);
+    let paths = RuntimePaths {
+        resources: resources.clone(),
+        user_data: user.path().to_path_buf(),
+        cache: user.path().to_path_buf(),
+        dictionaries: resources,
+    };
+    let mut engine = ShuangpinEngine::new(profile(ShuangpinProfileKind::Xiaohe), &paths);
+    let nihao = engine.query(&request("nihc", false), None);
+    assert!(
+        words(&nihao).iter().take(3).any(|word| *word == "你好"),
+        "{:?}",
+        words(&nihao)
+    );
+    let zhongguo = engine.query(&request("vsgo", false), None);
+    assert!(
+        words(&zhongguo).iter().take(3).any(|word| *word == "中国"),
+        "{:?}",
+        words(&zhongguo)
+    );
+}
+
+/// Without a sentence model no answer reads the committed context, so a new context keeps every cached answer, the online rows included.
+#[test]
+fn context_changes_keep_the_caches_without_a_model() {
+    let fixture = Fixture::new(HELPCODE_FILTER);
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let mut typed = request("nihc", false);
+    typed.rescoring_context = "上文".into();
+    engine.query(&typed, None);
+    assert!(engine.insert_online_words(&typed, &["甲".to_string()], CandidateSource::AiSuggestion));
+    typed.rescoring_context = "另一段上文".into();
+    assert!(words(&engine.query(&typed, None)).contains(&"甲"));
+}
+
+/// With a sentence model loaded the trimmed context joins the series key (overlays.md §1.6.2): an answer cached under one context is not read under another, and it is read again when that context comes back. Needs the keyboard model in `MSIME_EVAL_RESOURCES`.
+#[test]
+fn a_loaded_model_keys_the_series_cache_by_context() {
+    let model = match crate::lattice::neural::test_model_path(assets::NEURAL_MODEL_KEYBOARD) {
+        Ok(model) => model,
+        Err(reason) => {
+            eprintln!("skipped: {reason}");
+            return;
+        }
+    };
+    let fixture = Fixture::new(HELPCODE_FILTER);
+    std::fs::copy(
+        &model,
+        fixture.paths.resource(assets::NEURAL_MODEL_KEYBOARD),
+    )
+    .expect("model copy");
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let mut typed = request("nihc", false);
+    typed.sentence_association = SentenceAssociationOptions {
+        neural_keyboard: true,
+        ..SentenceAssociationOptions::default()
+    };
+    typed.rescoring_context = "上文".into();
+    engine.query(&typed, None);
+    assert!(engine.insert_online_words(&typed, &["甲".to_string()], CandidateSource::AiSuggestion));
+    assert!(words(&engine.query(&typed, None)).contains(&"甲"));
+
+    typed.rescoring_context = "另一段上文".into();
+    assert!(!words(&engine.query(&typed, None)).contains(&"甲"));
+    typed.rescoring_context = "上文".into();
+    assert!(words(&engine.query(&typed, None)).contains(&"甲"));
+}

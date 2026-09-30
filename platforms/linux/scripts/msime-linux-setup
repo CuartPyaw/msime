@@ -13,7 +13,7 @@ Windows 安装程序注册 TSF profile，装完输入法就出现在输入法列
 
 Windows 卸载程序注销 TSF profile 和类别，输入法随之从列表里消失，并删除水杉留下的全部状态；对应的是 --unregister：卸载时（.deb 的 prerm、CMake 卸载）在删除文件之前把输入法从这些列表里移除，再把宿主改过的桌面候选面板设置（Fcitx5 classicui 的主题、字体和滚轮翻页，IBus 面板的字体）恢复成接管之前的值——用户之后自己改过的不动——并删除水杉生成的 Fcitx5 主题。只做这些，不准备状态也不下载。
 
---update 对应 Windows 安装程序升级时的用户词库回放。随包提供词库的安装由包管理器换掉词库，宿主启动时自己切换代次；自行下载的词库没有人替换，升级抬高词库版本后宿主只能继续用旧的。--update 读出已有状态记录的词库目录，按已安装的词库锁核对；不符时加 --download 在旁边另建一份新词库目录，与旧目录一致的几项直接链接过去，只取回缺失或不符的几项，旧目录一个文件都不动。随后请两个宿主关掉输入会话，用 msime-linux-prepare --refresh 切到新代次并回放用户词库，再让它们重新打开。已有状态时给 --download 即视为 --update。
+--update 对应 Windows 安装程序升级时的用户词库回放。随包提供词库的安装由包管理器换掉词库，宿主启动时自己切换代次；自行下载的词库没有人替换，升级抬高词库版本后宿主只能继续用旧的。--update 读出已有状态记录的词库目录，按已安装的词库锁核对；不符时加 --download 在旁边另建一份新词库目录，与旧目录一致的几项直接链接过去，只取回缺失或不符的几项，旧目录一个文件都不动。锁已去掉的 dict_pinyin.dat 不算不符：宿主校验词库时自己把它从原目录删掉。随后请两个宿主关掉输入会话，用 msime-linux-prepare --refresh 切到新代次并回放用户词库，再让它们重新打开。已有状态时给 --download 即视为 --update。
 """
 from __future__ import annotations
 
@@ -28,7 +28,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import threading
 import time
@@ -43,9 +42,6 @@ PANEL_RESTORE_LIMIT = 64 * 1024
 # Each registration step is a local D-Bus or dconf round trip; a wedged daemon must not hold up the end of setup.
 COMMAND_TIMEOUT = 10
 DOWNLOAD_TIMEOUT = 60
-# Engine dependency archives have no individual size in the dictionary lock. Keep their compressed
-# response bounded while allowing the largest currently pinned archive.
-DOWNLOAD_MAX_BYTES = 512 * 1024 * 1024
 FCITX5_INPUT_METHOD = "msime"
 FCITX5_NAME = "水杉输入法"
 IBUS_ENGINE = "msime-linux"
@@ -116,9 +112,12 @@ def digest(path: Path) -> str:
 # The Engine's helpcode tables live in this subdirectory of the resource directory; the host's verification lets it through (crates/client-core/src/resources.rs).
 HELPCODE_DIRECTORY = "helpcodes"
 
+# Files an earlier lock pinned and the current one no longer does. The host's verification deletes such a regular file in place instead of refusing the directory (RETIRED_ARTIFACTS in crates/client-core/src/resources.rs), so a directory still holding one is usable as it is. Exact names only, and only as a regular file: a directory or symlink by that name is refused by the host and reported here too.
+RETIRED_ARTIFACTS = frozenset({"dict_pinyin.dat"})
+
 
 def unexpected_entries(directory: Path, lock: dict) -> list[str]:
-    """目录里锁之外的条目。宿主要求词库目录恰好是锁里那几项，多一个文件就拒绝整份词库；下载补不掉它们，得由用户移走。"""
+    """目录里锁之外的条目。宿主要求词库目录恰好是锁里那几项，多一个文件就拒绝整份词库；下载补不掉它们，得由用户移走。例外是锁已去掉的旧词库文件（RETIRED_ARTIFACTS，换成 Rust Engine 之后的 dict_pinyin.dat）：宿主校验时自己把它删掉，这里不算。"""
     if not directory.is_dir():
         return []
     names = {artifact["name"] for artifact in lock["artifacts"]}
@@ -126,6 +125,7 @@ def unexpected_entries(directory: Path, lock: dict) -> list[str]:
         f"{entry.name} 不在词库锁中或不是普通文件，宿主会拒绝这份词库；请把它移出 {directory}"
         for entry in sorted(os.scandir(directory), key=lambda item: item.name)
         if not (entry.name == HELPCODE_DIRECTORY and entry.is_dir(follow_symlinks=False))
+        and not (entry.name in RETIRED_ARTIFACTS and entry.is_file(follow_symlinks=False))
         and (entry.name not in names or not entry.is_file(follow_symlinks=False))
     ]
 
@@ -133,7 +133,7 @@ def unexpected_entries(directory: Path, lock: dict) -> list[str]:
 def verify_directory(directory: Path, lock: dict) -> list[str]:
     """锁文件与目录不符之处，逐条列出；空列表表示这份词库可用。
 
-    与宿主的校验一致，锁之外的条目也算：升级去掉某项词库时旧文件会留在下载目录里，在这里报出来，而不是等宿主拒绝后只剩一句笼统的失败。"""
+    与宿主的校验一致，锁之外的条目也算：升级去掉某项词库时旧文件会留在下载目录里，在这里报出来，而不是等宿主拒绝后只剩一句笼统的失败。宿主自己删掉的 RETIRED_ARTIFACTS 不算。"""
     problems = unexpected_entries(directory, lock)
     for artifact in lock["artifacts"]:
         name = artifact["name"]
@@ -148,15 +148,6 @@ def verify_directory(directory: Path, lock: dict) -> list[str]:
         if digest(path) != artifact["sha256"]:
             problems.append(f"{name} SHA-256 不符")
     return problems
-
-
-def dependency_for(engine_path: str, engine_lock: dict) -> dict | None:
-    """锁里没有 URL 的那一项来自引擎源码树，找出它属于哪个已固定的依赖归档。"""
-    for dependency in engine_lock.get("dependencies", []):
-        prefix = dependency.get("path", "")
-        if prefix and engine_path.startswith(prefix + "/"):
-            return dependency
-    return None
 
 
 def fetch(url: str, destination: Path, maximum: int) -> None:
@@ -180,64 +171,31 @@ def fetch(url: str, destination: Path, maximum: int) -> None:
         raise
 
 
-def download_artifacts(lock: dict, engine_lock: dict | None, directory: Path) -> None:
+def download_artifacts(lock: dict, directory: Path) -> None:
     """按锁下载并校验，全部通过后才发布到目标目录。校验不过或下载中断即中止，目标目录一个文件都不动，不留半份词库。
 
     先在同一文件系统的临时目录里备齐并逐个校验，再逐个改名发布。改名替换的是目录项而不是文件内容，所以更新时从旧词库目录硬链接过来的文件被替换后，旧目录里那一份不受影响。"""
+    pending = [
+        artifact
+        for artifact in lock["artifacts"]
+        if not ((directory / artifact["name"]).is_file() and digest(directory / artifact["name"]) == artifact["sha256"])
+    ]
+    # Checked before the first request, so a lock the setup cannot satisfy costs no download.
+    unreachable = [artifact["name"] for artifact in pending if not artifact.get("url")]
+    if unreachable:
+        raise SystemExit(f"{'、'.join(unreachable)} 在词库锁里没有下载地址，无法取回；请用 --resources 指向一份已备齐的词库目录。")
     directory.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=directory.parent) as staging_name:
         staging = Path(staging_name)
         verified = []
-        for artifact in lock["artifacts"]:
+        for artifact in pending:
             name = artifact["name"]
-            target = directory / name
-            if target.is_file() and digest(target) == artifact["sha256"]:
-                continue
             staged = staging / name
-            url = artifact.get("url", "")
-            if url:
-                print(f"下载 {name}")
-                fetch(url, staged, artifact["size"])
-            else:
-                engine_path = artifact.get("engine_path", "")
-                dependency = dependency_for(engine_path, engine_lock or {})
-                if dependency is None:
-                    raise SystemExit(
-                        f"{name} 在词库锁里没有下载地址，它来自引擎源码树 "
-                        f"({engine_path or '未记录路径'})，而本机没有可用的 engine-lock.json。"
-                        "请用 --resources 指向一份已备齐的词库目录。"
-                    )
-                print(f"取 {name}（来自 {dependency['repository']} 的固定归档）")
-                archive = staging / "dependency.tar.gz"
-                fetch(dependency["archive"], archive, DOWNLOAD_MAX_BYTES)
-                if digest(archive) != dependency["sha256"]:
-                    raise SystemExit(f"{dependency['repository']} 归档校验失败，已中止")
-                member_suffix = engine_path[len(dependency["path"]) + 1 :]
-                with tarfile.open(archive, "r:gz") as source:
-                    member = next(
-                        (
-                            item
-                            for item in source.getmembers()
-                            if item.isfile() and item.name.split("/", 1)[-1] == member_suffix
-                        ),
-                        None,
-                    )
-                    if member is None:
-                        raise SystemExit(f"固定归档里没有 {member_suffix}，已中止")
-                    extracted = source.extractfile(member)
-                    if extracted is None:
-                        raise SystemExit(f"无法读取归档中的 {member_suffix}，已中止")
-                    with staged.open("wb") as handle:
-                        size = 0
-                        while block := extracted.read(CHUNK):
-                            size += len(block)
-                            if size > artifact["size"]:
-                                raise SystemExit(f"{name} 解压后超过 {artifact['size']} 字节限制")
-                            handle.write(block)
-                archive.unlink()
+            print(f"下载 {name}")
+            fetch(artifact["url"], staged, artifact["size"])
             if digest(staged) != artifact["sha256"]:
                 raise SystemExit(f"{name} 校验失败，已中止；目标目录未改动")
-            verified.append((staged, target))
+            verified.append((staged, directory / name))
         for staged, target in verified:
             staged.replace(target)
 
@@ -276,20 +234,13 @@ def anonymous_account_state(state: Path) -> bool:
     )
 
 
-def load_engine_lock(prefix: Path, lock_file: Path) -> dict | None:
-    for path in (prefix / "share/msime-client/engine-lock.json", lock_file.parent / "engine-lock.json"):
-        if path.is_file():
-            return json.loads(path.read_text())
-    return None
-
-
-def fetch_missing(lock: dict, engine_lock: dict | None, resources: Path, in_use: Path | None = None) -> list[str]:
+def fetch_missing(lock: dict, resources: Path, in_use: Path | None = None) -> list[str]:
     """按锁取回缺失或不符的词库，返回取回之后仍然不符之处。网络失败时目标目录不变；有下载补不掉的多余条目时不下载。in_use 是更新时输入法正在用、这里不写入的那份目录。"""
     unexpected = unexpected_entries(resources, lock)
     if unexpected:
         return unexpected
     try:
-        download_artifacts(lock, engine_lock, resources)
+        download_artifacts(lock, resources)
     except OSError as error:
         raise SystemExit(f"下载失败：{error}\n词库目录未改动：{in_use or resources}")
     return verify_directory(resources, lock)
@@ -460,7 +411,7 @@ def run_refresh(prefix: Path, options_file: Path, document: dict, resources: Pat
         staged.unlink(missing_ok=True)
 
 
-def update_dictionaries(prefix: Path, lock_file: Path, lock: dict, options_file: Path, download: bool) -> int:
+def update_dictionaries(prefix: Path, lock: dict, options_file: Path, download: bool) -> int:
     """把已有状态记录的那份词库补到已安装的锁，再切换代次并回放用户词库。"""
     document = read_options(options_file)
     resources = recorded_path(document, "resources", options_file)
@@ -485,7 +436,7 @@ def update_dictionaries(prefix: Path, lock_file: Path, lock: dict, options_file:
             target = staged_resources(resources, lock)
         except OSError as error:
             raise SystemExit(f"无法建立新词库目录：{error}\n词库目录未改动：{resources}")
-        remaining = fetch_missing(lock, load_engine_lock(prefix, lock_file), target, resources)
+        remaining = fetch_missing(lock, target, resources)
         if remaining:
             print_problems("下载后仍不完整：", remaining)
             return 1
@@ -1103,7 +1054,7 @@ def main() -> int:
         )
     lock = json.loads(lock_file.read_text())
     if update:
-        return update_dictionaries(prefix, lock_file, lock, options_file, arguments.download)
+        return update_dictionaries(prefix, lock, options_file, arguments.download)
 
     if arguments.resources:
         resources = arguments.resources.expanduser()
@@ -1125,7 +1076,7 @@ def main() -> int:
         )
         return 1
     if problems:
-        remaining = fetch_missing(lock, load_engine_lock(prefix, lock_file), resources)
+        remaining = fetch_missing(lock, resources)
         if remaining:
             print_problems("下载后仍不完整：", remaining)
             return 1

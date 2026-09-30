@@ -10,17 +10,21 @@ int main() {
         // Every provider offered as an HTTPS multipart preset must use the batch request path.
         // Falling through starts macOS Speech and silently ignores the selected endpoint and token.
         for (NSString *provider in @[@"openai", @"groq", @"siliconflow", @"everyapi", @"mistral", @"cloud"])
-            assert(MSIMEVoiceUsesNativeHTTPProvider(provider, NO, NO));
-        for (NSString *provider in @[@"doubao", @"system", @"unknown", @""])
-            assert(!MSIMEVoiceUsesNativeHTTPProvider(provider, NO, NO));
-        assert(!MSIMEVoiceUsesNativeHTTPProvider(@"everyapi", YES, NO));
-        assert(!MSIMEVoiceUsesNativeHTTPProvider(@"local", NO, NO));
-        assert(MSIMEVoiceUsesNativeHTTPProvider(@"local", NO, YES));
-        // An installed model directory streams through the helper; a Whisper file, another provider or an external socket does not.
+            assert(MSIMEVoiceUsesNativeHTTPProvider(provider, NO));
+        for (NSString *provider in @[@"doubao", @"system", @"unknown", @"", @"local"])
+            assert(!MSIMEVoiceUsesNativeHTTPProvider(provider, NO));
+        assert(!MSIMEVoiceUsesNativeHTTPProvider(@"everyapi", YES));
+        // An installed model directory streams through the helper; any other local path, another provider or an external socket does not.
         assert(MSIMEVoiceUsesLocalModelHelper(@"local", NO, YES) && MSIMEVoiceUsesLocalModelHelper(@"Local", NO, YES));
         assert(!MSIMEVoiceUsesLocalModelHelper(@"local", NO, NO) && !MSIMEVoiceUsesLocalModelHelper(@"local", YES, YES));
         for (NSString *provider in @[@"doubao", @"system", @"openai", @""])
             assert(!MSIMEVoiceUsesLocalModelHelper(provider, NO, YES));
+        // `local` naming no installed model directory (a Whisper .bin from before the model catalog, say) refuses to record instead of reaching a network or system recognizer; a model directory or an external socket does not.
+        assert(MSIMEVoiceLocalModelMissing(@"local", NO, NO) && MSIMEVoiceLocalModelMissing(@"Local", NO, NO));
+        assert(!MSIMEVoiceLocalModelMissing(@"local", NO, YES) && !MSIMEVoiceLocalModelMissing(@"local", YES, NO));
+        for (NSString *provider in @[@"doubao", @"system", @"openai", @""])
+            assert(!MSIMEVoiceLocalModelMissing(provider, NO, NO));
+        assert(!MSIMEVoiceUsesNativeHTTPProvider(@"local", NO) && !MSIMEVoiceUsesLocalModelHelper(@"local", NO, NO));
         // Every provider this host calls with the stored token asks for one before recording; an unset provider preference means Doubao.
         for (NSString *provider in @[@"openai", @"groq", @"siliconflow", @"everyapi", @"mistral", @"cloud", @"doubao", @"Doubao"]) {
             assert(MSIMEVoiceASRTokenMissing(provider, nil, NO) && MSIMEVoiceASRTokenMissing(provider, @"", NO));

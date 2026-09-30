@@ -19,11 +19,8 @@
 #include <string_view>
 #include <vector>
 
-namespace metasequoia::voice {
-class AudioCapture;
-}
-
 namespace msime::windows {
+class AudioCapture;
 class LocalAsrStream;
 
 struct VoiceInputConfig {
@@ -114,7 +111,7 @@ private:
   void cancel_session(bool failed);
   // Stamps the time a local model was last used, for release_idle_local_model(). Any thread.
   void note_local_model_use();
-  // On-device recognition of a finished batch recording (a Whisper model file; installed model directories stream through LocalAsrStream instead), with the user's dictionary words as hotwords. Runs on the recognition worker.
+  // On-device recognition of a finished batch recording, reached only when asr_model_path is not an installed model directory (those stream through LocalAsrStream); shared/voice refuses such a path and the person is told the model is unusable (voice_local_failure). Runs on the recognition worker.
   std::string recognize_local(const std::vector<float> &samples,
                               const VoiceInputConfig &config,
                               const std::shared_ptr<std::atomic_bool> &cancelled);
@@ -127,8 +124,8 @@ private:
   LeaseProvider lease_provider_;
   Sender sender_;
   ConfigProvider config_provider_;
-  metasequoia::voice::AudioCapture *capture_ = nullptr;
-  std::unique_ptr<metasequoia::voice::AudioCapture> capture_owner_;
+  AudioCapture *capture_ = nullptr;
+  std::unique_ptr<AudioCapture> capture_owner_;
   CuePlayer cue_player_;
   std::atomic<bool> recording_{false};
   std::atomic<bool> starting_{false};

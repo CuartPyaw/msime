@@ -186,7 +186,7 @@ int main(int argc, char **argv) {
         assert([panel valueForKey:@"waveTimer"] == nil); // The animation stops with the panel.
         [panel setTranscript:@"late preview"];
         assert(!panel.visible && !panel.transcriptText.length);
-        for (NSUInteger failure = MSIMEVoiceFailureMicrophonePermission; failure <= MSIMEVoiceFailureMissingToken; ++failure) {
+        for (NSUInteger failure = MSIMEVoiceFailureMicrophonePermission; failure <= MSIMEVoiceFailureMissingLocalModel; ++failure) {
             [panel setListening:YES]; [panel setTranscript:@"synthetic discard on failure"];
             [panel showFailure:(MSIMEVoiceFailure)failure];
             [panel setTranscript:@"late preview during failure"];
@@ -199,6 +199,9 @@ int main(int argc, char **argv) {
         }
         [panel showFailure:MSIMEVoiceFailureMissingToken];
         assert([panel.statusText isEqual:@"请先在设置的“语音输入”分区填写当前 ASR 提供商的 API Token。"]);
+        [panel dismissFailure];
+        [panel showFailure:MSIMEVoiceFailureMissingLocalModel];
+        assert([panel.statusText isEqual:@"请先在设置的“语音输入”分区下载或选择本地语音模型。"]);
         [panel dismissFailure];
         // The provider's own account of the failure takes the transcript area under the category's status line, and late previews still cannot replace it.
         [panel setListening:YES];

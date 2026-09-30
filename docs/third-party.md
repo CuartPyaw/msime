@@ -8,23 +8,34 @@
 
 源码为 **GPL-3.0-only**，全文在根目录 [LICENSE](../LICENSE)。Rust workspace 的 `license` 字段、Linux 打包元数据和共享客户端都声明同一许可证。
 
-## 固定上游（`engine-lock.json`）
+## 输入引擎（`crates/engine`）
 
-锁文件记录每个归档的 commit 与 SHA-256，`scripts/fetch_engine.py` 校验后展开到被忽略的 `vendor/MSIME-Engine/`。下列 SPDX 标识取自各仓库在 GitHub 上的许可证声明，于 2026-09-20 核对：
+`crates/engine`（`msime-engine`）是本项目自己的代码，按 GPL-3.0 分发。它是 [`metasequoiaime/msime-engine`](https://github.com/metasequoiaime/msime-engine)（GPL-3.0）C++ 实现的 Rust 移植；移植时对照的参考提交记在 `tools/engine-golden/README.md`。构建时不再取回任何上游源码归档，原先随 Engine 归档进来的组件去向如下：
 
-| 组件 | 许可证 | 说明 |
+| 组件 | 许可证 | 现状 |
 | --- | --- | --- |
-| `metasequoiaime/msime-engine` | GPL-3.0 | 输入算法与组合状态 |
-| `metasequoiaime/Google-PinyinIME-Rev` | Apache-2.0 | Google Pinyin IME 的修订分支 |
-| `nemtrif/utfcpp` | BSL-1.0 | UTF-8 处理 |
-| `mackron/miniaudio` | 上游为公有领域 / MIT-0 双许可 | 音频采集；GitHub 分类器未给出单一标识，以归档内许可证文本为准 |
-| `ggml-org/whisper.cpp` | MIT | 本地语音识别 |
+| `metasequoiaime/Google-PinyinIME-Rev` | Apache-2.0 | 已移除。Google 整句解码器和它的 `dict_pinyin.dat` 随 C++ Engine 一并退役，整句候选只来自词格 |
+| `nemtrif/utfcpp` | BSL-1.0 | 引擎不再使用。Windows TSF 仍通过 vcpkg 引入它，见[各平台引入的第三方 SDK](#各平台引入的第三方-sdk) |
+| `mackron/miniaudio` | 公有领域 / MIT-0 双许可 | 不再随引擎来。Windows 提示音（`platforms/windows/src/voice/CuePlayer.cpp`）用的单头文件固定在 `platforms/windows/third_party/miniaudio/`，许可证全文在同目录 `LICENSE`；麦克风采集改由下表的 `cpal` 负责 |
+| `ggml-org/whisper.cpp` | MIT | 已移除。Whisper 本地文件识别不再提供，本地语音识别只走下文的 sherpa-onnx |
+| Zinnia（Taku Kudo） | BSD-3-Clause | 不再编译 C++ 版。`crates/engine/src/handwriting/` 是其识别器的 Rust 移植，桌面包照旧携带 `Zinnia-LICENSE.txt` |
+| 手写模型 `handwriting-zh_CN.model` | LGPL-2.1 | 由 `resources/handwriting-model.lock.json` 固定长度与 SHA-256，许可证全文 `HandwritingModel-LICENSE.txt` 与模型一同固定、一同分发 |
+| Boost、fmt、spdlog | 各自上游许可证 | 只为编译 C++ Engine 而引入，已从各平台的依赖清单去掉；Windows TSF 自己用的 fmt 保留 |
 
-五个归档均可匿名下载，不需要凭据，`fetch_engine.py` 使用 `urllib.request` 直接取回。
+引擎移植引入的 Rust crate（版本以 `Cargo.lock` 为准）：
+
+| crate | 版本 | 许可证 | 用途 |
+| --- | --- | --- | --- |
+| `rusqlite`（`bundled`） | 0.40 | MIT；打包进来的 SQLite 本身属公有领域 | 词库、学习日志与个人词库。`bundled` 把 SQLite 编进库里，不再链接系统或 vcpkg 的 SQLite |
+| `lru` | 0.16 | MIT | 查询结果缓存（`crates/engine/src/cache.rs`） |
+| `lunar-lite` | 0.1 | MIT | 日期时间快捷模式里的农历（`crates/engine/src/local/date_time.rs`） |
+| `wana_kana` | 4 | MIT | 日语罗马字转假名（`crates/engine/src/japanese/romaji.rs`） |
+| `cpal` | 0.18 | Apache-2.0 | `host-api` 的麦克风采集（iOS 与 HarmonyOS 不链接）。Linux 上经 ALSA 的 `libasound` 访问声卡，构建需要 `libasound2-dev` 与 `pkg-config` |
+| `rubato` | 5 | MIT OR Apache-2.0 | 把采集到的音频重采样到识别所需的采样率 |
 
 ## 随包资源（`resources/desktop-dictionary.lock.json`）
 
-锁文件固定十个产物的长度和 SHA-256。其中九个带可匿名下载的 URL：八个来自 `metasequoiaime/msime-engine` 的 `dict-v2.0.1` 发布，`sentence-model.safetensors` 来自 `metasequoiaime/chinese-ime-lm` 的 `model-v1`——两者是不同的仓库和不同的发布，以锁文件里各自的 `url` 为准。第十个 `dict_pinyin.dat` 没有下载地址，改用 `engine_path` 从 `engine-lock.json` 固定的那份 `googlepinyinime-rev` 归档里只取这一个文件。**锁文件本身不记录许可证字段**，来源信息分散在别处：
+锁文件固定九个产物的长度和 SHA-256，每个都带可匿名下载的 URL：八个来自 `metasequoiaime/msime-engine` 的 `dict-v2.0.1` 发布，`sentence-model.safetensors` 来自 `metasequoiaime/chinese-ime-lm` 的 `model-v1`——两者是不同的仓库和不同的发布，以锁文件里各自的 `url` 为准。原先的第十个产物 `dict_pinyin.dat` 只供 Google 整句解码器使用，随解码器一起去掉。**锁文件本身不记录许可证字段**，来源信息分散在别处：
 
 | 产物 | 大小 | 已知来源 |
 | --- | --- | --- |
@@ -36,7 +47,6 @@
 | `dict_japanese.dat` | 66.5 MB | Mozc 的开源版日文词库，构成见[下一节](#日文词库的分发义务) |
 | `mozc_dictionary_oss_README.txt` | 5.8 KB | 上述词库的许可证全文。**分发时必须一同携带**，理由见下节 |
 | `dictionary-manifest.json` | 2.5 KB | 资源清单 |
-| `dict_pinyin.dat` | 1.1 MB | 拼音数据，取自 `Google-PinyinIME-Rev` 归档的 `data/dict_pinyin.dat`，许可证见上一节 |
 | `sentence-model.safetensors` | 4.5 MB | 整句重排模型，权重为 Apache-2.0；训练语料与分发要求见[下下节](#整句重排模型的署名要求) |
 
 `Artifact` 结构体带 `#[serde(deny_unknown_fields)]`，所以在锁文件里直接加 `license` 字段会让解析失败；要记录许可证需要同时修改 `crates/client-core/src/resources.rs`。在那之前，新增或更换随包资源时请把来源与授权写进本文件。
@@ -93,12 +103,12 @@ print(json.loads(f.read(n))["__metadata__"]["attribution"])
 | 来源仓库 | [metasequoiaime/MSIME-Windows](https://github.com/metasequoiaime/MSIME-Windows) 的 `engine/helpcode/helpcodes/jiajia_helpcode.txt` |
 | 来源提交 | `566ff8b8320e7f56256544b2b1f0da8c8e7f037e` |
 | 内容摘要 | `sha256:6538d744547b590630e93160198ac16bf76112a51ec78b4dbae505b914761879`，7968 行 |
-| 注入方式 | `engine-lock.json` 列出的 `scripts/apply_engine_jiajia_helpcode.py`，在准备 Engine 时写入 `vendor/MSIME-Engine/helpcode/helpcodes/` |
+| 登记方式 | `crates/engine/src/assets.rs` 的 `HELPCODES` 把它登记为第六套方案 `jiajia`，资源目录里的路径是 `helpcodes/jiajia_helpcode.txt` |
 | 许可状态 | **本仓库的 GPL-3.0 不覆盖这张表的内容** |
 
-按 NOTICE.md 的记录，本表的一部分条目直接来自拼音加加 5.x 安装包内的数据表 `fzm.bin`，而拼音加加是商业软件；来源仓库的 `engine/helpcode/NOTICE.md` 写明六张辅助码表没有任何一项拿到明确的再分发授权，并指出 `jiajia` 一行与其余五张性质不同（其余各表只是复现已发表的输入方案）。**在权利澄清之前不要假定这张表可以自由再分发**，打包发布前需确认它在目标渠道是否可接受。退出方式也记在 NOTICE.md 里：去掉 `engine-lock.json` 中的 `scripts/apply_engine_jiajia_helpcode.py` 即可让整套方案不进入产物，同时把它登记进 `scripts/test-engine-overlay-registry.py` 的 `RETIRED` 并写明原因（例如“该渠道未获再分发许可”），或者直接从 `scripts/` 删掉这个脚本，否则覆盖层登记检查（以及跑它的 `verify-local.sh`）会报红；设置页随之少一个选项，Engine 自带的另外五套不受影响。
+按 NOTICE.md 的记录，本表的一部分条目直接来自拼音加加 5.x 安装包内的数据表 `fzm.bin`，而拼音加加是商业软件；来源仓库的 `engine/helpcode/NOTICE.md` 写明六张辅助码表没有任何一项拿到明确的再分发授权，并指出 `jiajia` 一行与其余五张性质不同（其余各表只是复现已发表的输入方案）。**在权利澄清之前不要假定这张表可以自由再分发**，打包发布前需确认它在目标渠道是否可接受。退出方式：从 `HELPCODES` 去掉 `jiajia` 那一行，并让该渠道的资源打包不再带上这张表；设置页随之少一个选项，另外五套不受影响。
 
-构成这张表所用的部件拆分与笔顺数据另有来源（rime-radical-pinyin，GPL-3.0，上游含 chaizi/CC-BY-3.0、CHISE/GPL-2+、yi-bai/ids/MIT；笔顺来自 cnchar，MIT），逐条同样见 NOTICE.md。Engine 自带的五套辅助码表随 `engine-lock.json` 锁定的归档一起来，来源说明在 `vendor/MSIME-Engine/helpcode/NOTICE.md`。
+构成这张表所用的部件拆分与笔顺数据另有来源（rime-radical-pinyin，GPL-3.0，上游含 chaizi/CC-BY-3.0、CHISE/GPL-2+、yi-bai/ids/MIT；笔顺来自 cnchar，MIT），逐条同样见 NOTICE.md。另外五套辅助码表原先随 Engine 归档而来，现在同样放在 `resources/helpcodes/`，来源说明是从 Engine 原样带过来的 [`resources/helpcodes/ENGINE-NOTICE.md`](../resources/helpcodes/ENGINE-NOTICE.md)：它们同样没有拿到明确的再分发授权。
 
 ## 背单词词书（`resources/wordbook.lock.json`）
 
@@ -193,14 +203,14 @@ kaikki 每周覆盖同一个 URL，所以能复现构建的是 `filtered_input`�
 | --- | --- | --- |
 | Android | `com.google.mlkit:digital-ink-recognition:19.0.0` | **Google 的 ML Kit 服务条款，不是开源许可证** |
 | Android | AndroidX、`com.google.android.material` | Apache-2.0 |
-| Android | vcpkg 提供的 Boost、fmt、spdlog、SQLite3（原生库，清单在 `platforms/android/vcpkg.json`） | 各自上游许可证 |
+| Android | vcpkg 提供的 nlohmann/json（原生库，清单在 `platforms/android/vcpkg.json`） | MIT |
 | iOS | `MLKitDigitalInkRecognition` 8.0.0（CocoaPods，链接进键盘扩展 target） | **Google 的 ML Kit 服务条款，不是开源许可证** |
 | macOS | Sparkle 2.9.6 | 以上游发布附带的许可证为准；框架不随仓库分发，由构建者按 `platforms/macos/README.md` 记录的 SHA-256 自行取得 |
-| Windows | vcpkg 提供的 Boost、libcurl、fmt、spdlog、SQLite3、nlohmann/json、utfcpp（清单与 baseline 在 `platforms/windows/vcpkg.json`） | 各自上游许可证；通知由 `platforms/windows/Collect-Notices.ps1` 收集 |
+| Windows | vcpkg 提供的 libcurl、fmt、nlohmann/json、utfcpp（清单与 baseline 在 `platforms/windows/vcpkg.json`） | 各自上游许可证；通知由 `platforms/windows/Collect-Notices.ps1` 收集 |
 | Linux | IBus / Fcitx5、GTK 栈、libcurl、ICU、xkbcommon、nlohmann/json、X11 与 Wayland 客户端库 | 各自上游许可证，按发行版依赖引入 |
 | 桌面 | Tauri、React、Vite 等 | 见 `pnpm-lock.yaml` 与各自上游 |
 
-两个移动平台的 ML Kit 是识别手写笔迹用的。桌面与 Linux 不使用它，改用 Engine 随附的离线 Zinnia 识别器和模型；Android 的原生构建明确把 Zinnia 及其模型路径排除在外（`platforms/android/verify-native.sh`）。
+两个移动平台的 ML Kit 是识别手写笔迹用的。桌面与 Linux 不使用它，改用 `crates/engine` 里移植的离线 Zinnia 识别器和上面固定的模型；Android 的原生构建明确把 Zinnia 及其模型路径排除在外（`platforms/android/verify-native.sh`）。
 
 仓库不捆绑任何字体文件；界面使用系统字体，`Noto Sans SC` 与 `Microsoft YaHei` 只是回退字体名。
 

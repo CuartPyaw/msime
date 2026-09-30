@@ -31,10 +31,11 @@ foreach ($prefix in @($X64Dependencies, $X86Dependencies)) {
     }
 }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
-foreach ($relative in @('Cargo.toml', 'vendor/MSIME-Engine/CMakeLists.txt',
+foreach ($relative in @('Cargo.toml', 'crates/engine/Cargo.toml',
                          'platforms/windows/CMakeLists.txt', 'platforms/windows/tsf/CMakeLists.txt',
                          'platforms/windows/settings/MSIME.Settings.vcxproj',
-                         'apps/desktop/package.json', 'scripts/fetch_voice_runtime.py')) {
+                         'apps/desktop/package.json', 'scripts/fetch_voice_runtime.py',
+                         'scripts/fetch_handwriting_model.py')) {
     if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot $relative) -PathType Leaf)) {
         throw "Missing Client build source: $relative"
     }
@@ -73,7 +74,7 @@ try {
         Invoke-ClientBuild cmake @('-E', 'copy_if_different', (Join-Path $release 'msime_host_api.dll'), $bin)
         if ($arch -eq 'x64') {
             Invoke-ClientBuild cargo @('build', '--locked', '--release', '--target', $triple,
-                '-p', 'msime-engine-bridge', '--bin', 'MetasequoiaImeDictionaryReplay')
+                '-p', 'msime-engine', '--bin', 'MetasequoiaImeDictionaryReplay')
             Invoke-ClientBuild cmake @('-E', 'copy_if_different',
                 (Join-Path $release 'MetasequoiaImeDictionaryReplay.exe'), $bin)
             Invoke-ClientBuild cmake @('-E', 'copy_if_different',
@@ -135,6 +136,9 @@ try {
     Invoke-ClientBuild cmake (@('-E', 'copy_if_different') +
         @($voiceRuntimeLibraries | ForEach-Object { Join-Path $voiceRuntime $_ }) +
         @((Join-Path $RepoRoot 'target/windows-full/x64/bin')))
+    # The offline handwriting model and its LGPL-2.1 licence, pinned by resources/handwriting-model.lock.json. Prepare-PackageFiles.ps1 stages both beside the Server from target/handwriting-model and Collect-Notices.ps1 reads the licence there. The fetch discards anything that does not match the lock and leaves a matching copy alone.
+    Invoke-ClientBuild python @((Join-Path $RepoRoot 'scripts/fetch_handwriting_model.py'),
+        '--out', (Join-Path $RepoRoot 'target/handwriting-model'))
     foreach ($arch in @('x64', 'x86')) {
         $bin = Join-Path $RepoRoot "target/windows-full/$arch/bin"
         $prefix = if ($arch -eq 'x64') { $X64Dependencies } else { $X86Dependencies }

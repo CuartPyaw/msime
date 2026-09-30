@@ -104,25 +104,18 @@ int main(int argc, char **argv) {
         options[@"asr_token"] = @"fixture-token"; options[@"asr_provider"] = @"doubao";
         assert(![[MSIMEHTTPVoiceRequest alloc] initWithOptions:options error:nil]);
 
-        // The on-device provider is accepted on its model file alone: no endpoint, no token. What it must
-        // not accept is a model that is missing, a directory, or a relative path, because each of those
-        // fails only once the user is holding the shortcut and waiting for text.
+        // The on-device provider is never a batch request: an installed model streams through the helper, and a stale Whisper model file from before the model catalog must be refused here rather than recognised somewhere else.
         NSMutableDictionary *local = [@{@"asr_provider": @"local", @"language": @"zh-cn"} mutableCopy];
         NSString *directory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
         assert([NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES
                                                         attributes:nil error:nil]);
         NSString *file = [directory stringByAppendingPathComponent:@"ggml-model.bin"];
         assert([NSFileManager.defaultManager createFileAtPath:file contents:NSData.data attributes:nil]);
-        for (NSString *rejected in @[@"", @"ggml-model.bin", directory,
+        for (NSString *rejected in @[@"", @"ggml-model.bin", directory, file,
                                      [directory stringByAppendingPathComponent:@"absent.bin"]]) {
             local[@"asr_model_path"] = rejected;
             assert(![[MSIMEHTTPVoiceRequest alloc] initWithOptions:local error:nil]);
         }
-        local[@"asr_model_path"] = file;
-        MSIMEHTTPVoiceRequest *localRequest = [[MSIMEHTTPVoiceRequest alloc] initWithOptions:local error:nil];
-        // A build without the recognizer must refuse the provider rather than quietly recognising elsewhere.
-        assert((localRequest != nil) == MSIMEVoiceLocalWhisperBuilt());
-        assert(!localRequest || localRequest.sampleLimit == msime::voice::local_asr_sample_limit);
         assert([NSFileManager.defaultManager removeItemAtPath:directory error:nil]);
     }
 }

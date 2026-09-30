@@ -8,7 +8,7 @@
 //!
 //! usage: japanese_conversion <verified-dictionary-directory>
 
-use msime_engine_bridge::{prepare_options, Command, Session};
+use msime_engine::host::{prepare_options, Command, Session};
 use msime_input_runtime::{Action, Runtime};
 
 const KEYS: &str = "nihon";

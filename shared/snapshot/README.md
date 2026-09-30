@@ -6,4 +6,4 @@ This package owns the platform-neutral half of the dictionary snapshot contract:
 
 Run locally: `swift test --package-path shared/snapshot`. No network requests, credentials, or Engine mutations are performed by the tests.
 
-Snapshot preparation and activation inside the macOS input method go through `shared/apple-bridge/DictionarySnapshotBridge` and the host-api snapshot interface, not through this package; see `platforms/macos/LOCAL_SNAPSHOT_INTEGRATION.md` for that side of the contract.
+Snapshot preparation and activation inside the macOS input method go through the host-api snapshot interface (`msime_client_snapshot_*`), not through this package; see `platforms/macos/LOCAL_SNAPSHOT_INTEGRATION.md` for that side of the contract.

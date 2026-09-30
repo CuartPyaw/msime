@@ -5,7 +5,7 @@
 
 int main() {
   using msime::linux_host::candidate_local_mode_label;
-  // Every non-default name the Engine bridge emits in `local_mode`.
+  // Every non-default name the engine emits in `local_mode`.
   for (const char *mode :
        {"unicode", "date_time", "quick_phrase", "emoji", "kaomoji",
         "super_jianpin", "temporary_english", "temporary_japanese"}) {

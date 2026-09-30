@@ -4864,7 +4864,7 @@ group("quietening other applications is off unless asked for", () => {
 group("a staged resource copy is trusted only while it matches the package", () => {
   const set: StagedArtifact[] = [
     { name: "msime.db", size: 107552768 },
-    { name: "dict_pinyin.dat", size: 1068442 },
+    { name: "others.db", size: 1495040 },
   ];
   const token: string = StagedResourcePolicy.generationToken(set);
   check(token.length > 0, "a package can be described");
@@ -4876,7 +4876,7 @@ group("a staged resource copy is trusted only while it matches the package", () 
   // changed, and the shared verification then refused the directory outright.
   const upgraded: StagedArtifact[] = [
     { name: "msime.db", size: 107552769 },
-    { name: "dict_pinyin.dat", size: 1068442 },
+    { name: "others.db", size: 1495040 },
   ];
   check(
     StagedResourcePolicy.needsStaging(token, StagedResourcePolicy.generationToken(upgraded)) ===
@@ -4893,6 +4893,22 @@ group("a staged resource copy is trusted only while it matches the package", () 
   check(
     StagedResourcePolicy.needsStaging(token, StagedResourcePolicy.generationToken(added)) === true,
     "and one with an extra, which is the case that fails verification",
+  );
+  // The helpcode tables sit in the nested helpcodes/ directory the Engine reads; StagedResources lists them by relative path, so a package that starts shipping them, or changes one, restages.
+  const helpcodes: StagedArtifact[] = [...set, { name: "helpcodes/helpcode.txt", size: 90000 }];
+  const helpcodeToken: string = StagedResourcePolicy.generationToken(helpcodes);
+  check(helpcodeToken.length > 0, "a nested table can be described");
+  check(
+    StagedResourcePolicy.needsStaging(token, helpcodeToken) === true,
+    "a package that adds the helpcode tables is a different generation",
+  );
+  const retabled: StagedArtifact[] = [...set, { name: "helpcodes/helpcode.txt", size: 90001 }];
+  check(
+    StagedResourcePolicy.needsStaging(
+      helpcodeToken,
+      StagedResourcePolicy.generationToken(retabled),
+    ) === true,
+    "and so is one whose table changed",
   );
   check(StagedResourcePolicy.needsStaging(null, token) === true, "no marker means never staged");
 });

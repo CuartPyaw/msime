@@ -12,15 +12,15 @@ test.each([true, false])("renders the model path editor with disclosure=%s", (di
   render(
     <VoiceModelPathDisclosure
       disclosure={disclosure}
-      path="/synthetic/models/ggml.bin"
+      path="/synthetic/voice-models/sense-voice"
       onChange={vi.fn()}
     />,
   );
 
-  expect(screen.getByLabelText("Whisper 模型文件")).toBeTruthy();
+  expect(screen.getByLabelText("本地模型目录")).toBeTruthy();
   if (disclosure) {
-    expect(screen.getByText("高级：手动指定 Whisper 模型文件")).toBeTruthy();
+    expect(screen.getByText("高级：手动指定本地模型目录")).toBeTruthy();
   } else {
-    expect(screen.queryByText("高级：手动指定 Whisper 模型文件")).toBeNull();
+    expect(screen.queryByText("高级：手动指定本地模型目录")).toBeNull();
   }
 });

@@ -1,6 +1,5 @@
 #include "LocalAsr.h"
 
-#include <msime/voice/stt_service.h>
 #include <nlohmann/json.hpp>
 #include <sherpa-onnx/c-api.h>
 
@@ -36,7 +35,6 @@ namespace msime::voice {
 namespace {
 
 namespace fs = std::filesystem;
-using metasequoia::voice::VoiceError;
 
 constexpr int kSampleRate = 16000;
 constexpr int32_t kVadWindow = 512;

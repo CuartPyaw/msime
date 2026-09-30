@@ -54,7 +54,7 @@ Sparkle 驱动就绪状态、手动检查激活 accessory UI 并转发给 Sparkl
 | 文件 | 断言 | 状态 |
 | --- | --- | --- |
 | InputSourceRegistrationTests | 注册收到已安装 bundle 的 URL；父输入源找到之前不得启用输入模式 | 目标 `platforms/macos/src/input/InputSourceRegistration.mm`，CTest 目标 `input-source-registration` |
-| CandidateSelectionStateTests | 重置不得留下过期的引擎索引；分页夹具候选数够用 | CTest 目标 `candidate-selection-state`、`candidate-pagination` |
+| CandidateSelectionStateTests | 重置不得留下过期的引擎索引；分页夹具候选数够用 | 前一条由结构保证：选中项归共享运行时，宿主不再记索引，`crates/input-runtime/src/runtime.rs` 的 `refresh` 每次重建候选先把高亮归零（`CandidateSelectionState.h` 只被未参与构建的直连适配器使用，已随 C++ Engine 删除）。后一条是 CTest 目标 `candidate-pagination` |
 | FloatingToolbarPanelTests | 关掉一个开关再打开要恢复按钮 | 已对齐 |
 | FloatingToolbarPanelTests | **四个开关全关，齿轮还在** | **刻意分歧。** 参考的 `MetasequoiaFloatingToolbarItemKeys()` 只有四项，齿轮不可关；目标把齿轮也做成可开关，并多出表情与屏幕键盘两项。理由：目标的工具栏组件本来就更多，且关掉齿轮不困人——输入菜单里仍有「水杉输入法设置…」，手写与语音按钮恒常存在，工具栏不会变成空条。 |
 

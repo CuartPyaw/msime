@@ -2,7 +2,7 @@ add_library(msime-windows-pipe STATIC ../../src/ipc/PipeIo.cpp ../../src/ipc/Pip
 target_include_directories(msime-windows-pipe PUBLIC ../../src)
 target_link_libraries(msime-windows-pipe PUBLIC advapi32 msime-windows-replies)
 add_executable(windows-pipe-io ../runtime/pipe_io.cpp)
-target_include_directories(windows-pipe-io PRIVATE ../../../vendor/MSIME-Engine/contracts)
+target_include_directories(windows-pipe-io PRIVATE ../../../shared/contracts)
 target_link_libraries(windows-pipe-io PRIVATE msime-windows-pipe advapi32)
 foreach(target msime-windows-pipe windows-pipe-io)
   if(MSVC)

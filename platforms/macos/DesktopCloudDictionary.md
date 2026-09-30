@@ -24,4 +24,4 @@ The authenticated RPC implementation is shared with cloud clipboard transport, b
 
 Configure CMake with `MSIME_CLOUD_DICTIONARY_PROBE` pointing to the Cargo example, build `desktop-cloud-dictionary-interop-test`, `desktop-dictionary-provider-test-build` and `desktop-account-cancellation-test`, then run the matching CTest entries. Full dictionary snapshot restore is a separate path with its own contract; see `LOCAL_SNAPSHOT_INTEGRATION.md`.
 
-Reference baseline: MSIME-Windows default branch `develop` at `cb534a97fd19bc9656645a7baa4ee019487279a8`. The authoritative Engine pin is `engine-lock.json`.
+Reference baseline: MSIME-Windows default branch `develop` at `cb534a97fd19bc9656645a7baa4ee019487279a8`. The input engine is `crates/engine` in this repository.

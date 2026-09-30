@@ -1,14 +1,8 @@
 //! Freeze the MIT-licensed SampleIME quanpin word list into a committed evaluation set.
 //!
-//! The source lives in `vendor/MSIME-Engine`, which is gitignored and deleted wholesale by
-//! `scripts/fetch_engine.py` whenever the on-disk marker disagrees with `engine-lock.json`. An
-//! evaluation set that lived there would vanish without warning, so it is frozen into
-//! `resources/eval/` once and committed.
+//! The source is `SampleIMESimplifiedQuanPin.txt` from microsoft/Windows-classic-samples (MIT). No build reads it and it is not part of `msime.db`, so the evaluation set is frozen into `resources/eval/quanpin-words-v1.tsv` once and committed; rerunning this needs a copy of that file, not anything in this repository.
 //!
-//! Truncation is filtered with the Engine's own segmenter rather than a length threshold: the
-//! source format truncates keys at twelve characters, but shorter keys are truncated too
-//! (`chulufengma`, `shumenshul`), so only "does this key segment into exactly as many syllables as
-//! the value has characters" rejects them all.
+//! Truncation is filtered with the Engine's own segmenter rather than a length threshold: the source format truncates keys at twelve characters, but shorter keys are truncated too (`chulufengma`, `shumenshul`), so only "does this key segment into exactly as many syllables as the value has characters" rejects them all.
 //!
 //! usage: build_eval_set <SampleIMESimplifiedQuanPin.txt> <output.tsv> <engine-commit>
 
@@ -42,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
         let key = key.to_ascii_lowercase();
-        let normalized = msime_engine_bridge::normalize_full_pinyin(&key, syllables);
+        let normalized = msime_engine::host::normalize_full_pinyin(&key, syllables);
         if normalized.is_empty() {
             truncated += 1;
             continue;

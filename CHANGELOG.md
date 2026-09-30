@@ -11,7 +11,7 @@
 #### 共享层与宿主接口
 
 - 不依赖 Tauri、React 或任何平台宿主的 Rust 共享层，覆盖偏好设置、资源安装与校验、输入运行时、账号与云服务、语音、翻译、皮肤、社区资源、剪贴板、个人词库、打字统计和候选释义。
-- 通过 CXX 接入由 `engine-lock.json` 固定提交与 SHA-256 的 msime-engine；输入算法、组合状态和学习数据继续由 C++ Engine 管理，共享层只做编排。
+- 输入引擎 `crates/engine`（`msime-engine`）是纯 Rust 实现，由 C++ MSIME-Engine 移植而来，输入算法、组合状态和学习数据归它管理，共享层只做编排；已有的用户词库日志、个人词库与学习数据按原格式读写，无需迁移。
 - 版本化 C ABI（`crates/host-api`）作为所有原生宿主的唯一入口，以 `cdylib`/`staticlib`/`rlib` 三种形态提供，覆盖会话生命周期、候选与代次选择、词库快照、云词典、云剪贴板、系统字体目录、翻译提供方、语音提供方与打字统计。
 - 输入运行时统一处理焦点、候选翻页、代次选择与全半角转换，并接入固定版本的整句重排模型。
 - macOS 与 Windows 各有一层宿主支持 crate：macOS 提供面板会话、云剪贴板与云词典桥接；Windows 提供语音控制器、语音上屏策略与 Windows Ink 手写。桌面 shell 禁用 `unsafe`，平台 API 调用集中在这两个 crate 里做安全封装。
@@ -26,7 +26,7 @@
 #### macOS
 
 - InputMethodKit 输入法宿主，支持候选面板（定位、分页、悬停、行宽适配、释义布局）、内置与外部皮肤包、候选释义与翻译、云联想、悬浮工具栏、中英模式 HUD、双拼键位提示、屏幕键盘、手写、表情与符号面板、剪贴板历史面板。
-- 语音输入覆盖豆包 WSS 与 HTTP 提供方、波形面板、录音设备选择、系统静音与恢复、润色和提示音；macOS 另可选用本地 Whisper 与系统识别，音频不出设备。
+- 语音输入覆盖豆包 WSS 与 HTTP 提供方、波形面板、录音设备选择、系统静音与恢复、润色和提示音；macOS 另可选用系统识别，音频不出设备。
 - 词库安装、运行时挂载、快照与云词典，账号与云剪贴板，打字统计、诊断日志、成对标点、智能标点空格、五笔上屏策略与辅助码。
 - Sparkle 自动更新；`platforms/macos/scripts/install.sh` 完成重签名、原子替换与失败回滚，`platforms/macos/scripts/check_input_source.swift` 核查输入源注册。
 
@@ -79,7 +79,7 @@
 - 语音服务 `local` 改为基于 sherpa-onnx 的设备端识别，六个平台共用同一份模型目录与设置页。运行时 sherpa-onnx v1.13.8 按平台由 `resources/voice-runtime.lock.json` 固定 SHA-256，`scripts/fetch_voice_runtime.py` 校验后取回，宿主在首次识别时动态加载，缺少运行时的包照常启动、只把本地识别标为不可用。
 - 模型目录 `resources/local-asr-models.json` 提供三个模型：默认的中英流式 X-ASR（边说边出字，自带标点），支持中英日韩粤的 SenseVoice-Small，以及仅桌面提供、约 1 GB 的 Fun-ASR-Nano。模型不随包分发，在设置页按需下载，逐文件校验长度与 SHA-256，完整就位后才写入 `msime-model.json`，下载可取消，也可配置 HTTPS 镜像（`voice_input.asr_model_mirror`）。
 - 用户词库里自己添加的拼音词条作为热词：X-ASR 与 Fun-ASR-Nano 原生使用，SenseVoice 在识别后按拼音做近音替换（`client-core::voice::hotwords`，含 zh/z、n/l、an/ang 等模糊对）。
-- `voice_input.asr_model_path` 接受已安装的模型目录或 Whisper 模型文件，Unix、Windows 盘符、UNC 等绝对路径写法在任何系统上都能通过校验，同一份偏好文件跨平台读取不再被拒。
+- `voice_input.asr_model_path` 接受已安装的模型目录，Unix、Windows 盘符、UNC 等绝对路径写法在任何系统上都能通过校验，同一份偏好文件跨平台读取不再被拒。
 - 宿主接口新增 `msime_client_voice_hotwords`、`msime_client_voice_hotword_correct`、`msime_client_voice_local_models`、`msime_client_voice_local_model_install`、`msime_client_voice_local_model_cancel` 与 `msime_client_voice_local_model_remove`。
 - `msime-voice-local` 辅助进程通过标准输入输出上的 JSON 行协议识别，macOS 与 Linux 的输入法进程由它加载模型，自身不常驻数百 MB 的模型；空闲 120 秒释放模型，空闲 10 分钟退出。协议见 `shared/voice/README.md`，许可证见[第三方组件清单](docs/third-party.md)。
 - 识别全程不联网，只有下载模型时访问 GitHub Releases 或所配置的镜像，见[网络请求与数据流向](PRIVACY.md)。
@@ -96,7 +96,8 @@
 
 #### 工程与文档
 
-- 固定上游：`engine-lock.json` 记录 Engine 及其嵌套依赖的提交与 SHA-256，配套 overlay 脚本；`resources/*.lock.json` 固定随包词库与模型的 URL、长度与 SHA-256。
+- 输入引擎从取回并打 overlay 的 C++ 归档改为仓库内的 Rust crate：`engine-lock.json`、`scripts/fetch_engine.py`、`scripts/relock_engine.py`、全部 `scripts/apply_engine_*.py` 与 `scripts/engine-overlays/`、每周重锁与自动合并的两个工作流、`crates/engine-bridge` 及其 Boost／fmt／spdlog 构建依赖一并删除，构建不再需要 C++ 工具链或 `vendor/MSIME-Engine`。行为基准从 C++ 参考实现录制在 `crates/engine/tests/golden/`，录制方法见 `tools/engine-golden/README.md`；平台仍用的 IPC 契约头文件、辅助码表与 miniaudio 改为随仓库提交（`shared/contracts/`、`resources/helpcodes/`、`platforms/windows/third_party/miniaudio/`）。Google 整句解码器及其 `dict_pinyin.dat`、Whisper 本地文件识别随之去掉。
+- `resources/*.lock.json` 固定随包词库与模型的 URL、长度与 SHA-256。
 - `scripts/verify-local.sh` 提供本地统一验证，分快速门禁与完整两档；长期失败集中记在 `scripts/known-failures.txt`，每条附完整取证记录，比对只对不在清单里的失败名报错。
 - 静态与契约门禁以独立脚本形式进入本地验证，覆盖配置键覆盖率、界面动作覆盖率、源码清单与设置页产物一致性。
 - 整句转换评测与重排延迟测量各有固定数据集与基线文件，可在本地复跑。

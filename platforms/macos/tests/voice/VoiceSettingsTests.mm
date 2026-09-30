@@ -1,5 +1,5 @@
-// Include the implementation so origin scoping is exercised without accessing a real Keychain.
-#import "../../src/voice/VoiceSettings.h"
+// Validation of the voice form's stored configuration. validate: reads only the properties, so this never touches the Keychain or the defaults the form saves to.
+#import "../../src/voice/VoiceProviderSettings.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -18,8 +18,8 @@ int main()
 {
     @autoreleasepool
     {
-        MetasequoiaVoiceSettings *settings = [MetasequoiaVoiceSettings new];
-        settings.provider = @"cloud";
+        MetasequoiaVoiceProviderSettings *settings = [MetasequoiaVoiceProviderSettings new];
+        settings.provider = @"openai";
         settings.endpoint = @"https://example.test/v1/audio/transcriptions";
         settings.model = @"fixture-model";
         settings.token = @"fixture-token";
@@ -42,6 +42,16 @@ int main()
         settings.token = @"";
         Require(![settings validate:nil], "missing ASR token accepted");
         settings.token = @"fixture-token";
+        settings.model = @"";
+        Require(![settings validate:nil], "missing ASR model accepted");
+        settings.model = @"fixture-model";
+        // Doubao streams over a WebSocket, so an HTTPS address is not one it can use.
+        settings.provider = @"doubao";
+        Require(![settings validate:nil], "HTTPS endpoint accepted for the streaming provider");
+        settings.endpoint = @"wss://example.test/asr";
+        Require([settings validate:nil], "valid streaming configuration rejected");
+        settings.provider = @"openai";
+        settings.endpoint = @"https://example.test/asr";
         settings.polishEnabled = YES;
         Require(![settings validate:nil], "incomplete opt-in polish accepted");
         settings.polishEndpoint = @"https://polish.test/v1/chat/completions";
@@ -51,19 +61,25 @@ int main()
         settings.polishEnabled = NO;
         settings.provider = @"local";
         settings.token = @"";
-        settings.modelPath = @"/nonexistent/msime-whisper-model.bin";
+        settings.modelPath = @"/nonexistent/msime-voice-model";
         Require(![settings validate:nil], "missing local model accepted");
         settings.modelPath = NSTemporaryDirectory();
-        Require(![settings validate:nil], "directory accepted as model");
+        Require(![settings validate:nil], "directory without a model manifest accepted as model");
         NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
         Require([@"model fixture" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil],
                 "model fixture creation failed");
+        settings.modelPath = path;
+        Require(![settings validate:nil], "a model file accepted in place of an installed model directory");
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        Require([[NSFileManager defaultManager] createDirectoryAtPath:path withIntermediateDirectories:NO attributes:nil error:nil],
+                "model directory fixture creation failed");
+        Require([@"{}" writeToFile:[path stringByAppendingPathComponent:@"msime-model.json"] atomically:YES
+                          encoding:NSUTF8StringEncoding error:nil], "model manifest fixture creation failed");
         settings.modelPath = path;
         Require([settings validate:nil], "local mode requires unused cloud credentials");
         [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
         settings.provider = @"unknown";
         Require(![settings validate:nil], "unknown provider accepted");
-
     }
     return 0;
 }

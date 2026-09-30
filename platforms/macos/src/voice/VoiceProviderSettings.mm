@@ -255,12 +255,12 @@ static NSString *SharedSetting(NSDictionary *saved, NSString *key, NSString *fal
     NSString *message = nil, *scope = MSIMEVoiceProviderRecognitionScope;
     if ([self.provider isEqualToString:@"local"])
     {
-        // Either an installed model directory, which the model installer marks complete by writing msime-model.json last and which runs in the msime-voice-local helper, or a Whisper model file.
+        // An installed model directory, which the model installer marks complete by writing msime-model.json last and which runs in the msime-voice-local helper.
         BOOL directory = NO;
         NSFileManager *files = NSFileManager.defaultManager;
-        if (![files fileExistsAtPath:self.modelPath isDirectory:&directory] ||
-            (directory && ![files fileExistsAtPath:[self.modelPath stringByAppendingPathComponent:@"msime-model.json"]]))
-            message = @"请选择已下载的本地语音模型目录或 Whisper 模型文件。";
+        if (![files fileExistsAtPath:self.modelPath isDirectory:&directory] || !directory ||
+            ![files fileExistsAtPath:[self.modelPath stringByAppendingPathComponent:@"msime-model.json"]])
+            message = @"请选择已下载的本地语音模型目录。";
     }
     else if (![MSIMEVoiceASRProviderIDs() containsObject:self.provider])
         message = @"请选择识别方式。";
@@ -767,6 +767,7 @@ static void ShowNotice(NSTextField *label, NSString *message, NSColor *color)
     (void)sender;
     NSOpenPanel *panel = [NSOpenPanel openPanel];
     panel.canChooseDirectories = YES;
+    panel.canChooseFiles = NO;
     panel.allowsMultipleSelection = NO;
     __weak MetasequoiaVoiceProviderSettingsView *weakSelf = self;
     [panel beginSheetModalForWindow:self.window

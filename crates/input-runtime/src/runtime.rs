@@ -91,11 +91,9 @@ pub struct Runtime<E: InputEngine = Session> {
     /// A selection that consumed no reading is not recorded, because there is nothing for it to
     /// restore - the same reason the reference refuses an empty `consumed_raw_input_with_cases`.
     pub(crate) phrase_selections: Vec<PhraseSelection>,
-    /// Recently committed text, sent to the AI provider as context.
+    /// Recently committed text, sent to the AI provider as context and pushed to the Engine as its rescoring context.
     ///
-    /// The reference sends what the user has just written so a suggestion fits
-    /// the sentence in progress. Every host but Linux left this empty, which
-    /// made AI suggestions guess from the pinyin alone.
+    /// The reference sends what the user has just written so a suggestion fits the sentence in progress. Every host but Linux left this empty, which made AI suggestions guess from the pinyin alone. The Engine's neural sentence association conditions on the same text, so every change here is mirrored with [`InputEngine::set_rescoring_context`]; without it the engine-side models ranked every sentence as if nothing had been written before it.
     pub(crate) ai_context: String,
     /// Reorders candidates the pinyin decoder assembled, when a host supplied a model.
     ///
@@ -112,6 +110,8 @@ pub struct Runtime<E: InputEngine = Session> {
     /// plausible now; when the user stops to read the candidates, it has to be right. The fast
     /// model owns the first job and this one owns the second.
     pub(crate) settled_reranker: Option<Reranker>,
+    /// Whether [`Runtime::rerank_settled`] runs the settled model: the product's desktop sentence model switch. On unless a host turns it off, so a caller that attaches a model and says nothing else gets it.
+    pub(crate) settled_rerank_enabled: bool,
 }
 
 /// `CandidateSource::Generated`: a whole-sentence path the word lattice assembled. The one source
@@ -120,7 +120,7 @@ pub(crate) const LATTICE_SOURCE: u8 = 8;
 
 /// Move the flagged elements to the end, keeping both groups in their existing order.
 #[cfg(test)]
-pub(crate) fn move_to_back<T>(items: &mut Vec<T>, moved: &[bool]) {
+pub(crate) fn move_to_back<T>(items: &mut [T], moved: &[bool]) {
     // Stable-partition in place. A rotation moves the next unflagged item ahead of the flagged
     // run without allocating a second vector; candidate arrays are kept in lockstep by calling
     // this once for each array below, and their usual size makes the bounded O(n²) movement cheap.
@@ -489,6 +489,7 @@ impl<E: InputEngine> Runtime<E> {
             ai_context: String::new(),
             reranker: None,
             settled_reranker: None,
+            settled_rerank_enabled: true,
             focused: false,
             page_size: page_size.into(),
             highlighted: 0,
@@ -534,19 +535,24 @@ impl<E: InputEngine> Runtime<E> {
         self.settled_reranker = reranker;
     }
 
-    /// Re-rank the current candidates with the settled model, reporting whether the order moved.
+    /// Turn the settled rerank on or off without dropping the attached model, so switching it back on needs no reload. Hosts drive this from the desktop sentence model preference.
+    pub fn set_settled_rerank_enabled(&mut self, enabled: bool) {
+        self.settled_rerank_enabled = enabled;
+    }
+
+    pub fn settled_rerank_enabled(&self) -> bool {
+        self.settled_rerank_enabled
+    }
+
+    /// Re-rank the current candidates with the settled model, reporting whether the order moved. Nothing happens without an attached model or while the settled rerank is switched off.
     ///
-    /// The host decides when this is: it owns the clock and already runs a settle timer for cloud
-    /// candidates. The runtime has no timer of its own and should not grow one — a keystroke that
-    /// arrives while this is deciding makes the whole answer stale, and only the host knows that
-    /// a keystroke arrived.
+    /// The host decides when this is: it owns the clock and already runs a settle timer for cloud candidates. The runtime has no timer of its own and should not grow one — a keystroke that arrives while this is deciding makes the whole answer stale, and only the host knows that a keystroke arrived.
     ///
-    /// Returns false when nothing changed, so a host can skip redrawing the candidate window. A
-    /// window that repaints identically on every pause is a flicker the user cannot explain.
+    /// Returns false when nothing changed, so a host can skip redrawing the candidate window. A window that repaints identically on every pause is a flicker the user cannot explain.
     pub fn rerank_settled(&mut self) -> bool {
-        // A reorder has to advance the generation (old IDs would otherwise select by the new seats),
-        // so an exhausted generation cannot reorder at all.
-        if self.settled_reranker.is_none()
+        // A reorder has to advance the generation (old IDs would otherwise select by the new seats), so an exhausted generation cannot reorder at all.
+        if !self.settled_rerank_enabled
+            || self.settled_reranker.is_none()
             || self.is_idle()
             || self.generation.checked_add(1).is_none()
         {
@@ -580,6 +586,14 @@ impl<E: InputEngine> Runtime<E> {
     /// session is indistinguishable from one that typed its way there.
     pub fn seed_context(&mut self, text: &str) {
         self.remember_commit(text);
+    }
+
+    /// Forget the committed text that candidates are ranked against, which [`Runtime::seed_context`] fills.
+    ///
+    /// [`Runtime::seed_context`] appends, exactly as a commit does, and cancelling a composition keeps what was committed before it. A harness that seeds a different context per case therefore has to clear it first, or every case is ranked against the tail of all the cases before it. The Engine's rescoring context is cleared with it, so both rankers start from the same empty sentence. The Engine's committed-word context is left alone: seeding never adds to it, so there is nothing of the seed's there to forget, unlike [`Runtime::focus`], which also ends real commits.
+    pub fn clear_context(&mut self) {
+        self.ai_context.clear();
+        self.engine.set_rescoring_context("");
     }
 
     /// Switch the Engine's digit interpretation only after the host finishes composition.
@@ -872,6 +886,8 @@ impl<E: InputEngine> Runtime<E> {
         let cached = engine.snapshot()?;
         self.advance()?;
         self.engine = engine;
+        // The committed text belongs to the client, not the engine, so the replacement ranks against it as its predecessor did.
+        self.engine.set_rescoring_context(&self.ai_context);
         self.load_snapshot(cached);
         self.snapshot_valid = true;
         self.page_size = page_size.into();
@@ -967,24 +983,23 @@ impl<E: InputEngine> Runtime<E> {
         Ok(())
     }
 
-    /// Keep the tail of what was committed, cut on a character boundary.
+    /// Keep the tail of what was committed, cut on a character boundary, and hand it to the Engine.
     ///
-    /// Bounded at 1024 bytes because `query_candidates` refuses anything longer
-    /// outright - an over-long context would silently disable the whole query
-    /// rather than being trimmed for us.
+    /// Bounded at 1024 bytes because `query_candidates` refuses anything longer outright - an over-long context would silently disable the whole query rather than being trimmed for us.
     pub(crate) fn remember_commit(&mut self, text: &str) {
         if !self.focused {
             self.ai_context.clear();
-            return;
-        }
-        self.ai_context.push_str(text);
-        if self.ai_context.len() > 1024 {
-            let mut cut = self.ai_context.len() - 1024;
-            while cut < self.ai_context.len() && !self.ai_context.is_char_boundary(cut) {
-                cut += 1;
+        } else {
+            self.ai_context.push_str(text);
+            if self.ai_context.len() > 1024 {
+                let mut cut = self.ai_context.len() - 1024;
+                while cut < self.ai_context.len() && !self.ai_context.is_char_boundary(cut) {
+                    cut += 1;
+                }
+                self.ai_context.drain(..cut);
             }
-            self.ai_context.drain(..cut);
         }
+        self.engine.set_rescoring_context(&self.ai_context);
     }
 
     /// Take the last selection of a phrase-in-progress back, when the key asks for it.
@@ -1205,10 +1220,7 @@ impl<E: InputEngine> Runtime<E> {
             .filter(|source| is_local(**source))
             .count();
         let promoted_english = first_english == Some(0) && local_count != 0;
-        let has_cloud = snapshot
-            .candidate_sources
-            .iter()
-            .any(|source| *source == CLOUD);
+        let has_cloud = snapshot.candidate_sources.contains(&CLOUD);
         let first_emoji = snapshot
             .candidate_sources
             .iter()
@@ -1386,31 +1398,32 @@ impl<E: InputEngine> Runtime<E> {
         true
     }
 
-    /// Move the runner-up sentence readings behind the rest of the list.
+    /// Keep the leading sentence readings together near the top and move the rest of them behind the list.
     ///
-    /// The lattice searches several readings of the whole key so that something can choose between
-    /// them. Leaving all of them at the front fills the candidate page with near-duplicate
-    /// sentences and pushes the short candidates a user actually wants off it, which is why the
-    /// search used to be pinned to a single path.
+    /// The lattice searches several readings of the whole key so that something can choose between them. Leaving all of them at the front fills the candidate page with near-duplicate sentences and pushes the short candidates a user actually wants off it, which is why the search used to be pinned to a single path.
     ///
-    /// They are moved rather than removed. A candidate page needs its *first* row to be the chosen
-    /// reading; it does not need the others gone. Deleting them threw away the model's second and
-    /// third choices, so a reading the model ranked third was unreachable even when it was right.
+    /// For a sentence of three or more characters the first page keeps three readings, seated together right after the first one, and only the rest are moved back. One reading was too few once the Google fallback stopped holding a second sentence seat: on sentences-neutral-v1 top5 fell to 0.615 and on sentences-v2 to 0.269 with the correct sentence sitting at reading two or three, and keeping three lifts them to 0.839 and 0.763 while quanpin-words-v1 top5 moves only from 0.940 to 0.938. Shorter readings still keep one, because two-syllable keys are where the runner-ups (倪好, 你号, 你毫 after 你好) push dictionary words off the page, and keeping three there costs words top5 two points.
     ///
-    /// Only lattice readings are touched. An earlier version of this keyed on "any source that is
-    /// not a dictionary", which is wrong twice over: a source number says which code produced a
-    /// candidate, not that two candidates are spellings of one answer, and most of the other
-    /// sources are plural by design — English words, emoji, kaomoji, quick phrases and AI
-    /// suggestions all arrive as lists, and that version silently dropped all but one of each.
-    fn demote_runner_up_readings(&mut self) -> bool {
-        // The lattice never runs on fewer than three syllables, so a shorter candidate reached the
-        // list some other way and is not a reading of the same sentence. Japanese kana are the case
-        // that proves it: あ and ア are both Generated and both one character.
-        const SENTENCE_SYLLABLES: usize = 3;
+    /// They are moved rather than removed. Deleting them threw away the model's later choices, so a reading the model ranked fourth was unreachable even when it was right.
+    ///
+    /// Only lattice readings are touched. An earlier version of this keyed on "any source that is not a dictionary", which is wrong twice over: a source number says which code produced a candidate, not that two candidates are spellings of one answer, and most of the other sources are plural by design — English words, emoji, kaomoji, quick phrases and AI suggestions all arrive as lists, and that version silently dropped all but one of each.
+    pub(crate) fn demote_runner_up_readings(&mut self) -> bool {
+        // The lattice runs from two syllables (a single syllable is never decoded), so a shorter candidate reached the list some other way and is not a reading of the same sentence. Japanese kana are the case that proves it: あ and ア are both Generated and both one character. Two rather than three because two-syllable keys are where the lattice's runner-up readings otherwise fill the first page ahead of dictionary words: on quanpin-words-v1 this moves two-syllable top5 from 0.883 to 0.924 with top1 unchanged.
+        const SENTENCE_SYLLABLES: usize = 2;
+        // From this many characters a reading is a sentence rather than a word, and the page keeps `SENTENCE_READINGS` of them.
+        const LONG_SENTENCE_CHARACTERS: usize = 3;
+        const SENTENCE_READINGS: usize = 3;
 
         let snapshot = &self.cached;
         let count = snapshot.candidates.len();
-        if count < 2 || snapshot.candidate_sources.len() != count {
+        if count < 2
+            || snapshot.candidate_codes.len() != count
+            || snapshot.candidate_annotations.len() != count
+            || snapshot.candidate_sources.len() != count
+            || snapshot.candidate_positions.len() != count
+            || snapshot.candidate_corrected.len() != count
+            || snapshot.candidate_answers_key.len() != count
+        {
             return false;
         }
         let Some(width) = snapshot
@@ -1425,47 +1438,44 @@ impl<E: InputEngine> Runtime<E> {
         if width < SENTENCE_SYLLABLES {
             return false;
         }
-        // Everything after the first lattice reading of the full key is a runner-up. First detect
-        // whether there is work, then partition all parallel arrays in one pass so no per-candidate
-        // mask needs to be allocated.
-        let mut kept_one = false;
-        let mut moved = false;
+        let keep = if width >= LONG_SENTENCE_CHARACTERS {
+            SENTENCE_READINGS
+        } else {
+            1
+        };
+        // Every lattice reading of the full key, in list order. The first stays where it is, the next `keep - 1` are seated right behind it, and the rest go to the back in their existing order.
+        let readings: Vec<usize> = (0..count)
+            .filter(|&index| {
+                snapshot.candidate_sources[index] == LATTICE_SOURCE
+                    && snapshot.candidates[index].chars().count() == width
+            })
+            .collect();
+        let (kept, demoted) = readings.split_at(keep.min(readings.len()));
+        let mut order = Vec::with_capacity(count);
         for index in 0..count {
-            let reading = self.cached.candidate_sources[index] == LATTICE_SOURCE
-                && self.cached.candidates[index].chars().count() == width;
-            if reading && kept_one {
-                moved = true;
+            if index != kept[0] && readings.contains(&index) {
                 continue;
             }
-            kept_one |= reading;
+            order.push(index);
+            if index == kept[0] {
+                order.extend_from_slice(&kept[1..]);
+            }
         }
-        if !moved {
+        order.extend_from_slice(demoted);
+        debug_assert_eq!(order.len(), count);
+        if order.iter().enumerate().all(|(seat, index)| seat == *index) {
             return false;
         }
         ensure_engine_order(&mut self.engine_order, count);
         let snapshot = &mut self.cached;
-        let engine_order = &mut self.engine_order;
-        let mut kept_one = false;
-        let mut head_len = 0;
-        for index in 0..count {
-            let reading = snapshot.candidate_sources[index] == LATTICE_SOURCE
-                && snapshot.candidates[index].chars().count() == width;
-            if reading && kept_one {
-                continue;
-            }
-            kept_one |= reading;
-            if head_len != index {
-                snapshot.candidates[head_len..=index].rotate_right(1);
-                snapshot.candidate_codes[head_len..=index].rotate_right(1);
-                snapshot.candidate_annotations[head_len..=index].rotate_right(1);
-                snapshot.candidate_sources[head_len..=index].rotate_right(1);
-                snapshot.candidate_positions[head_len..=index].rotate_right(1);
-                snapshot.candidate_corrected[head_len..=index].rotate_right(1);
-                snapshot.candidate_answers_key[head_len..=index].rotate_right(1);
-                engine_order[head_len..=index].rotate_right(1);
-            }
-            head_len += 1;
-        }
+        apply_order(&mut snapshot.candidates, &order);
+        apply_order(&mut snapshot.candidate_codes, &order);
+        apply_order(&mut snapshot.candidate_annotations, &order);
+        apply_order(&mut snapshot.candidate_sources, &order);
+        apply_order(&mut snapshot.candidate_positions, &order);
+        apply_order(&mut snapshot.candidate_corrected, &order);
+        apply_order(&mut snapshot.candidate_answers_key, &order);
+        apply_order(&mut self.engine_order, &order);
         true
     }
 
@@ -1544,6 +1554,7 @@ impl<E: InputEngine> Runtime<E> {
         // from one application into another. The Engine's committed-word context follows the same rule: the next word
         // no longer follows the last one, and no later pick may take back what a commit in the other client taught.
         self.ai_context.clear();
+        self.engine.set_rescoring_context("");
         self.engine.reset_context();
         Ok(self.transition(result))
     }
@@ -1843,7 +1854,7 @@ impl<E: InputEngine> Runtime<E> {
             action,
             Action::SegmentBackspace | Action::SegmentMoveLeft | Action::SegmentMoveRight
         );
-        self.hold_phrase_progress(picked, discarded, keep_empty, &consumed, &mut result);
+        self.hold_phrase_progress(picked, discarded, keep_empty, consumed, &mut result);
         let mut transition = self.transition(result);
         if let Some(commit_context) = commit_context {
             if transition.commit.is_some() {

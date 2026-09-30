@@ -90,17 +90,9 @@ docker build --platform linux/amd64 -t "$image" "$root/platforms/windows/wine" >
 # bash 3.2 treats an empty array as unset under `set -u`, so every expansion
 # of it has to be guarded rather than written plainly.
 #
-# Default to the cache the rest of the repository already uses for this set -
-# platforms/windows/installer/DesktopResources.md documents target/desktop-resources
-# and the packaging scripts default to it - so a checkout that has it gets the
-# full suite without anyone having to know this variable exists. Populate it with
+# Default to the cache the rest of the repository already uses for this set - platforms/windows/installer/DesktopResources.md documents target/desktop-resources and the packaging scripts default to it - so a checkout that has it gets the full suite without anyone having to know this variable exists. Populate it with
 #
-#   python3 scripts/fetch_engine.py
 #   cargo run -p msime-client-core --example install_resources -- target/desktop-resources
-#
-# Both steps are needed: one of the locked artifacts comes from the Engine
-# checkout rather than the dictionary release, and install_resources says so
-# rather than fetching it itself.
 #
 # install_resources writes into a generation directory named for the set's
 # hash, so the artifacts are one level below what it is given. Resolve that
@@ -153,24 +145,15 @@ if command -v cargo >/dev/null 2>&1; then
   # --no-run builds the test binaries and prints where they landed; anything that
   # fails to build is reported and skipped rather than failing the whole run,
   # because the C++ suite below is still worth having.
-  # host-api is the DLL the Server links against, so its FFI boundary is worth
-  # exercising on the target it ships for. It needs the same native dependency
-  # prefix the cross build uses; without one, only host-windows is staged.
+  # host-api is the DLL the Server links against, so its FFI boundary is worth exercising on the target it ships for; it needs no vcpkg prefix, since its C parts build with the same MinGW toolchain.
   # client-core carries the shared logic plus a few #[cfg(windows)] paths - the
   # file-replacement retry in the gloss store among them - that the host run can
   # never reach, because on macOS and Linux the other branch is compiled.
-  rust_packages="-p msime-host-windows -p msime-client-core -p msime-engine-bridge"
-  deps_prefix="${MSIME_WINDOWS_DEPS_ROOT:-$root/target/windows-native-deps}/$arch/$arch-mingw-static"
-  if [ -d "$deps_prefix" ]; then
-    rust_packages="$rust_packages -p msime-host-api"
-    export MSIME_WINDOWS_DEPS="$deps_prefix"
-  else
-    echo "note: no native dependency prefix at $deps_prefix, skipping the host-api tests"
-  fi
+  rust_packages="-p msime-host-windows -p msime-client-core -p msime-engine -p msime-host-api"
   # Filter on profile.test: --no-run also reports examples, which are ordinary
   # programs that expect arguments and would be counted as failures here.
   # --tests excludes examples, which are not tests and need not build for this
-  # target - engine-bridge ships one that uses std::os::unix.
+  # target.
   rust_build_log="$rust_stage/cargo.log"
   cargo test $rust_packages --target "$rust_triple" --no-run --tests \
     --message-format=json 2>"$rust_build_log" \

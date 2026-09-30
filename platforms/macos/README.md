@@ -12,17 +12,18 @@ macOS 平台源码统一放在 `src/` 下按 `backend/`、`voice/`、`candidate/
 
 ```sh
 cargo run --quiet -p msime-client-core --example install_resources --locked -- target/resources   # 拉取并逐个校验固定词库发布，打印目录
-ditto target/resources/<上一步的目录> "$HOME/Library/Application Support/app.msime.macos/EngineResources"
+bash platforms/macos/stage-resources.sh target/resources/<上一步的目录>                            # 再加上仓库自带的辅助码表，暂存到 target/macos/EngineResources
+ditto target/macos/EngineResources "$HOME/Library/Application Support/app.msime.macos/EngineResources"
 cargo run --quiet -p msime-host-api --example prepare_host --locked -- "$HOME/Library/Application Support/app.msime.macos/EngineResources" "$HOME/Library/Application Support/app.msime.macos"
 ```
 
-第二条不是多余的。`prepare_host` 只是把传进去的目录记到 `runtime-options.json` 里，指向 `target/resources` 的安装会在这个被忽略的产物目录被清掉时（AGENTS.md 里那条磁盘写满的记录说明它随时会）安静地失效，表现又是打不出中文。词库不合适时输入法只写一行 `MSIME has no input session (…)` 到统一日志，`log show --predicate 'process == "水杉输入法"'` 能看到，原因分「no usable runtime options」（没准备）和「session refused the runtime options」（准备过但 Engine 不接受）两种。
+`ditto` 那一条不是多余的。`prepare_host` 只是把传进去的目录记到 `runtime-options.json` 里，指向 `target/resources` 的安装会在这个被忽略的产物目录被清掉时（AGENTS.md 里那条磁盘写满的记录说明它随时会）安静地失效，表现又是打不出中文。词库不合适时输入法只写一行 `MSIME has no input session (…)` 到统一日志，`log show --predicate 'process == "水杉输入法"'` 能看到，原因分「no usable runtime options」（没准备）和「session refused the runtime options」（准备过但 Engine 不接受）两种。
 
 `scripts/install.sh` 会停掉正在运行的实例、在暂存目录用本机 Developer ID 连同 `resources/VoiceInput.entitlements` 重签名（`--deep`，因为 Sparkle 自带其发布方的签名，hardened runtime 下 Team ID 不一致会导致进程加载失败）、原子替换并保留旧 bundle，任一步失败自动回滚，最后调用 `--register-input-source` 并用 `scripts/check_input_source.swift` 查注册表，而不是只看退出码。
 
 签名身份按证书的 SHA-1 取，不按名字。钥匙串里同时存在两张有效的同名 Developer ID Application 证书是常态（续期的那张和它替换的那张并存），而 `codesign` 遇到同时匹配两张的名字不会自己挑一张，直接报 `ambiguous (matches … and …)` 拒签——那时运行中的输入法已经被停掉了。哈希不会有歧义；本机安装用哪张都可以，所以脚本取第一张并把找到几张打出来，要指定就把 `MSIME_SIGNING_IDENTITY` 设成 `security find-identity -v -p codesigning` 里的 SHA-1。
 
-`check_input_source.swift` 的退出码分三种，`install.sh` 按它选提示：0 是每条注册的源都 enabled；2 是能从输入菜单选中（至少一条 select-capable 的源是 enabled）但还有别的源没启用；1 才是不可用——不在注册表里，或在注册表里却没有任何可选中的源是 enabled 的。带模式的输入法在注册表里是多条：一条不可选中的总源，加上每个模式一条，所以判断是否可用要看可选中的那些，不是看是不是全部 enabled。以前任何一条 disabled 都退 1，于是一个中文模式正常、能打字的安装会被报成「本次登录会话看不到它」，并让人去注销重新登录，而那改变不了任何事情。LaunchServices 会把每个 worktree `target/` 下的构建产物都按同一个发布 identifier 登记，`install.sh` 因此在注册前只保留已安装的那一条。bundle 本身是否装配正确由 `bundle-contents` 这项 CTest 检查（图标是否真的暂存进去、用途字符串是否每种语言都有、语音提示音 `audios/start.mp3` / `end.mp3` 是否随包、可执行文件是否链接了本地识别器）。
+`check_input_source.swift` 的退出码分三种，`install.sh` 按它选提示：0 是每条注册的源都 enabled；2 是能从输入菜单选中（至少一条 select-capable 的源是 enabled）但还有别的源没启用；1 才是不可用——不在注册表里，或在注册表里却没有任何可选中的源是 enabled 的。带模式的输入法在注册表里是多条：一条不可选中的总源，加上每个模式一条，所以判断是否可用要看可选中的那些，不是看是不是全部 enabled。以前任何一条 disabled 都退 1，于是一个中文模式正常、能打字的安装会被报成「本次登录会话看不到它」，并让人去注销重新登录，而那改变不了任何事情。LaunchServices 会把每个 worktree `target/` 下的构建产物都按同一个发布 identifier 登记，`install.sh` 因此在注册前只保留已安装的那一条。bundle 本身是否装配正确由 `bundle-contents` 这项 CTest 检查（图标是否真的暂存进去、用途字符串是否每种语言都有、语音提示音 `audios/start.mp3` / `end.mp3` 是否随包、本地识别助手 `msime-voice-local` 与 sherpa-onnx 运行库及其许可证是否随包）。
 
 bundle 使用系统已登记的 `app.msime.inputmethod.MetasequoiaIME`，已在列表中的 identifier 原地更新正常：`install.sh` 安装之后，`check_input_source.swift` 稳定报出 `app.msime.inputmethod.MetasequoiaIME`、`.Hans` 与 `.Roman` 三条。
 
@@ -109,7 +110,7 @@ SwiftUI 设置同步覆盖 26 个当前宿主偏好：全局主题、自定义�
 
 ## 候选辅助码与纠错
 
-候选辅助码后缀按固定 Apple `CandidateDisplay.h` 接入。桥接层复用 Engine 的 `HelpcodeUtils`，按当前会话自身资源目录与辅助码方案加载不可变映射；仅启用辅助码的全拼/双拼普通模式和超级简拼附加后缀，Unicode、日期、快捷短语等合成模式及五笔/日语不附加。未提供共享或本地覆盖时按 Windows 基线使用全拼自然码且隐藏、双拼蓝天且显示。共享 JSON 候选新增 `annotation` 字符串，原 `text` 和候选 ID 不变；macOS 候选面板把后缀（或五笔编码提示）作为文字之后独立的一段绘制，间隔 4 点，同行放不下时移到文字下方并按列宽换行；tooltip 与辅助功能标签仍使用原文加后缀。两者都在繁体展示转换之后显示，上屏仍只提交 Engine 原文。映射缺失时后缀为空，不读取其他会话的全局映射。共享偏好现有延迟应用机制确保组合期间不切换映射；旧宿主无 annotation 字段仍显示原文。
+候选辅助码后缀由引擎的宿主接口按辅助码注释规则给出（`crates/engine/src/host/`，映射由 `crates/engine/src/helpcode.rs` 加载），按当前会话自身资源目录与辅助码方案加载不可变映射；仅启用辅助码的全拼/双拼普通模式和超级简拼附加后缀，Unicode、日期、快捷短语等合成模式及五笔/日语不附加。未提供共享或本地覆盖时按 Windows 基线使用全拼自然码且隐藏、双拼蓝天且显示。共享 JSON 候选新增 `annotation` 字符串，原 `text` 和候选 ID 不变；macOS 候选面板把后缀（或五笔编码提示）作为文字之后独立的一段绘制，间隔 4 点，同行放不下时移到文字下方并按列宽换行；tooltip 与辅助功能标签仍使用原文加后缀。两者都在繁体展示转换之后显示，上屏仍只提交 Engine 原文。映射缺失时后缀为空，不读取其他会话的全局映射。共享偏好现有延迟应用机制确保组合期间不切换映射；旧宿主无 annotation 字段仍显示原文。
 
 全拼的字母错位纠正与邻键误触纠正默认分别开启，已有对应字段或原生设置显式保存为 `false` 时保持关闭。旧的单一 `autocorrect` 值继续保留在兼容快照中，但不再作为两项纠错的 fallback。
 
@@ -181,7 +182,7 @@ AI 候选与候选释义相互独立：与来源的 `ai_eligible` / `UpdateAiInp
 
 「录音时静音其他声音」按来源的时序：开始提示音播完再静音，结束、取消与失败时先恢复再播结束提示音，所以两段提示音都听得见；录音在开始提示音播完前就结束时不会再去静音。macOS 13（部署目标）没有只静音其他进程的公开接口，`VoiceAudioMuter.mm` 仍静音整台默认输出设备；14.2 起的 CoreAudio process tap 能做到，但要抬高部署目标并申请「系统录音」权限，为一个静音选项不值得。静音期间监听默认输出设备，插拔耳机或连上 AirPods 时恢复原设备、静音新设备；用户自己已静音的设备不接管，事后也不解除。崩溃恢复记录最多同时记 8 台欠恢复的设备，只欠一台时写旧的 `version 1` 格式；仍找不到的设备留在记录里，但不挡住下一次录音静音当前设备。`voice-audio-muter`、`voice-mute-recovery` 与 `http-voice-controller` 覆盖切换、恢复与提示音顺序。
 
-录音时长按实际上传的格式封顶，不再在 60 秒处作废。批量识别上传的是共享层编出的 16 位 WAV，上限与来源同为 20 MiB（`shared/voice/VoiceProviders.h` 的 `batch_upload_sample_limit`，16 kHz 下约 655 秒），再扣掉 SiliconFlow 两端的补静音，保证录满的一段对每家都编得出来；本机 Whisper 按 Engine 自己校验的 60 秒（`local_asr_sample_limit`）。录满上限时宿主像用户松开一样结束录音：浮层转为「识别中...」、播结束提示音、提交已录的部分。来源的做法是攒下全部音频、提交时报「超过 20 MiB 上传限制」并丢掉整段；这里提交前 11 分钟的文字，内存也有界。豆包流式不设长度上限，缓冲只保留尚未发送的样本，只保留 30 秒请求超时与结束后等最终结果的 30 秒，不再有按 60 秒录音估出的 100 秒整场时限。
+录音时长按实际上传的格式封顶，不再在 60 秒处作废。批量识别上传的是共享层编出的 16 位 WAV，上限与来源同为 20 MiB（`shared/voice/VoiceProviders.h` 的 `batch_upload_sample_limit`，16 kHz 下约 655 秒），再扣掉 SiliconFlow 两端的补静音，保证录满的一段对每家都编得出来。本地模型不走批量上传，经 `msime-voice-local` 助手流式识别，不受这条上限约束。录满上限时宿主像用户松开一样结束录音：浮层转为「识别中...」、播结束提示音、提交已录的部分。来源的做法是攒下全部音频、提交时报「超过 20 MiB 上传限制」并丢掉整段；这里提交前 11 分钟的文字，内存也有界。豆包流式不设长度上限，缓冲只保留尚未发送的样本，只保留 30 秒请求超时与结束后等最终结果的 30 秒，不再有按 60 秒录音估出的 100 秒整场时限。
 
 识别失败时浮层状态行显示类别文案，正文区显示服务商给出的原因，文案逐字取自来源：HTTP 失败取服务商 JSON 的 `error` / `message`（附 `code`），取不到则显示 `HTTP N`，SiliconFlow 5xx 附追踪 ID；豆包分别报连接失败（按新版 API Key 或旧版 App ID + Access Token 提示该检查哪项）、握手失败与带 `code` 的服务端错误。原因来自 `shared/voice` 的 `CloudAsrError` 与 `VoiceFailureMessages.h`，不含 API Key、请求头或请求体；共享错误的 `what()` 不变，Windows 宿主不受影响。没填 ASR Token 且没有共享 provider socket 时，在请求权限和开始采集之前就在浮层提示去设置里填写，不弹模态窗口。来源的失败提示是模态消息框，这里留在浮层上。
 
@@ -213,11 +214,11 @@ AI 候选与候选释义相互独立：与来源的 `ai_eligible` / `UpdateAiInp
 
 ## 构建与本地测试
 
-`src/` 下有两个文件不参与任何 target 的构建：`src/input/MetasequoiaInputController.mm` 与 `src/dictionary/DictionaryRuntime.mm`，它们是固定 Apple 快照里的一对适配器，留作参照；产品用的是 `src/input/InputController.mm` 与 `src/core/ClientDictionaryRuntime.mm`。改前者不会影响产品——#912 就是把一个输入会话的修复提交进 `DictionaryRuntime.mm`，通过评审、合并，而产品一行没变。两个文件各自在开头写明了这一点，`scripts/test-macos-orphan-sources.py` 负责让这句话不会烂掉：它列出 `src/` 下不被 CMake 编译的源文件，新出现的一个会直接失败，登记为保留的必须在开头带上那句说明。
+`src/` 下每个源文件都必须被某个 target 编译。固定 Apple 快照里那对直连引擎的适配器（`MetasequoiaInputController.mm` 与 `DictionaryRuntime.mm`）从未参与构建，已随 C++ Engine 一起删除；产品用的是 `src/input/InputController.mm` 与 `src/core/ClientDictionaryRuntime.mm`。#912 就是把一个输入会话的修复提交进了那份不参与构建的 `DictionaryRuntime.mm`，通过评审、合并，而产品一行没变；`scripts/test-macos-orphan-sources.py` 列出 `src/` 下不被 CMake 编译的源文件，新出现的一个会直接失败。
 
 并行开发时使用独立产物目录，避免其他平台构建覆盖最低系统版本设置：
 
-最低系统版本用 `CFLAGS` / `CXXFLAGS` / `CMAKE_OSX_DEPLOYMENT_TARGET` 分别交给 C、C++ 与 Engine 的 CMake 构建，**不要**改回一个全局的 `MACOSX_DEPLOYMENT_TARGET`。rustc 会把该变量一并应用到为宿主编译的 proc-macro 动态库上，而它随后加载不了自己产出的这个库，于是冷缓存构建以 `can't find crate for zerofrom_derive` 失败；cargo 不把这个变量算进指纹，坏掉的 proc-macro 会留在产物目录里，之后即使不再设置该变量也继续复用，失败因此看起来时有时无。上面的写法只影响真正需要最低版本的 C/C++/CMake 目标，链接时没有版本不匹配告警；Rust 目标文件按 rustc 默认的 11.0 产出，低于 13.0 下限，不会抬高最终 bundle 的最低系统版本。
+最低系统版本用 `CFLAGS` / `CXXFLAGS` / `CMAKE_OSX_DEPLOYMENT_TARGET` 分别交给 C、C++ 与 CMake，**不要**改回一个全局的 `MACOSX_DEPLOYMENT_TARGET`。rustc 会把该变量一并应用到为宿主编译的 proc-macro 动态库上，而它随后加载不了自己产出的这个库，于是冷缓存构建以 `can't find crate for zerofrom_derive` 失败；cargo 不把这个变量算进指纹，坏掉的 proc-macro 会留在产物目录里，之后即使不再设置该变量也继续复用，失败因此看起来时有时无。上面的写法只影响真正需要最低版本的 C/C++/CMake 目标，链接时没有版本不匹配告警；Rust 目标文件按 rustc 默认的 11.0 产出，低于 13.0 下限，不会抬高最终 bundle 的最低系统版本。
 
 原生更新控制器依赖固定的 [Sparkle 2.9.6](https://github.com/sparkle-project/Sparkle/releases/tag/2.9.6)，不可省略。下载该发布的 `Sparkle-2.9.6.tar.xz`，用 `shasum -a 256` 校验为 `52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192` 后解压到独立依赖目录。下列 `MSIME_SPARKLE_ROOT` 必须指向包含 `Sparkle.framework` 的目录，不是框架内部；请替换示例绝对路径。CMake 校验框架版本，并将其复制到应用的 `Contents/Frameworks`。构建不会自动下载框架，也不应从其他已安装应用复制依赖。
 
@@ -339,7 +340,7 @@ platforms/macos/stage-resources.sh <已校验资源目录>
 
 打包时如果 `cargo` 报某个过程宏 crate「can't find crate for `xxx_macros`」，看它前面一行的 dlopen 错误：`mis-aligned LINKEDIT string pool` 表示过程宏的 dylib 被产出成 dyld 拒绝加载的形状。成因是 `MACOSX_DEPLOYMENT_TARGET`：`tauri build` 会按 `bundle.macOS.minimumSystemVersion` 导出它，rustc 把它也用在宿主过程宏上，同一个 crate 不设该变量时产出的 dylib 能正常加载。cargo 不把这个变量算进指纹，坏掉的 dylib 会留在产物目录里被后续构建继续复用，所以换一个干净的 `CARGO_TARGET_DIR` 看起来也能「修好」——但那只是另起一整棵要从头编译、占几个 GB 的产物树，坏掉的 dylib 还留在原处，不要这么做。`package-release.sh` 因此先用不带该变量的 `cargo build --features tauri/custom-protocol` 编译设置应用，再用 `tauri bundle` 只做打包；已经坏掉的过程宏要删掉 `target/<profile>/deps` 里对应的 `.dylib` 让它重编。
 
-`tauri.macos.conf.json` 会把 `target/macos/EngineResources` 嵌入为 `EngineResources`；不要直接把未校验的词库目录配置到 bundle。资源目录缺少 `others.db` 或 `dict_japanese.dat` 时，宿主会安全关闭对应的 Emoji、颜文字或临时日语触发键，而不会吞掉普通大写字母。
+`tauri.macos.conf.json` 会把 `target/macos/EngineResources` 嵌入为 `EngineResources`；不要直接把未校验的词库目录配置到 bundle。`stage-resources.sh` 还把仓库自带的六套辅助码表（`resources/helpcodes`，不在词库发布里）连同来源声明放进其中的 `helpcodes/`，Engine 从资源目录下的这个子目录读辅助码表；缺了它们，Shift 字母仍被当作辅助码却筛不掉任何候选。`package-release.sh` 检查打出的应用里有这几个文件。资源目录缺少 `others.db` 或 `dict_japanese.dat` 时，宿主会安全关闭对应的 Emoji、颜文字或临时日语触发键，而不会吞掉普通大写字母。
 
 Tauri macOS 设置宿主首次启动时，如果应用数据目录中没有 `runtime-options.json`，会从 bundle 内的 `EngineResources` 调用共享 Host API 准备默认用户词库、缓存和配置，并以同目录原子发布配置；已有配置不会被覆盖。`MSIME_CLIENT_HOST_OPTIONS`（兼容 `MSIME_IBUS_OPTIONS`）显式指定配置时不会触发自动准备，`MSIME_CLIENT_STATE_DIR` 仍可指定偏好与用户状态根目录。资源校验或准备失败会以通用错误终止本次设置宿主启动，不泄露路径、输入或 Host API 诊断内容。
 

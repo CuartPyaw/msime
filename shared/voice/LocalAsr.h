@@ -5,6 +5,8 @@
 //
 // A model is a directory holding the files of one catalog entry (resources/local-asr-models.json) and an `msime-model.json` copy of that entry, written last by the installer so a half-installed directory never looks usable. Nothing here downloads anything.
 
+#include "VoiceError.h"
+
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -38,7 +40,7 @@ struct LocalAsrOptions {
   int threads = 0;
 };
 
-// One dictation. Samples are 16 kHz mono floats in [-1, 1]. Streaming models decode as audio arrives; whole-utterance models are fed through Silero VAD and decode each finished speech segment, so both report partial text before finish(). Not thread-safe: one thread feeds and finishes a session. Throws metasequoia::voice::VoiceError on a missing runtime, an unusable model directory or a cancelled request.
+// One dictation. Samples are 16 kHz mono floats in [-1, 1]. Streaming models decode as audio arrives; whole-utterance models are fed through Silero VAD and decode each finished speech segment, so both report partial text before finish(). Not thread-safe: one thread feeds and finishes a session. Throws VoiceError on a missing runtime, an unusable model directory or a cancelled request.
 class LocalAsrSession {
 public:
   using PartialCallback = std::function<void(const std::string &)>;

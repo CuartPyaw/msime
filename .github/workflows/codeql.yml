@@ -61,10 +61,7 @@ jobs:
             exit 1
           fi
       - name: Install dependencies and Xcode generator
-        run: brew install boost fmt spdlog nlohmann-json xcodegen cocoapods
-      # The keyboard's bridge target compiles the Engine's sources, and the mobile dictionary is built by a script inside the Engine. Neither arrives with the checkout any more.
-      - name: Prepare the locked Engine archive
-        run: python3 scripts/fetch_engine.py
+        run: brew install xcodegen cocoapods
       - name: Prepare the same dictionary as simulator CI
         run: python3 platforms/ios/scripts/prepare_dictionary.py
       # Generated in platforms/ios rather than build/ios: the Podfile there names `project 'MSIMEClient.xcodeproj'` and `workspace 'MSIMEClient.xcworkspace'` relative to its own directory, so pod install only finds the project when xcodegen has written it beside the Podfile. This is the sequence build-app.sh uses.

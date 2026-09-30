@@ -29,10 +29,10 @@ try {
     foreach ($dll in $voiceRuntimeLibraries) {
         Write-PEFixture (Join-Path $fixture "target/windows-full/x64/bin/$dll") x64 dll
     }
-    foreach ($relative in @('Cargo.toml', 'vendor/MSIME-Engine/CMakeLists.txt',
+    foreach ($relative in @('Cargo.toml', 'crates/engine/Cargo.toml',
         'platforms/windows/CMakeLists.txt', 'platforms/windows/tsf/CMakeLists.txt',
         'platforms/windows/settings/MSIME.Settings.vcxproj', 'apps/desktop/package.json',
-        'scripts/fetch_voice_runtime.py')) {
+        'scripts/fetch_voice_runtime.py', 'scripts/fetch_handwriting_model.py')) {
         $path = Join-Path $fixture $relative
         New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
         [IO.File]::WriteAllText($path, 'synthetic')
@@ -67,7 +67,7 @@ try {
         & (Join-Path $PSScriptRoot '../../Test-PortableExecutable.ps1') `
             -LiteralPath (Join-Path $fixture "target/windows-full/$arch/bin/synthetic-runtime.dll") -Architecture $arch -Kind dll
     }
-    if ($count -ne 23) { throw "Unexpected build stage count: $count" }
+    if ($count -ne 24) { throw "Unexpected build stage count: $count" }
     if ($global:ClientBuildCalls[20].Values[-1] -ne (Join-Path $fixture 'target/windows-full/x64/bin/MSIME.pdb')) {
         throw 'Desktop PDB did not follow staged executable name'
     }
@@ -87,7 +87,13 @@ try {
     foreach ($dll in $voiceRuntimeLibraries) {
         if ($stage -notcontains (Join-Path $voiceRuntime $dll)) { throw "Voice runtime library not staged: $dll" }
     }
-    foreach ($index in @(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22)) {
+    # The handwriting model is fetched where Prepare-PackageFiles.ps1 and Collect-Notices.ps1 read it.
+    $handwritingFetch = $global:ClientBuildCalls[23]
+    if ($handwritingFetch.Name -ne 'python' -or $handwritingFetch.Values[0] -ne (Join-Path $fixture 'scripts/fetch_handwriting_model.py') -or
+        [Array]::IndexOf($handwritingFetch.Values, (Join-Path $fixture 'target/handwriting-model')) -ne ([Array]::IndexOf($handwritingFetch.Values, '--out') + 1)) {
+        throw 'Handwriting model fetch mismatch'
+    }
+    foreach ($index in @(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22, 23)) {
         if ($global:ClientBuildCalls[$index].Prefix -ne $x64) { throw 'Incorrect x64 dependency scope' }
     }
     foreach ($index in @(12, 13, 14, 15)) {

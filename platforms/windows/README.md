@@ -79,9 +79,9 @@ CandidatePresentation.h 将回复投影为带焦点 lease、会话/代次、坐�
 
 `VoiceInputSession::start_review` 为面板提供独立结果对象与录音电平、识别/润色阶段；该模式不显示原生浮层、不发送行内组合、不执行 TSF/SendInput/剪贴板自动上屏或失败回退。结果限制为 v2 允许的 UTF-8 大小，取消后晚到结果不能恢复，`stop_review` / `cancel_review` 只作用于匹配对象，不能取消后续录音。`windows-voice-review-result` 覆盖结果状态、竞态与提交隔离。
 
-识别服务选 `local` 时，Server 不联网，模型为 `voice_input.asr_model_path` 指向的已安装目录。录音开始时即在识别任务上加载模型，采集线程只把音频放进队列，由该任务边录边用共享的 `msime::voice::LocalAsrSession`（`shared/voice/LocalAsr.h`）解码；识别中的文字与豆包流式识别走同一条路径显示（允许内嵌预编辑时写入组合串，否则显示在语音浮窗上），录音结束后取最终文本。`asr_model_path` 若是旧的 Whisper 模型文件而非已安装目录，仍按批量方式在录音结束后调用 `recognize_local_asr`。热词取自 `msime_client_voice_hotwords`（用户自己的拼音词条）；模型清单 `msime-model.json` 写明 `"hotwords": "pinyin"` 时，最终文本再经 `msime_client_voice_hotword_correct` 校正。未选模型时开始录音即提示去设置下载；运行时或模型不可用时给出对应提示。已加载的模型空闲 120 秒后由 `maintain()` 交给工作线程卸载。运行时 `sherpa-onnx-c-api.dll`、`onnxruntime.dll`、`onnxruntime_providers_shared.dll` 由 `Build-Client.ps1` 取来并放在 Server 同目录，安装包随 `server_exe` 一起安装。
+识别服务选 `local` 时，Server 不联网，模型为 `voice_input.asr_model_path` 指向的已安装目录。录音开始时即在识别任务上加载模型，采集线程只把音频放进队列，由该任务边录边用共享的 `msime::voice::LocalAsrSession`（`shared/voice/LocalAsr.h`）解码；识别中的文字与豆包流式识别走同一条路径显示（允许内嵌预编辑时写入组合串，否则显示在语音浮窗上），录音结束后取最终文本。`asr_model_path` 若是旧的 Whisper 模型文件而非已安装目录，录音结束后走批量的 `recognize_local_asr`，识别会失败并提示模型不可用（Windows 从未带 Whisper 识别器）。热词取自 `msime_client_voice_hotwords`（用户自己的拼音词条）；模型清单 `msime-model.json` 写明 `"hotwords": "pinyin"` 时，最终文本再经 `msime_client_voice_hotword_correct` 校正。未选模型时开始录音即提示去设置下载；运行时或模型不可用时给出对应提示。已加载的模型空闲 120 秒后由 `maintain()` 交给工作线程卸载。运行时 `sherpa-onnx-c-api.dll`、`onnxruntime.dll`、`onnxruntime_providers_shared.dll` 由 `Build-Client.ps1` 取来并放在 Server 同目录，安装包随 `server_exe` 一起安装。
 
-`VoiceControllerProtocol.h` 直接消费固定 Engine 的 `voice_controller.h` v2 布局，处理有界消息、UTF-8 和语言标识，不复制 opcode。`VoiceControllerConnection.h` 在专用连接上执行 Hello、OS 对端认证、请求顺序和有界读写，拒绝重放；它不接受客户端提供的 TSF 目标身份。`windows-voice-controller-protocol` 可在非 Windows 运行，`windows-voice-controller-connection` 使用真实 Windows Named Pipe。
+`VoiceControllerProtocol.h` 直接消费 `shared/contracts/voice_controller.h` 的 v2 布局，处理有界消息、UTF-8 和语言标识，不复制 opcode。`VoiceControllerConnection.h` 在专用连接上执行 Hello、OS 对端认证、请求顺序和有界读写，拒绝重放；它不接受客户端提供的 TSF 目标身份。`windows-voice-controller-protocol` 可在非 Windows 运行，`windows-voice-controller-connection` 使用真实 Windows Named Pipe。
 
 Server 主循环创建 `VoiceControllerListener`：专用 I/O 线程通过单槽 `VoiceControllerMailbox` 向控制线程派发，`VoiceControllerDispatch` 分配不可跨连接复用的会话 ID，保存并复核 Server 内部焦点租约。断线、焦点失效、派发超时使对应会话失效，旧队列任务不能启动新录音；关闭时先中止并等待 I/O，再在控制线程取消匹配结果。监听失败不影响原生输入。当前一个认证连接独占端点；Hello/写回复限时 2 秒，空闲读取 5 秒，等待控制线程回复 10 秒，因此控制端应小于 5 秒轮询一次。I/O 超时后会取消并排空操作，不承诺硬实时截止。`windows-voice-controller-dispatch` 为可移植的所有权/焦点/队列测试；`windows-voice-controller-listener` 在 Windows 通过真实管道和模拟录音后端检查 Hello→Start→Stop→Poll、断线清理与未派发请求的关闭。
 
@@ -99,7 +99,7 @@ target/windows-boundary/windows-session-smoke /absolute/verified-resources
 
 Windows 构建时 MSIME_HOST_LIBRARY 应指定同架构 Rust DLL 的导入库，运行时需可找到对应 DLL；Linux 本机边界测试使用 .so。Windows MSVC 的完整构建入口是 `Build-Client.ps1`（见 `Build-Client.md`），MinGW 交叉构建不替代它；两者产出同一组目标。
 
-`bash tests/tools/check-cross.sh /absolute/nlohmann-include-root` 使用 x86_64/i686 MinGW 分别编译适配器、测试源和固定上游 IPC 契约，验证 32/64 位 COFF 和 Windows SDK 键码断言；另将不依赖 Rust 的编码测试链接为 Windows PE。不会链接 Windows Rust 库，也不执行 Windows 二进制。会话测试覆盖真实 Unicode 输入、锁定词库第二页数字选词、配置延迟、客户端/焦点/线程拒绝及本地取消不回复。
+`bash tests/tools/check-cross.sh /absolute/nlohmann-include-root` 使用 x86_64/i686 MinGW 分别编译适配器、测试源和 `shared/contracts` 中的 IPC 契约，验证 32/64 位 COFF 和 Windows SDK 键码断言；另将不依赖 Rust 的编码测试链接为 Windows PE。不会链接 Windows Rust 库，也不执行 Windows 二进制。会话测试覆盖真实 Unicode 输入、锁定词库第二页数字选词、配置延迟、客户端/焦点/线程拒绝及本地取消不回复。
 
 ## 旧协议回复编码
 
@@ -139,7 +139,7 @@ CI（`.github/workflows/ci-platforms.yml` 的 windows job）在 `debian:trixie-s
 
 管道子集的独立测试入口：`cmake -S platforms/windows -B target/windows-pipe -DMSIME_WINDOWS_PIPE_ONLY=ON`，随后 `cmake --build target/windows-pipe --config Debug` 与 `ctest --test-dir target/windows-pipe -C Debug --output-on-failure`。它不需要 Rust 库，也不注册输入法，因此适合只验证帧 I/O 与身份绑定；`verify-local.sh` 在有 MinGW 的非 Windows 主机上对 x86_64 和 i686 两个架构分别配置这一子集，用来锁住 `windows_ipc.h` 的帧大小与字段偏移 `static_assert`。
 
-键码依据 [Microsoft Virtual-Key Codes](https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes)，线格式直接包含 vendor/MSIME-Engine/contracts，不另造 opcode 或改协议能力声明。
+键码依据 [Microsoft Virtual-Key Codes](https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes)，线格式直接包含 shared/contracts，不另造 opcode 或改协议能力声明。
 
 ## 主连接与反向端点握手
 
@@ -277,7 +277,7 @@ WindowsServer 的回调可能在构造返回前运行，捕获依赖须事先初
 
 ### Windows GNU 完整链接构建
 
-`bash platforms/windows/build-cross.sh x64` 在已具备 Git、MinGW、Rust、CMake 的主机上准备固定 vcpkg、安装锁定依赖，构建真实 Rust/C++ 宿主 DLL，再链接全部 Windows 原生测试（包含 windows-server-smoke.exe）。vcpkg 固定 ef7dbf94b9198bc58f45951adcf1f041fcbc5ea0；默认使用 target/tooling/vcpkg，缺失时由 bootstrap-vcpkg.sh 从官方仓库获取固定提交并关闭指标收集进行 bootstrap。会访问网络下载工具与依赖。也可设置绝对 MSIME_VCPKG_ROOT，显式提供的目录必须已准备好，脚本不重置或自动修复它。脚本会安装相应 Rust 标准库和清单依赖，依赖安装根按架构隔离，避免 vcpkg 切换 triplet 时移除另一架构的库；同一 vcpkg checkout 不并发执行。GNU 桥接通过 MSIME_WINDOWS_DEPS 指向同架构依赖前缀，禁止 CMake 搜索主机库；Windows 补链 UUID 库以解析 Engine 的已知文件夹标识。
+`bash platforms/windows/build-cross.sh x64` 在已具备 Git、MinGW、Rust、CMake 的主机上准备固定 vcpkg、安装锁定依赖，构建真实 Rust/C++ 宿主 DLL，再链接全部 Windows 原生测试（包含 windows-server-smoke.exe）。vcpkg 固定 ef7dbf94b9198bc58f45951adcf1f041fcbc5ea0；默认使用 target/tooling/vcpkg，缺失时由 bootstrap-vcpkg.sh 从官方仓库获取固定提交并关闭指标收集进行 bootstrap。会访问网络下载工具与依赖。也可设置绝对 MSIME_VCPKG_ROOT，显式提供的目录必须已准备好，脚本不重置或自动修复它。脚本会安装相应 Rust 标准库和清单依赖，依赖安装根按架构隔离，避免 vcpkg 切换 triplet 时移除另一架构的库；同一 vcpkg checkout 不并发执行。宿主库不需要 vcpkg 前缀，其中的 C 部分（rusqlite 自带的 SQLite）用同一套 MinGW 工具链编译；同架构依赖前缀只交给 platforms/windows 的 CMake（`CMAKE_PREFIX_PATH`）。
 
 bootstrap 只管理默认工具缓存，已有错误版本、跟踪文件改动、符号链接或非预期目录均拒绝，不覆盖用户内容。目录锁拒绝并发准备；失败的独立 staging 目录保留供检查，不递归删除。若遗留锁，先确认原进程已结束再清理空锁目录。可单独执行 `bash platforms/windows/bootstrap-vcpkg.sh`，已有固定版本且可执行时复用；离线拒绝路径测试为 `bash tests/tools/bootstrap-vcpkg.sh`，测试只操作新建的隔离目录。本机 x86 SJLJ 工具链会在网络准备前被拒绝。
 

@@ -83,7 +83,6 @@ fn resource_verification_rejects_a_symlinked_state_root() {
         artifacts: vec![msime_client_core::resources::Artifact {
             name: "fixture.db".into(),
             url: "https://example.invalid/fixture.db".into(),
-            engine_path: String::new(),
             sha256: hex::encode(Sha256::digest(b"fixture")),
             size: 7,
         }],
@@ -94,6 +93,36 @@ fn resource_verification_rejects_a_symlinked_state_root() {
 
     assert!(verify_resources_once(&resources, &specification, &state).is_err());
     assert!(!outside.path().join("verified-resources.json").exists());
+}
+
+#[test]
+fn resource_verification_removes_the_retired_pinyin_dictionary_in_place() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    std::fs::write(resources.join("fixture.db"), b"fixture").unwrap();
+    // Left behind by a release whose lock still pinned the C++ Engine's system dictionary.
+    std::fs::write(resources.join("dict_pinyin.dat"), b"retired").unwrap();
+    let specification = ResourceSet {
+        source_commit: "a".repeat(40),
+        artifacts: vec![msime_client_core::resources::Artifact {
+            name: "fixture.db".into(),
+            url: "https://example.invalid/fixture.db".into(),
+            sha256: hex::encode(Sha256::digest(b"fixture")),
+            size: 7,
+        }],
+    };
+    let state = root.path().join("state");
+
+    verify_resources_once(&resources, &specification, &state).unwrap();
+    assert!(!resources.join("dict_pinyin.dat").exists());
+    assert_eq!(
+        std::fs::read(resources.join("fixture.db")).unwrap(),
+        b"fixture"
+    );
+    // The marker describes the directory as it was before hashing, so it is recorded on the next verification once the directory holds only pinned files.
+    verify_resources_once(&resources, &specification, &state).unwrap();
+    assert!(state.join("verified-resources.json").is_file());
 }
 
 #[test]
@@ -178,10 +207,8 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         local_super_jianpin: true,
         local_temporary_english: true,
         local_temporary_japanese: true,
-        sentence_association: msime_engine_bridge::SentenceAssociationOptions {
+        sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
-            google: true,
-            neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
         },
@@ -537,6 +564,28 @@ fn shuangpin_key_hint_boundary_publishes_the_engine_face() {
     let value = "xiaohe";
     assert_eq!(
         read(unsafe { msime_client_shuangpin_key_hints(value.as_ptr(), 4096) })["ok"],
+        false
+    );
+}
+
+#[test]
+fn shuangpin_zero_initial_boundary_publishes_the_engine_table() {
+    let codes = |value: &str| {
+        // SAFETY: the slice outlives the call.
+        read(unsafe { msime_client_shuangpin_zero_initials(value.as_ptr(), value.len()) })
+    };
+
+    let xiaohe = codes("xiaohe");
+    assert_eq!(xiaohe["ok"], true);
+    assert_eq!(xiaohe["value"].as_object().unwrap().len(), 12);
+    assert_eq!(xiaohe["value"]["ang"], "ah");
+
+    let unknown = codes("xiaohe-v2");
+    assert_eq!(unknown["ok"], true);
+    assert_eq!(unknown["value"].as_object().unwrap().len(), 0);
+
+    assert_eq!(
+        read(unsafe { msime_client_shuangpin_zero_initials(std::ptr::null(), 6) })["ok"],
         false
     );
 }
@@ -2762,7 +2811,10 @@ fn mobile_clipboard_rejects_symlinked_legacy_ancestors() {
     .unwrap();
     let response =
         read(unsafe { msime_client_mobile_clipboard_history(request.as_ptr(), request.len()) });
-    assert_eq!(response["ok"], false);
+    assert_eq!(
+        response["error"],
+        "clipboard migration path is a symbolic link"
+    );
     assert_eq!(std::fs::read(&outside_history).unwrap(), fixture);
 
     let clear = serde_json::to_vec(&json!({
@@ -2772,7 +2824,10 @@ fn mobile_clipboard_rejects_symlinked_legacy_ancestors() {
     .unwrap();
     let response =
         read(unsafe { msime_client_mobile_clipboard_history(clear.as_ptr(), clear.len()) });
-    assert_eq!(response["ok"], false);
+    assert_eq!(
+        response["error"],
+        "clipboard migration path is a symbolic link"
+    );
     assert_eq!(std::fs::read(&outside_history).unwrap(), fixture);
 
     std::fs::remove_file(root.path().join("Clipboard")).unwrap();
@@ -2786,7 +2841,10 @@ fn mobile_clipboard_rejects_symlinked_legacy_ancestors() {
     let response = read(unsafe {
         msime_client_mobile_clipboard_history(harmony_request.as_ptr(), harmony_request.len())
     });
-    assert_eq!(response["ok"], false);
+    assert_eq!(
+        response["error"],
+        "clipboard migration path is a symbolic link"
+    );
 }
 
 #[test]
@@ -2953,6 +3011,37 @@ fn settled_rerank_without_movement_omits_the_unused_view() {
     assert_eq!(result["ok"], true);
     assert_eq!(result["value"]["moved"], false);
     assert!(result["value"].get("view").is_none());
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+/// The desktop model preference switches the runtime's settled rerank, at creation and on a later update, and the keyboard model switch reaches the rebuilt Engine the same way.
+#[test]
+fn sentence_model_switches_follow_the_preferences() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut preferences = chinese_preferences();
+    preferences.sentence_association.neural_desktop = true;
+    preferences.sentence_association.neural_keyboard = true;
+    let handle = test_host_preferences(directory.path(), preferences.clone());
+    let switches = || {
+        SESSIONS.with(|sessions| {
+            let session = &sessions.borrow()[&handle];
+            (
+                session.runtime.settled_rerank_enabled(),
+                session.options.sentence_association.neural_keyboard,
+            )
+        })
+    };
+    assert_eq!(switches(), (true, true));
+
+    preferences.sentence_association.neural_desktop = false;
+    preferences.sentence_association.neural_keyboard = false;
+    let updated = update(handle, 1, &preferences);
+    assert_eq!(updated["value"]["deferred"], false, "{updated}");
+    assert_eq!(switches(), (false, false));
+
+    preferences.sentence_association.neural_desktop = true;
+    assert_eq!(update(handle, 2, &preferences)["ok"], true);
+    assert_eq!(switches(), (true, false));
     assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }
 
@@ -3836,7 +3925,7 @@ fn paired_book_title_auto_close_balance_is_narrow_and_owned() {
 
 #[test]
 fn unpaired_punctuation_keeps_quote_alternation_and_book_title_nesting() {
-    // With paired completion off (or in an excluded host) nothing supplies the closing half, so the Engine's own alternation and nesting are the only way to type it - the reference's GetPunctuation does both regardless of the setting. See `scripts/apply_engine_punctuation_alternation.py`.
+    // With paired completion off (or in an excluded host) nothing supplies the closing half, so the Engine's own alternation and nesting are the only way to type it - the reference's GetPunctuation does both regardless of the setting.
     let dir = tempfile::tempdir().unwrap();
     let handle = test_host(dir.path());
     assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
@@ -3860,7 +3949,7 @@ fn unpaired_punctuation_keeps_quote_alternation_and_book_title_nesting() {
     // An unmatched closing mark leaves the depth at zero, so the next pair opens with 《 again.
     assert_eq!(marks(b"><>"), ["》", "《", "》"]);
 
-    // The state belongs to the session, not to the setting: turning pairing on mid-quote does not reset it, as the reference's toggle is never reset by the switch either. Paired-on output is unchanged by the overlay.
+    // The state belongs to the session, not to the setting: turning pairing on mid-quote does not reset it, as the reference's toggle is never reset by the switch either. With pairing on, the same state carries over: the next quote closes the one left open and a book-title mark nests inside the open 《.
     assert_eq!(marks(b"\"<"), ["“", "《"]);
     assert_eq!(
         read(msime_client_set_paired_punctuation(handle, true))["ok"],

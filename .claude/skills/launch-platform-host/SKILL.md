@@ -18,7 +18,6 @@ description: Build, launch and verify a 水杉输入法 platform host — macOS,
 | 依赖 | 用途 | 怎么找 |
 | --- | --- | --- |
 | Sparkle 2.9.6 | macOS 更新控制器，不可省略 | 按 [platforms/macos/README.md](../../../platforms/macos/README.md) 下载校验后解压到独立目录，`MSIME_SPARKLE_ROOT` 指向含 `Sparkle.framework` 的那一层 |
-| Boost（iOS 可用前缀） | `MSIME_IOS_DEPS` | Engine 用其头文件，Homebrew 的 `$(brew --prefix boost)` 即可 |
 | Android SDK + NDK 28.2.13676358 | Android 原生构建 | `ANDROID_SDK_ROOT`；NDK 在 `$ANDROID_SDK_ROOT/ndk/28.2.13676358`，版本由 `build-native.sh` 钉死 |
 | vcpkg（锁定 commit） | Android 依赖 | `MSIME_VCPKG_ROOT`，或 `target/tooling/vcpkg`；commit 不符会直接拒绝 |
 | DevEco 命令行 `hvigorw` / `ohpm` | HarmonyOS 打包 | DevEco Studio 自带，把其 `command-line-tools/bin` 加进 `PATH` |
@@ -58,7 +57,7 @@ CARGO_TARGET_DIR=target/macos-cargo cargo build -p msime-host-api --locked \
 - bundle 名字是中文。`cp -R target/macos-isolated/水杉输入法.app …` 会因 APFS 的 NFC/NFD 归一化报 `No such file or directory`——用 `find target/macos-isolated -maxdepth 1 -name "*.app" -exec cp -R {} <目标> \;`。
 - 安装与输入源注册走 `platforms/macos/scripts/install.sh`。注册后有分钟级不稳定窗口：`check_input_source.swift` 要隔几秒多查几次再下结论，只查一次两个方向都可能误判。
 - **装完还打不出中文是正常的：`install.sh` 不准备词库。** 输入会话要 `~/Library/Application Support/app.msime.macos/runtime-options.json`（旧安装是 `app.msime.client`），开发构建里没有（发布包由设置应用首次启动时写）。没有会话的控制器把按键原样交给应用，看起来就是「选了中文却打出英文」。补齐的三条命令在 `platforms/macos/README.md` 的《安装与输入源注册》开头；资源别留在 `target/resources`，那里会被清掉。查现象用 `log show --predicate 'process == "水杉输入法"'` 找 `MSIME has no input session`。
-- `src/input/MetasequoiaInputController.mm` 和 `src/dictionary/DictionaryRuntime.mm` 不参与构建（固定 Apple 快照的保留适配器）。产品是 `src/input/InputController.mm` 和 `src/core/ClientDictionaryRuntime.mm`，改动要落在后者；`scripts/test-macos-orphan-sources.py` 守这条。
+- 产品是 `src/input/InputController.mm` 和 `src/core/ClientDictionaryRuntime.mm`，改动要落在这两处；`scripts/test-macos-orphan-sources.py` 守着不让不参与构建的源文件留在树里。
 - 换新 bundle identifier 需要重新登录一次，这是 macOS 本身的限制，与签名和 plist 无关。
 - `check_input_source.swift` 报某个模式 `disabled`（典型是英文模式 `.Roman`）而中文模式 enabled 时，安装是成功的，别去重新登录或反复重装：macOS 27 上进程启用不了键盘输入模式，`TISEnableInputSource` 返回 noErr 而状态不变，苹果自己的模式一样如此。该脚本为此退 2（可用但有源未启用），退 1 才是不可用。测量见 `docs/macos-parity.md`。
 - 钥匙串里有两张同名 Developer ID Application 证书时，`codesign` 会因名字歧义拒签。`install.sh` 已改为按 SHA-1 取身份，要指定就把 `MSIME_SIGNING_IDENTITY` 设成哈希而不是名字。
@@ -74,7 +73,7 @@ mkdir -p target/macos && find target/macos-isolated -maxdepth 1 -name "*.app" -e
 ## iOS
 
 ```sh
-MSIME_IOS_DEPS="$(brew --prefix boost)" bash platforms/ios/build-native.sh simulator
+bash platforms/ios/build-native.sh simulator
 ```
 
 跑模拟器测试要静态库、staged 资源、生成好的工程三样同时在场，串成一条：
@@ -82,7 +81,7 @@ MSIME_IOS_DEPS="$(brew --prefix boost)" bash platforms/ios/build-native.sh simul
 ```sh
 cargo run --quiet -p msime-client-core --example install_resources --locked -- target/resources > /tmp/ir.log \
 && RES=$(tail -1 /tmp/ir.log) && bash platforms/ios/stage-resources.sh "$RES" \
-&& MSIME_IOS_DEPS="$(brew --prefix boost)" bash platforms/ios/build-native.sh simulator \
+&& bash platforms/ios/build-native.sh simulator \
 && (cd platforms/ios && xcodebuild -project MSIMEClient.xcodeproj -scheme MSIMEClientTests \
       -destination 'platform=iOS Simulator,name=<模拟器名>' test)
 ```
@@ -134,9 +133,9 @@ Tauri 外壳的 Linux 编译是唯一能看见 `#[cfg(target_os = "linux")]` 分
 ```sh
 image="msime-linux-desktop-check:$(printf %s "$PWD" | shasum | cut -c1-12)"
 docker build -q -t "$image" -f platforms/linux/tests/tools/Dockerfile.desktop-check platforms/linux/tests
-docker run --rm -v "$PWD":/source -v "$PWD/vendor":/source/vendor:ro \
+docker run --rm -v "$PWD":/source \
   -v "$PWD/target/linux-desktop-check":/ctarget -w /source \
-  -e CARGO_TARGET_DIR=/ctarget -e MSIME_SKIP_ENGINE_FETCH=1 \
+  -e CARGO_TARGET_DIR=/ctarget \
   "$image" cargo check -p msime-desktop --locked --all-targets --message-format short
 ```
 

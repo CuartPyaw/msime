@@ -25,7 +25,7 @@
 //! boundary, the IPC hop, or the time the platform spends drawing the candidate panel. The budget
 //! it checks is therefore a ceiling on this crate's share of a frame, not a guarantee about what a
 //! user perceives.
-use msime_engine_bridge::{Command, Session};
+use msime_engine::host::{Command, Session};
 use msime_input_runtime::{Action, Reranker, Runtime, SentenceModel};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -194,7 +194,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let generation = generation["source_commit"]
         .as_str()
         .ok_or("lock has no source_commit")?;
-    let mut options = msime_engine_bridge::prepare_options(
+    let mut options = msime_engine::host::prepare_options(
         resources.to_str().ok_or("non-UTF-8 resource path")?,
         state
             .path()

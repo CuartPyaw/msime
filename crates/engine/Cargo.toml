@@ -1,0 +1,29 @@
+[package]
+name = "msime-engine"
+description = "Pure Rust input engine: composition state, schemes, dictionaries and learning. Replaces the C++ MSIME-Engine."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chinese-ime-lm = { git = "https://github.com/metasequoiaime/chinese-ime-lm", rev = "7e02487323ee5047a07a36b6e20d766d7c2f381d" }
+hex = "0.4"
+lru = "0.16"
+lunar-lite = "0.1"
+memmap2 = "0.9"
+rusqlite = { workspace = true, features = ["bundled", "backup"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+time = { workspace = true, features = ["local-offset"] }
+unicode-segmentation.workspace = true
+wana_kana = "4"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

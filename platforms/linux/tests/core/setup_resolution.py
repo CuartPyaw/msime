@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """msime-linux-setup 的判定规则，不需要词库也不联网。
 
-这个入口要做的判断——这份词库能不能用、锁里没有 URL 的那一项归哪个固定归档、去哪里找锁
-和已有词库——都是纯函数，钉在这里。容器门禁不带词库，凡是需要真实词库才注册的检查在那里
-等于不存在，所以判定逻辑必须能脱离词库单独验证。
+这个入口要做的判断——这份词库能不能用、锁里的哪几项取不回、去哪里找锁和已有词库——都是纯函数，钉在这里。容器门禁不带词库，凡是需要真实词库才注册的检查在那里等于不存在，所以判定逻辑必须能脱离词库单独验证。
 """
 import hashlib
 import importlib.machinery
@@ -58,7 +56,7 @@ def main() -> int:
         assert len(problems) == 1 and "SHA-256" in problems[0], problems
         write(resources / "msime.db", payload)
 
-        # 宿主拒绝锁之外的任何条目，这里同样报出来；只有 Engine 的 helpcodes 子目录例外。
+        # 宿主拒绝锁之外的任何条目，这里同样报出来；例外只有 Engine 的 helpcodes 子目录，和宿主校验时自己删掉的普通文件 dict_pinyin.dat（setup_update.py 覆盖）。
         (resources / "helpcodes").mkdir()
         assert setup.verify_directory(resources, lock) == []
         (resources / "retired.db").write_bytes(b"dropped by a newer lock")
@@ -74,21 +72,40 @@ def main() -> int:
         problems = setup.verify_directory(resources, lock)
         assert len(problems) == 1 and "缺少" in problems[0], problems
 
-    # 词库锁里没有 URL 的那一项来自引擎源码树，按 path 前缀归到对应的固定归档。
-    engine_lock = {
-        "dependencies": [
-            {"path": "googlepinyinime-rev", "repository": "metasequoiaime/Google-PinyinIME-Rev",
-             "archive": "https://example.invalid/a.tar.gz", "sha256": "0" * 64},
-            {"path": "utfcpp", "repository": "nemtrif/utfcpp",
-             "archive": "https://example.invalid/b.tar.gz", "sha256": "1" * 64},
-        ]
-    }
-    found = setup.dependency_for("googlepinyinime-rev/data/dict_pinyin.dat", engine_lock)
-    assert found is not None and found["path"] == "googlepinyinime-rev", found
-    # 前缀必须落在目录边界上，不能让 utfcpp 匹配到 utfcpp-extra/...
-    assert setup.dependency_for("utfcpp-extra/x.dat", engine_lock) is None
-    assert setup.dependency_for("", engine_lock) is None
-    assert setup.dependency_for("googlepinyinime-rev/data/dict_pinyin.dat", {}) is None
+    # 锁里没有下载地址的一项只要目录里已有且摘要相符就不算缺；缺了则在发出任何请求之前就中止，不下半份词库。
+    with tempfile.TemporaryDirectory() as name:
+        resources = Path(name) / "resources"
+        resources.mkdir()
+        present = b"already here"
+        lock = {
+            "artifacts": [
+                {"name": "present.dat", "sha256": write(resources / "present.dat", present), "size": len(present)},
+                {"name": "msime.db", "sha256": hashlib.sha256(b"x").hexdigest(), "size": 1,
+                 "url": "https://example.invalid/msime.db"},
+                {"name": "unreachable.dat", "sha256": "1" * 64, "size": 1},
+            ]
+        }
+        requested = []
+        original_fetch = setup.fetch
+
+        def fetch(url: str, destination: Path, maximum: int) -> None:
+            requested.append(url)
+            destination.write_bytes(b"x"[:maximum])
+
+        setup.fetch = fetch
+        try:
+            try:
+                setup.download_artifacts(lock, resources)
+                raise AssertionError("a lock entry without a URL was accepted")
+            except SystemExit as error:
+                assert "unreachable.dat" in str(error) and "present.dat" not in str(error), error
+            assert requested == [], requested
+            lock["artifacts"].pop()
+            setup.download_artifacts(lock, resources)
+            assert requested == ["https://example.invalid/msime.db"], requested
+            assert setup.verify_directory(resources, lock) == []
+        finally:
+            setup.fetch = original_fetch
 
     # 查找顺序：显式环境变量优先于安装前缀，随包词库优先于用户自备的那一份。
     prefix = Path("/opt/msime")

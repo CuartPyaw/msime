@@ -37,15 +37,21 @@ ATTRIBUTE = re.compile(r"^\s*(#\[|#!\[|//|/\*|\*)")
 EXEMPT = 'target_os = "android"'
 
 
+def enclosing_signature(lines: list[str], index: int) -> int:
+    """The line of the `fn` that contains `index`, or -1 when none is found above it."""
+    start = index
+    while start >= 0 and not SIGNATURE.match(lines[start]):
+        start -= 1
+    return start
+
+
 def excused(lines: list[str], index: int) -> bool:
     """A body that Android never compiles may use the std API, and some tests must.
 
     The exemption is read off the enclosing function's own attributes rather than a window, so
     that a `cfg` belonging to some unrelated item further up cannot launder a real call.
     """
-    start = index
-    while start >= 0 and not SIGNATURE.match(lines[start]):
-        start -= 1
+    start = enclosing_signature(lines, index)
     if start < 0:
         return False
     above = start - 1
@@ -64,7 +70,8 @@ for directory in SEARCHED:
         for index, line in enumerate(lines):
             if not CALL.search(line) and not FILE_ONLY.search(line):
                 continue
-            window = "\n".join(lines[max(0, index - WINDOW) : index + 1])
+            # The window stops at the enclosing function's signature: a file opened by the function above is not this function's lock sidecar.
+            window = "\n".join(lines[max(0, index - WINDOW, enclosing_signature(lines, index)) : index + 1])
             if not (FILE_ONLY.search(line) or OPENED.search(window)):
                 continue
             if excused(lines, index):

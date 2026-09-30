@@ -49,12 +49,8 @@ export function providerSettingValue(
 
 export const ASR_PROVIDER_DEFAULTS: Record<string, ProviderDefaults> = {
   system: { endpoint: "", model: "" },
-  // On-device recognition. The model is a downloaded model directory or a Whisper file the user points at, not a name a service resolves, so it lives in `asr_model_path` and there is no endpoint, token or model list to offer here.
-  local: {
-    endpoint: "",
-    model: "",
-    documentation: "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
-  },
+  // On-device recognition. The model is an installed model directory (one holding msime-model.json) the user points at, not a name a service resolves, so it lives in `asr_model_path` and there is no endpoint, token or model list to offer here.
+  local: { endpoint: "", model: "" },
   doubao: {
     endpoint: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async",
     model: "",

@@ -8,10 +8,10 @@ use crate::platform::mobile::mobile_account_helpers::{
     account_preferences_schema as shared_account_preferences_schema,
     account_profile as shared_account_profile, account_rename as shared_account_rename,
     account_request_code as shared_account_request_code, account_status as shared_account_status,
-    call, cleanup_stale_snapshot_previews, clear_snapshot_previews, clear_snapshot_previews_after,
-    cloud_dictionary_account_request, replace_pending_snapshot, snapshot_command_error,
-    snapshot_response_without_account, take_pending_snapshot, valid_mobile_haptic_strength,
-    validate_pending_snapshot, PendingSnapshot, SnapshotMetadata,
+    call_session, cleanup_stale_snapshot_previews, clear_snapshot_previews,
+    clear_snapshot_previews_after, cloud_dictionary_account_request, replace_pending_snapshot,
+    snapshot_command_error, snapshot_response_without_account, take_pending_snapshot,
+    valid_mobile_haptic_strength, validate_pending_snapshot, PendingSnapshot, SnapshotMetadata,
 };
 use crate::platform::mobile::mobile_account_preferences::{
     frequency_account_preferences, insert_bool, insert_integer, insert_string,
@@ -19,7 +19,7 @@ use crate::platform::mobile::mobile_account_preferences::{
 use crate::platform::mobile::mobile_community::MobileCommunityState;
 use crate::shared::account_dto::{
     providers_response_without_apple, ChallengeResponse, ChatModelsResponse, ChatResponse,
-    PreferenceSchemaResponse, ProfileResponse, ProvidersResponse, StatusResponse, UserResponse,
+    PreferenceSchemaResponse, ProfileResponse, ProvidersResponse, StatusResponse,
 };
 use msime_client_core::account::{
     merge_account_preferences, validate_account_preferences, AccountChatMessage, AccountError,
@@ -931,7 +931,7 @@ pub async fn ai_test(
 pub async fn account_providers(
     state: State<'_, AccountState>,
 ) -> Result<ProvidersResponse, crate::CommandError> {
-    call(state, |session| {
+    call_session(state.session(), |session| {
         session.providers().map(providers_response_without_apple)
     })
     .await

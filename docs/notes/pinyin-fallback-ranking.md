@@ -1,5 +1,7 @@
 # 回退整句：一个被缺失文件掩盖了的排序缺陷
 
+> 历史记录：这里讨论的 Google 整句解码器（读 `dict_pinyin.dat`、以 `Fallback` 来源给出整句的那一条）已随 C++ Engine 移植到 `crates/engine` 一起退役，整句候选现在只来自词格。文中的 `vendor/`、`MSIME_SKIP_ENGINE_FETCH` 与 `crates/engine-bridge` 都是当时的构建方式。
+
 ## 定位
 
 整句评测第一次跑出 top-1 51.7% 时，有个数字比它更反常：`top1`、`top5`、`top9`、`found` 四个值完全相等。整句答错时，正确答案不是排在后面，而是**根本不在候选列表里**。

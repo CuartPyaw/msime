@@ -265,11 +265,7 @@ if ! rg -q 'VoiceConfiguration\.read' \
   echo "Android keyboard voice must read the shared provider resolution" >&2
   exit 1
 fi
-# The JNI translation unit is the one place a Java declaration and a shared FFI
-# signature have to agree, and nothing else in this script reads it: a method
-# declared native in Java compiles whether or not the C++ side exists. Compiling
-# it for the real target catches that without the full native build, which needs
-# vcpkg and the Engine. A machine without the pinned NDK skips it and says so.
+# The JNI translation unit is the one place a Java declaration and a shared FFI signature have to agree, and nothing else in this script reads it: a method declared native in Java compiles whether or not the C++ side exists. Compiling it for the real target catches that without the full native build, which needs vcpkg, the Rust Android targets and the pinned speech runtime. A machine without the pinned NDK skips it and says so.
 ndk=${MSIME_ANDROID_NDK:-${android_sdk}/ndk/28.2.13676358}
 case $(uname -s) in
   Darwin) host_tag=darwin-x86_64 ;;

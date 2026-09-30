@@ -491,7 +491,7 @@ pub unsafe extern "C" fn msime_client_translation_gloss_save(
                 } else {
                     item.text
                 };
-                if msime_engine_bridge::save_candidate_gloss(user_data, !english, &key, &gloss) {
+                if msime_engine::host::save_candidate_gloss(user_data, !english, &key, &gloss) {
                     saved += 1;
                 }
             }
@@ -573,7 +573,7 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
         }
         let glosses = match target_language.as_deref() {
             None | Some("en") => {
-                msime_engine_bridge::candidate_glosses_with_user(resources, user_data, &candidates)
+                msime_engine::host::candidate_glosses_with_user(resources, user_data, &candidates)
                     .map_err(|_| "candidate gloss dictionary unavailable")?
             }
             // Another language reads only its offline dictionary: the learned store and custom_translations.txt hold English. A dictionary that is not installed answers nothing, so the host keeps whatever the online path brings.
@@ -589,7 +589,7 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
                 let database = database
                     .to_str()
                     .ok_or("candidate gloss dictionary unavailable")?;
-                msime_engine_bridge::candidate_target_glosses(database, language, &candidates)
+                msime_engine::host::candidate_target_glosses(database, language, &candidates)
                     .map_err(|_| "candidate gloss dictionary unavailable")?
             }
             Some(_) => return Err("invalid candidate gloss request".into()),
@@ -667,7 +667,7 @@ pub unsafe extern "C" fn msime_client_english_completions_request(
         if !Path::new(resources).is_absolute() {
             return Err("resources path must be absolute".into());
         }
-        let items = msime_engine_bridge::english_completions(
+        let items = msime_engine::host::english_completions(
             resources,
             &request.prefix,
             usize::from(request.limit),

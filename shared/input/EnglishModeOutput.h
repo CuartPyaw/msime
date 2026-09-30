@@ -5,7 +5,7 @@
 
 namespace msime::input {
 
-// English mode never reaches Engine's punctuation policy, because the session is closed or ignored while the IME is off. The "always Chinese punctuation" lock, and a Ctrl+. or toolbar toggle made in English mode, still have to convert marks there, as they do on Windows with the IME closed (KeyEventSink.cpp's FUNCTION_PUNCTUATION and FUNCTION_DOUBLE_SINGLE_BYTE branches), so the hosts carry a forward copy of Engine's contract (vendor/MSIME-Engine/contracts/punctuation/policy.h). This is deliberately not the Linux host's chinese_punctuation_mark: that table is the reverse Space rewrite, maps '/' to 、 and has no alternating quotes.
+// English mode never reaches the engine's punctuation policy (crates/engine/src/punctuation.rs), because the session is closed or ignored while the IME is off. The "always Chinese punctuation" lock, and a Ctrl+. or toolbar toggle made in English mode, still have to convert marks there, as they do on Windows with the IME closed (KeyEventSink.cpp's FUNCTION_PUNCTUATION and FUNCTION_DOUBLE_SINGLE_BYTE branches), so the hosts carry a forward copy of its contract (shared/contracts/punctuation/policy.h). This is deliberately not the Linux host's chinese_punctuation_mark: that table is the reverse Space rewrite, maps '/' to 、 and has no alternating quotes.
 struct EnglishPunctuationState {
   bool double_quote_open = false;
   bool single_quote_open = false;

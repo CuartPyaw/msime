@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let generation: serde_json::Value = serde_json::from_str(&generation)?;
     let generation = generation["source_commit"].as_str().ok_or("no commit")?;
-    let options = msime_engine_bridge::prepare_options(
+    let options = msime_engine::host::prepare_options(
         &resources,
         state.path().join("user").to_str().ok_or("path")?,
         state.path().join("cache").to_str().ok_or("path")?,
@@ -38,13 +38,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // First call separately: it is the one that would build a cache, and averaging it in
         // would hide whether later calls got cheaper.
         let started = Instant::now();
-        let first = msime_engine_bridge::hanzi_to_pinyin(&options, word);
+        let first = msime_engine::host::hanzi_to_pinyin(&options, word);
         let first_ms = started.elapsed().as_secs_f64() * 1000.0;
 
         let runs = 20;
         let started = Instant::now();
         for _ in 0..runs {
-            let _ = msime_engine_bridge::hanzi_to_pinyin(&options, word);
+            let _ = msime_engine::host::hanzi_to_pinyin(&options, word);
         }
         let rest_ms = started.elapsed().as_secs_f64() * 1000.0 / f64::from(runs);
         println!(

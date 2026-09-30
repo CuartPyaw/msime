@@ -35,6 +35,49 @@ fn preference_store_rejects_a_symlinked_document() {
 }
 
 #[test]
+fn retired_google_sentence_switch_still_loads_and_is_not_written_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let saved = store.save(0, Preferences::default()).unwrap();
+    let mut document: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    document["preferences"]["sentence_association"] = serde_json::json!({
+        "word_lattice": false,
+        "google": false,
+        "neural_desktop": true,
+    });
+    fs::write(store.path(), serde_json::to_vec_pretty(&document).unwrap()).unwrap();
+
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.revision, saved.revision);
+    let sentence = loaded.preferences.sentence_association;
+    assert!(!sentence.word_lattice);
+    assert!(sentence.neural_desktop);
+    assert_eq!(
+        sentence,
+        SentenceAssociationPreferences {
+            word_lattice: false,
+            neural_desktop: true,
+            ..SentenceAssociationPreferences::default()
+        }
+    );
+    let written = serde_json::to_value(sentence).unwrap();
+    assert!(written.get("google").is_none());
+    assert!(
+        serde_json::from_value::<SentenceAssociationPreferences>(serde_json::json!({
+            "google": "not a bool either",
+        }))
+        .is_ok()
+    );
+    assert!(
+        serde_json::from_value::<SentenceAssociationPreferences>(serde_json::json!({
+            "googel": true,
+        }))
+        .is_err()
+    );
+}
+
+#[test]
 fn voice_commit_mode_defaults_for_legacy_documents() {
     let mut value = serde_json::to_value(Preferences::default()).unwrap();
     value["voice_input"]
@@ -224,27 +267,27 @@ fn local_recognition_stores_an_absolute_model_path_and_refuses_anything_else() {
     // A Windows path is absolute too: the Windows host saves one, and the same document is validated wherever it is read.
     for accepted in [
         "",
-        "/Users/someone/models/ggml-large-v3-turbo.bin",
         "/Users/someone/Library/Application Support/msime/voice-models/x-asr-zh-en-streaming",
         r"C:\Users\someone\AppData\Roaming\msime\voice-models\sense-voice-small",
-        "D:/models/ggml.bin",
+        "D:/models/sense-voice-small",
         r"\\?\C:\models\x-asr-zh-en-streaming",
-        r"\\fileserver\share\models\ggml.bin",
+        r"\\fileserver\share\models\fun-asr-nano",
+        // A Whisper model file saved by an earlier build: the document still loads, and the recognizer then reports the model missing because the path is not a directory holding `msime-model.json`.
+        "/Users/someone/models/ggml-large-v3-turbo.bin",
     ] {
         assert!(
             with_path(accepted).validate().is_ok(),
             "{accepted:?} should be accepted"
         );
     }
-    // A relative path resolves against whichever process happens to read it, and a control character
-    // reaches the recognizer as a filename it cannot open. Both fail while the user holds the shortcut.
+    // A relative path resolves against whichever process happens to read it, and a control character reaches the recognizer as a filename it cannot open. Both fail while the user holds the shortcut.
     for rejected in [
-        "models/ggml.bin",
-        "~/models/ggml.bin",
-        "/models/gg\nml.bin",
-        r"C:models\ggml.bin",
-        r"\models\ggml.bin",
-        "C:\\models\\gg\tml.bin",
+        "models/x-asr-zh-en-streaming",
+        "~/models/x-asr-zh-en-streaming",
+        "/models/x-asr\nzh-en-streaming",
+        r"C:models\x-asr-zh-en-streaming",
+        r"\models\x-asr-zh-en-streaming",
+        "C:\\models\\x-asr\tzh-en-streaming",
     ] {
         assert!(
             matches!(
@@ -2474,7 +2517,7 @@ fn restoring_defaults_keeps_what_cannot_be_retyped() {
     edited.voice_input.asr_provider = "doubao".into();
     edited.voice_input.asr_token = "fixture-asr-token".into();
     edited.voice_input.asr_endpoint = "https://asr.example.test/v1".into();
-    edited.voice_input.asr_model_path = "/Users/fixture/models/ggml.bin".into();
+    edited.voice_input.asr_model_path = "/Users/fixture/voice-models/sense-voice-small".into();
     edited.voice_input.asr_model_mirror = "https://mirror.example.test/".into();
     edited.voice_input.polish_token = "fixture-polish-token".into();
     edited.voice_input.polish_enabled = true;
@@ -2528,7 +2571,7 @@ fn restoring_defaults_keeps_what_cannot_be_retyped() {
     );
     assert_eq!(
         restored.voice_input.asr_model_path,
-        "/Users/fixture/models/ggml.bin"
+        "/Users/fixture/voice-models/sense-voice-small"
     );
     assert_eq!(
         restored.voice_input.asr_model_mirror,

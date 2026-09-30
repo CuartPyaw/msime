@@ -38,21 +38,16 @@ git -C "$vcpkg_root" diff --quiet HEAD -- || { echo "vcpkg has tracked changes" 
 # manifest is reinstalled in the same root. Do not run this script concurrently
 # against the same vcpkg checkout (it holds a filesystem lock).
 #
-# MSIME_WINDOWS_DEPS_ROOT shares the built dependencies across checkouts. This
-# repository is worked in one short-lived worktree per task, and each would
-# otherwise rebuild curl and boost from source before it could compile a line
-# of this project - minutes of work per worktree, for an identical answer every
-# time. The manifest is the same file in every worktree, so one tree per
-# architecture serves all of them; the per-arch split above is unchanged.
+# MSIME_WINDOWS_DEPS_ROOT shares the built dependencies across checkouts. This repository is worked in one short-lived worktree per task, and each would otherwise rebuild curl from source before it could compile a line of this project - minutes of work per worktree, for an identical answer every time. The manifest is the same file in every worktree, so one tree per architecture serves all of them; the per-arch split above is unchanged.
 deps_root="${MSIME_WINDOWS_DEPS_ROOT:-$repo_root/target/windows-native-deps}/$arch"
 prefix="$deps_root/$arch-mingw-static"
 VCPKG_DISABLE_METRICS=1 "$vcpkg_root/vcpkg" install \
   --triplet "$arch-mingw-static" --host-triplet "$host_triplet" \
   --x-manifest-root="$repo_root/platforms/windows" --x-install-root="$deps_root"
-env "MSIME_WINDOWS_DEPS=$prefix" "$linker_var=$compiler-gcc" \
+env "$linker_var=$compiler-gcc" \
   cargo build --locked -p msime-host-api --target "$triple"
-env "MSIME_WINDOWS_DEPS=$prefix" "$linker_var=$compiler-gcc" \
-  cargo build --locked -p msime-engine-bridge --bin MetasequoiaImeDictionaryReplay --target "$triple"
+env "$linker_var=$compiler-gcc" \
+  cargo build --locked -p msime-engine --bin MetasequoiaImeDictionaryReplay --target "$triple"
 output="$repo_root/target/windows-full/$arch"
 # compile_commands.json is what lets the same sources be re-checked for the
 # other architecture with the flags they are really built with, rather than a

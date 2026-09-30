@@ -66,6 +66,7 @@ export function settingsCapabilities({
   const clientHostedPlatform =
     windows || linux || android || macos || harmony || host?.platform === "ios";
   const desktopPanels = host ? (host.panel_windows ?? !mobile) : true;
+  const showVoiceHotkeys = desktopPanels || host?.voice_hotkeys === true;
   return {
     nativeVoicePlatform,
     showModeScope,
@@ -98,5 +99,6 @@ export function settingsCapabilities({
     showFullwidthChord,
     clientHostedPlatform,
     desktopPanels,
+    showVoiceHotkeys,
   } as const;
 }

@@ -510,7 +510,7 @@ impl UnixSocketProvider {
         {
             return None;
         }
-        msime_engine_bridge::handwriting_order_candidates(&reply.candidates).ok()
+        msime_engine::host::handwriting_order_candidates(&reply.candidates).ok()
     }
 
     /// Search the user-owned emoji catalog. Results stay outside the IBus

@@ -588,6 +588,28 @@ pub fn pick_directory() -> Option<String> {
     path
 }
 
+/// Ask the user for an installed voice model directory (one holding msime-model.json) and return its absolute path, or `None` when cancelled.
+///
+/// Unlike [`pick_directory`], the panel offers no new folder and says nothing about the data directory. Must run on the AppKit main thread; the native side refuses anywhere else.
+#[cfg(target_os = "macos")]
+pub fn pick_voice_model_directory() -> Option<String> {
+    unsafe extern "C" {
+        fn msime_macos_pick_voice_model_directory() -> *mut std::os::raw::c_char;
+        fn msime_macos_free_picked_path(path: *mut std::os::raw::c_char);
+    }
+    // SAFETY: the native side returns either null or a strdup'd UTF-8 path that this owns and frees.
+    let raw = unsafe { msime_macos_pick_voice_model_directory() };
+    if raw.is_null() {
+        return None;
+    }
+    let path = unsafe { std::ffi::CStr::from_ptr(raw) }
+        .to_str()
+        .ok()
+        .map(str::to_owned);
+    unsafe { msime_macos_free_picked_path(raw) };
+    path
+}
+
 /// Stop every running instance of the separate InputMethodKit bundle before its state is moved.
 /// Must run on the AppKit main thread.
 #[cfg(target_os = "macos")]

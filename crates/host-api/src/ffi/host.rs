@@ -361,7 +361,7 @@ pub unsafe extern "C" fn msime_client_shuangpin_key_hints(
         // SAFETY: guaranteed by the documented caller contract; size checked above.
         let bytes = unsafe { std::slice::from_raw_parts(profile, length) };
         let name = std::str::from_utf8(bytes).map_err(|_| "invalid shuangpin profile encoding")?;
-        let entries = msime_engine_bridge::shuangpin_key_hints(name);
+        let entries = msime_engine::host::shuangpin_key_hints(name);
         let mut hints = serde_json::Map::with_capacity(entries.len());
         hints.extend(
             entries
@@ -369,6 +369,36 @@ pub unsafe extern "C" fn msime_client_shuangpin_key_hints(
                 .map(|entry| (entry.key, serde_json::Value::String(entry.hint))),
         );
         Ok(serde_json::Value::Object(hints))
+    })
+}
+
+/// The double-pinyin codes of the whole zero-initial syllables for one profile, read out of the Engine's own profile tables, as a JSON object such as `{"a":"aa","ang":"ah",...}`.
+///
+/// A keymap panel shows these next to the key face, and like the key hints they depend only on the profile, so this takes no handle. An unknown name yields an empty object.
+/// # Safety
+/// `profile` points to `length` readable UTF-8 bytes. Null is rejected.
+/// The returned response must be released with `msime_client_string_free`.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_shuangpin_zero_initials(
+    profile: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if profile.is_null() || length > 64 {
+            return Err("invalid shuangpin profile buffer".into());
+        }
+        // SAFETY: guaranteed by the documented caller contract; size checked above.
+        let bytes = unsafe { std::slice::from_raw_parts(profile, length) };
+        let name = std::str::from_utf8(bytes).map_err(|_| "invalid shuangpin profile encoding")?;
+        let entries = msime_engine::host::shuangpin_zero_initials(name);
+        let mut codes = serde_json::Map::with_capacity(entries.len());
+        codes.extend(entries.into_iter().map(|(syllable, code)| {
+            (
+                syllable.to_string(),
+                serde_json::Value::String(code.to_string()),
+            )
+        }));
+        Ok(serde_json::Value::Object(codes))
     })
 }
 
@@ -1271,10 +1301,11 @@ fn apple_date_to_unix_ms(value: f64) -> Option<u64> {
         .then(|| milliseconds.round() as u64)
 }
 
-/// Check every existing component before a migration opens or removes a path. The mobile root is
-/// supplied by a host and legacy subdirectories can be replaced independently, so checking only
-/// the final directory entry still lets `File::open` follow a symlinked ancestor.
-fn reject_symlinked_path(path: &std::path::Path) -> Result<(), String> {
+/// Check every existing component from `path` up to and including `root` before a migration opens or removes it. Legacy subdirectories below the root can be replaced independently, so checking only the final entry still lets `File::open` follow a symlinked ancestor. Components above the root belong to the host and the OS, not to this migration: a host directory can legitimately sit under a system symlink such as `/var -> /private/var` on Apple platforms, and walking past the root to `/` would reject every such path and turn migration off. The shared store under `MSIME/` applies client-core's own storage rule on top of this.
+fn reject_symlinked_path(root: &std::path::Path, path: &std::path::Path) -> Result<(), String> {
+    if !path.starts_with(root) {
+        return Err("clipboard migration path unavailable".into());
+    }
     let mut current = path;
     loop {
         match std::fs::symlink_metadata(current) {
@@ -1285,18 +1316,17 @@ fn reject_symlinked_path(path: &std::path::Path) -> Result<(), String> {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err("clipboard migration path unavailable".into()),
         }
-        let parent = current
-            .parent()
-            .ok_or_else(|| "clipboard migration path unavailable".to_owned())?;
-        if parent == current {
+        if current == root {
             return Ok(());
         }
-        current = parent;
+        current = current
+            .parent()
+            .ok_or_else(|| "clipboard migration path unavailable".to_owned())?;
     }
 }
 
 fn apple_clipboard_migration_lock(root: &std::path::Path) -> Result<std::fs::File, String> {
-    reject_symlinked_path(root)?;
+    reject_symlinked_path(root, root)?;
     std::fs::create_dir_all(root).map_err(|_| "clipboard migration unavailable")?;
     let lock_path = root.join(".msime-clipboard-history-migration.lock");
     let lock = msime_client_core::file_lock::open_private_lock_file(lock_path)
@@ -1324,7 +1354,7 @@ pub fn migrate_apple_clipboard_history(root: &std::path::Path) -> Result<bool, S
     }
 
     let legacy_path = root.join("Clipboard").join("history.json");
-    reject_symlinked_path(&legacy_path)?;
+    reject_symlinked_path(root, &legacy_path)?;
     let metadata = match std::fs::symlink_metadata(&legacy_path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -1393,7 +1423,7 @@ fn migrate_harmony_clipboard_history(root: &std::path::Path) -> Result<bool, Str
     }
 
     let legacy_path = root.join("state").join("clipboard-history.json");
-    reject_symlinked_path(&legacy_path)?;
+    reject_symlinked_path(root, &legacy_path)?;
     let metadata = match std::fs::symlink_metadata(&legacy_path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -1451,7 +1481,7 @@ fn clear_mobile_clipboard_history_with_legacy(
 ) -> Result<(), String> {
     let _lock = apple_clipboard_migration_lock(root)?;
     let legacy_path = root.join("Clipboard").join("history.json");
-    reject_symlinked_path(&legacy_path)?;
+    reject_symlinked_path(root, &legacy_path)?;
     match std::fs::symlink_metadata(&legacy_path) {
         Ok(metadata) if metadata.file_type().is_file() => {
             std::fs::remove_file(&legacy_path).map_err(|_| "mobile clipboard clear failed")?;
@@ -1462,7 +1492,7 @@ fn clear_mobile_clipboard_history_with_legacy(
     }
     if matches!(legacy, Some(MobileClipboardLegacy::HarmonyState)) {
         let harmony_path = root.join("state").join("clipboard-history.json");
-        reject_symlinked_path(&harmony_path)?;
+        reject_symlinked_path(root, &harmony_path)?;
         match std::fs::symlink_metadata(&harmony_path) {
             Ok(metadata) if metadata.file_type().is_file() => {
                 std::fs::remove_file(harmony_path).map_err(|_| "mobile clipboard clear failed")?;
@@ -1836,4 +1866,37 @@ pub unsafe extern "C" fn msime_client_vocabulary_review(
         .map_err(|error| error.to_string())?;
         serde_json::to_value(status).map_err(|_| "vocabulary review response failed".to_owned())
     })
+}
+
+#[cfg(all(test, unix))]
+mod migration_path_tests {
+    use super::reject_symlinked_path;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn symlinks_are_checked_from_the_path_up_to_the_root_only() {
+        let host = tempfile::tempdir().unwrap();
+        let real = host.path().join("real");
+        std::fs::create_dir_all(real.join("root/Clipboard")).unwrap();
+        symlink(&real, host.path().join("link")).unwrap();
+        let root = host.path().join("link/root");
+        let legacy = root.join("Clipboard/history.json");
+        assert_eq!(reject_symlinked_path(&root, &root), Ok(()));
+        assert_eq!(reject_symlinked_path(&root, &legacy), Ok(()));
+
+        std::fs::remove_dir(real.join("root/Clipboard")).unwrap();
+        symlink(host.path(), real.join("root/Clipboard")).unwrap();
+        assert_eq!(
+            reject_symlinked_path(&root, &legacy),
+            Err("clipboard migration path is a symbolic link".to_owned())
+        );
+        assert_eq!(
+            reject_symlinked_path(&root, &host.path().join("elsewhere")),
+            Err("clipboard migration path unavailable".to_owned())
+        );
+        assert_eq!(
+            reject_symlinked_path(std::path::Path::new("/"), std::path::Path::new("/")),
+            Ok(())
+        );
+    }
 }

@@ -2,7 +2,9 @@
 // Migrated from MSIME-Apple b637828e15eafcb5e459edd270a962dd14517285.
 
 #include "ShuangpinProfileNames.h"
-#include "shuangpin/shuangpin_profile.h"
+#include "msime_client.h"
+#include <cstring>
+#include <memory>
 
 namespace
 {
@@ -15,51 +17,59 @@ NSDictionary<NSString *, NSString *> *Key(NSString *key, NSString *codes)
     return @{@"key" : key, @"codes" : codes};
 }
 
-NSString *DisplayUnit(const std::string &unit)
+NSString *DisplayUnit(NSString *unit)
 {
-    if (!unit.empty() && unit.front() == 'v')
-    {
-        return [@"ü" stringByAppendingString:[NSString stringWithUTF8String:unit.c_str() + 1]];
-    }
-    return [NSString stringWithUTF8String:unit.c_str()];
+    return [unit hasPrefix:@"v"] ? [@"ü" stringByAppendingString:[unit substringFromIndex:1]] : unit;
 }
 
-void AppendProfileUnits(const std::unordered_map<std::string, std::string> &mapping,
-                        NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *unitsByKey)
+// One of the engine's profile tables, read through host-api so the panel keeps no copy of any keymap: a JSON object of strings, or empty when the answer is not one. An unknown profile name reads as xiaohe first, as the panel always has.
+NSDictionary<NSString *, NSString *> *ProfileTable(char *(*query)(const uint8_t *, size_t), NSString *profileName)
 {
-    for (const auto &entry : mapping)
+    const char *profile =
+        msime::mac::NormalizeShuangpinSchema(profileName.UTF8String != nullptr ? profileName.UTF8String : "");
+    std::unique_ptr<char, decltype(&msime_client_string_free)> raw(
+        query(reinterpret_cast<const uint8_t *>(profile), std::strlen(profile)), msime_client_string_free);
+    if (!raw)
     {
-        NSString *key = [NSString stringWithUTF8String:entry.second.c_str()].uppercaseString;
-        if (unitsByKey[key] == nil)
-        {
-            unitsByKey[key] = [NSMutableArray array];
-        }
-        [unitsByKey[key] addObject:DisplayUnit(entry.first)];
+        return @{};
     }
+    id envelope = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:raw.get() length:std::strlen(raw.get())]
+                                                  options:0
+                                                    error:nil];
+    if (![envelope isKindOfClass:NSDictionary.class] || ![envelope[@"ok"] isEqual:@YES] ||
+        ![envelope[@"value"] isKindOfClass:NSDictionary.class])
+    {
+        return @{};
+    }
+    NSMutableDictionary<NSString *, NSString *> *table = [NSMutableDictionary dictionary];
+    [envelope[@"value"] enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
+      (void)stop;
+      if ([key isKindOfClass:NSString.class] && [value isKindOfClass:NSString.class])
+      {
+          table[key] = value;
+      }
+    }];
+    return table;
 }
 
-NSString *CodesForKey(NSString *key, NSDictionary<NSString *, NSMutableArray<NSString *> *> *initialsByKey,
-                      NSDictionary<NSString *, NSMutableArray<NSString *> *> *finalsByKey)
+// The engine's hint reads "initials / finals", the units of each side sorted and separated by spaces, ü already spelled out; the panel separates the units with " · ".
+NSString *CodesText(NSString *hint)
 {
-    NSArray<NSString *> *initials = [initialsByKey[key] sortedArrayUsingSelector:@selector(compare:)];
-    NSArray<NSString *> *finals = [finalsByKey[key] sortedArrayUsingSelector:@selector(compare:)];
-    NSString *initialText = [initials componentsJoinedByString:@" · "];
-    NSString *finalText = [finals componentsJoinedByString:@" · "];
-    if (initialText.length > 0 && finalText.length > 0)
+    NSMutableArray<NSString *> *sides = [NSMutableArray array];
+    for (NSString *side in [hint componentsSeparatedByString:@" / "])
     {
-        return [NSString stringWithFormat:@"%@ / %@", initialText, finalText];
+        [sides addObject:[[side componentsSeparatedByString:@" "] componentsJoinedByString:@" · "]];
     }
-    return initialText.length > 0 ? initialText : finalText;
+    return [sides componentsJoinedByString:@" / "];
 }
 
-NSArray<NSDictionary<NSString *, NSString *> *> *KeyDefinitions(
-    NSArray<NSString *> *keys, NSDictionary<NSString *, NSMutableArray<NSString *> *> *initialsByKey,
-    NSDictionary<NSString *, NSMutableArray<NSString *> *> *finalsByKey)
+NSArray<NSDictionary<NSString *, NSString *> *> *KeyDefinitions(NSArray<NSString *> *keys,
+                                                                NSDictionary<NSString *, NSString *> *hints)
 {
     NSMutableArray<NSDictionary<NSString *, NSString *> *> *definitions = [NSMutableArray arrayWithCapacity:keys.count];
     for (NSString *key in keys)
     {
-        [definitions addObject:Key(key, CodesForKey(key, initialsByKey, finalsByKey))];
+        [definitions addObject:Key(key, CodesText(hints[key] ?: @""))];
     }
     return definitions;
 }
@@ -209,34 +219,27 @@ NSString *AccessibleKeymapDescription(NSArray<MSIMEShuangpinKeyView *> *keyViews
 
 NSArray<NSArray<NSDictionary<NSString *, NSString *> *> *> *MSIMEShuangpinKeymapRows(NSString *profileName)
 {
-    const ShuangpinProfile &profile = GetShuangpinProfile(
-        msime::mac::NormalizeShuangpinSchema(profileName.UTF8String != nullptr ? profileName.UTF8String : ""));
-    NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *initialsByKey = [NSMutableDictionary dictionary];
-    NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *finalsByKey = [NSMutableDictionary dictionary];
-    AppendProfileUnits(profile.initials, initialsByKey);
-    AppendProfileUnits(profile.finals, finalsByKey);
+    NSDictionary<NSString *, NSString *> *hints = ProfileTable(msime_client_shuangpin_key_hints, profileName);
     NSMutableArray<NSString *> *homeKeys = [@[ @"A", @"S", @"D", @"F", @"G", @"H", @"J", @"K", @"L" ] mutableCopy];
-    if (initialsByKey[@";"].count > 0 || finalsByKey[@";"].count > 0)
+    if (hints[@";"].length > 0)
     {
         [homeKeys addObject:@";"];
     }
     return @[
-        KeyDefinitions(@[ @"Q", @"W", @"E", @"R", @"T", @"Y", @"U", @"I", @"O", @"P" ], initialsByKey, finalsByKey),
-        KeyDefinitions(homeKeys, initialsByKey, finalsByKey),
-        KeyDefinitions(@[ @"Z", @"X", @"C", @"V", @"B", @"N", @"M" ], initialsByKey, finalsByKey),
+        KeyDefinitions(@[ @"Q", @"W", @"E", @"R", @"T", @"Y", @"U", @"I", @"O", @"P" ], hints),
+        KeyDefinitions(homeKeys, hints),
+        KeyDefinitions(@[ @"Z", @"X", @"C", @"V", @"B", @"N", @"M" ], hints),
     ];
 }
 
 NSString *MSIMEShuangpinZeroInitialText(NSString *profileName)
 {
-    const ShuangpinProfile &profile = GetShuangpinProfile(
-        msime::mac::NormalizeShuangpinSchema(profileName.UTF8String != nullptr ? profileName.UTF8String : ""));
-    NSMutableArray<NSString *> *entries = [NSMutableArray arrayWithCapacity:profile.zero_initials.size()];
-    for (const auto &entry : profile.zero_initials)
-    {
-        [entries addObject:[NSString stringWithFormat:@"%@=%@", DisplayUnit(entry.first),
-                                                      [NSString stringWithUTF8String:entry.second.c_str()]]];
-    }
+    NSDictionary<NSString *, NSString *> *zeroInitials = ProfileTable(msime_client_shuangpin_zero_initials, profileName);
+    NSMutableArray<NSString *> *entries = [NSMutableArray arrayWithCapacity:zeroInitials.count];
+    [zeroInitials enumerateKeysAndObjectsUsingBlock:^(NSString *syllable, NSString *code, BOOL *stop) {
+      (void)stop;
+      [entries addObject:[NSString stringWithFormat:@"%@=%@", DisplayUnit(syllable), code]];
+    }];
     [entries sortUsingSelector:@selector(compare:)];
     return [@"零声母  " stringByAppendingString:[entries componentsJoinedByString:@" · "]];
 }

@@ -13,6 +13,5 @@ esac
 [[ "$*" == "build -p msime-host-api --target $target --release --locked" ]]
 [[ "$IPHONEOS_DEPLOYMENT_TARGET" == 16.2 ]]
 [[ "$RUSTFLAGS" == "-C debuginfo=1" ]]
-[[ "$CMAKE_PREFIX_PATH" == "$MSIME_IOS_DEPS" ]]
 [[ "$CARGO_TARGET_DIR" == */target/ios-cargo/"$MSIME_TEST_VARIANT" ]]
 exit 42

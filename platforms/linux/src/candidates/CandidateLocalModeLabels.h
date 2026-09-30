@@ -4,7 +4,7 @@
 
 namespace msime::linux_host {
 
-// Footer label for the Engine's local input mode, shared by the IBus auxiliary text and the Fcitx5 aux-down line. The keys are the names the Engine bridge emits in `local_mode` (engine-bridge/native/bridge.cpp local_mode_name); "none" and any unknown name have no label.
+// Footer label for the Engine's local input mode, shared by the IBus auxiliary text and the Fcitx5 aux-down line. The keys are the names the Engine emits in `local_mode` (crates/engine/src/types.rs LocalInputMode::name); "none" and any unknown name have no label.
 inline const char *candidate_local_mode_label(std::string_view mode) {
   struct Entry {
     std::string_view name;

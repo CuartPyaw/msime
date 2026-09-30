@@ -102,12 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         json!([])
     );
 
-    // An English code and the word it types out are two different texts. `dont` types out `don't`,
-    // which is the case the reference's own importer exists to accept and the one the Engine used
-    // to refuse: its English rule demanded that the word be the code again, letter for letter,
-    // ignoring case. The table underneath always had room for it - `english_words(word, display,
-    // weight)` is two columns - so what changed is the rule, in
-    // `scripts/apply_engine_english_display.py`.
+    // An English code and the word it types out are two different texts. `dont` types out `don't`, which is the case the reference's own importer exists to accept: an English entry's word does not have to be its code again letter for letter, because the table keeps the code and the displayed word in separate columns.
     let contraction = json!({ "kind": "english", "key": "dont", "value": "don't", "weight": 4096 });
     let add_contraction = json!({ "operation": "edit", "previous": null, "replacement": contraction.clone(), "request_id": "native-english-display" });
     assert_eq!(

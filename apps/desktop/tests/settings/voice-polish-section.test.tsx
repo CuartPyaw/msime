@@ -24,7 +24,7 @@ test("updates the polish toggle, provider, and model controls", () => {
     />,
   );
 
-  fireEvent.click(screen.getByRole("checkbox", { name: "启用文本润色" }));
+  fireEvent.click(screen.getByRole("switch", { name: "启用文本润色" }));
   fireEvent.change(screen.getByRole("combobox", { name: "文本润色服务提供商" }), {
     target: { value: "openai" },
   });

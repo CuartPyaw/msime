@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 /// Where a candidate came from. Mirrors the Engine's CandidateSource discriminants, which the
 /// runtime passes through untouched as `Candidate::source`.
 pub fn source_name(source: u8) -> &'static str {
-    // Mirrors vendor/MSIME-Engine/core/word_item.h CandidateSource, in declaration order.
+    // Mirrors msime_engine::CandidateSource, in declaration order.
     match source {
         0 => "database",
         1 => "user-database",
@@ -18,6 +18,8 @@ pub fn source_name(source: u8) -> &'static str {
         7 => "kaomoji",
         8 => "generated",
         9 => "fallback",
+        10 => "neural-desktop",
+        11 => "neural-keyboard",
         _ => "unknown",
     }
 }

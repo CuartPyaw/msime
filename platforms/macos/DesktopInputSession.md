@@ -4,9 +4,9 @@ The native IMK emoji, handwriting and cloud clipboard routes launch their shared
 
 ## Packaged handwriting
 
-The macOS Tauri bundle includes the fixed Engine handwriting model under `Contents/Resources/handwriting`, together with the Tegaki model license, Zinnia license, and upstream provenance. Discovery is relative to the running executable so moving the application does not break recognition. Explicit host options and provider/model overrides retain precedence.
+The macOS Tauri bundle includes the pinned handwriting model (`resources/handwriting-model.lock.json`, fetched by `scripts/fetch_handwriting_model.py` and copied in by `package-release.sh`) under `Contents/Resources/handwriting`, together with the Tegaki model license and the Zinnia license. Discovery is relative to the running executable so moving the application does not break recognition. Explicit host options and provider/model overrides retain precedence.
 
-The C++ Engine performs single-character ordered-stroke recognition. This is not sentence segmentation or image OCR. An exploratory Apple Vision adapter executed successfully but returned no candidates for the tested isolated glyphs; it was removed rather than treating a successful API call as handwriting parity. The shared panel uses the packaged Engine implementation without needing a separate recognizer service. Recognition and composition algorithms remain out of the platform host and UI.
+The engine's zinnia port (`crates/engine/src/handwriting`) performs single-character ordered-stroke recognition; host-api splits a written line into character cells first. This is not sentence segmentation or image OCR. An exploratory Apple Vision adapter executed successfully but returned no candidates for the tested isolated glyphs; it was removed rather than treating a successful API call as handwriting parity. The shared panel uses the packaged engine implementation without needing a separate recognizer service. Recognition and composition algorithms remain out of the platform host and UI.
 
 `pnpm --filter @msime/desktop tauri build --debug --bundles app --no-sign` produces an unsigned local bundle for development. Release signing and installation are described in `README.md`.
 

@@ -221,7 +221,7 @@ fn activation_rejects_live_session_before_swapping() {
 fn discard_does_not_require_maintenance_lock_for_live_paths() {
     use super::*;
     use msime_client_core::dictionary::access::DictionaryAccess;
-    use msime_engine_bridge::EngineOptions;
+    use msime_engine::host::EngineOptions;
     use std::fs;
 
     let root = tempfile::tempdir().unwrap();
@@ -267,10 +267,8 @@ fn discard_does_not_require_maintenance_lock_for_live_paths() {
         local_super_jianpin: true,
         local_temporary_english: true,
         local_temporary_japanese: true,
-        sentence_association: msime_engine_bridge::SentenceAssociationOptions {
+        sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
-            google: true,
-            neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
         },
@@ -297,7 +295,7 @@ fn discard_does_not_require_maintenance_lock_for_live_paths() {
 fn activation_case(nested_dictionaries: bool, hold_session: bool, handle: u64) {
     use super::*;
     use msime_client_core::dictionary::access::DictionaryAccess;
-    use msime_engine_bridge::EngineOptions;
+    use msime_engine::host::EngineOptions;
     use std::fs;
     use std::path::Path;
 
@@ -356,10 +354,8 @@ fn activation_case(nested_dictionaries: bool, hold_session: bool, handle: u64) {
         local_temporary_english: true,
         local_temporary_japanese: true,
         sentence_alternatives: true,
-        sentence_association: msime_engine_bridge::SentenceAssociationOptions {
+        sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
-            google: true,
-            neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
         },

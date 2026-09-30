@@ -6,12 +6,7 @@ the target as text, and an absolute one names a path that only exists where it w
 out anywhere else it is a dangling entry - and a dangling entry is worse than a missing one, because
 the tools that would have created the real thing find something already there and stop.
 
-This is not hypothetical. `vendor` was committed as `vendor -> /Users/<someone>/.../msime/vendor`,
-an absolute path pointing at itself. Every fresh clone and every new worktree got it, and
-`scripts/fetch_engine.py` then failed on `mkdir(exist_ok=True)` - which does not forgive a path that
-exists but is not a directory - so the Engine could not be prepared at all. The failure named
-`FileExistsError` on a directory the checkout was supposed to create itself, which points nowhere
-near a symlink someone committed by accident.
+This is not hypothetical. `vendor` was committed as `vendor -> /Users/<someone>/.../msime/vendor`, an absolute path pointing at itself. Every fresh clone and every new worktree got it, and the script that then prepared the vendored Engine failed on `mkdir(exist_ok=True)` - which does not forgive a path that exists but is not a directory - so the Engine could not be prepared at all. The failure named `FileExistsError` on a directory the checkout was supposed to create itself, which points nowhere near a symlink someone committed by accident.
 
 Relative links that stay inside the tree are fine and are what a repository should contain; they
 mean the same thing wherever they are checked out.

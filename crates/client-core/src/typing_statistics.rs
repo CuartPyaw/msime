@@ -520,12 +520,10 @@ impl TypingStatisticsStore {
         if !metadata.file_type().is_file() {
             return Err(TypingStatisticsError::InvalidDocument);
         }
-        let bytes = match File::open(&path) {
-            Ok(file) => crate::bounded_io::read_bounded_file(file, MAX_DOCUMENT_BYTES, || {
+        let bytes =
+            crate::bounded_io::read_bounded_file(File::open(&path)?, MAX_DOCUMENT_BYTES, || {
                 TypingStatisticsError::InvalidDocument
-            })?,
-            Err(error) => return Err(error.into()),
-        };
+            })?;
         let value: TypingStatistics = serde_json::from_slice(&bytes)?;
         value.validate()?;
         Ok(value)

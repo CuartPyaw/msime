@@ -10,35 +10,26 @@ Set-StrictMode -Version Latest
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $RepoRoot 'target/windows-notices' }
 if (-not [IO.Path]::IsPathRooted($OutputDirectory)) { throw 'Notice output directory must be absolute' }
-$engine = Join-Path $RepoRoot 'vendor/MSIME-Engine'
-$lockPath = Join-Path $RepoRoot 'engine-lock.json'
-$lock = Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json
-$pin = "$($lock.commit)"
-if ($pin -notmatch '^[a-f0-9]{40}$') { throw 'Cannot resolve locked Engine commit' }
-$markerPath = Join-Path $engine '.msime-engine-lock'
-# scripts/fetch_engine.py writes the locked commit on the first line and a digest of the local overlays after it.
-if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf) -or
-    "$(Get-Content -LiteralPath $markerPath -TotalCount 1)".Trim() -ne $pin) {
-    throw 'Engine sources are not prepared from the locked archive; run scripts/fetch_engine.py'
-}
 $documents = [Collections.Generic.List[string]]::new()
-$documents.Add("MSIME third-party notice collection`nEngine commit: $pin`nThis collection is not a license-completeness or redistribution-authorization assessment. Nested third-party archives, Rust/frontend and other distribution-specific notices must also be supplied and reviewed.`n")
-foreach ($relative in @('NOTICE.md', 'LICENSE', 'dictionary/NOTICE.md', 'dictionary/makecikudb/LICENSE',
-    'helpcode/NOTICE.md', 'voice/LICENSE', 'handwriting/models/HandwritingModel-LICENSE.txt',
-    'handwriting/third_party/zinnia/Zinnia-LICENSE.txt')) {
-    $noticePath = Join-Path $engine $relative
-    if (-not (Test-Path -LiteralPath $noticePath -PathType Leaf)) { throw "Missing locked Engine notice: $relative" }
-    $content = Get-Content -LiteralPath $noticePath -Raw
-    if (-not $content) { throw "Empty locked Engine notice: $relative" }
-    $documents.Add("===== MSIME-Engine/$relative @ $pin =====`n$content`n")
-}
-# Data compiled into the shared host library rather than taken from the Engine tree.
-foreach ($relative in @('crates/client-core/data/opencc/LICENSE')) {
+$documents.Add("MSIME third-party notice collection`nThis collection is not a license-completeness or redistribution-authorization assessment. Nested third-party archives, Rust/frontend and other distribution-specific notices must also be supplied and reviewed.`n")
+# Notices committed with the data and code they cover, plus the handwriting model's LGPL-2.1 text, which scripts/fetch_handwriting_model.py downloads with the model into target/handwriting-model as resources/handwriting-model.lock.json pins. The input engine is the repository's own Rust crate under the root LICENSE, which the package carries as LICENSE.txt, so it has no separate entry.
+foreach ($notice in @(
+    @('resources/licenses/msime-engine-dictionary-NOTICE.md', 'Dictionary data (msime.db, english.db, others.db, bigram.bin, trigram.bin)'),
+    @('resources/helpcodes/ENGINE-NOTICE.md', 'Helpcode tables (lantian, ziranma, shouyou2_0, shouyouplus, xiaohe)'),
+    @('resources/helpcodes/NOTICE.md', 'Helpcode table (jiajia)'),
+    @('target/handwriting-model/HandwritingModel-LICENSE.txt', 'Tegaki Simplified Chinese handwriting model (handwriting-zh_CN.model), LGPL-2.1'),
+    @('resources/licenses/Zinnia-LICENSE.txt', 'zinnia, whose recognizer the host library ports, BSD License'),
+    @('platforms/windows/third_party/miniaudio/LICENSE', 'miniaudio (Server microphone capture and cue sounds)'),
+    @('crates/client-core/data/opencc/LICENSE', 'OpenCC dictionaries, BYVoid/OpenCC @ 26753884f1984add422f3b0249ccee8613deaff6'))) {
+    $relative = $notice[0]
     $noticePath = Join-Path $RepoRoot $relative
-    if (-not (Test-Path -LiteralPath $noticePath -PathType Leaf)) { throw "Missing repository notice: $relative" }
+    if (-not (Test-Path -LiteralPath $noticePath -PathType Leaf)) {
+        if ($relative.StartsWith('target/handwriting-model/')) { throw "Missing handwriting model notice: $relative; run scripts/fetch_handwriting_model.py" }
+        throw "Missing repository notice: $relative"
+    }
     $content = Get-Content -LiteralPath $noticePath -Raw
     if (-not $content) { throw "Empty repository notice: $relative" }
-    $documents.Add("===== OpenCC dictionaries ($relative), BYVoid/OpenCC @ 26753884f1984add422f3b0249ccee8613deaff6 =====`n$content`n")
+    $documents.Add("===== $($notice[1]) ($relative) =====`n$content`n")
 }
 # The on-device speech runtime Build-Client.ps1 stages beside the Server from resources/voice-runtime.lock.json: sherpa-onnx-c-api.dll (Apache-2.0), and onnxruntime.dll with onnxruntime_providers_shared.dll (MIT, plus the notices of the components ONNX Runtime bundles). The upstream archive carries no license files, so the texts pinned for the Linux package are the ones collected here; the Windows DLLs report the same ONNX Runtime release those texts name. Prepare-PackageFiles.ps1 refuses to package the runtime with a notice file that lacks these sections.
 $voiceLockPath = Join-Path $RepoRoot 'resources/voice-runtime.lock.json'
@@ -85,4 +76,4 @@ foreach ($notice in $SupplementalNotices) {
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'THIRD_PARTY_NOTICES.txt'),
     ($documents -join "`n"), [Text.UTF8Encoding]::new($false))
-Write-Output 'Collected pinned Engine and supplied dependency notices; completeness review remains required.'
+Write-Output 'Collected repository and supplied dependency notices; completeness review remains required.'

@@ -1,5 +1,5 @@
 //! Exercise shared input routing against the locked production dictionary.
-use msime_engine_bridge::{prepare_options, Session};
+use msime_engine::host::{prepare_options, Session};
 use msime_input_runtime::{Action, Runtime};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

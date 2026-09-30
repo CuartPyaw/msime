@@ -176,7 +176,6 @@ rerank-latency sentences
 # 2026-09-23: keyboard-repeat and the four windows-doubao-probe cases, recorded as failing every time, are gone. They passed on three consecutive full runs of the suite on c3bcde034 and again with their two files run alone. The timing-dependent entries below also passed all three runs, which is what a 1-in-3 failure does often enough that it proves nothing, so they stay.
 #
 # The same runs found six failures this file did not list, all deterministic and all on origin/develop: android-helpcode and one settings case were jsdom history state leaking between tests once the mobile page began restoring itself from it (2cb75ca8b), and mobile-tab-bar was the sidebar still offering a page selectPage refuses on mobile (063e53740). Both were fixed rather than recorded.
-desktop tests/settings/settings.test.tsx > input parity controls persist cloud, translation and punctuation settings
 # Also timing-dependent: 1 of 3 consecutive runs of settings.test.tsx alone on an
 # unmodified develop, and the same 1-in-3 with a change that does not touch it.
 desktop tests/settings/settings.test.tsx > clipboard history exposes timestamps, pinning, deletion and two-step clearing

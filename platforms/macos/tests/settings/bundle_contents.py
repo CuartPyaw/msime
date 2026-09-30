@@ -6,7 +6,7 @@ elsewhere. None of that says the bundle came out right: a resource can be declar
 localisation can exist in the tree and not be copied, and a provider can be compiled into a library that
 the executable was never linked against. Every one of those is invisible until someone installs the thing.
 
-Usage: bundle_contents.py <path/to/App.app> [--languages zh-Hans,en] [--whisper]
+Usage: bundle_contents.py <path/to/App.app> [--languages zh-Hans,en]
 """
 
 import argparse
@@ -14,7 +14,6 @@ import os
 import plistlib
 import re
 import struct
-import subprocess
 import sys
 from pathlib import Path
 
@@ -54,8 +53,6 @@ def main() -> int:
     # The languages the build stages. Without this a bundle that shipped none of them would pass by
     # having nothing left to check.
     parser.add_argument("--languages", default="")
-    # Whether the build compiled the on-device Whisper provider in (MSIME_SHARED_VOICE_LOCAL_WHISPER). Without it the executable is expected to carry none.
-    parser.add_argument("--whisper", action="store_true")
     arguments = parser.parse_args()
     bundle = arguments.bundle
     contents = bundle / "Contents"
@@ -148,14 +145,6 @@ def main() -> int:
                     f"codesign will call the bundle format ambiguous"
                 )
 
-    # The on-device recogniser is a build option. Compiled into a library the executable never links, the
-    # host accepts the provider in its settings and then recognises somewhere else - which is the state this
-    # bundle shipped in before the provider was wired up.
-    if executable.is_file() and arguments.whisper:
-        symbols = subprocess.run(["nm", "-a", str(executable)], capture_output=True, text=True).stdout
-        if "whisper" not in symbols:
-            failures.append("the executable carries no local Whisper recogniser; the 本地模型 provider would fall back silently")
-
     # Installed on-device models run in the msime-voice-local helper, which loads the sherpa-onnx runtime from ../Frameworks. The input method spawns it from beside its own executable, so a bundle missing either one accepts a model directory in settings and then fails every recognition.
     helper = contents / "MacOS" / "msime-voice-local"
     if not helper.is_file() or not os.access(helper, os.X_OK):
@@ -173,8 +162,7 @@ def main() -> int:
             print(failure, file=sys.stderr)
         return 1
     print(f"{bundle.name}: icons staged, {len(usage)} usage descriptions and {len(identifiers)} input source names "
-          f"localised in {len(lprojs)} languages, voice cues staged, local voice helper, runtime and its licences staged"
-          f"{', Whisper recogniser linked' if arguments.whisper else ''}.")
+          f"localised in {len(lprojs)} languages, voice cues staged, local voice helper, runtime and its licences staged.")
     return 0
 
 

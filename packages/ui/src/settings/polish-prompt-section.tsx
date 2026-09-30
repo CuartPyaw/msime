@@ -1,3 +1,6 @@
+import type { ReactNode } from "react";
+import { Row, Select } from "../core/platform-controls";
+import * as settings from "./settings-style";
 import {
   POLISH_CUSTOM_IDS,
   POLISH_PRESET_IDS,
@@ -18,6 +21,8 @@ export interface PolishPromptSectionProps {
   onSelectPrompt: (promptId: string, prompt: string) => void;
   onPromptChange: (prompt: string, customSlot?: string) => void;
   onRestore: (prompt: string) => void;
+  /** Further buttons beside 恢复默认, such as the host's credential test. */
+  actions?: ReactNode;
 }
 
 /** Prompt preset, custom slot, editing, and restore controls for text polishing. */
@@ -28,6 +33,7 @@ export function PolishPromptSection({
   onSelectPrompt,
   onPromptChange,
   onRestore,
+  actions,
 }: PolishPromptSectionProps) {
   const selectedSlot = normalizePolishSlot(promptId);
   const selectedDefault = isPolishCustomSlot(selectedSlot)
@@ -37,9 +43,8 @@ export function PolishPromptSection({
 
   return (
     <>
-      <label className="section-header">
-        <span className="section-title">润色方案</span>
-        <select
+      <Row title="润色方案">
+        <Select
           aria-label="润色方案"
           value={selectedSlot}
           onChange={(event) => {
@@ -58,29 +63,33 @@ export function PolishPromptSection({
           <option value="custom_1">自定义一</option>
           <option value="custom_2">自定义二</option>
           <option value="custom_3">自定义三</option>
-        </select>
-      </label>
-      <label className="section-header polish-prompt-row">
-        <span className="section-title">
-          润色提示词
-          <small>
+        </Select>
+      </Row>
+      <div className={settings.managerBlock}>
+        <label className={settings.field}>
+          <span>
+            <span data-row-title="">润色提示词</span>{" "}
             {customSlot ? "这一段会保存到所选的自定义方案" : "内置方案的完整提示词，可以就地修改"}
-          </small>
-        </span>
-        <textarea
-          aria-label="润色提示词"
-          value={prompt}
-          onChange={(event) => onPromptChange(event.target.value, customSlot)}
-        />
-      </label>
-      <button
-        type="button"
-        className="secondary"
-        disabled={prompt === selectedDefault}
-        onClick={() => onRestore(selectedDefault)}
-      >
-        恢复默认
-      </button>
+          </span>
+          <textarea
+            aria-label="润色提示词"
+            className={settings.promptInput}
+            value={prompt}
+            onChange={(event) => onPromptChange(event.target.value, customSlot)}
+          />
+        </label>
+        <div className={settings.managerActions}>
+          <button
+            type="button"
+            className="secondary"
+            disabled={prompt === selectedDefault}
+            onClick={() => onRestore(selectedDefault)}
+          >
+            恢复默认
+          </button>
+          {actions}
+        </div>
+      </div>
     </>
   );
 }

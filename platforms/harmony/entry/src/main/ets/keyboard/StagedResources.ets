@@ -26,9 +26,7 @@ export class StagedResources {
         return false;
       }
       const artifacts: StagedArtifact[] = [];
-      for (const name of fs.listFileSync(packaged)) {
-        artifacts.push({ name: name, size: fs.statSync(`${packaged}/${name}`).size });
-      }
+      StagedResources.listFiles(packaged, '', artifacts);
       const token: string = StagedResourcePolicy.generationToken(artifacts);
       if (!StagedResourcePolicy.needsStaging(StagedResources.readMarker(marker), token)) {
         return true;
@@ -39,6 +37,11 @@ export class StagedResources {
       StagedResources.removeDirectory(destination);
       fs.mkdirSync(destination, true);
       for (const artifact of artifacts) {
+        const slash: number = artifact.name.lastIndexOf('/');
+        const parent: string = `${destination}/${artifact.name.substring(0, slash)}`;
+        if (slash > 0 && !fs.accessSync(parent)) {
+          fs.mkdirSync(parent, true);
+        }
         fs.copyFileSync(`${packaged}/${artifact.name}`, `${destination}/${artifact.name}`);
       }
       const handle = fs.openSync(marker,
@@ -65,6 +68,22 @@ export class StagedResources {
       StagedResources.removeDirectory(destination);
     } catch (error) {
       KeyboardLog.error(`unstaging failed: ${describeError(error)}`);
+    }
+  }
+
+  /**
+   * Every file below `root`, named by its path relative to it. The Engine's helpcodes/ directory is nested, so its tables are listed as helpcodes/<file> and a changed table changes the generation token like any other artifact.
+   */
+  private static listFiles(root: string, relative: string, into: StagedArtifact[]): void {
+    const directory: string = relative.length === 0 ? root : `${root}/${relative}`;
+    for (const name of fs.listFileSync(directory)) {
+      const path: string = relative.length === 0 ? name : `${relative}/${name}`;
+      const stat = fs.statSync(`${root}/${path}`);
+      if (stat.isDirectory()) {
+        StagedResources.listFiles(root, path, into);
+      } else {
+        into.push({ name: path, size: stat.size });
+      }
     }
   }
 

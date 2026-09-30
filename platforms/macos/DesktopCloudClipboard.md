@@ -20,4 +20,4 @@ The Swift provider test injects a synthetic account/API: validation, cancellatio
 
 Configure CMake with `MSIME_CLOUD_CLIPBOARD_PROBE` pointing to the Cargo `cloud_clipboard_probe` example, then build `desktop-cloud-clipboard-interop-test` and `desktop-cloud-provider-test-build`; run `ctest -R desktop-cloud`.
 
-Reference baseline: MSIME-Windows default branch `develop` at `cb534a97fd19bc9656645a7baa4ee019487279a8`. The authoritative Engine pin is `engine-lock.json`.
+Reference baseline: MSIME-Windows default branch `develop` at `cb534a97fd19bc9656645a7baa4ee019487279a8`. The input engine is `crates/engine` in this repository.

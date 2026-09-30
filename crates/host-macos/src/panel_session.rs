@@ -3,7 +3,6 @@ use serde::Deserialize;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -204,6 +203,7 @@ pub(crate) fn peer_matches(stream: &UnixStream, expected: i32) -> bool {
 mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
+    use std::path::Path;
     #[test]
     fn clipboard_contract_counts_utf16_and_keeps_multiline_text() {
         for text in [

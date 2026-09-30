@@ -1,15 +1,16 @@
 #include "DoubaoAsrClient.h"
 #include "DoubaoTranscript.h"
 #include "../../../../shared/voice/DoubaoAuth.h"
+#include "msime_client.h"
 
 #include <nlohmann/json.hpp>
 #include <windows.h>
 #include <winhttp.h>
-#include <zlib.h>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <memory>
 #include <utility>
 
 namespace
@@ -47,87 +48,33 @@ std::wstring Utf8ToWide(const std::string &value)
     return result;
 }
 
-void AppendBigEndian32(std::vector<std::uint8_t> &output, std::int32_t value)
+// Doubao v1 frames are built and decoded by the shared host library (crates/client-core/src/voice/doubao_frame.rs), the codec every other host uses. Each builder is called once with no buffer to learn the frame's size and once more to write it.
+template <typename Build> std::vector<std::uint8_t> BuildFrame(Build build)
 {
-    const auto unsigned_value = static_cast<std::uint32_t>(value);
-    output.push_back(static_cast<std::uint8_t>(unsigned_value >> 24));
-    output.push_back(static_cast<std::uint8_t>(unsigned_value >> 16));
-    output.push_back(static_cast<std::uint8_t>(unsigned_value >> 8));
-    output.push_back(static_cast<std::uint8_t>(unsigned_value));
+    std::size_t length = 0;
+    if (build(nullptr, 0, &length) || length == 0)
+        return {};
+    std::vector<std::uint8_t> frame(length);
+    if (!build(frame.data(), frame.size(), &length) || length != frame.size())
+        return {};
+    return frame;
 }
 
-std::uint32_t ReadBigEndian32(const std::uint8_t *data)
+std::vector<std::uint8_t> StartFrame(bool enable_itn, bool enable_punc, bool enable_ddc, const std::string &boosting_table_id)
 {
-    return (static_cast<std::uint32_t>(data[0]) << 24) | (static_cast<std::uint32_t>(data[1]) << 16) |
-           (static_cast<std::uint32_t>(data[2]) << 8) | static_cast<std::uint32_t>(data[3]);
+    return BuildFrame([&](std::uint8_t *output, std::size_t capacity, std::size_t *length) {
+        return msime_client_doubao_start_frame(enable_itn, enable_punc, enable_ddc,
+                                               reinterpret_cast<const std::uint8_t *>(boosting_table_id.data()),
+                                               boosting_table_id.size(), output, capacity, length);
+    });
 }
 
-std::vector<std::uint8_t> GzipCompress(const std::uint8_t *data, std::size_t size)
+// The final frame negates the sequence and sets the last-packet flag.
+std::vector<std::uint8_t> AudioFrame(std::int32_t sequence, const std::uint8_t *pcm, std::size_t size, bool final_chunk)
 {
-    z_stream stream{};
-    if (deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, MAX_WBITS + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK)
-        return {};
-    const std::size_t compressed_capacity = static_cast<std::size_t>(compressBound(static_cast<uLong>(size))) + 32;
-    std::vector<std::uint8_t> output((std::max)(std::size_t{64}, compressed_capacity));
-    stream.next_in = const_cast<Bytef *>(reinterpret_cast<const Bytef *>(data));
-    stream.avail_in = static_cast<uInt>(size);
-    stream.next_out = output.data();
-    stream.avail_out = static_cast<uInt>(output.size());
-    const int status = deflate(&stream, Z_FINISH);
-    if (status != Z_STREAM_END)
-    {
-        deflateEnd(&stream);
-        return {};
-    }
-    output.resize(stream.total_out);
-    deflateEnd(&stream);
-    return output;
-}
-
-std::vector<std::uint8_t> GzipDecompress(const std::uint8_t *data, std::size_t size)
-{
-    z_stream stream{};
-    if (inflateInit2(&stream, MAX_WBITS + 16) != Z_OK)
-        return {};
-    stream.next_in = const_cast<Bytef *>(reinterpret_cast<const Bytef *>(data));
-    stream.avail_in = static_cast<uInt>(size);
-    std::vector<std::uint8_t> output;
-    std::array<std::uint8_t, 8192> buffer{};
-    int status = Z_OK;
-    while (status == Z_OK)
-    {
-        stream.next_out = buffer.data();
-        stream.avail_out = static_cast<uInt>(buffer.size());
-        status = inflate(&stream, Z_NO_FLUSH);
-        const auto produced = buffer.size() - stream.avail_out;
-        if (produced > kMaximumResponseBytes - output.size())
-        {
-            inflateEnd(&stream);
-            return {};
-        }
-        output.insert(output.end(), buffer.begin(),
-                      buffer.begin() + static_cast<std::ptrdiff_t>(produced));
-    }
-    inflateEnd(&stream);
-    return status == Z_STREAM_END ? output : std::vector<std::uint8_t>{};
-}
-
-std::vector<std::uint8_t> BuildPacket(std::uint8_t message_type, std::uint8_t flags, std::int32_t sequence,
-                                      const std::uint8_t *payload, std::size_t payload_size)
-{
-    const auto compressed = GzipCompress(payload, payload_size);
-    if (compressed.empty())
-        return {};
-    std::vector<std::uint8_t> packet;
-    packet.reserve(12 + compressed.size());
-    packet.push_back(0x11); // Protocol v1, 4-byte header.
-    packet.push_back(static_cast<std::uint8_t>((message_type << 4) | flags));
-    packet.push_back(0x11); // JSON serialization + gzip (also required by the audio frame protocol).
-    packet.push_back(0x00);
-    AppendBigEndian32(packet, sequence);
-    AppendBigEndian32(packet, static_cast<std::int32_t>(compressed.size()));
-    packet.insert(packet.end(), compressed.begin(), compressed.end());
-    return packet;
+    return BuildFrame([&](std::uint8_t *output, std::size_t capacity, std::size_t *length) {
+        return msime_client_doubao_audio_frame(sequence, pcm, size, final_chunk, output, capacity, length);
+    });
 }
 
 bool SendBinary(HINTERNET websocket, const std::vector<std::uint8_t> &packet)
@@ -144,55 +91,29 @@ struct ParsedResponse
     std::string text;
 };
 
+// A message the decoder refuses (another message type, a truncated or oversized frame, a payload that is not gzip JSON) carries no transcript and does not end the exchange.
 ParsedResponse ParseResponse(const std::vector<std::uint8_t> &message)
 {
     ParsedResponse response;
-    if (message.size() < 4)
+    if (message.empty())
         return response;
-    const std::size_t header_size = (message[0] & 0x0f) * 4;
-    if (header_size > message.size())
-        return response;
-    const std::uint8_t message_type = message[1] >> 4;
-    const std::uint8_t flags = message[1] & 0x0f;
-    const std::uint8_t serialization = message[2] >> 4;
-    const std::uint8_t compression = message[2] & 0x0f;
-    response.last = (flags & 0x02) != 0;
-    std::size_t offset = header_size;
-    if (flags & 0x01)
-        offset += 4;
-    if (flags & 0x04)
-        offset += 4;
-    if (offset > message.size())
-        return response;
-    std::size_t payload_size = 0;
-    if (message_type == 0x09)
-    {
-        if (offset + 4 > message.size())
-            return response;
-        payload_size = ReadBigEndian32(message.data() + offset);
-        offset += 4;
-    }
-    else if (message_type == 0x0f)
-    {
-        if (offset + 8 > message.size())
-            return response;
-        response.code = static_cast<int>(ReadBigEndian32(message.data() + offset));
-        payload_size = ReadBigEndian32(message.data() + offset + 4);
-        offset += 8;
-    }
-    else
-        return response;
-    payload_size = (std::min)(payload_size, message.size() - offset);
-    std::vector<std::uint8_t> payload(message.begin() + static_cast<std::ptrdiff_t>(offset),
-                                      message.begin() + static_cast<std::ptrdiff_t>(offset + payload_size));
-    if (compression == 0x01)
-        payload = GzipDecompress(payload.data(), payload.size());
-    if (serialization != 0x01 || payload.empty())
+    const std::unique_ptr<char, decltype(&msime_client_string_free)> decoded(
+        msime_client_doubao_decode_frame(message.data(), message.size()), msime_client_string_free);
+    if (!decoded)
         return response;
     try
     {
-        const auto json = nlohmann::json::parse(payload.begin(), payload.end());
-        response.text = msime::windows::doubao_transcript(json);
+        const auto reply = nlohmann::json::parse(decoded.get());
+        if (!reply.value("ok", false))
+            return response;
+        const auto &value = reply.at("value");
+        if (value.contains("error_code"))
+        {
+            response.code = value.at("error_code").get<int>();
+            return response;
+        }
+        response.last = value.at("last").get<bool>();
+        response.text = msime::windows::doubao_transcript(nlohmann::json::parse(value.at("payload").get<std::string>()));
     }
     catch (...)
     {
@@ -376,21 +297,9 @@ void DoubaoAsrClient::Run()
         return;
     }
 
-    nlohmann::json request_options = {{"model_name", "bigmodel"},    {"enable_itn", enable_itn_},
-                                      {"enable_punc", enable_punc_}, {"enable_ddc", enable_ddc_},
-                                      {"show_utterances", false},    {"result_type", "full"}};
-    if (!boosting_table_id_.empty())
-        request_options["corpus"] = {{"boosting_table_id", boosting_table_id_}};
-
-    const nlohmann::json request_json = {
-        {"user", {{"uid", "metasequoia-ime"}}},
-        {"audio", {{"format", "pcm"}, {"codec", "raw"}, {"rate", 16000}, {"bits", 16}, {"channel", 1}}},
-        {"request", std::move(request_options)}};
-    const std::string request_text = request_json.dump();
-    std::int32_t sequence = 1;
-    if (!SendBinary(websocket.value,
-                    BuildPacket(0x01, 0x01, sequence++, reinterpret_cast<const std::uint8_t *>(request_text.data()),
-                                request_text.size())))
+    // The full client request is sequence 1; audio sequences start at 2.
+    std::int32_t sequence = 2;
+    if (!SendBinary(websocket.value, StartFrame(enable_itn_, enable_punc_, enable_ddc_, boosting_table_id_)))
     {
         std::lock_guard<std::mutex> lock(result_mutex_);
         error_ = "豆包语音识别握手失败。";
@@ -476,7 +385,7 @@ void DoubaoAsrClient::Run()
         }
         while (pending.size() >= kPcmChunkBytes && !finishing)
         {
-            if (!SendBinary(websocket.value, BuildPacket(0x02, 0x01, sequence++, pending.data(), kPcmChunkBytes)))
+            if (!SendBinary(websocket.value, AudioFrame(sequence++, pending.data(), kPcmChunkBytes, false)))
             {
                 {
                     std::lock_guard<std::mutex> lock(result_mutex_);
@@ -492,7 +401,7 @@ void DoubaoAsrClient::Run()
         // Drain complete chunks, leaving the final chunk for the negative sequence packet.
         while (pending.size() > kPcmChunkBytes)
         {
-            if (!SendBinary(websocket.value, BuildPacket(0x02, 0x01, sequence++, pending.data(), kPcmChunkBytes)))
+            if (!SendBinary(websocket.value, AudioFrame(sequence++, pending.data(), kPcmChunkBytes, false)))
             {
                 {
                     std::lock_guard<std::mutex> lock(result_mutex_);
@@ -503,8 +412,7 @@ void DoubaoAsrClient::Run()
             }
             pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(kPcmChunkBytes));
         }
-        const std::int32_t last_sequence = -sequence;
-        if (!SendBinary(websocket.value, BuildPacket(0x02, 0x03, last_sequence, pending.data(), pending.size())))
+        if (!SendBinary(websocket.value, AudioFrame(sequence, pending.data(), pending.size(), true)))
         {
             {
                 std::lock_guard<std::mutex> lock(result_mutex_);
