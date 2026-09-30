@@ -28,11 +28,21 @@ Releases are cut by the manually dispatched `.github/workflows/release-dictionar
 
 ## Checking contributed words
 
-msime-dictionary's CI gates changes to `custom/words.txt` with `check-words`:
+msime-dictionary's CI gates changes to `custom/words.txt`, `custom/translations.txt` and `custom/english.txt` with `check-words`. Pass a base/head pair for each file to check (at least one); the words pair keeps its original `--base`/`--head` names:
 
 ```sh
-msime-dict-build check-words --base <old words.txt> --head <new words.txt> \
-  [--msime-db <shipped msime.db>] [--json report.json] [--markdown summary.md]
+msime-dict-build check-words \
+  [--base <old words.txt> --head <new words.txt>] \
+  [--translations-base <old translations.txt> --translations-head <new translations.txt>] \
+  [--english-base <old english.txt> --english-head <new english.txt>] \
+  [--msime-db <shipped msime.db>] [--english-db <shipped english.db>] \
+  [--json report.json] [--markdown summary.md]
 ```
 
-A change may only append lines. Each appended entry goes through the parser the build uses (word, `'`-separated quanpin that maps to a table, integer weight), its weight must lie within the range the existing entries use, and it must not repeat another appended line, an entry already in `words.txt`, or (with `--msime-db`) a row with the same word and pinyin in the shipped quanpin tables. Appended blank and `#` lines are skipped. The JSON report lists `added` and `rejected` lines (1-based line number, text, reason) with `accepted`, the line counts and `weight_range`; the Markdown summary is the same in table form and is also printed to stderr. The exit status is 0 when nothing is rejected, 1 when anything is (the reports are still written), and 2 when the check cannot run: an unreadable file, a base `words.txt` the build itself would reject, or a database without the expected table.
+For every file a change may only append lines, and each appended entry goes through the parser the build uses and must not repeat another appended line or an entry already in that file. Per file:
+
+- `words.txt`: word, `'`-separated quanpin that maps to a table, integer weight. The weight must lie within the range the existing entries use; with `--msime-db`, a row with the same word and pinyin in the shipped quanpin tables is rejected.
+- `translations.txt`: `source<TAB>gloss`. A new gloss for an existing source is accepted (the build's last line wins), but the same source and gloss again is a duplicate.
+- `english.txt`: lowercase ASCII word, non-empty display, integer weight of at least 1. An entry is its word and display; the weight must lie within the range the existing entries use; with `--english-db`, a word and display already in the shipped `english_words` is rejected.
+
+Appended blank and `#` lines are skipped. The JSON report lists `added` and `rejected` lines, each with its `file` (for example `custom/english.txt`) and 1-based line number; added lines carry the parsed fields, rejected ones the text and reason. It also has `accepted`, a `files` array with each checked file's line counts and `weight_range`, and, at the top level as before, `words.txt`'s line counts and `weight_range` (null when `words.txt` was not checked). The Markdown summary is the same in table form, with an Added table per file, and is also printed to stderr. The exit status is 0 when nothing is rejected, 1 when anything is (the reports are still written), and 2 when the check cannot run: an unreadable file, a base file the build itself would reject, or a database without the expected table.

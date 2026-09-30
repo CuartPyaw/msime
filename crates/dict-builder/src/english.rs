@@ -723,38 +723,43 @@ pub struct CustomTranslation {
     pub gloss: String,
 }
 
+pub const CUSTOM_TRANSLATIONS: &str = "custom/translations.txt";
+
 /// `source<TAB>gloss`; a source containing a character from U+3400 up is Chinese-to-English, anything else English-to-Chinese. A later line for the same source wins.
 pub fn parse_custom_translations(text: &str) -> Result<Vec<CustomTranslation>> {
     let mut entries = Vec::new();
-    for (number, raw_line) in text::splitlines(text::without_bom(text))
+    for (number, line) in text::splitlines(text::without_bom(text))
         .into_iter()
         .enumerate()
     {
-        let line = text::strip(raw_line);
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+        if let Some(entry) = parse_custom_translation(line)
+            .with_context(|| format!("{CUSTOM_TRANSLATIONS}:{}", number + 1))?
+        {
+            entries.push(entry);
         }
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 2 {
-            bail!(
-                "custom/translations.txt:{}: expected source<TAB>gloss, got {raw_line:?}",
-                number + 1
-            );
-        }
-        let (source, gloss) = (text::strip(fields[0]), text::strip(fields[1]));
-        if source.is_empty() || gloss.is_empty() {
-            bail!(
-                "custom/translations.txt:{}: empty source or gloss",
-                number + 1
-            );
-        }
-        entries.push(CustomTranslation {
-            chinese_to_english: source.chars().any(|c| c >= '\u{3400}'),
-            source: source.to_owned(),
-            gloss: gloss.to_owned(),
-        });
     }
     Ok(entries)
+}
+
+/// One line of custom/translations.txt: `None` for a blank or `#` comment line, an error naming the problem (without its location) for a malformed one. Fields after the gloss are ignored. `check-words` validates contributed lines with this same function.
+pub fn parse_custom_translation(line: &str) -> Result<Option<CustomTranslation>> {
+    let stripped = text::strip(line);
+    if stripped.is_empty() || stripped.starts_with('#') {
+        return Ok(None);
+    }
+    let fields: Vec<&str> = stripped.split('\t').collect();
+    if fields.len() < 2 {
+        bail!("expected source<TAB>gloss, got {line:?}");
+    }
+    let (source, gloss) = (text::strip(fields[0]), text::strip(fields[1]));
+    if source.is_empty() || gloss.is_empty() {
+        bail!("empty source or gloss");
+    }
+    Ok(Some(CustomTranslation {
+        chinese_to_english: source.chars().any(|c| c >= '\u{3400}'),
+        source: source.to_owned(),
+        gloss: gloss.to_owned(),
+    }))
 }
 
 pub fn apply_custom_translations(
