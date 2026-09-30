@@ -140,12 +140,12 @@ pub fn load_helpcode_keymap(resources: &Path, schema: &str) -> Result<HelpcodeKe
 }
 
 fn parse_helpcode_table(bytes: &[u8]) -> HashMap<String, String> {
-    let mut codes = HashMap::new();
     let mut lines: Vec<&[u8]> = bytes.split(|&byte| byte == b'\n').collect();
     // `getline` yields no final empty line after a trailing newline.
     if lines.last().is_some_and(|line| line.is_empty()) {
         lines.pop();
     }
+    let mut codes = HashMap::with_capacity(lines.len());
     for (number, mut line) in lines.into_iter().enumerate() {
         if number == 0 {
             line = line.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(line);
