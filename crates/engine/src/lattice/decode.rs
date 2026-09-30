@@ -221,6 +221,7 @@ pub(super) fn build_graph(
             let rows = span_cache
                 .entry(span_key.clone())
                 .or_insert_with(|| lookup(span));
+            edges.reserve(rows.len().min(options.span_limit));
             for row in rows.iter().take(options.span_limit) {
                 if row.value.is_empty() {
                     continue;
