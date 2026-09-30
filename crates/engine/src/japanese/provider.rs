@@ -39,6 +39,11 @@ struct Rows {
 }
 
 impl Rows {
+    fn reserve(&mut self, additional: usize) {
+        self.items.reserve(additional);
+        self.seen.reserve(additional);
+    }
+
     fn push(&mut self, word: &str, weight: i64, source: CandidateSource) {
         if word.is_empty() || !self.seen.insert(word.to_owned()) {
             return;
@@ -77,8 +82,8 @@ impl JapaneseProvider {
             return Vec::new();
         }
         let mut rows = Rows {
-            items: Vec::new(),
-            seen: HashSet::new(),
+            items: Vec::with_capacity(2),
+            seen: HashSet::with_capacity(2),
             code: request.raw_input_with_cases.clone(),
         };
         // A bare minus opens a composition whose first choice is the long-vowel mark, with the plain hyphen kept as the alternative.
@@ -96,7 +101,14 @@ impl JapaneseProvider {
         if let Some(dictionary) = self.dictionary() {
             if !conversion.hiragana.is_empty() && !conversion.pending.is_empty() {
                 // `kana_for_romaji_prefix` already limits the kana to spellings that start with the pending letters. Re-deriving romaji from each lemma's reading to check the prefix again would drop correct lemmas: a reading has several valid spellings and `hiragana_to_romaji` picks one, so しし reads `shishi` and fails `sis`.
-                for kana in kana_for_romaji_prefix(&conversion.pending) {
+                let pending_kana = kana_for_romaji_prefix(&conversion.pending);
+                rows.reserve(
+                    pending_kana
+                        .len()
+                        .saturating_mul(PENDING_PREFIX_LEMMAS)
+                        .saturating_add(SENTENCE_LIMIT + 1),
+                );
+                for kana in pending_kana {
                     let prefix = format!("{}{kana}", conversion.hiragana);
                     for lemma in dictionary.prefix_lemmas(&prefix, PENDING_PREFIX_LEMMAS) {
                         rows.push(
@@ -109,6 +121,7 @@ impl JapaneseProvider {
             } else if conversion.pending.is_empty()
                 && conversion.hiragana.len() >= MIN_PREFIX_READING_BYTES
             {
+                rows.reserve(READING_PREFIX_LEMMAS + SENTENCE_LIMIT + 1);
                 for lemma in dictionary.prefix_lemmas(&conversion.hiragana, READING_PREFIX_LEMMAS) {
                     rows.push(
                         &lemma.surface,
@@ -116,6 +129,8 @@ impl JapaneseProvider {
                         CandidateSource::Database,
                     );
                 }
+            } else {
+                rows.reserve(SENTENCE_LIMIT + 1);
             }
             for sentence in search_converted(&dictionary, &conversion, SENTENCE_LIMIT) {
                 rows.push(
