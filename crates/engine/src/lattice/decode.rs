@@ -365,13 +365,13 @@ pub(super) fn decode_graph(
     let take = options.nbest.min(last.len());
 
     let mut paths = Vec::with_capacity(take);
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::with_capacity(take);
     for hyp in &last {
         if paths.len() >= take {
             break;
         }
-        let mut words = Vec::new();
-        let mut keys = Vec::new();
+        let mut words = Vec::with_capacity(n);
+        let mut keys = Vec::with_capacity(n);
         let mut cursor = Some(hyp);
         while let Some(step) = cursor {
             let Some(edge) = step.edge else { break };
