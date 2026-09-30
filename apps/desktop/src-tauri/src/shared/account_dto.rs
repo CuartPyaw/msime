@@ -1,6 +1,6 @@
 //! Redacted account responses the webview reads, shared by the iOS host and the three desktop hosts.
 //!
-//! These are the JSON shapes `packages/ui/src/account/account-page.tsx` declares as `AccountUser`, `AccountProviders`, `AccountChallenge` and `AccountProfile`, plus the `{ user }` status wrapper. Tokens, nonces and authorization URLs never reach them. The Android host reuses the same provider DTO while omitting the optional `apple` field.
+//! These are the JSON shapes `packages/ui/src/account/account-page.tsx` declares as `AccountUser`, `AccountProviders`, `AccountChallenge` and `AccountProfile`, plus the `{ user }` status wrapper. Tokens, nonces and authorization URLs never reach them. The Android host reuses the same provider DTO while omitting the optional `apple` and `google` fields; the page only offers either button when the host client also implements that sign-in.
 
 use msime_client_core::account::{
     AccountChallenge, AccountChatModels, AccountPreferenceSchema, AccountProfile, AccountUser,
@@ -38,6 +38,8 @@ pub struct ProvidersResponse {
     phone: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     apple: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    google: Option<bool>,
 }
 
 pub(crate) fn provider_flags(providers: &HashMap<String, bool>) -> (bool, bool) {
@@ -53,6 +55,7 @@ pub(crate) fn providers_response(providers: HashMap<String, bool>) -> ProvidersR
         email,
         phone,
         apple: Some(providers.get("apple") == Some(&true)),
+        google: Some(providers.get("google") == Some(&true)),
     }
 }
 
@@ -64,6 +67,7 @@ pub(crate) fn providers_response_without_apple(
         email,
         phone,
         apple: None,
+        google: None,
     }
 }
 
@@ -211,7 +215,7 @@ mod tests {
         // "sms" is the backend's name for the phone provider, and apple is reported even when absent so the client can tell "this account has no Apple identity" from "this build does not know about the provider".
         assert_eq!(
             serde_json::to_value(providers).unwrap(),
-            json!({"email":true,"phone":true,"apple":false})
+            json!({"email":true,"phone":true,"apple":false,"google":false})
         );
 
         let profile = ProfileResponse::from(AccountProfile {

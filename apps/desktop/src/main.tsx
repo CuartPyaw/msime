@@ -799,6 +799,8 @@ function DesktopSettings() {
                       invoke("account_request_code", { provider, target }),
                     login: (challengeId: string, code: string) =>
                       invoke("account_login", { challengeId, code }),
+                    googleLogin: () => invoke("account_google_login"),
+                    googleCancel: () => invoke("account_google_cancel"),
                     profile: () => invoke("account_profile"),
                     rename: (displayName: string) => invoke("account_rename", { displayName }),
                     logout: (all: boolean) => invoke("account_logout", { all }),
