@@ -1,5 +1,6 @@
 //! The C++ `CircularBuffer`: a bounded map that evicts the oldest *insertion*. Reads do not refresh an entry and re-inserting a key keeps its age, so this is FIFO, not LRU. The goldens depend on which entries survive (online rows inserted into the series cache in particular), so the semantics are kept exactly on top of `lru::LruCache` by never promoting.
 
+use std::borrow::Borrow;
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 
@@ -24,6 +25,14 @@ impl<K: Hash + Eq, V: Clone> FifoCache<K, V> {
     }
 
     pub fn get_ref(&self, key: &K) -> Option<&V> {
+        self.entries.peek(key)
+    }
+
+    pub fn get_ref_by<Q>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         self.entries.peek(key)
     }
 
@@ -64,5 +73,12 @@ mod tests {
         assert!(!cache.contains(&"a"));
         assert_eq!(cache.get(&"b"), Some(2));
         assert_eq!(cache.get(&"c"), Some(4));
+    }
+
+    #[test]
+    fn looks_up_owned_keys_by_borrowed_key() {
+        let mut cache = FifoCache::new(2);
+        cache.insert("a".to_owned(), 1);
+        assert_eq!(cache.get_ref_by("a"), Some(&1));
     }
 }

@@ -685,13 +685,12 @@ impl QuanpinDictionary {
             raw
         } else {
             segmentation
-        }
-        .to_string();
-        if let Some(cached) = self.cache.get(&cache_key) {
-            return cached;
+        };
+        if let Some(cached) = self.cache.get_ref_by(cache_key) {
+            return cached.clone();
         }
         let result = self.query_database(segments, segmentation);
-        self.cache.insert(cache_key, result.clone());
+        self.cache.insert(cache_key.to_owned(), result.clone());
         result
     }
 
