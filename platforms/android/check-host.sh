@@ -358,6 +358,7 @@ javac --release 17 -Xlint:all -Werror -cp "$android_jar" -d "$output_dir" \
   "${client_sources[@]}" \
   "$repo_root/platforms/android/tests/core/EditorSmoke.java" \
   "$repo_root/platforms/android/tests/core/BootstrapMarkerSmoke.java" \
+  "$repo_root/platforms/android/tests/core/TelemetryHandlerSmoke.java" \
   "$repo_root/platforms/android/tests/core/PhrasePreeditSmoke.java" \
   "$repo_root/platforms/android/tests/core/InputViewRefreshPolicySmoke.java" \
   "$repo_root/platforms/android/tests/core/EditorContextSnapshotSmoke.java" \
@@ -444,6 +445,7 @@ javac --release 17 -Xlint:all -Werror -cp "$android_jar" -d "$output_dir" \
   "$repo_root/platforms/android/tests/keyboard/SymbolPanelModelSmoke.java"
 java -cp "$output_dir" EditorSmoke
 java -cp "$output_dir:$android_jar" app.msime.android.BootstrapMarkerSmoke
+java -cp "$output_dir:$android_jar" app.msime.android.core.TelemetryHandlerSmoke
 java -cp "$output_dir" PhrasePreeditSmoke
 java -cp "$output_dir" InputViewRefreshPolicySmoke
 java -cp "$output_dir" EditorContextSnapshotSmoke

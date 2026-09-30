@@ -15,13 +15,20 @@ import java.util.concurrent.Executors;
 public final class Telemetry {
     private static final String PREFS = "msime-telemetry", EVENTS = "events";
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
+    private static boolean crashHandlerInstalled;
     private Telemetry() {}
     public static void start(Context context) {
         Context app = context.getApplicationContext(); SharedPreferences prefs = app.getSharedPreferences(PREFS, 0);
         if (!prefs.getBoolean("first-launch", false)) { prefs.edit().putBoolean("first-launch", true).apply(); enqueue(app, event("download", null, null)); }
         flush(app);
+        installCrashHandler(app);
+    }
+    static synchronized boolean installCrashHandler(Context app) {
+        if (crashHandlerInstalled) return false;
         Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((thread, error) -> { enqueue(app, event("crash", error.toString(), stack(error))); if (previous != null) previous.uncaughtException(thread, error); });
+        crashHandlerInstalled = true;
+        return true;
     }
     private static JSONObject event(String kind, String message, String stack) { JSONObject value = new JSONObject(); try { value.put("id", UUID.randomUUID().toString()); value.put("kind", kind); value.put("platform", "android"); value.put("version", "0.1.0-dev"); if (message != null) value.put("message", clip(message, 2048)); if (stack != null) value.put("stack", clip(stack, 12000)); } catch (Exception ignored) {} return value; }
     private static String stack(Throwable error) { StringBuilder out = new StringBuilder(); for (StackTraceElement frame : error.getStackTrace()) out.append(frame).append('\n'); return out.toString(); }
