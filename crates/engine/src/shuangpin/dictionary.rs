@@ -319,12 +319,18 @@ impl ShuangpinDictionary {
         let original_segmentation = pinyin_segmentation(raw, self.profile);
         let whole = self.generate_series(raw, &original_segmentation, "");
         // The reference appended the whole-input answer and then the unmatched rows whole, so a word already among the matched rows, or in both lists, was listed again; a word already listed keeps its first seat.
-        let mut listed: HashSet<String> = result.iter().map(|item| item.word.clone()).collect();
+        // Keep duplicate keys borrowed while checking both owned append lists, then move rows after releasing the set.
+        let mut listed: HashSet<&str> = result.iter().map(|item| item.word.as_str()).collect();
+        let rows = whole.into_iter().chain(unmatched).collect::<Vec<_>>();
+        let unique = rows
+            .iter()
+            .map(|item| listed.insert(item.word.as_str()))
+            .collect::<Vec<_>>();
+        drop(listed);
         result.extend(
-            whole
-                .into_iter()
-                .chain(unmatched)
-                .filter(|item| listed.insert(item.word.clone())),
+            rows.into_iter()
+                .zip(unique)
+                .filter_map(|(item, unique)| unique.then_some(item)),
         );
         result
     }
