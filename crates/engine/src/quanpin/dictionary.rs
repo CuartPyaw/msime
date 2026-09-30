@@ -451,12 +451,12 @@ impl QuanpinDictionary {
         if resolution.corrected_input {
             // The corrected reading is the primary key, so selection and weight updates land on the right rows; the literal reading stays behind it as a fallback tail.
             result = self.query_series(raw, &primary_segmentation, &resolution.corrected);
-            let literal_segmentation = if segmentation.is_empty() {
-                join_segments(&segments)
+            let literal = if segmentation.is_empty() {
+                let literal_segmentation = join_segments(&segments);
+                self.query_series(raw, &literal_segmentation, &segments)
             } else {
-                segmentation.to_string()
+                self.query_series(raw, segmentation, &segments)
             };
-            let literal = self.query_series(raw, &literal_segmentation, &segments);
             append_unique_words(&mut result, literal);
             // Same-cost readings of the typo compete with the primary cut on dictionary frequency, and the best keeps a protected slot near the top.
             if !alternatives.is_empty() {
