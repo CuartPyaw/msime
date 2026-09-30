@@ -353,7 +353,7 @@ pub fn autocorrect_cut_kbest(
     let bytes = pinyin.as_bytes();
     let length = bytes.len();
     let mut search = Search {
-        best: vec![Vec::new(); length + 1],
+        best: (0..=length).map(|_| Vec::with_capacity(k)).collect(),
         finalized: vec![false; length + 1],
         arrival: 0,
         sequences: HashMap::new(),
