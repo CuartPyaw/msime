@@ -1,6 +1,5 @@
 //! The Japanese candidate provider (schemes-lang.md §5.5), without the dropped `japanese_lexicon` step. Display order is insertion order; nothing is re-sorted by weight.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -34,18 +33,20 @@ pub struct JapaneseProvider {
 /// Rows unique by word, in insertion order.
 struct Rows {
     items: Vec<WordItem>,
-    seen: HashSet<String>,
     code: String,
 }
 
 impl Rows {
     fn reserve(&mut self, additional: usize) {
         self.items.reserve(additional);
-        self.seen.reserve(additional);
+    }
+
+    fn contains_word(&self, word: &str) -> bool {
+        self.items.iter().any(|item| item.word == word)
     }
 
     fn push(&mut self, word: &str, weight: i64, source: CandidateSource) {
-        if word.is_empty() || !self.seen.insert(word.to_owned()) {
+        if word.is_empty() || self.contains_word(word) {
             return;
         }
         self.items.push(WordItem::new(
@@ -83,7 +84,6 @@ impl JapaneseProvider {
         }
         let mut rows = Rows {
             items: Vec::with_capacity(2),
-            seen: HashSet::with_capacity(2),
             code: request.raw_input_with_cases.clone(),
         };
         // A bare minus opens a composition whose first choice is the long-vowel mark, with the plain hyphen kept as the alternative.
@@ -149,7 +149,7 @@ impl JapaneseProvider {
             let mut insertion = rows.items.len().min(if kana_first { 2 } else { 1 });
             for item in dynamic {
                 // Dynamic rows are bounded by the cache quota; scan the already-owned words to avoid cloning a second key into `seen`.
-                if rows.items.iter().any(|row| row.word == item.word) {
+                if rows.contains_word(&item.word) {
                     continue;
                 }
                 rows.items.insert(insertion, item.clone());
@@ -215,6 +215,19 @@ mod tests {
         }
         let provider = JapaneseProvider::new(&path);
         (root, provider)
+    }
+
+    #[test]
+    fn rows_scan_owned_words_when_deduplicating() {
+        let mut rows = Rows {
+            items: Vec::new(),
+            code: "ka".to_owned(),
+        };
+        assert!(!rows.contains_word("かな"));
+        rows.push("かな", KANA_WEIGHT, CandidateSource::Generated);
+        assert!(rows.contains_word("かな"));
+        rows.push("かな", KATAKANA_WEIGHT, CandidateSource::Generated);
+        assert_eq!(words(&rows.items), vec!["かな"]);
     }
 
     // test_engine_smoke.cpp:410-455, on the two-lemma synthetic model.
