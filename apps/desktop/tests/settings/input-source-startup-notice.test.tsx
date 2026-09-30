@@ -46,6 +46,8 @@ test("reports a failure when opening keyboard settings fails", async () => {
 
   fireEvent.click(screen.getByRole("button", { name: "打开键盘设置" }));
   await vi.waitFor(() =>
-    expect(onError).toHaveBeenCalledWith("无法打开系统设置，请手动前往 系统设置 > 键盘 > 输入法。"),
+    expect(onError).toHaveBeenCalledWith(
+      "无法打开系统设置，请手动前往 系统设置 > 键盘 > 文字输入 > 输入法。",
+    ),
   );
 });
