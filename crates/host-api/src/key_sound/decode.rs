@@ -198,9 +198,11 @@ impl Decoder for TrackDecoder {
         Ok(vec![Frame::ZERO; SILENCE_FRAMES])
     }
 
-    /// Music never loops or seeks, so a seek only comes from something unexpected; the track ends there rather than trusting the demuxer to land where asked.
+    /// kira seeks to the start position when it opens a stream, which is where the decoder already is. Music never loops or seeks otherwise, so any other seek comes from something unexpected; the track ends there rather than trusting the demuxer to land where asked.
     fn seek(&mut self, index: usize) -> Result<usize, Self::Error> {
-        self.ended.store(true, Ordering::Release);
+        if index != self.produced {
+            self.ended.store(true, Ordering::Release);
+        }
         Ok(index)
     }
 }

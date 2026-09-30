@@ -298,6 +298,47 @@ mod playback {
         assert!(!silence.is_empty() && silence.iter().all(|frame| *frame == kira::Frame::ZERO));
     }
 
+    // kira seeks every stream to its start position when it opens it; that seek must not end the track.
+    #[test]
+    fn a_track_survives_the_seek_that_opens_it() {
+        use kira::sound::streaming::{Decoder as _, StreamingSoundData};
+        use kira::sound::PlaybackState;
+        use kira::{AudioManager, AudioManagerSettings, Tween};
+        let directory = tempfile::tempdir().unwrap();
+        let track = directory.path().join("track.wav");
+        // Longer than kira's stream buffer, so its decode thread cannot reach the end on its own.
+        wav(&track, 1, 8_000, 8_000 * 30);
+        let ended = Arc::new(AtomicBool::new(false));
+        let mut decoder = decode::track(&track, Arc::clone(&ended)).unwrap();
+        assert_eq!(decoder.seek(0).unwrap(), 0);
+        assert!(!ended.load(Ordering::Acquire));
+        assert!(!decoder.decode().unwrap().is_empty());
+        assert!(!ended.load(Ordering::Acquire));
+
+        let ended = Arc::new(AtomicBool::new(false));
+        let decoder = decode::track(&track, Arc::clone(&ended)).unwrap();
+        let mut manager =
+            AudioManager::<kira::backend::mock::MockBackend>::new(AudioManagerSettings::default())
+                .unwrap();
+        let mut handle = manager
+            .play(StreamingSoundData::from_decoder(decoder))
+            .unwrap();
+        assert!(
+            !ended.load(Ordering::Acquire),
+            "opening the stream ended it"
+        );
+        handle.stop(Tween::default());
+        manager.backend_mut().on_start_processing();
+        manager.backend_mut().process();
+        assert_eq!(handle.state(), PlaybackState::Stopped);
+
+        // Any other seek is unexpected and ends the track.
+        let ended = Arc::new(AtomicBool::new(false));
+        let mut decoder = decode::track(&track, Arc::clone(&ended)).unwrap();
+        decoder.seek(100).unwrap();
+        assert!(ended.load(Ordering::Acquire));
+    }
+
     #[test]
     fn built_in_packs_load_into_a_sample_table() {
         assert!(load(&Selection::of(&keys_settings()).unwrap()).is_ok());

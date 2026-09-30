@@ -1,6 +1,7 @@
 //! The process's player: one thread that owns the kira mixer, and the queue sessions post to.
 
 use super::{decibels, decode, Event, KeyClass, Melody, PluginRoots, SessionSound, SoundSettings};
+use kira::backend::Backend;
 use kira::sound::static_sound::StaticSoundData;
 use kira::sound::streaming::{StreamingSoundData, StreamingSoundHandle};
 use kira::sound::PlaybackState;
@@ -25,6 +26,14 @@ const STALE: Duration = Duration::from_millis(200);
 const IDLE_CLOSE: Duration = Duration::from_secs(30);
 /// How often the player looks at a playing track, to start the next one when it ends.
 const MUSIC_TICK: Duration = Duration::from_millis(250);
+/// After the device fails to open, how long the player waits before trying again. A failure is usually passing (the default output switching to a headset, the sound server restarting), so it must not silence the rest of the process.
+const OPEN_RETRY: Duration = Duration::from_secs(5);
+/// With no music playing, a device open this long is let go at the next quiet moment and opened afresh by the next sound. kira gives no sign when its stream thread has died on a device change, and steady typing would otherwise keep a silent manager until the idle close.
+const MANAGER_LIFETIME: Duration = Duration::from_secs(60);
+/// The quiet moment a worn device waits for, longer than any sample a pack may have, so letting it go never cuts a sound off.
+const WORN_QUIET: Duration = Duration::from_secs(2);
+/// How long a closing device waits for its stopped tracks to be reported stopped. A renderer that never reports it is gone already, and the device is let go anyway.
+const STOP_WAIT: Duration = Duration::from_secs(2);
 
 type LoadResult = thread::Result<Result<Samples, String>>;
 
@@ -115,7 +124,7 @@ pub(super) fn sync(sound: &SessionSound) {
 }
 
 fn run(receiver: Receiver<Request>, loads: SyncSender<Request>) {
-    let mut worker = Worker::new(loads);
+    let mut worker: Worker = Worker::new(loads);
     loop {
         let request = match worker.timeout(Instant::now()) {
             None => match receiver.recv() {
@@ -250,14 +259,12 @@ struct Music {
 }
 
 impl Music {
-    /// Forget the pack and stop its track, for a change of pack or a closed device.
-    fn reset(&mut self) {
-        if let Some(mut handle) = self.handle.take() {
-            handle.stop(Tween::default());
-        }
+    /// Forget the pack, for a change of pack or a closed device, handing back its track for the worker to stop.
+    fn reset(&mut self) -> Option<StreamingSoundHandle<Infallible>> {
         self.tracks = None;
         self.resolved = false;
         self.track = 0;
+        self.handle.take()
     }
 
     fn playing(&self) -> bool {
@@ -267,7 +274,8 @@ impl Music {
     }
 }
 
-pub(super) struct Worker {
+/// The player's state. The backend is kira's default (cpal) in the host; tests drive the same code over kira's mock backend.
+pub(super) struct Worker<B: Backend = DefaultBackend> {
     settings: Arc<SoundSettings>,
     loads: SyncSender<Request>,
     /// The load whose result is wanted; results of an earlier one are dropped.
@@ -275,12 +283,26 @@ pub(super) struct Worker {
     selection: Option<Selection>,
     samples: Option<Samples>,
     melody: Melody,
-    manager: Option<AudioManager>,
+    manager: Option<AudioManager<B>>,
+    /// When the open manager was opened.
+    opened: Option<Instant>,
+    /// When the device may be tried again after it failed to open.
+    open_retry: Option<Instant>,
+    /// Whether the last open failed, so a failing device is reported once rather than every few seconds.
+    open_failing: bool,
     last_sound: Option<Instant>,
     music: Music,
+    /// Tracks told to stop that the renderer has not yet reported stopped. The manager is kept until they are: kira's decode thread for a stream only exits once the renderer marks the stream stopped, and a stream left paused or stopping when its manager is dropped keeps that thread waking every millisecond for the life of the process.
+    stopping: Vec<StreamingSoundHandle<Infallible>>,
+    /// When the device was asked to close while `stopping` was not yet empty.
+    closing: Option<Instant>,
 }
 
-impl Worker {
+impl<B: Backend> Worker<B>
+where
+    B::Settings: Default,
+    B::Error: std::fmt::Debug,
+{
     pub(super) fn new(loads: SyncSender<Request>) -> Self {
         Self {
             settings: Arc::default(),
@@ -290,21 +312,37 @@ impl Worker {
             samples: None,
             melody: Melody::default(),
             manager: None,
+            opened: None,
+            open_retry: None,
+            open_failing: false,
             last_sound: None,
             music: Music::default(),
+            stopping: Vec::new(),
+            closing: None,
         }
     }
 
     /// How long the thread may wait for the next request before `tick` has something to do: never while idle with the device closed.
     fn timeout(&self, now: Instant) -> Option<Duration> {
-        if self.music.handle.is_some() && self.music.active {
+        if (self.music.handle.is_some() && self.music.active) || !self.stopping.is_empty() {
             return Some(MUSIC_TICK);
         }
-        self.manager.as_ref()?;
+        if self.manager.is_none() {
+            // Music waiting for the device to open again is retried when the back-off ends.
+            let retry = self
+                .open_retry
+                .filter(|_| self.settings.music && self.music.active)?;
+            return Some(retry.saturating_duration_since(now) + MUSIC_TICK);
+        }
         let since = self
             .last_sound
             .map_or(Duration::ZERO, |last| now.saturating_duration_since(last));
-        Some(IDLE_CLOSE.saturating_sub(since) + MUSIC_TICK)
+        let close = if self.worn(now) {
+            WORN_QUIET
+        } else {
+            IDLE_CLOSE
+        };
+        Some(close.saturating_sub(since) + MUSIC_TICK)
     }
 
     pub(super) fn handle(&mut self, request: Request) {
@@ -352,18 +390,19 @@ impl Worker {
             }
         }
         let previous = std::mem::replace(&mut self.settings, settings);
-        let settings = &self.settings;
+        let settings = Arc::clone(&self.settings);
         if (previous.music, &previous.music_pack, &previous.roots)
             != (settings.music, &settings.music_pack, &settings.roots)
         {
-            self.music.reset();
+            let track = self.music.reset();
+            self.retire(track);
         } else if previous.music_volume != settings.music_volume {
             if let Some(handle) = &mut self.music.handle {
                 handle.set_volume(decibels(settings.music_volume), Tween::default());
             }
         }
         if !settings.wanted() {
-            self.close();
+            self.close(Instant::now());
         }
     }
 
@@ -425,44 +464,89 @@ impl Worker {
             .collect()
     }
 
-    fn manager(&mut self) -> Option<&mut AudioManager> {
+    /// The open manager, opening the device first when it is closed. A failed open is tried again after `OPEN_RETRY`, never given up on.
+    fn manager(&mut self, now: Instant) -> Option<&mut AudioManager<B>> {
         if self.manager.is_none() {
-            match AudioManager::<DefaultBackend>::new(AudioManagerSettings::default()) {
-                Ok(manager) => self.manager = Some(manager),
+            if !may_open(self.open_retry, now) {
+                return None;
+            }
+            match AudioManager::<B>::new(AudioManagerSettings::default()) {
+                Ok(manager) => {
+                    self.manager = Some(manager);
+                    self.opened = Some(now);
+                    self.open_retry = None;
+                    self.open_failing = false;
+                }
                 Err(error) => {
-                    disable(&format!("no audio output: {error}"));
+                    if !std::mem::replace(&mut self.open_failing, true) {
+                        eprintln!("msime: no audio output, trying again later: {error:?}");
+                    }
+                    self.open_retry = Some(now + OPEN_RETRY);
                     return None;
                 }
             }
         }
+        // A sound wants the device, so a close waiting on stopped tracks is called off.
+        self.closing = None;
         self.manager.as_mut()
     }
 
     fn play(&mut self, sound: StaticSoundData) {
-        let Some(manager) = self.manager() else {
+        let now = Instant::now();
+        let Some(manager) = self.manager(now) else {
             return;
         };
         // Past kira's limit of sounds at once, a key sound is simply not heard.
         let _ = manager.play(sound);
-        self.last_sound = Some(Instant::now());
+        self.last_sound = Some(now);
     }
 
-    /// Let the audio device go. Music starts its current track again when it next plays.
-    fn close(&mut self) {
-        self.music.handle = None;
-        self.manager = None;
+    /// Stop a track and keep its handle until the renderer reports it stopped (see `stopping`).
+    fn retire(&mut self, track: Option<StreamingSoundHandle<Infallible>>) {
+        if let Some(mut handle) = track {
+            handle.stop(Tween::default());
+            self.stopping.push(handle);
+        }
+    }
+
+    /// Let the audio device go, once the renderer has reported every stopped track stopped or `STOP_WAIT` has passed. Music starts its current track again when it next plays.
+    fn close(&mut self, now: Instant) {
+        let track = self.music.handle.take();
+        self.retire(track);
+        self.stopping
+            .retain(|handle| handle.state() != PlaybackState::Stopped);
+        let since = *self.closing.get_or_insert(now);
+        if self.stopping.is_empty() || now.saturating_duration_since(since) >= STOP_WAIT {
+            self.stopping.clear();
+            self.closing = None;
+            self.manager = None;
+            self.opened = None;
+        }
     }
 
     fn tick(&mut self, now: Instant) {
         self.tick_music(now);
-        if self.manager.is_some()
-            && !self.music.playing()
-            && self
-                .last_sound
-                .is_none_or(|last| now.saturating_duration_since(last) >= IDLE_CLOSE)
-        {
-            self.close();
+        self.stopping
+            .retain(|handle| handle.state() != PlaybackState::Stopped);
+        if self.manager.is_none() || self.music.playing() {
+            return;
         }
+        let since = self
+            .last_sound
+            .map_or(Duration::MAX, |last| now.saturating_duration_since(last));
+        if since >= IDLE_CLOSE
+            || (self.worn(now) && since >= WORN_QUIET)
+            || self.closing.is_some()
+            || !self.settings.wanted()
+        {
+            self.close(now);
+        }
+    }
+
+    /// Whether the open device has been open for `MANAGER_LIFETIME`.
+    fn worn(&self, now: Instant) -> bool {
+        self.opened
+            .is_some_and(|opened| now.saturating_duration_since(opened) >= MANAGER_LIFETIME)
     }
 
     fn tick_music(&mut self, now: Instant) {
@@ -520,7 +604,7 @@ impl Worker {
             let path = directory.join(&tracks[self.music.track]);
             if let Ok(decoder) = decode::track(&path, Arc::clone(&ended)) {
                 let data = StreamingSoundData::from_decoder(decoder).volume(volume);
-                let Some(manager) = self.manager() else {
+                let Some(manager) = self.manager(now) else {
                     return;
                 };
                 if let Ok(handle) = manager.play(data) {
@@ -537,5 +621,172 @@ impl Worker {
             self.settings.music_pack
         );
         self.music.tracks = None;
+    }
+}
+
+/// Whether the device may be opened at `now`, given when a failed open said to try again.
+fn may_open(retry: Option<Instant>, now: Instant) -> bool {
+    retry.is_none_or(|retry| now >= retry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::PluginRoots;
+    use super::*;
+    use kira::backend::mock::MockBackend;
+
+    /// A silent mono 16-bit WAV of `frames` frames at 8 kHz.
+    fn silent_wav(path: &Path, frames: u32) {
+        let data = frames * 2;
+        let mut bytes = Vec::with_capacity(44 + data as usize);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&8_000u32.to_le_bytes());
+        bytes.extend_from_slice(&16_000u32.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data.to_le_bytes());
+        bytes.resize(44 + data as usize, 0);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    /// Settings playing a one-track music pack installed under `state`, and nothing else.
+    fn music_settings(state: &Path) -> SoundSettings {
+        let pack = state.join("plugins/music/calm");
+        std::fs::create_dir_all(&pack).unwrap();
+        // Thirty seconds: far more than kira's stream buffer, so the decoder never reaches the end during a test.
+        silent_wav(&pack.join("calm.wav"), 8_000 * 30);
+        std::fs::write(
+            pack.join("plugin.toml"),
+            "schema_version = 1\nkind = \"music\"\nid = \"calm\"\nname = \"Calm\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n[music]\ntracks = [\"calm.wav\"]\n",
+        )
+        .unwrap();
+        SoundSettings {
+            roots: PluginRoots::new(state.to_str(), None, ""),
+            music: true,
+            music_pack: "calm".into(),
+            music_volume: 30,
+            ..SoundSettings::default()
+        }
+    }
+
+    fn render(worker: &mut Worker<MockBackend>) {
+        let backend = worker.manager.as_mut().unwrap().backend_mut();
+        backend.on_start_processing();
+        backend.process();
+    }
+
+    fn playing_worker(settings: &SoundSettings, now: Instant) -> Worker<MockBackend> {
+        let (sender, _receiver) = sync_channel(8);
+        let mut worker: Worker<MockBackend> = Worker::new(sender);
+        worker.configure(Arc::new(settings.clone()));
+        worker.handle(Request::Event(Event::Music(true), now));
+        worker.tick(now);
+        assert!(worker.music.handle.is_some(), "the track started");
+        assert!(!worker.music.ended.load(Ordering::Acquire));
+        render(&mut worker);
+        worker
+    }
+
+    // kira's decode thread for a stream exits only when the renderer marks the stream stopped, so dropping the manager first would leave it waking every millisecond for good.
+    #[test]
+    fn switching_music_off_keeps_the_device_until_the_track_is_stopped() {
+        let state = tempfile::tempdir().unwrap();
+        let settings = music_settings(state.path());
+        let now = Instant::now();
+        let mut worker = playing_worker(&settings, now);
+        worker.configure(Arc::new(SoundSettings {
+            music: false,
+            ..settings.clone()
+        }));
+        assert!(worker.manager.is_some());
+        assert_eq!(worker.stopping.len(), 1);
+        assert_eq!(worker.timeout(now), Some(MUSIC_TICK));
+        render(&mut worker);
+        worker.tick(now);
+        assert!(worker.manager.is_none());
+        assert!(worker.stopping.is_empty());
+        assert_eq!(worker.timeout(now), None);
+    }
+
+    #[test]
+    fn paused_music_is_stopped_before_the_idle_close() {
+        let state = tempfile::tempdir().unwrap();
+        let settings = music_settings(state.path());
+        let now = Instant::now();
+        let mut worker = playing_worker(&settings, now);
+        worker.handle(Request::Event(Event::Music(false), now));
+        worker.tick(now);
+        render(&mut worker);
+        assert_eq!(
+            worker.music.handle.as_ref().unwrap().state(),
+            PlaybackState::Paused
+        );
+        let idle = now + IDLE_CLOSE;
+        worker.tick(idle);
+        assert!(worker.music.handle.is_none());
+        assert!(worker.manager.is_some(), "waiting for the stop to render");
+        render(&mut worker);
+        worker.tick(idle);
+        assert!(worker.manager.is_none());
+    }
+
+    // The stream's decode thread outlives this test's device, which is what a dead renderer leaves behind anyway; it ends with the test process.
+    #[test]
+    fn a_renderer_that_never_reports_the_stop_does_not_hold_the_device() {
+        let state = tempfile::tempdir().unwrap();
+        let settings = music_settings(state.path());
+        let now = Instant::now();
+        let mut worker = playing_worker(&settings, now);
+        worker.configure(Arc::new(SoundSettings {
+            music: false,
+            ..settings.clone()
+        }));
+        let closed = Instant::now();
+        worker.tick(closed + STOP_WAIT / 2);
+        assert!(worker.manager.is_some());
+        worker.tick(closed + STOP_WAIT);
+        assert!(worker.manager.is_none());
+        assert!(worker.stopping.is_empty());
+    }
+
+    #[test]
+    fn a_failed_open_is_tried_again_after_the_back_off() {
+        let (sender, _receiver) = sync_channel(8);
+        let mut worker: Worker<MockBackend> = Worker::new(sender);
+        let now = Instant::now();
+        worker.open_retry = Some(now + OPEN_RETRY);
+        worker.open_failing = true;
+        assert!(worker.manager(now).is_none());
+        assert!(!DISABLED.load(Ordering::Acquire));
+        assert!(worker.manager(now + OPEN_RETRY).is_some());
+        assert!(worker.open_retry.is_none() && !worker.open_failing);
+        assert!(may_open(None, now));
+        assert!(!may_open(Some(now + OPEN_RETRY), now));
+        assert!(may_open(Some(now), now));
+    }
+
+    #[test]
+    fn a_worn_device_is_let_go_at_the_next_quiet_moment() {
+        let (sender, _receiver) = sync_channel(8);
+        let mut worker: Worker<MockBackend> = Worker::new(sender);
+        worker.settings = Arc::new(SoundSettings {
+            key: true,
+            ..SoundSettings::default()
+        });
+        let now = Instant::now();
+        assert!(worker.manager(now).is_some());
+        let worn = now + MANAGER_LIFETIME;
+        worker.last_sound = Some(worn);
+        worker.tick(worn);
+        assert!(worker.manager.is_some(), "a sound may still be playing");
+        assert_eq!(worker.timeout(worn), Some(WORN_QUIET + MUSIC_TICK));
+        worker.tick(worn + WORN_QUIET);
+        assert!(worker.manager.is_none());
     }
 }
