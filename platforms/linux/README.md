@@ -54,7 +54,7 @@ msime-linux-setup --update --download   # 升级之后只取回过期的那几�
 
 ### Omarchy
 
-[Omarchy](https://omarchy.org) 用 Hyprland 和 Fcitx5，Fcitx5 由用户服务 `omarchy-fcitx5.service` 以 `fcitx5 --disable notificationitem` 启动（`Restart=always`）。水杉在这里多做了三件事：
+[Omarchy](https://omarchy.org) 用 Hyprland 和 Fcitx5，Fcitx5 由用户服务 `omarchy-fcitx5.service` 以 `fcitx5 --disable notificationitem` 启动（`Restart=always`）。水杉在这里多做了四件事：
 
 - **候选窗口跟随 Omarchy 主题。** `msime-linux-setup` 检测到 Omarchy（`~/.config/omarchy` 与 `~/.local/state/omarchy/current/theme` 都在）时，把随包安装的钩子 `<前缀>/share/msime-client/omarchy/theme-set` 链接为 `~/.config/omarchy/hooks/theme-set.d/msime`，并立即按当前主题生成一次皮肤。Omarchy 每次切换主题后运行这个钩子，钩子执行 `msime-linux-settings --sync-omarchy-theme`：不开窗口，用 Omarchy 自己的 `omarchy-theme-color --all` 读出新主题解析后的配色（旧式 `colorN` 主题也一样），写成皮肤目录下的 `omarchy` 皮肤包（直角、背景与前景取主题的 `background`/`foreground`，边框和强调取 `accent`，选中取 `selection`，悬停取 `lighter_background`，序号和翻译取 `dark_foreground`），再发布皮肤目录，宿主热重载后即生效。皮肤不会被自动选中：在输入法的「主题」菜单或设置页里选「Omarchy」之后，候选窗口才随 Omarchy 主题换色。`~/.config/omarchy/hooks/theme-set.d/msime` 已被别的文件占用时不覆盖，只打印提示；`msime-linux-setup --unregister`（`.deb` 卸载时由 prerm 调用）只移除指向水杉钩子的链接。包被删掉后留下的悬空链接会被 Omarchy 跳过，不会让切换主题出错。由 `tests/core/setup_omarchy.py` 和 `apps/desktop/src-tauri/src/shared/omarchy_skin.rs` 的单元测试钉住。
 - **重启提示指向用户服务。** 在 `omarchy-fcitx5.service` 里执行 `fcitx5 -r` 会在服务之外再起一个 Fcitx5，它抢走总线名，服务自己的那份随即退出又被 `Restart=always` 拉起，两者来回抢。所以插件发现自己运行在某个 systemd 用户服务里（读 `/proc/self/cgroup`；桌面自启动项生成的 `app-*` 单元和作用域不算）时，升级、卸载提示改为 `systemctl --user restart <该服务>`；`.deb` 升级通知对 `omarchy-fcitx5.service` 处于活动状态的用户同样改写。由 `tests/core/replaced_program.cpp` 与 `tests/core/deb_maintainer_scripts.py` 钉住。
@@ -71,6 +71,7 @@ msime-linux-setup --update --download   # 升级之后只取回过期的那几�
   ```
 
   按住说话不需要合成器绑定：输入法自己处理按住 RAlt（或 Ctrl+Win、RCtrl+RAlt）录音、松开结束，Ctrl+F9 开始/结束切换（见「语音输入」）。别把这些组合键绑给 Hyprland，否则按键到不了输入法。上面三个组合键在 Omarchy 默认绑定里空着，自定义过绑定的话先用 `omarchy menu keybindings --print` 确认。
+- **状态栏插件代替托盘。** `--disable notificationitem` 让 Fcitx5 不注册托盘图标，水杉的中/英标签和托盘菜单在 Omarchy 上就都看不到了。`msime-linux-setup` 在 Omarchy 上把随包安装的插件目录 `<前缀>/share/msime-client/omarchy/plugin` 链接为 `~/.config/omarchy/plugins/metasequoia.msime`，并提示运行 `omarchy plugin enable metasequoia.msime` 把它放上状态栏（setup 不改用户的状态栏布局）。插件显示当前的 中/英/日/⇪，悬停显示当前方案；左键打开菜单（设置、词库、手写、屏幕键盘、表情、语音输入、云剪贴板、重载水杉输入法，`omarchy-fcitx5.service` 在运行时还有重启 Fcitx5），中键直接打开设置。数据来自 Fcitx5 插件写的 `$XDG_RUNTIME_DIR/msime-client/input-status.json`：`{"active":bool,"label":"中","scheme":"quanpin"}`，焦点上下文由水杉处理时 `active` 为真，切到别的输入法或失去焦点后为假，插件随之隐藏；内容不变时不重写。`--unregister` 只移除指向水杉插件的链接。由 `tests/core/input_status.cpp` 和 `tests/core/setup_omarchy.py` 钉住。
 
 ## 生成 Linux 安装包
 

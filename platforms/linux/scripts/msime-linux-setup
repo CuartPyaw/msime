@@ -605,6 +605,47 @@ def unlink_omarchy_theme_hook() -> str | None:
     return f"已移除 Omarchy 主题钩子 {link}"
 
 
+# The bar widget (data/omarchy/plugin) replaces the tray Omarchy disables. Omarchy discovers user plugins with `find -L`, so a link to the installed folder is a plugin like any other, and `omarchy plugin remove` knows to only unlink it.
+OMARCHY_PLUGIN = "share/msime-client/omarchy/plugin"
+OMARCHY_PLUGIN_ID = "metasequoia.msime"
+
+
+def omarchy_plugin_link() -> Path:
+    return Path.home() / ".config/omarchy/plugins" / OMARCHY_PLUGIN_ID
+
+
+def our_omarchy_plugin(link: Path) -> bool:
+    return link.is_symlink() and os.readlink(link).endswith(OMARCHY_PLUGIN)
+
+
+def link_omarchy_plugin(prefix: Path) -> None:
+    """On Omarchy, link the bar widget into the user's plugins. Placing it on the bar is left to the user, as Omarchy leaves it for any plugin: setup does not rewrite their bar layout."""
+    plugin = prefix / OMARCHY_PLUGIN
+    if not omarchy_desktop() or not (plugin / "manifest.json").is_file():
+        return
+    link = omarchy_plugin_link()
+    if (link.exists() or link.is_symlink()) and not our_omarchy_plugin(link):
+        print(f"{link} 已存在且不是水杉的插件，没有改动它。", file=sys.stderr)
+        return
+    try:
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if link.is_symlink():
+            link.unlink()
+        link.symlink_to(plugin)
+    except OSError as error:
+        print(f"未能接入 Omarchy 状态栏插件：{error}", file=sys.stderr)
+        return
+    print(f"已接入 Omarchy 状态栏插件：运行 `omarchy plugin enable {OMARCHY_PLUGIN_ID}` 把中/英和方案显示到状态栏，点它打开水杉菜单。")
+
+
+def unlink_omarchy_plugin() -> str | None:
+    link = omarchy_plugin_link()
+    if not our_omarchy_plugin(link):
+        return None
+    link.unlink()
+    return f"已移除 Omarchy 状态栏插件 {link}；状态栏里的位置可用 `omarchy plugin disable {OMARCHY_PLUGIN_ID}` 移除"
+
+
 class RegistrationFailed(Exception):
     """One step of adding the input method to, or removing it from, the host's list did not work; setup falls back to printing the manual steps, and --unregister reports it and goes on with the other lists."""
 
@@ -1015,9 +1056,9 @@ def unregister_input_method() -> None:
             print(step())
         except RegistrationFailed as error:
             print(f"未能从输入法列表移除：{error}", file=sys.stderr)
-    removed = unlink_omarchy_theme_hook()
-    if removed:
-        print(removed)
+    for removed in (unlink_omarchy_theme_hook(), unlink_omarchy_plugin()):
+        if removed:
+            print(removed)
     restore_panel_settings()
 
 
@@ -1119,6 +1160,7 @@ def main() -> int:
     if update:
         status = update_dictionaries(prefix, lock, options_file, arguments.download)
         link_omarchy_theme_hook(prefix, options_file)
+        link_omarchy_plugin(prefix)
         return status
 
     if arguments.resources:
@@ -1151,6 +1193,7 @@ def main() -> int:
     ensure_anonymous_account(prefix)
     enable_services(service_units(state, config_home() / "msime-client"))
     link_omarchy_theme_hook(prefix, options_file)
+    link_omarchy_plugin(prefix)
     host = active_host()
     next_steps(state, host, None if arguments.no_register else register_input_method(host))
     return 0

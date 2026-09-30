@@ -254,6 +254,11 @@ add_executable(linux-candidate-panel-status-test tests/candidate/candidate_panel
 target_compile_options(linux-candidate-panel-status-test PRIVATE -Wall -Wextra -Werror)
 target_include_directories(linux-candidate-panel-status-test PRIVATE src)
 add_test(NAME linux-candidate-panel-status COMMAND linux-candidate-panel-status-test)
+add_executable(linux-input-status-test tests/core/input_status.cpp)
+target_compile_options(linux-input-status-test PRIVATE -Wall -Wextra -Werror)
+target_include_directories(linux-input-status-test PRIVATE src)
+target_link_libraries(linux-input-status-test PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME linux-input-status COMMAND linux-input-status-test)
 add_executable(linux-candidate-translation-policy-test tests/candidate/candidate_translation_policy.cpp)
 target_compile_options(linux-candidate-translation-policy-test PRIVATE -Wall -Wextra -Werror)
 target_include_directories(linux-candidate-translation-policy-test PRIVATE src)
@@ -640,6 +645,12 @@ if(MSIME_DESKTOP_BINARY)
   # The Omarchy theme-set hook runs msime-linux-settings, so it ships with it; msime-linux-setup links it into ~/.config/omarchy/hooks/theme-set.d on an Omarchy desktop.
   configure_file(data/omarchy/theme-set.in ${CMAKE_CURRENT_BINARY_DIR}/omarchy/theme-set @ONLY)
   install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/omarchy/theme-set DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/omarchy")
+  # The bar widget and its menu stand in for the tray Omarchy disables; the menu opens msime-linux-settings panels, so both ship with it too. msime-linux-setup links the plugin directory into ~/.config/omarchy/plugins.
+  configure_file(data/omarchy/menu.in ${CMAKE_CURRENT_BINARY_DIR}/omarchy/menu @ONLY)
+  configure_file(data/omarchy/plugin/Widget.qml.in ${CMAKE_CURRENT_BINARY_DIR}/omarchy/plugin/Widget.qml @ONLY)
+  install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/omarchy/menu DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/omarchy")
+  install(FILES data/omarchy/plugin/manifest.json ${CMAKE_CURRENT_BINARY_DIR}/omarchy/plugin/Widget.qml
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/omarchy/plugin")
 endif()
 # Nothing here starts the MCP server: an agent's MCP configuration names the command and runs it over stdio, so it only has to be on PATH.
 if(MSIME_MCP_BINARY)
