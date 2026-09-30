@@ -6,6 +6,16 @@
 mod credential_command_tests;
 mod local_model_tests;
 
+#[test]
+fn runtime_options_fallback_reserves_all_candidate_slots() {
+    let candidates: Vec<std::path::PathBuf> =
+        Vec::with_capacity(super::MAX_RUNTIME_OPTIONS_CANDIDATE_CAPACITY);
+    assert_eq!(
+        candidates.capacity(),
+        super::MAX_RUNTIME_OPTIONS_CANDIDATE_CAPACITY
+    );
+}
+
 #[cfg(not(target_os = "android"))]
 #[test]
 fn ai_endpoint_validation_accepts_http_api_urls_and_rejects_unsafe_urls() {
