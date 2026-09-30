@@ -39,6 +39,7 @@ inline std::vector<std::string> untranslated_texts(
     const std::vector<std::pair<std::string, std::string>> &answered,
     const std::vector<std::string> &planned) {
   std::vector<std::string> pending;
+  pending.reserve(planned.size());
   for (const auto &text : planned) {
     if (text.empty())
       continue;
