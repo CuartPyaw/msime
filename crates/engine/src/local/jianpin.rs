@@ -84,15 +84,17 @@ fn expand_code(code: &str, scheme: SchemeType, profile: &ShuangpinProfile) -> Op
     Some(
         code.bytes()
             .map(|byte| {
-                let key = char::from(byte.to_ascii_lowercase()).to_string();
-                if scheme != SchemeType::Shuangpin {
-                    return key;
+                let key = byte.to_ascii_lowercase();
+                if scheme == SchemeType::Shuangpin {
+                    if let Some((initial, _)) = profile
+                        .initials
+                        .iter()
+                        .find(|(_, mapped)| mapped.as_bytes() == [key])
+                    {
+                        return (*initial).to_owned();
+                    }
                 }
-                profile
-                    .initials
-                    .iter()
-                    .find(|(_, mapped)| *mapped == key)
-                    .map_or(key, |(initial, _)| (*initial).to_owned())
+                char::from(key).to_string()
             })
             .collect(),
     )
