@@ -1,0 +1,172 @@
+{
+  "references": {
+    "msime-engine": {
+      "repository": "https://github.com/metasequoiaime/msime-engine.git",
+      "commit": "e92a9c7c64e262f30218ca9aaad5f40d0b18cf89"
+    },
+    "ECDICT": {
+      "repository": "https://github.com/skywind3000/ECDICT.git",
+      "commit": "bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b"
+    },
+    "rime-ice": {
+      "repository": "https://github.com/iDvel/rime-ice.git",
+      "commit": "9e66b0729083b37d217312294f6d516c8d7234be"
+    }
+  },
+  "mozc": {
+    "repository": "https://github.com/google/mozc.git",
+    "commit": "9fbd649bea4c5e99cd8ad5e487213b26a953a376"
+  },
+  "ngram_corpus": {
+    "source": "zhwiki",
+    "dump": "20260901",
+    "license": "CC-BY-SA-4.0",
+    "attribution": "中文维基百科 (zhwiki) 20260901 pages-articles dump, https://dumps.wikimedia.org/zhwiki/20260901/"
+  },
+  "files": [
+    {
+      "path": "cn/SingleCharsAllV1.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/e92a9c7c64e262f30218ca9aaad5f40d0b18cf89/dictionary/cn/SingleCharsAllV1.txt",
+      "sha256": "18d133c146ba3a398e915721f0b1603af37fff76864e40a89cb1bb5b0c3906fc",
+      "size": 595605
+    },
+    {
+      "path": "cn/BaseDictIceV1.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/e92a9c7c64e262f30218ca9aaad5f40d0b18cf89/dictionary/cn/BaseDictIceV1.txt",
+      "sha256": "d364637b9e27bb9b1c325971a4fa587e371ee3f98807b407744da345b876d4ec",
+      "size": 28521963
+    },
+    {
+      "path": "cn/Wubi86.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/e92a9c7c64e262f30218ca9aaad5f40d0b18cf89/dictionary/cn/Wubi86.txt",
+      "sha256": "5bf365976a8d896cdb42d3a8766544604275bec5d78952e71aee1747fd7145db",
+      "size": 1319422
+    },
+    {
+      "path": "en/BaseDictIceEn.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/e92a9c7c64e262f30218ca9aaad5f40d0b18cf89/dictionary/en/BaseDictIceEn.txt",
+      "sha256": "d8e063481a29d87b762a33d58de7c5098fbabaf0f719e16a2a5a4538a0d7a8cf",
+      "size": 399282
+    },
+    {
+      "path": "en/google_count_1_w.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/e92a9c7c64e262f30218ca9aaad5f40d0b18cf89/dictionary/en/google_count_1_w.txt",
+      "sha256": "c71de38c5a4e97e08192fb1c74fc3395d68782bbc2d6dea190c6c90542b06c1f",
+      "size": 4956240
+    },
+    {
+      "path": "cn/SingleCharWhitelist.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/e92a9c7c64e262f30218ca9aaad5f40d0b18cf89/dictionary/cn/SingleCharWhitelist.txt",
+      "sha256": "40b1dd89ce4686ee324d4037c220235f625db76ef3c8c40e6cb5d3a8fb603593",
+      "size": 62329
+    },
+    {
+      "path": "cn/BaseDictAllV1Part1.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/e92a9c7c64e262f30218ca9aaad5f40d0b18cf89/dictionary/cn/BaseDictAllV1Part1.txt",
+      "sha256": "d9a8abe964801cf0d0128757482e98fe2944ade111648c284fd0d5dc41c23d2d",
+      "size": 29916127
+    },
+    {
+      "path": "cn/BaseDictAllV1Part2.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/e92a9c7c64e262f30218ca9aaad5f40d0b18cf89/dictionary/cn/BaseDictAllV1Part2.txt",
+      "sha256": "ed8ce77dd9a7bbef7c77a8f2193befc0919a1b81ef29e09360014f67cec8b52a",
+      "size": 11383877
+    },
+    {
+      "path": "en/oaldpe_words.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/e92a9c7c64e262f30218ca9aaad5f40d0b18cf89/dictionary/en/oaldpe_words.txt",
+      "sha256": "60cd73f0df66c502693981d77c80373c38d79ff3d06c4c4071a32688929b49e2",
+      "size": 1478040
+    },
+    {
+      "path": "ecdict/ecdict.csv",
+      "url": "https://raw.githubusercontent.com/skywind3000/ECDICT/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b/ecdict.csv",
+      "sha256": "1a6947e04785db63613a92e14903cdae7954f7e84860b10e68e5c7cbb3f9c3cf",
+      "size": 65933428
+    },
+    {
+      "path": "mozc/dictionary00.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/dictionary00.txt",
+      "sha256": "9e07ce292932c4fff327ed8cb06274c09acca556bd8bdf7c7ef1f6173eae3b61",
+      "size": 7157174
+    },
+    {
+      "path": "mozc/dictionary01.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/dictionary01.txt",
+      "sha256": "836fd5fd8399510de0d8ef7b33be913cca6bbaee7b712cc8045fba03f4c75a89",
+      "size": 6428663
+    },
+    {
+      "path": "mozc/dictionary02.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/dictionary02.txt",
+      "sha256": "93943858d0cfd092b849a78def6901eaf228177e1ac5663544e865a3a1e45a9e",
+      "size": 6480134
+    },
+    {
+      "path": "mozc/dictionary03.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/dictionary03.txt",
+      "sha256": "cb9f1b0b4a7550d682d86244a021cd17e0b15366328819e69135b5f183a1a24b",
+      "size": 7434257
+    },
+    {
+      "path": "mozc/dictionary04.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/dictionary04.txt",
+      "sha256": "9fdc4e3948d03463de13ab5782adffbc11dd06e934cb80138c5920029cd3d2f6",
+      "size": 5399172
+    },
+    {
+      "path": "mozc/dictionary05.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/dictionary05.txt",
+      "sha256": "199e3b0f050b691823ae7ba943090d437f51af6436b27c5f3dc69cafa12000e4",
+      "size": 5316454
+    },
+    {
+      "path": "mozc/dictionary06.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/dictionary06.txt",
+      "sha256": "b95b14f7770ae2a824bc8e9fad8b03c1bc45c504f93a36554b8b56daa0368d2a",
+      "size": 5373350
+    },
+    {
+      "path": "mozc/dictionary07.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/dictionary07.txt",
+      "sha256": "7f53649b529d4c8c495d3a8dd9c4d489dfe7696080f7423107ff01331174be48",
+      "size": 5315756
+    },
+    {
+      "path": "mozc/dictionary08.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/dictionary08.txt",
+      "sha256": "50a31bb5fc1646721b00be371a5695dffab1292bda143e1e59cc70cbbdd8643f",
+      "size": 4887114
+    },
+    {
+      "path": "mozc/dictionary09.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/dictionary09.txt",
+      "sha256": "4e5fcd4cbfbf11395166a37b506f547fc54d20edc0884f5184ecd3fc705f0d9a",
+      "size": 6690572
+    },
+    {
+      "path": "mozc/connection_single_column.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/connection_single_column.txt",
+      "sha256": "68823a1f6617372ccb89afdbcb334d7a0bcfa82c9c5dda03fc1f80f1cab5c48e",
+      "size": 36428642
+    },
+    {
+      "path": "mozc/id.def",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/id.def",
+      "sha256": "07a05a268c3783b7e02b36e4aa591555a2dd19a1f3c93891576740761c154f2d",
+      "size": 151747
+    },
+    {
+      "path": "mozc/README.txt",
+      "url": "https://raw.githubusercontent.com/google/mozc/9fbd649bea4c5e99cd8ad5e487213b26a953a376/src/data/dictionary_oss/README.txt",
+      "sha256": "6b1de66bc6fa30e0b45dc45b8c8f6c57bd78aff923c261a3efffac8eb86f7bac",
+      "size": 5750
+    },
+    {
+      "path": "ngram-corpus/zhwiki-20260901-pages-articles1.xml-p1p187712.bz2",
+      "url": "https://dumps.wikimedia.org/zhwiki/20260901/zhwiki-20260901-pages-articles1.xml-p1p187712.bz2",
+      "sha256": "71f216ffbd5d6ba64d1a7c5570519c2e412e6f7163304287399d1f5e9c1af0df",
+      "size": 254212741
+    }
+  ]
+}
