@@ -106,13 +106,33 @@ pub fn parse_google_counts(text: &str) -> HashMap<String, i64> {
     counts
 }
 
+/// What [`build_english_words`] wrote: the words of the base lexicons, and how the custom rows landed on them.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct EnglishWordCounts {
+    pub base: usize,
+    /// Custom (word, display) pairs the base lexicons did not have.
+    pub custom_added: usize,
+    /// Custom pairs that replaced a base row with the same word and display.
+    pub custom_replaced: usize,
+}
+
+/// The weight a custom row is stored with. Base rows are weighted by the word's Google unigram count, 0 when Google never counted it, and the Engine orders a prefix's completions by that weight after the exact word. A custom row takes the same count when there is one, so a custom word sits where its real frequency puts it and never above a word people type more often. A word Google never counted takes its file weight capped just below the smallest count (`ceiling`), which places it after every counted word and ahead of the uncounted base words at 0: reachable from a prefix once the common words are out of the way, always first on its own full spelling, and unable to outrank a common word whatever weight the file gives it. The file weight is therefore only an ordering among uncounted custom words. Never lower than the base row it replaces, since that row already carries the count.
+fn custom_english_weight(entry: &CustomEnglishWord, count: i64, ceiling: i64) -> i64 {
+    count.max(entry.weight.min(ceiling))
+}
+
 pub fn build_english_words(
     connection: &mut Connection,
     oaldpe: &BTreeSet<String>,
     base: &BTreeMap<String, String>,
     counts: &HashMap<String, i64>,
-) -> Result<usize> {
+    custom: &[CustomEnglishWord],
+) -> Result<EnglishWordCounts> {
     let words: BTreeSet<&String> = oaldpe.iter().chain(base.keys()).collect();
+    let mut result = EnglishWordCounts {
+        base: words.len(),
+        ..EnglishWordCounts::default()
+    };
     let transaction = connection.transaction()?;
     transaction.execute_batch("DROP TABLE IF EXISTS english_words")?;
     transaction.execute_batch(CREATE_ENGLISH_WORDS)?;
@@ -128,6 +148,43 @@ pub fn build_english_words(
             ])?;
         }
     }
+    // The base lexicons give every word exactly one display; only custom rows may add a second.
+    let (base_rows, distinct): (i64, i64) = transaction.query_row(
+        "SELECT COUNT(*), COUNT(DISTINCT word) FROM english_words",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if base_rows == 0 || base_rows != distinct {
+        bail!("english_words: unexpected row counts: rows={base_rows}, distinct_words={distinct}");
+    }
+    {
+        let ceiling = counts
+            .values()
+            .copied()
+            .filter(|count| *count > 0)
+            .min()
+            .map_or(i64::MAX, |smallest| smallest - 1);
+        let mut exists = transaction
+            .prepare("SELECT EXISTS(SELECT 1 FROM english_words WHERE word = ? AND display = ?)")?;
+        let mut insert = transaction.prepare(
+            "INSERT OR REPLACE INTO english_words(word, display, weight) VALUES (?, ?, ?)",
+        )?;
+        for entry in custom {
+            let replaced: bool =
+                exists.query_row(params![entry.word, entry.display], |row| row.get(0))?;
+            let count = counts.get(&entry.word).copied().unwrap_or(0);
+            insert.execute(params![
+                entry.word,
+                entry.display,
+                custom_english_weight(entry, count, ceiling)
+            ])?;
+            if replaced {
+                result.custom_replaced += 1;
+            } else {
+                result.custom_added += 1;
+            }
+        }
+    }
     transaction.commit()?;
 
     // The Python verify_db.py step, including its ANALYZE: it runs before the gloss tables exist, so the shipped statistics cover english_words only.
@@ -139,16 +196,79 @@ pub fn build_english_words(
     if primary_key != ["word", "display"] {
         bail!("english_words must use PRIMARY KEY(word, display); got {primary_key:?}");
     }
-    let (rows, distinct): (i64, i64) = connection.query_row(
-        "SELECT COUNT(*), COUNT(DISTINCT word) FROM english_words",
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    if rows == 0 || rows != distinct {
-        bail!("english_words: unexpected row counts: rows={rows}, distinct_words={distinct}");
+    let rows: i64 =
+        connection.query_row("SELECT COUNT(*) FROM english_words", [], |row| row.get(0))?;
+    let expected = base_rows + i64::try_from(result.custom_added)?;
+    if rows != expected {
+        bail!(
+            "english_words: {rows} rows, expected {base_rows} base rows plus {} custom ones",
+            result.custom_added
+        );
     }
     sqlite::analyze(connection, true)?;
-    Ok(words.len())
+    Ok(result)
+}
+
+// ---- custom English words ----
+
+pub const CUSTOM_ENGLISH: &str = "custom/english.txt";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomEnglishWord {
+    /// The lowercase key a prefix is matched against.
+    pub word: String,
+    /// What the candidate shows and commits.
+    pub display: String,
+    pub weight: i64,
+}
+
+/// `word<TAB>display<TAB>weight`. One word may list several displays (webview, Webview, webview2), each its own row. A malformed line fails the stage, as custom/words.txt does. A (word, display) pair listed twice keeps its last weight, which is what the INSERT OR REPLACE that stores it does too.
+pub fn parse_custom_english(text: &str) -> Result<Vec<CustomEnglishWord>> {
+    let mut entries: indexmap::IndexMap<(String, String), CustomEnglishWord> =
+        indexmap::IndexMap::new();
+    for (number, line) in text::splitlines(text::without_bom(text))
+        .into_iter()
+        .enumerate()
+    {
+        let Some(entry) = parse_custom_english_line(line)
+            .with_context(|| format!("{CUSTOM_ENGLISH}:{}", number + 1))?
+        else {
+            continue;
+        };
+        entries.insert((entry.word.clone(), entry.display.clone()), entry);
+    }
+    Ok(entries.into_values().collect())
+}
+
+/// One line of custom/english.txt: `None` for a blank or `#` comment line, an error naming the problem (without its location) for a malformed one. `check-words` validates contributed lines with this same function.
+pub fn parse_custom_english_line(line: &str) -> Result<Option<CustomEnglishWord>> {
+    let stripped = text::strip(line);
+    if stripped.is_empty() || stripped.starts_with('#') {
+        return Ok(None);
+    }
+    let fields: Vec<&str> = stripped.split('\t').collect();
+    let [word, display, weight] = fields[..] else {
+        bail!("expected word, display and weight: {line:?}");
+    };
+    let (word, display, weight) = (text::strip(word), text::strip(display), text::strip(weight));
+    // The Engine only looks up lowercase a-z prefixes, so any other key could never be reached.
+    if !is_lowercase_ascii_word(word) {
+        bail!("{word:?} is not a lowercase ASCII word");
+    }
+    if display.is_empty() {
+        bail!("the display is empty");
+    }
+    let weight: i64 = weight
+        .parse()
+        .with_context(|| format!("weight {weight:?} is not an integer"))?;
+    if weight < 1 {
+        bail!("weight {weight} is below 1");
+    }
+    Ok(Some(CustomEnglishWord {
+        word: word.to_owned(),
+        display: display.to_owned(),
+        weight,
+    }))
 }
 
 // ---- ECDICT glosses ----
@@ -603,38 +723,43 @@ pub struct CustomTranslation {
     pub gloss: String,
 }
 
+pub const CUSTOM_TRANSLATIONS: &str = "custom/translations.txt";
+
 /// `source<TAB>gloss`; a source containing a character from U+3400 up is Chinese-to-English, anything else English-to-Chinese. A later line for the same source wins.
 pub fn parse_custom_translations(text: &str) -> Result<Vec<CustomTranslation>> {
     let mut entries = Vec::new();
-    for (number, raw_line) in text::splitlines(text::without_bom(text))
+    for (number, line) in text::splitlines(text::without_bom(text))
         .into_iter()
         .enumerate()
     {
-        let line = text::strip(raw_line);
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+        if let Some(entry) = parse_custom_translation(line)
+            .with_context(|| format!("{CUSTOM_TRANSLATIONS}:{}", number + 1))?
+        {
+            entries.push(entry);
         }
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 2 {
-            bail!(
-                "custom/translations.txt:{}: expected source<TAB>gloss, got {raw_line:?}",
-                number + 1
-            );
-        }
-        let (source, gloss) = (text::strip(fields[0]), text::strip(fields[1]));
-        if source.is_empty() || gloss.is_empty() {
-            bail!(
-                "custom/translations.txt:{}: empty source or gloss",
-                number + 1
-            );
-        }
-        entries.push(CustomTranslation {
-            chinese_to_english: source.chars().any(|c| c >= '\u{3400}'),
-            source: source.to_owned(),
-            gloss: gloss.to_owned(),
-        });
     }
     Ok(entries)
+}
+
+/// One line of custom/translations.txt: `None` for a blank or `#` comment line, an error naming the problem (without its location) for a malformed one. Fields after the gloss are ignored. `check-words` validates contributed lines with this same function.
+pub fn parse_custom_translation(line: &str) -> Result<Option<CustomTranslation>> {
+    let stripped = text::strip(line);
+    if stripped.is_empty() || stripped.starts_with('#') {
+        return Ok(None);
+    }
+    let fields: Vec<&str> = stripped.split('\t').collect();
+    if fields.len() < 2 {
+        bail!("expected source<TAB>gloss, got {line:?}");
+    }
+    let (source, gloss) = (text::strip(fields[0]), text::strip(fields[1]));
+    if source.is_empty() || gloss.is_empty() {
+        bail!("empty source or gloss");
+    }
+    Ok(Some(CustomTranslation {
+        chinese_to_english: source.chars().any(|c| c >= '\u{3400}'),
+        source: source.to_owned(),
+        gloss: gloss.to_owned(),
+    }))
 }
 
 pub fn apply_custom_translations(
@@ -681,8 +806,11 @@ mod tests {
 
         let mut connection = Connection::open_in_memory().unwrap();
         assert_eq!(
-            build_english_words(&mut connection, &oaldpe, &base, &counts).unwrap(),
-            7
+            build_english_words(&mut connection, &oaldpe, &base, &counts, &[]).unwrap(),
+            EnglishWordCounts {
+                base: 7,
+                ..EnglishWordCounts::default()
+            }
         );
         let row: (String, i64) = connection
             .query_row(
@@ -700,6 +828,107 @@ mod tests {
             .map(Result::unwrap)
             .collect();
         assert_eq!(stats, ["english_words"]);
+    }
+
+    #[test]
+    fn custom_english_lines_parse_as_the_file_is_written() {
+        let entries = parse_custom_english(
+            "\u{feff}# custom\nfigma\tfigma\t1\nfigma\tFigma\t1\n\nwebview\twebview2\t2\nwebview\twebview2\t3",
+        )
+        .unwrap();
+        let pairs: Vec<_> = entries
+            .iter()
+            .map(|entry| (entry.word.as_str(), entry.display.as_str(), entry.weight))
+            .collect();
+        assert_eq!(
+            pairs,
+            [
+                ("figma", "figma", 1),
+                ("figma", "Figma", 1),
+                ("webview", "webview2", 3)
+            ],
+            "one word keeps several displays; a repeated pair keeps its last weight"
+        );
+
+        for (line, problem) in [
+            ("figma\tFigma", "expected word, display and weight"),
+            (
+                "figma\tFigma\t1\textra",
+                "expected word, display and weight",
+            ),
+            ("Figma\tFigma\t1", "not a lowercase ASCII word"),
+            ("web view\tweb view\t1", "not a lowercase ASCII word"),
+            ("figma\t \t1", "the display is empty"),
+            ("figma\tFigma\tone", "not an integer"),
+            ("figma\tFigma\t0", "below 1"),
+        ] {
+            let error = parse_custom_english_line(line).unwrap_err().to_string();
+            assert!(error.contains(problem), "{line:?}: {error}");
+        }
+        let error = parse_custom_english("figma\tfigma\t1\nbad\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.starts_with("custom/english.txt:2"), "{error}");
+    }
+
+    #[test]
+    fn custom_english_rows_merge_below_common_words_and_above_uncounted_ones() {
+        let base = parse_base_dict_words(
+            "asr asr\nfig fig\nfigure figure\nfigwort figwort\nwebview webview\n",
+        )
+        .unwrap();
+        // The smallest count is 12711, as in google_count_1_w.txt; figwort and figma were never counted.
+        let counts = parse_google_counts(
+            "figure\t9000000\nfig\t400000\nasr\t779429\nwebview\t79275\nzzz\t12711\n",
+        );
+        let custom = parse_custom_english("figma\tfigma\t1\nfigma\tFigma\t1\nasr\tASR\t1\nwebview\twebview\t1\nwebview\tWebview2\t1\nloud\tLOUD\t999999999\n").unwrap();
+        let mut connection = Connection::open_in_memory().unwrap();
+        let counts_written =
+            build_english_words(&mut connection, &BTreeSet::new(), &base, &counts, &custom)
+                .unwrap();
+        assert_eq!(
+            counts_written,
+            EnglishWordCounts {
+                base: 5,
+                custom_added: 5,
+                custom_replaced: 1
+            }
+        );
+        let rows = |prefix: &str| -> Vec<(String, i64)> {
+            connection
+                .prepare("SELECT display, weight FROM english_words WHERE word >= ?1 AND word < ?1 || '{' ORDER BY CASE WHEN word = ?1 THEN 0 ELSE 1 END, weight DESC, length(word), word, display")
+                .unwrap()
+                .query_map([prefix], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        // The Engine's prefix order: counted words first, then the uncounted custom word, then the uncounted base word.
+        assert_eq!(
+            rows("fig"),
+            [
+                ("fig".to_owned(), 400_000),
+                ("figure".to_owned(), 9_000_000),
+                ("Figma".to_owned(), 1),
+                ("figma".to_owned(), 1),
+                ("figwort".to_owned(), 0)
+            ]
+        );
+        // A counted custom word takes its count, beside the base row that already had it.
+        assert_eq!(
+            rows("asr"),
+            [("ASR".to_owned(), 779_429), ("asr".to_owned(), 779_429)]
+        );
+        // Replacing the base row does not demote it; a second display joins it.
+        assert_eq!(
+            rows("webview"),
+            [
+                ("Webview2".to_owned(), 79_275),
+                ("webview".to_owned(), 79_275)
+            ]
+        );
+        // An uncounted word's file weight stays below the least common counted word.
+        assert_eq!(rows("loud"), [("LOUD".to_owned(), 12_710)]);
     }
 
     #[test]

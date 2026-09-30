@@ -1340,6 +1340,11 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     fn rerank(&mut self) -> bool {
+        const WUBI: u8 = 2;
+        // A Wubi list the table answered is ranked by the table: the Engine seats the Wubi rows first (`merge_pinyin_fallback`) and appends the mixed-in pinyin rows after them. Those pinyin rows are corrections of the same letters (dyn read as dun), so the corrected-key rule below would strip the exact code hit (态 on dyn) of its dictionary exemption and let the model promote a longer code's row (太快 on dynn) over it. Only a list the pinyin fallback answered alone is pinyin, and that one is reranked like pinyin.
+        if self.cached.scheme == WUBI && !self.cached.answered_by_pinyin_fallback {
+            return false;
+        }
         let Some(reranker) = self.reranker.as_mut() else {
             return false;
         };

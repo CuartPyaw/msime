@@ -36,7 +36,7 @@ const FEATURES: [&str; 8] = [
 ];
 const REPOSITORY: &str = "metasequoiaime/msime";
 const SOURCE_PATH: &str = "resources/dictionary-sources";
-/// The dictionary source repository, pinned under this name in the sources lock. The custom words and translations sit in its `custom/` directory; the base lexicons come from the same commit.
+/// The dictionary source repository, pinned under this name in the sources lock. The custom words, translations and English words sit in its `custom/` directory; the base lexicons come from the same commit.
 const CUSTOM_DICTIONARY: &str = "msime-dictionary";
 const CUSTOM_DICTIONARY_REPOSITORY: &str = "metasequoiaime/msime-dictionary";
 const CUSTOM_DICTIONARY_PATH: &str = "custom";

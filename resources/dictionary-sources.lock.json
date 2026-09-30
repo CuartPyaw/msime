@@ -37,6 +37,12 @@
       "size": 7964
     },
     {
+      "path": "custom/english.txt",
+      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.0.0/english.txt",
+      "sha256": "c9960707a92783def0fa916540f6b787bf101674982cb42a909339a21ac73693",
+      "size": 111
+    },
+    {
       "path": "cn/SingleCharsAllV1.txt",
       "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.0.0/SingleCharsAllV1.txt",
       "sha256": "18d133c146ba3a398e915721f0b1603af37fff76864e40a89cb1bb5b0c3906fc",

@@ -4,7 +4,7 @@
 //! msime-dict-build --cache <dir> --out <dir>                 every stage, then the manifest
 //! msime-dict-build --cache <dir> --out <dir> --skip ngram    a quick local build without the corpus pass
 //! msime-dict-build --list
-//! msime-dict-build check-words --base <words.txt> --head <words.txt> [--msime-db <msime.db>] [--json <report.json>] [--markdown <summary.md>]
+//! msime-dict-build check-words [--base <words.txt> --head <words.txt>] [--translations-base <translations.txt> --translations-head <translations.txt>] [--english-base <english.txt> --english-head <english.txt>] [--msime-db <msime.db>] [--english-db <english.db>] [--json <report.json>] [--markdown <summary.md>]
 //! ```
 
 mod check_words;
@@ -38,7 +38,7 @@ enum Stage {
     Wubi,
     /// Quick phrase table in msime.db, then msime.db's planner statistics
     QuickPhrases,
-    /// english_words table in english.db
+    /// english_words table in english.db, plus custom/english.txt (pinned from msime-dictionary)
     English,
     /// Bidirectional gloss tables in english.db, derived from ECDICT (reads msime.db)
     EnglishGlosses,
@@ -113,21 +113,42 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Check a change to the shared custom dictionary's words.txt. Exits 0 when every appended line is accepted, 1 when anything is rejected (the reports are still written), 2 when the check cannot run.
+    /// Check a change to the shared custom dictionary's words.txt, translations.txt and english.txt; pass a base/head pair for each file to check. Exits 0 when every appended line is accepted, 1 when anything is rejected (the reports are still written), 2 when the check cannot run.
     CheckWords(CheckWords),
 }
 
 #[derive(Args)]
+#[command(group(
+    clap::ArgGroup::new("files")
+        .args(["base", "translations_base", "english_base"])
+        .required(true)
+        .multiple(true)
+))]
 struct CheckWords {
-    /// words.txt before the change.
-    #[arg(long)]
-    base: PathBuf,
-    /// words.txt after the change.
-    #[arg(long)]
-    head: PathBuf,
-    /// A shipped msime.db; appended entries already in its quanpin tables are rejected.
+    /// custom/words.txt before the change.
+    #[arg(long, requires = "head")]
+    base: Option<PathBuf>,
+    /// custom/words.txt after the change.
+    #[arg(long, requires = "base")]
+    head: Option<PathBuf>,
+    /// custom/translations.txt before the change.
+    #[arg(long, requires = "translations_head")]
+    translations_base: Option<PathBuf>,
+    /// custom/translations.txt after the change.
+    #[arg(long, requires = "translations_base")]
+    translations_head: Option<PathBuf>,
+    /// custom/english.txt before the change.
+    #[arg(long, requires = "english_head")]
+    english_base: Option<PathBuf>,
+    /// custom/english.txt after the change.
+    #[arg(long, requires = "english_base")]
+    english_head: Option<PathBuf>,
+    /// A shipped msime.db; appended words already in its quanpin tables are rejected.
     #[arg(long)]
     msime_db: Option<PathBuf>,
+    /// A shipped english.db; appended English words whose word and display are already in its english_words are rejected.
+    #[arg(long)]
+    english_db: Option<PathBuf>,
     /// Where the JSON report is written.
     #[arg(long)]
     json: Option<PathBuf>,
@@ -136,21 +157,49 @@ struct CheckWords {
     markdown: Option<PathBuf>,
 }
 
+fn open_read_only(path: Option<&Path>) -> Result<Option<rusqlite::Connection>> {
+    path.map(|path| {
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .with_context(|| format!("opening {}", path.display()))
+    })
+    .transpose()
+}
+
 /// Runs `check-words` and writes its reports; `Ok(false)` when a line was rejected.
 fn check_words(arguments: &CheckWords) -> Result<bool> {
-    let shipped = arguments
-        .msime_db
-        .as_deref()
-        .map(|path| {
-            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .with_context(|| format!("opening {}", path.display()))
+    let msime = open_read_only(arguments.msime_db.as_deref())?;
+    let english = open_read_only(arguments.english_db.as_deref())?;
+    let mut contents = Vec::new();
+    for (kind, base, head) in [
+        (check_words::Kind::Words, &arguments.base, &arguments.head),
+        (
+            check_words::Kind::Translations,
+            &arguments.translations_base,
+            &arguments.translations_head,
+        ),
+        (
+            check_words::Kind::English,
+            &arguments.english_base,
+            &arguments.english_head,
+        ),
+    ] {
+        if let (Some(base), Some(head)) = (base, head) {
+            contents.push((kind, text::read(base)?, text::read(head)?));
+        }
+    }
+    let inputs: Vec<check_words::Input> = contents
+        .iter()
+        .map(|(kind, base, head)| check_words::Input {
+            kind: *kind,
+            base,
+            head,
         })
-        .transpose()?;
-    let report = check_words::check(
-        &text::read(&arguments.base)?,
-        &text::read(&arguments.head)?,
-        shipped.as_ref(),
-    )?;
+        .collect();
+    let shipped = check_words::Shipped {
+        msime: msime.as_ref(),
+        english: english.as_ref(),
+    };
+    let report = check_words::check(&inputs, shipped)?;
     if let Some(path) = &arguments.json {
         let mut json = serde_json::to_string_pretty(&report)?;
         json.push('\n');
@@ -251,13 +300,23 @@ impl Build {
                 let counts = english::parse_google_counts(&text::read(
                     &self.sources.pinned("en/google_count_1_w.txt")?,
                 )?);
+                let custom = english::parse_custom_english(&text::read(
+                    &self.sources.pinned(english::CUSTOM_ENGLISH)?,
+                )?)?;
                 let rows = english::build_english_words(
                     &mut self.database("english.db")?,
                     &oaldpe,
                     &base,
                     &counts,
+                    &custom,
                 )?;
-                Ok(format!("{rows} words"))
+                Ok(format!(
+                    "{} words, {} custom rows: {} added, {} replacing a base row",
+                    rows.base,
+                    custom.len(),
+                    rows.custom_added,
+                    rows.custom_replaced
+                ))
             }
             Stage::EnglishGlosses => {
                 let msime_path = self.out.join("msime.db");
@@ -279,7 +338,7 @@ impl Build {
             }
             Stage::CustomTranslations => {
                 let entries = english::parse_custom_translations(&text::read(
-                    &self.sources.pinned("custom/translations.txt")?,
+                    &self.sources.pinned(english::CUSTOM_TRANSLATIONS)?,
                 )?)?;
                 english::apply_custom_translations(&mut self.database("english.db")?, &entries)?;
                 Ok(format!("{} overrides", entries.len()))
