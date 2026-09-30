@@ -1,6 +1,5 @@
 //! `E` and `M` modes and the mixed emoji / kaomoji rows (emoji_query.cpp:59-140, kaomoji_query.cpp). Shuangpin also queries the code normalised to quanpin.
 
-use std::collections::HashSet;
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -119,7 +118,6 @@ fn read(
 ) -> rusqlite::Result<Vec<(String, i64)>> {
     let mut statement = connection.prepare_cached(sql)?;
     let capacity = limit.saturating_mul(prefixes.len());
-    let mut seen = HashSet::with_capacity(capacity);
     let mut entries = Vec::with_capacity(capacity);
     for prefix in prefixes {
         let upper_bound = format!("{prefix}\x7f");
@@ -134,7 +132,7 @@ fn read(
         )?;
         for row in rows {
             if let (Some(text), sort_order) = row? {
-                if seen.insert(text.clone()) {
+                if !contains_text(&entries, &text) {
                     entries.push((text, sort_order.unwrap_or(0)));
                 }
             }
@@ -142,6 +140,10 @@ fn read(
     }
     entries.sort_by_key(|(_, sort_order)| *sort_order);
     Ok(entries)
+}
+
+fn contains_text(entries: &[(String, i64)], text: &str) -> bool {
+    entries.iter().any(|(entry, _)| entry == text)
 }
 
 #[cfg(test)]
@@ -188,6 +190,13 @@ mod tests {
             .iter()
             .map(|row| row.word.as_str())
             .collect()
+    }
+
+    #[test]
+    fn duplicate_text_lookup_scans_existing_entries() {
+        let entries = vec![("😀".to_owned(), 1)];
+        assert!(contains_text(&entries, "😀"));
+        assert!(!contains_text(&entries, "😄"));
     }
 
     /// test_local_modes.cpp:269-296, the quanpin half.
