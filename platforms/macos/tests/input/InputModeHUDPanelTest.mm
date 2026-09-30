@@ -28,6 +28,13 @@ int main() {
             MSIMEInputModeHUDPanel *hud = MSIMEInputModeHUDPanel.sharedPanel;
             Require(hud == MSIMEInputModeHUDPanel.sharedPanel && hud.ignoresMouseEvents && hud.floatingPanel && !hud.opaque, "HUD panel contract mismatch");
             Require(hud.displayedText == nil, "HUD was visible before use");
+            // The badge is the floating toolbar's height, (font + 20) x scale: 44pt at the toolbar's default 24pt and 100%.
+            Require(hud.panelSize.height == 44.0 && hud.panelSize.width < 100.0, "HUD default size is not the toolbar's");
+            const CGFloat defaultWidth = hud.panelSize.width;
+            [hud applySizingPreferences:@{@"floating_toolbar" : @{@"font_size" : @16, @"scale_percent" : @150}}];
+            Require(hud.panelSize.height == 54.0 && hud.panelSize.width > defaultWidth, "HUD did not follow the toolbar's font size and scale");
+            [hud applySizingPreferences:@{@"floating_toolbar" : @{@"font_size" : @99, @"scale_percent" : @7}}];
+            Require(hud.panelSize.height == 44.0 && hud.panelSize.width == defaultWidth, "HUD did not fall back to the toolbar's defaults");
             // Until the controller hands it the theme's palette the badge is the system window surface, not a fixed brand colour.
             Require([hud.surfaceColor isEqual:NSColor.windowBackgroundColor] && [hud.textColor isEqual:NSColor.labelColor], "HUD default colours are not the system ones");
             NSColor *surface = [NSColor colorWithSRGBRed:0xF4 / 255.0 green:0xF8 / 255.0 blue:1.0 alpha:1.0];

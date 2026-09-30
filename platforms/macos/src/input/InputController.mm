@@ -4425,6 +4425,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     // The mode badge wears the toolbar's palette, so it is drawn in the toolbar's mode too; it is updated whether or not the toolbar is shown.
     [[MSIMEInputModeHUDPanel sharedPanel] applyThemePreferences:toolbarThemePreferences];
     [_toolbar applySizingPreferences:preferences];
+    // And it is the toolbar's size, from the same font size and scale.
+    [[MSIMEInputModeHUDPanel sharedPanel] applySizingPreferences:preferences];
     NSDictionary *toolbar = preferences[@"floating_toolbar"];
     id enabled = [toolbar isKindOfClass:NSDictionary.class] ? toolbar[@"enabled"] : nil;
     if ([enabled isKindOfClass:NSNumber.class]) {
