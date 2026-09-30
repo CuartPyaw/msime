@@ -52,6 +52,10 @@ import {
   type LocalVoiceModelClient,
   type LocalVoiceModelList,
   type LocalVoiceModelProgress,
+  type MentionEntry,
+  type PluginCatalogResult,
+  type PluginClient,
+  type PluginPackage,
   UNBATCHED_DICTIONARY_FILE_BYTES,
 } from "@msime/ui";
 import type {
@@ -129,6 +133,10 @@ interface NativeBridge {
   showInputMethodPicker(): string;
   /** Starts the picker and answers at once; the panel's own rescan is what shows the result. */
   importSkinFolder(): string;
+  /**
+   * The 扩展 page's pack store and @ name list: `{operation:"catalog"|"remove"|"load_mentions"|"save_mentions",...}`, answered by `msime_client_plugins` as `{ok,value}` or `{ok:false,error,detail?}`. An import waits for the system picker, so it goes through `startRequest` as `plugin_import` instead.
+   */
+  plugins(action: string): string;
 }
 
 declare global {
@@ -573,6 +581,37 @@ globalThis.msimeHarmonyVoiceModelProgress = (document: string) => {
   for (const listener of voiceModelProgressListeners) listener(progress);
 };
 
+/**
+ * Rejects the way the desktop shell's plugin commands reject: `{code, detail}`, where detail is the rule client-core reports for a refused pack or name, so `pluginErrorMessage` can say which file or entry to fix.
+ */
+function unwrapPlugin<T>(raw: string): T {
+  const reply = JSON.parse(raw) as Reply<T> & { detail?: string };
+  if (!reply.ok) throw { code: reply.error, detail: reply.detail ?? null };
+  return reply.value;
+}
+
+/**
+ * The 扩展 page's host side. The host fills in the state root and the bundle's built-in sound packs, so the page, as on the desktop, never names a path. An import waits on the system picker for as long as the user leaves it open, so its deadline is the one the export save allows.
+ */
+function pluginClient(native: NativeBridge): PluginClient {
+  const call = <T,>(action: Record<string, unknown>): T =>
+    unwrapPlugin<T>(native.plugins(JSON.stringify(action)));
+  return {
+    catalog: async () => call<PluginCatalogResult>({ operation: "catalog" }),
+    importPack: async (source) =>
+      unwrapPlugin<PluginPackage | null>(
+        await bridgeRequest(native, "plugin_import", JSON.stringify({ source }), 30 * 60 * 1000),
+      ),
+    remove: async (kind, id) => {
+      call<null>({ operation: "remove", kind, id });
+    },
+    loadMentions: async () => call<MentionEntry[]>({ operation: "load_mentions" }),
+    saveMentions: async (entries) => {
+      call<null>({ operation: "save_mentions", entries });
+    },
+  };
+}
+
 function localVoiceModelClient(native: NativeBridge): LocalVoiceModelClient {
   const request = <T,>(action: Record<string, unknown>, timeoutMs?: number): Promise<T> =>
     bridgeRequest(native, "voice_local_model", JSON.stringify(action), timeoutMs).then(unwrap<T>);
@@ -946,6 +985,8 @@ function makeClient(
     communityResources: communityResourceClient(native),
     aiSkins: aiSkinClient(native),
     localVoiceModels: localVoiceModelClient(native),
+    // The page is offered only on a 2in1, the form factor that plays packs and routes the / and @ modes; a phone hides it whatever the host supplies.
+    plugins: pluginClient(native),
     openCloudClipboard: async () => openCloudClipboard(),
     openCloudDictionary: async () => openCloudDictionary(),
   };

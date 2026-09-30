@@ -214,6 +214,28 @@ interface TypingStatisticsAction {
   retention?: string;
 }
 
+/** One 扩展 page request; only the operation is read here, the rest travels to `msime_client_plugins` as the page wrote it. */
+interface PluginPageAction {
+  operation: string;
+}
+
+/** The page's import request: which picker to show. */
+interface PluginImportRequest {
+  source: string;
+}
+
+/** `msime_client_plugins`'s import action, naming the staged copy of what was picked. */
+interface PluginImportAction {
+  operation: string;
+  source: string;
+}
+
+interface PluginImportCall {
+  state_root: string;
+  sound_packs: string;
+  action: PluginImportAction;
+}
+
 /** 背单词 request, as `msime_client_vocabulary_review` reads it. */
 interface VocabularyRequest {
   directory: string;
@@ -485,7 +507,7 @@ struct Settings {
                 'typingStatistics', 'vocabularyReview', 'openExternalUrl', 'copyText',
                 'openSystemKeyboardSettings', 'listVoiceCaptureDevices', 'listFontFamilies',
                 'keyboardFeedback', 'customTranslations', 'onboardingStatus',
-                'showInputMethodPicker', 'importSkinFolder', 'startRequest'],
+                'showInputMethodPicker', 'importSkinFolder', 'startRequest', 'plugins'],
               []);
           } catch (error) {
             KeyboardLog.error(`settings bridge not registered: ${describeError(error)}`);
@@ -721,6 +743,11 @@ class SettingsBridge {
         KeyboardLog.error(`local voice model request failed: ${describeError(error)}`);
         deliver(LocalVoiceModelPolicy.refusal('local_model_failed'));
       });
+    } else if (kind === 'plugin_import') {
+      this.importPlugin(payload).then(deliver).catch((error: Object): void => {
+        KeyboardLog.error(`plugin import failed: ${describeError(error)}`);
+        deliver(JSON.stringify({ ok: false, error: 'storage' }));
+      });
     } else if (kind === 'save_export') {
       this.saveExport(payload).then(deliver).catch((error: Object): void => {
         KeyboardLog.error(`export save failed: ${describeError(error)}`);
@@ -850,6 +877,104 @@ class SettingsBridge {
       .catch((error: Object): void => {
         KeyboardLog.error(`bridge reply not delivered: ${describeError(error)}`);
       });
+  }
+
+  /**
+   * The 扩展 page's pack store and @ name list: `catalog`, `remove`, `load_mentions` and `save_mentions`, answered by `msime_client_plugins` with the same rules and failure codes the desktop shell answers with. The page never names a path: the state root and the bundle's built-in sound packs are filled in here, and an import, which has to wait for the system picker, arrives through `startRequest` as `plugin_import` instead.
+   */
+  plugins(actionDocument: string): string {
+    const refused: string = JSON.stringify({ ok: false, error: 'invalid' });
+    if (this.context === undefined) {
+      return refused;
+    }
+    let action: PluginPageAction;
+    try {
+      action = JSON.parse(actionDocument) as PluginPageAction;
+    } catch {
+      return refused;
+    }
+    if (!['catalog', 'remove', 'load_mentions', 'save_mentions'].includes(action.operation)) {
+      return refused;
+    }
+    return client.plugins(`{"state_root":${JSON.stringify(this.stateDirectory)},`
+      + `"sound_packs":${JSON.stringify(this.soundPacks())},"action":${actionDocument}}`);
+  }
+
+  /** The built-in sound packs this bundle ships, where the keyboard's players read them too. */
+  private soundPacks(): string {
+    return this.context === undefined ? '' : `${this.context.resourceDir}/sound-packs`;
+  }
+
+  /**
+   * Installs a pack folder or `.zip` file the user picks with the system picker.
+   *
+   * What the picker hands back is a document URI the native library cannot open, so the pick is copied into a private staging directory first and installed from there by `msime_client_plugins`, which checks it by the same rules as every other host and leaves nothing installed when it refuses. The staging copy is removed however the import ends. The reply is the installed pack, or null when the user closed the picker, which is not a failure.
+   */
+  private async importPlugin(document: string): Promise<string> {
+    const context: common.UIAbilityContext | undefined = this.context;
+    let request: PluginImportRequest;
+    try {
+      request = JSON.parse(document) as PluginImportRequest;
+    } catch {
+      return JSON.stringify({ ok: false, error: 'invalid' });
+    }
+    if (context === undefined || (request.source !== 'folder' && request.source !== 'archive')) {
+      return JSON.stringify({ ok: false, error: 'invalid' });
+    }
+    const folder: boolean = request.source === 'folder';
+    let picked: string[] = [];
+    try {
+      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      options.selectMode = folder ? picker.DocumentSelectMode.FOLDER : picker.DocumentSelectMode.FILE;
+      options.maxSelectNumber = 1;
+      if (!folder) {
+        options.fileSuffixFilters = ['扩展包|.zip'];
+      }
+      picked = await new picker.DocumentViewPicker(context).select(options);
+    } catch (error) {
+      KeyboardLog.error(`plugin picker refused: ${describeError(error)}`);
+      return JSON.stringify({ ok: false, error: 'storage' });
+    }
+    if (picked.length === 0) {
+      return JSON.stringify({ ok: true, value: null });
+    }
+    // The picked name, so a folder copies to a known place and an archive keeps the extension the import goes by.
+    const name: string | null = SkinImportPolicy.pickedName(picked[0]);
+    if (name === null) {
+      return JSON.stringify({ ok: false, error: 'plugin_unsupported_source' });
+    }
+    const staging: string = `${context.cacheDir}/plugin-import/${util.generateRandomUUID(false)}`;
+    try {
+      fs.mkdirSync(staging, true);
+      if (folder) {
+        await fs.copyDir(picked[0], staging, 1);
+      } else {
+        const file: fs.File = fs.openSync(picked[0], fs.OpenMode.READ_ONLY);
+        try {
+          await fs.copyFile(file.fd, `${staging}/${name}`);
+        } finally {
+          fs.closeSync(file);
+        }
+      }
+      const action: PluginImportAction = { operation: 'import', source: `${staging}/${name}` };
+      const call: PluginImportCall = {
+        state_root: this.stateDirectory, sound_packs: this.soundPacks(), action: action
+      };
+      const reply: string = client.plugins(JSON.stringify(call));
+      KeyboardLog.info('plugin import answered');
+      return reply;
+    } catch (error) {
+      KeyboardLog.error(`plugin import failed: ${describeError(error)}`);
+      return JSON.stringify({ ok: false, error: 'storage' });
+    } finally {
+      try {
+        if (fs.accessSync(staging)) {
+          fs.rmdirSync(staging);
+        }
+      } catch (error) {
+        KeyboardLog.error(`plugin import staging not removed: ${describeError(error)}`);
+      }
+    }
   }
 
   /** The shared settings page uses the same validated catalog as desktop presenters. */
@@ -1123,6 +1248,7 @@ class SettingsBridge {
       value['candidate_follow_cursor'] = projection.candidateFollowCursor;
       value['input_mode_hud'] = projection.inputModeHud;
       value['key_sound'] = projection.keySound;
+      value['music'] = projection.music;
       value['plugin_triggers'] = projection.pluginTriggers;
       if (release !== null) {
         value['os_version'] = release;

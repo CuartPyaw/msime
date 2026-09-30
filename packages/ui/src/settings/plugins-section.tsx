@@ -96,7 +96,7 @@ export function mentionListIssue(entries: readonly MentionEntry[]): string | nul
   return null;
 }
 
-/** The sentence for a failed host call. Tauri rejects with the command's `{code, detail}` and the HarmonyOS bridge with `{code}`; `detail`, when present, is the rule client-core reports. */
+/** The sentence for a failed host call. The desktop shell's commands and the HarmonyOS bridge both reject with `{code, detail}`, the codes being client-core's `PluginFailure`; `detail`, when present, is the rule client-core reports. */
 export function pluginErrorMessage(error: unknown, fallback: string): string {
   const code =
     typeof error === "object" && error !== null && "code" in error

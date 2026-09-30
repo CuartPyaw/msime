@@ -533,7 +533,7 @@ impl HostCapabilities {
             // no platform here that can and one that cannot. The flag exists for the version
             // skew: a host binary older than the entry point sends no field and gets `false`.
             vocabulary_review: true,
-            // The three desktop hosts play the packs, route V, / and @ by the Engine's spelling symbols and stream music while they are the active input method. HarmonyOS claims key sounds and the triggers per form factor in its own settings projection (2in1 only) and has no music player; the phone and tablet hosts wire none of them. A switch with nothing behind it reads as a setting being ignored, so each host flips here only in the change that wires it.
+            // The three desktop hosts play the packs, route V, / and @ by the Engine's spelling symbols and stream music while they are the active input method. HarmonyOS claims key sounds, music and the triggers per form factor in its own settings projection (2in1 only); the phone and tablet hosts wire none of them. A switch with nothing behind it reads as a setting being ignored, so each host flips here only in the change that wires it.
             key_sound: platform.is_desktop(),
             plugin_triggers: platform.is_desktop(),
             music: platform.is_desktop(),

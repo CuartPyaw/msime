@@ -627,12 +627,12 @@ group("projects the same form factor into every settings capability", () => {
   );
   check(desktop.voiceHotkeys, "2-in-1 settings offer the voice hotkeys");
   check(
-    desktop.keySound && desktop.pluginTriggers,
-    "2-in-1 settings offer key sounds and the V, / and @ modes",
+    desktop.keySound && desktop.music && desktop.pluginTriggers,
+    "2-in-1 settings offer key sounds, background music and the V, / and @ modes",
   );
   check(
-    !phone.keySound && !phone.pluginTriggers,
-    "a phone keeps its own key feedback and does not claim the hardware-only modes",
+    !phone.keySound && !phone.music && !phone.pluginTriggers,
+    "a phone keeps its own key feedback, plays no music and does not claim the hardware-only modes",
   );
   // The phone strip is always horizontal, so a layout select there is a control that does nothing; the 2in1 candidate window keeps the choice.
   check(

@@ -421,7 +421,7 @@ test("shows the V, / and @ switches only where the host routes them", () => {
   const expression = screen.getByRole("switch", { name: /V 模式/ }) as HTMLInputElement;
   expect(expression.checked).toBe(false);
   expect(screen.getByRole("switch", { name: /\/ 模式/ })).toBeTruthy();
-  // Without a way to edit the @ list (HarmonyOS has no plugin store), the @ mode could never produce a candidate, so its switch is not offered.
+  // Without a way to edit the @ list (a host with no plugin store), the @ mode could never produce a candidate, so its switch is not offered.
   expect(screen.queryByRole("switch", { name: /@ 模式/ })).toBeNull();
 
   cleanup();
