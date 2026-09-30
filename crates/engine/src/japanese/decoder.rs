@@ -256,7 +256,7 @@ impl JapaneseDictionary {
         if prefix.is_empty() || next_kana.is_empty() || limit == 0 {
             return Vec::new();
         }
-        let mut matches = Vec::new();
+        let mut matches = Vec::with_capacity(limit);
         for index in self.lower_bound(prefix)..self.token_count {
             let reading = self.reading(&self.token_at(index));
             let Some(remaining) = reading.strip_prefix(prefix) else {
