@@ -23,6 +23,8 @@ export function schemeTitle(scheme: string): string {
       return "双拼";
     case "wubi":
       return "五笔";
+    case "korean":
+      return "韩语";
     default:
       return "日语";
   }

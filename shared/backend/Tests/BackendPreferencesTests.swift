@@ -73,6 +73,8 @@ final class BackendPreferencesTests: XCTestCase {
     XCTAssertEqual(japanese.scheme, "japaneseNineKey")
     let roman = try IOSPreferencePlan(["input.schema": .string("japanese"), "platform.ios.nine_key": .boolean(false)], themes: themes)
     XCTAssertEqual(roman.scheme, "japanese")
+    let korean = try IOSPreferencePlan(["input.schema": .string("korean"), "platform.ios.nine_key": .boolean(true)], themes: themes)
+    XCTAssertEqual(korean.scheme, "korean")
     let nine = try IOSPreferencePlan(["input.schema": .string("quanpin"), "platform.ios.nine_key": .boolean(true)], themes: themes)
     XCTAssertEqual(nine.scheme, "nineKey")
     XCTAssertNil(nine.sound)

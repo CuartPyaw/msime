@@ -97,7 +97,7 @@ void MSIMEApplyTransitionWithPendingClosing(NSDictionary *transition, id<MSIMETe
     NSString *preedit = view[@"preedit"];
     if (![preedit isKindOfClass:NSString.class]) preedit = editing;
     id position = view[@"caret_position"];
-    // A Japanese composition is かな, not romaji.
+    // A Japanese composition is かな, not romaji, and a Korean one is Hangul, not the Dubeolsik key letters in `editing_text`.
     //
     // The Engine hands over both - `editing_text` is the letters that were typed and `reading` the
     // kana they convert to - and every Japanese input method shows the kana: it is what the user

@@ -1,4 +1,4 @@
-export type InputSchemeDetailsScheme = "quanpin" | "shuangpin" | "wubi" | "japanese";
+export type InputSchemeDetailsScheme = "quanpin" | "shuangpin" | "wubi" | "japanese" | "korean";
 export type ShuangpinProfile = "xiaohe" | "ziranma" | "shoudao" | "microsoft";
 
 export interface InputSchemeDetailsSectionProps {
@@ -21,7 +21,8 @@ export function InputSchemeDetailsSection({
   onShuangpinProfileChange,
   onMacosShuangpinKeymapChange,
 }: InputSchemeDetailsSectionProps) {
-  const hideChineseSchemeOptions = hasTouchKeyboardSchemes || scheme === "japanese";
+  const hideChineseSchemeOptions =
+    hasTouchKeyboardSchemes || scheme === "japanese" || scheme === "korean";
 
   return (
     <>
@@ -82,6 +83,25 @@ export function InputSchemeDetailsSection({
         </div>
         <div className="input-setting-description japanese-scheme-description">
           直接输入罗马音，提供平假名、片假名及日语词库候选
+        </div>
+      </div>
+      <div
+        className="section"
+        role="group"
+        aria-labelledby="korean-scheme-title"
+        hidden={hasTouchKeyboardSchemes || scheme !== "korean"}
+      >
+        <div className="section-title" id="korean-scheme-title">
+          韩语方案
+        </div>
+        <div className="input-option-content">
+          <label className="radio-option">
+            <input type="radio" name="korean-scheme" checked readOnly />
+            <span>两套式</span>
+          </label>
+        </div>
+        <div className="input-setting-description korean-scheme-description">
+          按两套式（두벌식）键位输入韩文字母，自动拼成音节，标点为半角
         </div>
       </div>
     </>

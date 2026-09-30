@@ -69,3 +69,20 @@ test("shows only the Japanese scheme details in Japanese mode", () => {
   expect(screen.queryByRole("combobox", { name: "双拼方案" })).toBeNull();
   expect(screen.queryByRole("combobox", { name: "五笔方案" })).toBeNull();
 });
+
+test("shows only the Korean scheme details in Korean mode", () => {
+  render(
+    <InputSchemeDetailsSection
+      scheme="korean"
+      shuangpinProfile="xiaohe"
+      macos={false}
+      hasTouchKeyboardSchemes={false}
+      onShuangpinProfileChange={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole("group", { name: "韩语方案" }).getAttribute("hidden")).toBeNull();
+  expect(screen.queryByRole("group", { name: "日语方案" })).toBeNull();
+  expect(screen.queryByRole("combobox", { name: "双拼方案" })).toBeNull();
+  expect(screen.queryByRole("combobox", { name: "五笔方案" })).toBeNull();
+});

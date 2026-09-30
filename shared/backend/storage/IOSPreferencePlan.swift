@@ -41,6 +41,7 @@ struct IOSPreferencePlan {
       case "japanese":
         guard try string("input.japanese_schema") ?? "romaji" == "romaji" else { throw BackendAccountClient.Failure(status: 400) }
         scheme = nineKey == true ? "japaneseNineKey" : "japanese"
+      case "korean": scheme = "korean"
       default: throw BackendAccountClient.Failure(status: 400)
       }
     } else { scheme = nil }

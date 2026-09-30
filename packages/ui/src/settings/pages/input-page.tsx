@@ -19,7 +19,11 @@ import { CharacterWidthRow } from "../punctuation-section";
 import { InputModeHudSection } from "../input-mode-hud-section";
 import { createUtilitiesSettingsActions } from "../utilities-settings-actions";
 import { createSettingsDraftActions } from "../settings-draft-actions";
-import { chineseInputSchemeOptions, japaneseInputSchemeOptions } from "../input-scheme-options";
+import {
+  chineseInputSchemeOptions,
+  japaneseInputSchemeOptions,
+  koreanInputSchemeOptions,
+} from "../input-scheme-options";
 
 /** The 输入 page of the settings form. */
 export function InputSettingsPage() {
@@ -49,7 +53,7 @@ export function InputSettingsPage() {
   } = useSettingsForm();
   const { onLocalModesChange } = createUtilitiesSettingsActions({ setDraft });
   const { onPreferencesChange } = createSettingsDraftActions({ setDraft });
-  const chineseSchemes = draft.scheme !== "japanese";
+  const chineseSchemes = draft.scheme !== "japanese" && draft.scheme !== "korean";
   const navigation = draft.navigation ?? defaultNavigation;
   return (
     <fieldset disabled={busy} hidden={page !== "input"} aria-label="输入">
@@ -127,9 +131,16 @@ export function InputSettingsPage() {
           <Row
             title="日语方案"
             description="直接输入罗马音，提供平假名、片假名及日语词库候选"
-            hidden={client.touchKeyboardSchemes || chineseSchemes}
+            hidden={client.touchKeyboardSchemes || draft.scheme !== "japanese"}
           >
             <Segmented options={japaneseInputSchemeOptions} value="romaji" onChange={() => {}} />
+          </Row>
+          <Row
+            title="韩语方案"
+            description="按两套式（두벌식）键位输入韩文字母，自动拼成音节，标点为半角"
+            hidden={client.touchKeyboardSchemes || draft.scheme !== "korean"}
+          >
+            <Segmented options={koreanInputSchemeOptions} value="dubeolsik" onChange={() => {}} />
           </Row>
         </GroupList>
         <GroupList title="选词">

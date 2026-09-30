@@ -246,9 +246,15 @@ export function InputSettingsPanel({
           }
         />
       )}
-      <div hidden={client.touchKeyboardSchemes || draft.scheme === "japanese"}>
+      <div
+        hidden={
+          client.touchKeyboardSchemes || draft.scheme === "japanese" || draft.scheme === "korean"
+        }
+      >
         <InputSchemeSelectorSection
-          value={draft.scheme === "japanese" ? "quanpin" : draft.scheme}
+          value={
+            draft.scheme === "japanese" || draft.scheme === "korean" ? "quanpin" : draft.scheme
+          }
           onChange={(scheme: InputSchemeSelectorValue) =>
             onPreferencesChange({ scheme, last_chinese_scheme: scheme })
           }

@@ -267,7 +267,7 @@ constexpr std::uint32_t UpdateVoiceComposition = 15;
 constexpr std::uint32_t CancelVoiceComposition = 16;
 // Streaming ASR: replace the inline composition with this snapshot and commit.
 constexpr std::uint32_t CommitVoiceComposition = 17;
-// Payload "1" when input.mode is Japanese, otherwise "0".
+// Payload "1" when the scheme is Japanese, "2" when it is Korean, otherwise "0".
 constexpr std::uint32_t InputModeChanged = 18;
 // Payload "1" when Caps Lock is on. Server is the source of truth.
 constexpr std::uint32_t CapsLockChanged = 19;

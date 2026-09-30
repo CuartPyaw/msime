@@ -393,6 +393,7 @@ impl IosKeyboardPreferences {
                 | "wubi"
                 | "japaneseNineKey"
                 | "japanese"
+                | "korean"
                 | "handwriting"
                 | "thoughtfulReply"
         ) && matches!(self.haptic_strength.as_str(), "light" | "medium" | "strong")

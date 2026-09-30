@@ -1230,7 +1230,7 @@ export type Preferences = {
   word_character?: { enabled: boolean; keys: "brackets" | "minus_equal" };
   navigation?: NavigationPreferences;
   keybindings?: KeybindingPreferences;
-  scheme: "quanpin" | "shuangpin" | "wubi" | "japanese";
+  scheme: "quanpin" | "shuangpin" | "wubi" | "japanese" | "korean";
   /** Width used when desktop hosts commit printable ASCII characters. */
   character_width?: "halfwidth" | "fullwidth";
   wubi_code_hint?: boolean;

@@ -438,3 +438,23 @@ test("statistics written before candidate positions existed render an empty stat
   expect(await screen.findByText("暂无候选记录。用水杉键盘上屏几次后再回来查看。")).not.toBeNull();
   expect(screen.queryByLabelText("候选命中位置分布")).toBeNull();
 });
+
+test("Korean input has its own scheme and language slices", async () => {
+  const statistics: TypingStatistics = {
+    enabled: true,
+    total: 5,
+    days: { [key(0)]: 5 },
+    detail: { characters: { otherLetter: 5 }, sources: { korean: 5 } },
+    dailyDetails: { [key(0)]: { characters: { otherLetter: 5 }, sources: { korean: 5 } } },
+  };
+  const typingStatistics = {
+    load: vi.fn().mockResolvedValue(status(statistics)),
+    setEnabled: vi.fn(),
+    reset: vi.fn(),
+  };
+  render(<SettingsPage client={{ ...baseClient(), typingStatistics }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "统计" }));
+  fireEvent.click(await screen.findByRole("button", { name: "累计" }));
+  expect(screen.getAllByLabelText(/^韩语 5 字符/).length).toBeGreaterThanOrEqual(1);
+  expect(screen.getAllByLabelText(/^韩语模式 5 字符/).length).toBeGreaterThanOrEqual(1);
+});
