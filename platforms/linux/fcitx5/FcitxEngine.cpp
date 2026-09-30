@@ -48,6 +48,9 @@
 #endif
 #include "../src/core/BackspaceHoldPolicy.h"
 #include "../src/core/SmartPunctuationSpace.h"
+#include "../src/core/SpellingSymbols.h"
+#include "../src/core/LocalModeSwitches.h"
+#include "../src/system/KeySound.h"
 #include "../src/system/DiagnosticLog.h"
 #include "../src/system/PanelInputChannel.h"
 #include "../src/core/HelpcodeDefaults.h"
@@ -83,6 +86,7 @@
 #include <cmath>
 #include <spawn.h>
 #include <unistd.h>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include <cstring>
@@ -100,6 +104,9 @@
 #endif
 #ifndef MSIME_BINDIR
 #define MSIME_BINDIR "/usr/bin"
+#endif
+#ifndef MSIME_SOUND_PACKS
+#define MSIME_SOUND_PACKS "/usr/share/msime-client/sound-packs"
 #endif
 
 extern char **environ;
@@ -430,6 +437,7 @@ public:
     hideVoiceOverlay();
     wave_overlay_.reset();
     if (session_) msime_linux_diagnostic_write("focus_out");
+    music_.release(session_, msime_client_music_set_active);
     if (session_) msime_client_string_free(msime_client_destroy(session_));
     session_ = 0;
     view_ = Json::object();
@@ -775,11 +783,13 @@ public:
   }
   bool toggleLocalMode(const char *key) {
     if (!session_ || !key || !*key || restricted() || privateInput()) return false;
-    static constexpr std::array<const char *, 8> allowed = {
+    static constexpr std::array<std::string_view, 11> allowed = {
         "unicode", "date_time", "quick_phrase", "emoji", "kaomoji",
-        "super_jianpin", "temporary_english", "temporary_japanese"};
+        "super_jianpin", "temporary_english", "temporary_japanese",
+        "expression", "command", "mention"};
     if (std::find(allowed.begin(), allowed.end(), key) == allowed.end()) return false;
-    const bool enabled = !preferences_.value("local_modes", Json::object()).value(key, true);
+    const bool enabled = !preferences_.value("local_modes", Json::object())
+                              .value(key, msime::linux_host::local_mode_enabled_by_default(key));
     auto snapshot = preferences_snapshot_;
     if (!snapshot.is_object() || !snapshot.contains("revision") ||
         !snapshot.contains("preferences")) return false;
@@ -1569,6 +1579,10 @@ public:
     // several selections stays in the composition instead of reaching the document one piece at a
     // time. Requesting it and drawing it are one decision; see core/PhrasePreedit.h.
     options["phrase_preedit"] = true;
+    // The built-in sound packs of this installation, unless the runtime options name others. The Host API's own fallback looks beside the configured resource directory, which is no longer the installed one once the user has downloaded a newer dictionary into their own data directory.
+    if (std::error_code error; !options.contains("sound_packs") &&
+                               std::filesystem::is_directory(MSIME_SOUND_PACKS, error))
+      options["sound_packs"] = MSIME_SOUND_PACKS;
     // On-device recognition reads the user's dictionary words as hotwords with the same options; see requestVoice.
     voice_host_options_ = options;
     const auto document = options.dump();
@@ -2050,11 +2064,13 @@ public:
       }
     }).detach();
   }
+  // `typingStatistics` is false for text the Engine generated rather than the user typed out (the expression, command and mention modes), which the statistics leave out.
   void commitText(const std::string &text,
-                  std::optional<msime::linux_host::TypingSource> source = std::nullopt) {
+                  std::optional<msime::linux_host::TypingSource> source = std::nullopt,
+                  bool typingStatistics = true) {
     if (text.empty()) return;
     ic_.commitString(text);
-    recordTypingStatistics(text, source.value_or(typingSource()));
+    if (typingStatistics) recordTypingStatistics(text, source.value_or(typingSource()));
   }
   bool pasteClipboard(size_t index = 0) {
     if (restricted() || privateInput() || !ic_.hasFocus()) return false;
@@ -2519,6 +2535,7 @@ public:
                      !view_.value("candidates", Json::array()).empty()))
       command(MSIME_CANCEL);
     voice_loading_ = true;
+    syncMusic();
     voice_cancelled_ = false;
     const auto socket = voice_socket_;
     const auto generation = view_.value("generation", uint64_t{});
@@ -2644,7 +2661,11 @@ public:
         last_smart_punctuation_ = 0;
         last_smart_punctuation_at_ = {};
       }
-      commitText(text);
+      const auto context = result.value("commit_context", Json(nullptr));
+      commitText(text, std::nullopt,
+                 !context.is_object() || context.value("typing_statistics", true));
+      // The key sound played when the key went down; this is the commit's own sound, or the next note of a melody that advances on commits. Never for a secure field.
+      if (!text.empty() && !privateInput()) msime_client_commit_sound(session_);
       if (pair_inserted_) {
         if (const auto closing = msime::linux_host::paired_closing_from_text(text))
           paired_tracker_.push(*closing);
@@ -3018,6 +3039,25 @@ public:
                            input_enabled_ ? typingSource()
                                           : msime::linux_host::TypingSource::English);
   }
+  // Background music may play while this input method is active in a focused field that is not a secure one, and not while a recording would pick it up. The player serves the whole fcitx5 process, so this only tells it about a change (KeySound.h); close() tells it the music is over before the session goes away.
+  void syncMusic() {
+    music_.sync(session_, ic_.hasFocus() && !restricted() && !privateInput() && !voice_loading_,
+                msime_client_music_set_active);
+  }
+  // The key sound of one press: every typing key while Chinese input is on in a field that is not a secure one, whether the Engine or the application takes the key, and none while a recording is running. This runs inside the fcitx5 daemon, so it only posts a request: the Host API opens no audio device and starts no thread until it finds a sound switched on, and an audio failure turns sound off for the process with one line on stderr instead of reaching this addon (msime_client.h).
+  void playKeySound(const fcitx::KeyEvent &event) {
+    syncMusic();
+    if (!session_ || !input_enabled_ || !ic_.hasFocus() || restricted() || privateInput() ||
+        voice_loading_)
+      return;
+    const bool shortcut = event.rawKey().states().testAny(fcitx::KeyStates{
+        fcitx::KeyState::Ctrl, fcitx::KeyState::Alt, fcitx::KeyState::Super,
+        fcitx::KeyState::Hyper, fcitx::KeyState::Meta});
+    if (msime::linux_host::key_press_sounds(event.isRelease(), event.key().isModifier(), shortcut))
+      msime_client_key_sound(session_, msime::linux_host::key_sound_class(event.key().sym()));
+  }
+  // What the process's sound player was last told about background music; see syncMusic.
+  msime::linux_host::MusicActivity music_;
   uint64_t session_ = 0;
   Json view_ = Json::object();
   Json preferences_ = Json::object();
@@ -3773,7 +3813,7 @@ public:
     if (!ic) return false;
     const auto *state = ic->propertyFor(factory_);
     return state->session_ && state->preferences_.value("local_modes", Json::object())
-        .value(key_, true);
+        .value(key_, msime::linux_host::local_mode_enabled_by_default(key_));
   }
   void activate(fcitx::InputContext *ic) override {
     if (!ic || !ic->hasFocus()) return;
@@ -5029,6 +5069,9 @@ public:
     local_super_jianpin_action_.registerAction("msime-local-super-jianpin", &instance->userInterfaceManager());
     local_temporary_english_action_.registerAction("msime-local-temporary-english", &instance->userInterfaceManager());
     local_temporary_japanese_action_.registerAction("msime-local-temporary-japanese", &instance->userInterfaceManager());
+    local_expression_action_.registerAction("msime-local-expression", &instance->userInterfaceManager());
+    local_command_action_.registerAction("msime-local-command", &instance->userInterfaceManager());
+    local_mention_action_.registerAction("msime-local-mention", &instance->userInterfaceManager());
     english_gloss_action_.registerAction("msime-english-gloss", &instance->userInterfaceManager());
     word_character_action_.registerAction("msime-word-character", &instance->userInterfaceManager());
     number_row_action_.registerAction("msime-number-row", &instance->userInterfaceManager());
@@ -5167,7 +5210,8 @@ public:
              &cloud_candidates_action_, &ai_candidates_action_, &number_row_action_, &word_character_action_,
              &mode_scope_action_, &clipboard_history_action_, &input_group_separator_, &local_unicode_action_,
              &local_date_time_action_, &local_quick_phrase_action_, &local_emoji_action_, &local_kaomoji_action_,
-             &local_super_jianpin_action_, &local_temporary_english_action_, &local_temporary_japanese_action_})
+             &local_super_jianpin_action_, &local_temporary_english_action_, &local_temporary_japanese_action_,
+             &local_expression_action_, &local_command_action_, &local_mention_action_})
       input_group_menu_.addAction(action);
     punctuation_group_action_.setMenu(&punctuation_group_menu_);
     for (auto *action : std::initializer_list<fcitx::Action *>{
@@ -5395,6 +5439,7 @@ public:
           event.inputContext()->statusArea().addAction(
               fcitx::StatusGroup::InputMethod, &voice_action_);
         state->render();
+        state->syncMusic();
       }
     } catch (const OptionsNotConfigured &) { notConfigured(*state, true); }
     catch (...) { unavailable(*state); }
@@ -5440,6 +5485,7 @@ public:
       if (state->ensure()) {
         if (state->key(event)) event.filterAndAccept();
         else state->countPassthroughKey(event);
+        state->playKeySound(event);
       }
     }
     catch (const OptionsNotConfigured &) { notConfigured(*state, false); }
@@ -5543,6 +5589,9 @@ public:
   FcitxLocalModeAction local_super_jianpin_action_{&factory_, "super_jianpin", "超级简拼（J 模式）"};
   FcitxLocalModeAction local_temporary_english_action_{&factory_, "temporary_english", "临时英文（Y 模式）"};
   FcitxLocalModeAction local_temporary_japanese_action_{&factory_, "temporary_japanese", "临时日文（R 模式）"};
+  FcitxLocalModeAction local_expression_action_{&factory_, "expression", "计算与数字（V 模式）"};
+  FcitxLocalModeAction local_command_action_{&factory_, "command", "指令（/ 模式）"};
+  FcitxLocalModeAction local_mention_action_{&factory_, "mention", "名单（@ 模式）"};
   FcitxEnglishGlossAction english_gloss_action_{&factory_};
   FcitxWordCharacterAction word_character_action_{&factory_};
   FcitxNumberRowAction number_row_action_{&factory_};
@@ -6267,6 +6316,15 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
       }
     }
   }
+  // A key the active local mode spells with is input before any binding below can claim it: a paired closing mark, a page or word-character key, a candidate digit, a paired bracket or smart punctuation (core/SpellingSymbols.h).
+  if (!states.testAny(fcitx::KeyStates{fcitx::KeyState::Ctrl, fcitx::KeyState::Alt,
+                                       fcitx::KeyState::Super, fcitx::KeyState::Hyper,
+                                       fcitx::KeyState::Meta, fcitx::KeyState::Mod5})) {
+    const auto spelled = static_cast<char32_t>(fcitx::Key::keySymToUnicode(sym));
+    if (msime::linux_host::local_mode_spelling(view_, spelled))
+      return apply(msime_client_character(session_, static_cast<uint8_t>(spelled),
+                                          event.rawKey().states().test(fcitx::KeyState::Shift)));
+  }
   if (skipPairedClosing(sym, states)) return true;
   switch (sym) {
   case FcitxKey_BackSpace: case FcitxKey_Delete: case FcitxKey_KP_Delete:
@@ -6408,15 +6466,15 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
       break;
     default: break;
     }
-    // Windows selects by virtual key, which does not depend on the layout: the number row picks a candidate on AZERTY too, where it types & é " unshifted. The XKB keycode (evdev + 8) is that physical key. Unicode candidates use Shift plus the row, as on Windows and in the IBus host, because the bare digits are hex input there.
-    const bool unicodeMode = view_.value("local_mode", std::string("none")) == "unicode";
+    // Windows selects by virtual key, which does not depend on the layout: the number row picks a candidate on AZERTY too, where it types & é " unshifted. The XKB keycode (evdev + 8) is that physical key. In the modes whose spelling has digits (unicode, expression: the Engine lists them in spelling_symbols) candidates use Shift plus the row, as on Windows and in the IBus host, because the bare digits are input there; a shifted symbol the mode also spells with was sent to the Engine above.
+    const bool spellingDigits = msime::linux_host::spelling_digits(view_);
     // Fcitx5 drops Shift from a normalised symbol such as '!', so ask the raw event.
     const bool rawShift = event.rawKey().states().test(fcitx::KeyState::Shift);
     const auto number = [&]() -> std::optional<size_t> {
-      if (rawShift != unicodeMode) return std::nullopt;
+      if (rawShift != spellingDigits) return std::nullopt;
       const auto code = event.rawKey().code();
       if (code >= 10 && code <= 19) return code == 19 ? size_t{9} : static_cast<size_t>(code - 10);
-      if (unicodeMode) return std::nullopt;
+      if (spellingDigits) return std::nullopt;
       if (sym >= FcitxKey_1 && sym <= FcitxKey_9)
         return static_cast<size_t>(sym - FcitxKey_1);
       if (sym == FcitxKey_0 || sym == FcitxKey_KP_0) return size_t{9};

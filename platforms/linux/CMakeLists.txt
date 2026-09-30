@@ -156,6 +156,12 @@ file(RELATIVE_PATH MSIME_INSTALLED_RESOURCE_RELATIVE_DIR
      "${CMAKE_INSTALL_FULL_DATADIR}/msime-client/resources")
 target_compile_definitions(msime-linux-prepare PRIVATE
   MSIME_INSTALLED_RESOURCE_RELATIVE_DIR="${MSIME_INSTALLED_RESOURCE_RELATIVE_DIR}")
+# The IBus engine names the installed built-in sound packs to the Host API, found from its own executable as the prepare tool finds the resources (core/PreparePaths.h).
+file(RELATIVE_PATH MSIME_INSTALLED_SOUND_PACKS_RELATIVE_DIR
+     "${CMAKE_INSTALL_FULL_BINDIR}"
+     "${CMAKE_INSTALL_FULL_DATADIR}/msime-client/sound-packs")
+target_compile_definitions(msime-ibus-host PRIVATE
+  MSIME_INSTALLED_SOUND_PACKS_RELATIVE_DIR="${MSIME_INSTALLED_SOUND_PACKS_RELATIVE_DIR}")
 target_compile_options(msime-linux-dictionary PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(msime-linux-dictionary PRIVATE msime-ibus-host)
 add_executable(msime-linux-cloud-dictionary src/providers/cloud_dictionary_request.cpp)
@@ -209,6 +215,15 @@ target_compile_options(linux-navigation-bindings-test PRIVATE -Wall -Wextra -Wer
 target_include_directories(linux-navigation-bindings-test PRIVATE src ../../crates/host-api/include)
 target_link_libraries(linux-navigation-bindings-test PRIVATE PkgConfig::IBUS)
 add_test(NAME linux-navigation-bindings COMMAND linux-navigation-bindings-test)
+add_executable(linux-spelling-symbols-test tests/input/spelling_symbols.cpp)
+target_compile_options(linux-spelling-symbols-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+target_include_directories(linux-spelling-symbols-test PRIVATE src)
+target_link_libraries(linux-spelling-symbols-test PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME linux-spelling-symbols COMMAND linux-spelling-symbols-test)
+add_executable(linux-key-sound-test tests/input/key_sound.cpp)
+target_compile_options(linux-key-sound-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+target_include_directories(linux-key-sound-test PRIVATE src)
+add_test(NAME linux-key-sound COMMAND linux-key-sound-test)
 add_executable(linux-client-input-mode-memory-test tests/input/client_input_mode_memory.cpp)
 target_compile_options(linux-client-input-mode-memory-test PRIVATE -Wall -Wextra -Werror)
 target_include_directories(linux-client-input-mode-memory-test PRIVATE src)
@@ -659,13 +674,13 @@ if(MSIME_MCP_BINARY)
   endif()
   install(PROGRAMS "${MSIME_MCP_BINARY}" DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
+# The built-in sound packs, synthesized by scripts/generate_sound_packs.py and dedicated to the public domain, beside the resource directory rather than in it: that directory has to hold exactly what the dictionary lock pins. The hosts and the settings window name this directory to client-core as the built-in pack root.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/sound-packs/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/sound-packs")
 # 桌面入口的 Icon=msime-linux、Fcitx5 输入法条目的 Icon 和 IBus 组件的 <icon> 都按名字
 # 解析，所以这些文件决定了托盘、输入法列表和启动器上显示的是 logo 还是占位图。它们此前
 # 装在桌面二进制那个分支里，于是只装输入法、不装设置窗口的安装一张图标都没有，而那恰恰
 # 是最小可用的安装方式。
-# The built-in sound packs, synthesized by scripts/generate_sound_packs.py and dedicated to the public domain, beside the resource directory rather than in it: that directory has to hold exactly what the dictionary lock pins. The hosts and the settings window name this directory to client-core as the built-in pack root.
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/sound-packs/"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/sound-packs")
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/icons")
 configure_file(cmake/icon-cache.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/icon-cache.cmake @ONLY)
