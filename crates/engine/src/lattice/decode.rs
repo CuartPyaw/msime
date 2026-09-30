@@ -300,7 +300,10 @@ pub(super) fn decode_graph(
     let n = graph.len();
     let personal = active_personal(options);
     let bigram = options.bigram.as_deref();
-    let mut columns: Vec<Vec<Hyp<'_>>> = (0..=n).map(|_| Vec::new()).collect();
+    let column_capacity = options.beam.max(options.nbest);
+    let mut columns: Vec<Vec<Hyp<'_>>> = (0..=n)
+        .map(|_| Vec::with_capacity(column_capacity))
+        .collect();
     columns[0].push(Hyp {
         score: 0.0,
         prev: None,
