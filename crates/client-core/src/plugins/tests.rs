@@ -954,6 +954,25 @@ fn hostile_archives_are_refused_before_anything_is_installed() {
         import(&archive, &root),
         Err(PluginError::Archive(_))
     ));
+    // A directory declaring far more members than a pack may have is refused while it is being read, before `zip` has allocated an entry for each.
+    let crowded = files.path().join("crowded.zip");
+    let mut writer = zip::ZipWriter::new(fs::File::create(&crowded).unwrap());
+    for index in 0..20_000 {
+        writer
+            .start_file(
+                format!("{index}"),
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .unwrap();
+    }
+    writer.finish().unwrap();
+    match import(&crowded, &root) {
+        Err(PluginError::Archive(reason)) => {
+            assert!(reason.contains("directory is too large"), "{reason}")
+        }
+        other => panic!("{other:?}"),
+    }
     let garbage = files.path().join("garbage.zip");
     fs::write(&garbage, b"PK\x03\x04 not really").unwrap();
     assert!(matches!(

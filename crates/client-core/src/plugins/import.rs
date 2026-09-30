@@ -3,7 +3,7 @@
 //! The pack is copied or extracted into a staging directory beside the kind directories, checked there by the same rules `scan` lists packs by, and only then renamed into `<root>/<kind>/<id>`, replacing an installed pack of that id whole (`skin::folder_import::replace_directory`). A failed or interrupted import therefore never leaves a directory that looks installed, and never a pack that is half one version and half another.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
@@ -25,6 +25,8 @@ pub(super) fn lock_plugin_root() -> MutexGuard<'static, ()> {
 pub const MAX_ARCHIVE_BYTES: u64 = 80 * 1024 * 1024;
 /// Members of an archive, macOS resource forks and a wrapping folder included.
 const MAX_ARCHIVE_MEMBERS: usize = 64;
+/// Bytes `zip` may read while it parses an archive's directory: the end records it searches for (behind a comment of up to 64 KiB) and a directory entry for each of `MAX_ARCHIVE_MEMBERS` members, with room for long names and extra fields. `zip` allocates every entry a directory declares before the member count can be checked, and a zip64 directory in an archive of `MAX_ARCHIVE_BYTES` can declare over a million; this budget refuses one after a few thousand.
+const MAX_DIRECTORY_READ_BYTES: u64 = 128 * 1024 + MAX_ARCHIVE_MEMBERS as u64 * 4 * 1024;
 /// Bytes of one copied or extracted file, the largest any kind allows.
 const MAX_FILE_BYTES: u64 = super::music_pack::MAX_TRACK_BYTES;
 /// Bytes of a whole copied or extracted pack.
@@ -167,13 +169,19 @@ fn extract(source: &Path, staging: &Path) -> Result<(), PluginError> {
     if file.metadata()?.len() > MAX_ARCHIVE_BYTES {
         return Err(PluginError::Archive("the archive is too large".into()));
     }
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|error| PluginError::Archive(error.to_string()))?;
-    if archive.len() > MAX_ARCHIVE_MEMBERS {
+    let directory = zip::ZipArchive::new(ReadBudget {
+        inner: file,
+        left: MAX_DIRECTORY_READ_BYTES,
+    })
+    .map_err(|error| PluginError::Archive(error.to_string()))?;
+    if directory.len() > MAX_ARCHIVE_MEMBERS {
         return Err(PluginError::Archive(
             "the archive has too many members".into(),
         ));
     }
+    // The directory is known to be small now; members are read without the budget, each bounded by `Budget` instead.
+    let mut archive = zip::ZipArchive::new(directory.into_inner().inner)
+        .map_err(|error| PluginError::Archive(error.to_string()))?;
     // Every file member's path, as plain components, with the members to leave behind already dropped.
     let mut members: Vec<(usize, Vec<String>)> = Vec::with_capacity(archive.len());
     for index in 0..archive.len() {
@@ -233,6 +241,31 @@ fn extract(source: &Path, staging: &Path) -> Result<(), PluginError> {
         write_member(staging, &name, member, size)?;
     }
     Ok(())
+}
+
+/// A reader that fails once it has read `left` bytes, so parsing an archive's directory cannot run past `MAX_DIRECTORY_READ_BYTES`. Seeking is free.
+struct ReadBudget<R> {
+    inner: R,
+    left: u64,
+}
+
+impl<R: Read> Read for ReadBudget<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let read = self.inner.read(buffer)?;
+        self.left = self.left.checked_sub(read as u64).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "the archive directory is too large",
+            )
+        })?;
+        Ok(read)
+    }
+}
+
+impl<R: Seek> Seek for ReadBudget<R> {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(position)
+    }
 }
 
 /// A member path as plain components, or `None` if it has anything but.
