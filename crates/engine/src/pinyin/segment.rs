@@ -236,7 +236,8 @@ pub fn cut_pinyin_with_corrections(pinyin: &str) -> Vec<Vec<String>> {
         if part_paths.is_empty() {
             return Vec::new();
         }
-        let mut combined = Vec::new();
+        let capacity = CORRECTION_PATH_LIMIT.min(merged.len().saturating_mul(part_paths.len()));
+        let mut combined = Vec::with_capacity(capacity);
         'product: for head in &merged {
             for tail in &part_paths {
                 let mut path = head.clone();
