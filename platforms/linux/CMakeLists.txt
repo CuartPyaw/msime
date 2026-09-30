@@ -334,6 +334,8 @@ add_test(NAME linux-setup-update
                  $<TARGET_FILE:msime-linux-prepare>)
 add_test(NAME linux-setup-registration
          COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/setup_registration.py")
+add_test(NAME linux-setup-omarchy
+         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/setup_omarchy.py")
 add_test(NAME linux-setup-panel-restore
          COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/setup_panel_restore.py")
 add_test(NAME linux-first-run-guide
@@ -635,6 +637,9 @@ if(MSIME_DESKTOP_BINARY)
   install(PROGRAMS "${MSIME_DESKTOP_BINARY}" DESTINATION "${CMAKE_INSTALL_BINDIR}" RENAME msime-linux-desktop)
   install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/msime-linux-settings DESTINATION "${CMAKE_INSTALL_BINDIR}")
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/msime-linux.desktop DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+  # The Omarchy theme-set hook runs msime-linux-settings, so it ships with it; msime-linux-setup links it into ~/.config/omarchy/hooks/theme-set.d on an Omarchy desktop.
+  configure_file(data/omarchy/theme-set.in ${CMAKE_CURRENT_BINARY_DIR}/omarchy/theme-set @ONLY)
+  install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/omarchy/theme-set DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/omarchy")
 endif()
 # Nothing here starts the MCP server: an agent's MCP configuration names the command and runs it over stdio, so it only has to be on PATH.
 if(MSIME_MCP_BINARY)

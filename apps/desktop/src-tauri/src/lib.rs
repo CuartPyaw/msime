@@ -4184,7 +4184,71 @@ async fn app_icon_set(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// `--sync-omarchy-theme`, which the Omarchy theme-set hook runs through msime-linux-settings: rewrite the `omarchy` skin from the current Omarchy palette and publish the catalog to the hosts, the way a rescan from the settings page would, then exit without opening a window. The state directory is the one the settings window would open on, so the package lands in the skin root it lists.
+#[cfg(target_os = "linux")]
+fn sync_omarchy_theme() -> i32 {
+    let fail = |message: &str| {
+        eprintln!("msime: {message}");
+        1
+    };
+    let absolute = |name: &str| {
+        std::env::var_os(name)
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    };
+    let Some(path) =
+        absolute("MSIME_IBUS_OPTIONS").or_else(|| absolute("MSIME_CLIENT_HOST_OPTIONS"))
+    else {
+        return fail("no runtime options path; run this through msime-linux-settings");
+    };
+    let directory = match absolute("MSIME_CLIENT_STATE_DIR") {
+        Some(directory) => directory,
+        None => match linux_runtime_state_directory() {
+            Ok(Some(directory)) => directory,
+            Ok(None) => {
+                return fail(
+                    "the runtime options name no state directory; run msime-linux-setup first",
+                )
+            }
+            Err(error) => return fail(&error),
+        },
+    };
+    let Some(palette) = linux_process::read_text(
+        "omarchy-theme-color",
+        &["--all"],
+        64 * 1024,
+        std::time::Duration::from_secs(5),
+    ) else {
+        return fail("omarchy-theme-color did not answer; is this an Omarchy session?");
+    };
+    let Some(manifest) =
+        shared::omarchy_skin::skin_manifest(&shared::omarchy_skin::parse_resolved_colors(&palette))
+    else {
+        return fail("the current Omarchy theme has no background or foreground colour");
+    };
+    let root = directory.join("skins");
+    if shared::omarchy_skin::install(&root, &manifest).is_err() {
+        return fail("cannot write the Omarchy skin");
+    }
+    let runtime = RuntimeOptionsState {
+        path: Some(path),
+        document: Arc::new(Mutex::new(Value::Null)),
+        skins: Some(root.clone()),
+    };
+    match publish_candidate_skin_catalog(&runtime, &msime_client_core::skin::catalog::scan(&root)) {
+        Ok(()) => 0,
+        Err(_) => fail("cannot publish the skin catalog to the runtime options"),
+    }
+}
+
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    if std::env::args_os()
+        .skip(1)
+        .any(|argument| argument == "--sync-omarchy-theme")
+    {
+        std::process::exit(sync_omarchy_theme());
+    }
     #[cfg(target_os = "macos")]
     let mut keyboard_launch_target = macos_keyboard::startup_panel(requested_surface_route())
         .and_then(|_| msime_host_macos::capture_launch_target());
