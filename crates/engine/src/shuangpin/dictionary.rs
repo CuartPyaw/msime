@@ -296,9 +296,9 @@ impl ShuangpinDictionary {
         }
         let prefer_last = help_code.as_bytes()[0].is_ascii_uppercase();
         let normalized = help_code.to_ascii_lowercase();
-        let mut first = Vec::new();
-        let mut last = Vec::new();
-        let mut unmatched = Vec::new();
+        let mut first = Vec::with_capacity(candidates.len());
+        let mut last = Vec::with_capacity(candidates.len());
+        let mut unmatched = Vec::with_capacity(candidates.len());
         for candidate in candidates {
             match match_single_helpcode(&candidate.word, &normalized, keymap) {
                 SingleHelpcodeMatch::First => first.push(candidate.clone()),
