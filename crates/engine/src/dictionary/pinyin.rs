@@ -422,7 +422,7 @@ fn dict_row(row: &Row<'_>) -> rusqlite::Result<DictRow> {
 
 /// First occurrence wins (QQ:774-780).
 fn deduplicate_by_value(rows: &mut Vec<DictRow>) {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::with_capacity(rows.len());
     rows.retain(|row| seen.insert(row.value.clone()));
 }
 
