@@ -274,18 +274,17 @@ pub(crate) fn dictionary_hotwords_with(
                 "user_only": true,
             });
             Ok::<_, ()>(list(&action).map(|page| {
-                let entries = page["entries"].as_array().cloned().unwrap_or_default();
+                let source_entries = page["entries"].as_array().cloned().unwrap_or_default();
+                let mut entries = Vec::with_capacity(source_entries.len());
+                entries.extend(source_entries.iter().filter_map(|entry| {
+                    Some((
+                        entry["value"].as_str()?.to_owned(),
+                        entry["key"].as_str()?.to_owned(),
+                        entry["weight"].as_i64().unwrap_or(0),
+                    ))
+                }));
                 msime_client_core::voice::hotwords::DictionaryHotwordPage {
-                    entries: entries
-                        .iter()
-                        .filter_map(|entry| {
-                            Some((
-                                entry["value"].as_str()?.to_owned(),
-                                entry["key"].as_str()?.to_owned(),
-                                entry["weight"].as_i64().unwrap_or(0),
-                            ))
-                        })
-                        .collect(),
+                    entries,
                     has_more: page["has_more"].as_bool() == Some(true),
                 }
             }))
