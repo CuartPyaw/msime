@@ -492,10 +492,23 @@ pub unsafe extern "C" fn msime_client_typing_statistics(
                 day,
                 hour,
             } => {
+                // The count is read first only when a session asked for achievement sounds, so recording stays one read and one write for everyone else.
+                let before = key_sound::achievements_armed()
+                    .then(|| store.load().ok().map(|statistics| statistics.total))
+                    .flatten();
                 let recorded = store
                     .record(&text, source, &day, hour)
                     .map_err(|error| error.to_string())?;
-                Ok(json!({"recorded": recorded}))
+                let milestone = before.and_then(|before| {
+                    msime_client_core::plugins::achievement_milestone(
+                        before,
+                        before.saturating_add(recorded),
+                    )
+                });
+                if milestone.is_some() {
+                    key_sound::achievement();
+                }
+                Ok(json!({"recorded": recorded, "milestone": milestone}))
             }
             StatisticsAction::SetEnabled { enabled } => serde_json::to_value(
                 store

@@ -60,3 +60,25 @@ opt-level = 3
 
 [profile.dev.package.serde_json]
 opt-level = 3
+
+# The key-sound mixer renders in the audio callback and decodes music as it plays, so an unoptimised build glitches audibly; kira's documentation asks for these. Local macOS installs are dev builds (above).
+[profile.dev.package.kira]
+opt-level = 3
+
+[profile.dev.package.cpal]
+opt-level = 3
+
+[profile.dev.package.symphonia-core]
+opt-level = 3
+
+[profile.dev.package.symphonia-format-riff]
+opt-level = 3
+
+[profile.dev.package.symphonia-format-ogg]
+opt-level = 3
+
+[profile.dev.package.symphonia-codec-pcm]
+opt-level = 3
+
+[profile.dev.package.symphonia-codec-vorbis]
+opt-level = 3

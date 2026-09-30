@@ -132,6 +132,15 @@ print(json.loads(f.read(n))["__metadata__"]["attribution"])
 | --- | --- | --- | --- |
 | `zip`（关闭默认特性，只开 `deflate-flate2`） | 8.6 | MIT | 导入用户选中的 `.zip` 插件包（`crates/client-core/src/plugins/import.rs`）。带进 `typed-path`（MIT OR Apache-2.0）；其余依赖 `crc32fast`、`indexmap`、`memchr`、`flate2` 原本就在锁文件里 |
 
+播放音效包与背景音乐用到的 Rust crate，只链进 macOS、Windows、Linux 的 `host-api`（`crates/host-api/src/key_sound/`）；iOS、Android、HarmonyOS 不链接，HarmonyOS 2in1 用系统播放器播 `msime_client_key_sound_pack` 解析出的文件：
+
+| crate | 版本 | 许可证 | 用途 |
+| --- | --- | --- | --- |
+| `kira`（关闭默认特性，只开 `cpal`、`wav`、`pcm`、`ogg`、`vorbis`） | 0.12 | MIT OR Apache-2.0 | 混音、复音、按半音变调播放旋律、流式播放背景音乐。输出走上表已有的 `cpal` 0.18，不另带一份。带进 `glam`（MIT OR Apache-2.0）、`mint`（MIT）、`rtrb`（MIT OR Apache-2.0）、`atomic-arena`（MIT OR Apache-2.0）、`triple_buffer`（MPL-2.0）；`send_wrapper`（MIT OR Apache-2.0）只在 wasm 目标下用到 |
+| `symphonia`（关闭默认特性，只开 `wav`、`pcm`、`ogg`、`vorbis`） | 0.6 | MPL-2.0 | WAV 与 Ogg Vorbis 解码，是 `kira` 自己用的解码器；`host-api` 直接调用它，在包的时长上限内逐包解码（`decode.rs`），不整段解码后再检查。带进 `symphonia-core`、`symphonia-common`、`symphonia-metadata`、`symphonia-format-riff`、`symphonia-format-ogg`、`symphonia-codec-pcm`、`symphonia-codec-vorbis`（均为 MPL-2.0）、`extended`（MIT）、`regex-lite`（MIT OR Apache-2.0） |
+
+MPL-2.0 是文件级 copyleft，与本仓库的 GPL-3.0 兼容：这些 crate 未作修改，以二进制随包分发时附上许可证全文并指明源码位置（crates.io 上的对应版本）即可，`platforms/linux/collect-notices.py` 从 Cargo 依赖图收集的通知已覆盖它们。
+
 ## 背单词词书（`resources/wordbook.lock.json`）
 
 背单词模式的八本内置词书来自 ECDICT，不在 `desktop-dictionary.lock.json` 的覆盖范围里，所以单列一节。

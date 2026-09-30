@@ -59,6 +59,14 @@ pub trait InputEngine {
     fn set_nine_key_enabled(&mut self, _enabled: bool) -> Result<(), RuntimeError> {
         Err(RuntimeError::Engine("Nine-key mode is unsupported".into()))
     }
+    /// Replace the `/` mode's command table. Engines without the mode ignore it.
+    fn set_command_table(&mut self, _table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    /// Replace the `@` mode's name list. Engines without the mode ignore it.
+    fn set_mention_entries(&mut self, _entries: &[MentionEntry]) -> Result<(), RuntimeError> {
+        Ok(())
+    }
     /// Ask for candidates withheld from the first answer, reporting whether the list grew. The
     /// default answers no, which is what an engine that already returns everything it has means.
     fn expand_initial_candidates(&mut self) -> Result<bool, RuntimeError> {
@@ -196,6 +204,12 @@ impl InputEngine for Session {
     fn set_nine_key_enabled(&mut self, enabled: bool) -> Result<(), RuntimeError> {
         Session::set_nine_key_enabled(self, enabled)
             .map_err(|e| RuntimeError::Engine(e.to_string()))
+    }
+    fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
+        Session::set_command_table(self, table).map_err(|e| RuntimeError::Engine(e.to_string()))
+    }
+    fn set_mention_entries(&mut self, entries: &[MentionEntry]) -> Result<(), RuntimeError> {
+        Session::set_mention_entries(self, entries).map_err(|e| RuntimeError::Engine(e.to_string()))
     }
     fn expand_initial_candidates(&mut self) -> Result<bool, RuntimeError> {
         Session::expand_initial_candidates(self).map_err(|e| RuntimeError::Engine(e.to_string()))

@@ -41,7 +41,26 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
         let sentence_model_path = options.sentence_model.clone();
         let settled_model_path = options.settled_model.clone();
         let phrase_preedit = options.phrase_preedit.unwrap_or(false);
-        let options = options.into_engine_options();
+        let plugin_roots = key_sound::PluginRoots::new(
+            options.preferences_directory.as_deref(),
+            options.sound_packs.as_deref(),
+            &options.resources,
+        );
+        let mut options = options.into_engine_options();
+        let plugin_tables = plugin_tables::PluginTables::stamp(
+            plugin_roots.installed.as_deref(),
+            &options,
+            &applied.plugins.command_tables,
+        );
+        plugin_tables.fill(
+            &plugin_tables::PluginTables::default(),
+            plugin_roots.installed.as_deref(),
+            &mut options,
+        );
+        let sound = key_sound::SessionSound::new(key_sound::SoundSettings::new(
+            &applied.plugins,
+            &plugin_roots,
+        ));
         let dictionary_access = DictionaryAccess::try_session(
             std::path::Path::new(&options.user_data),
             std::path::Path::new(&options.dictionaries),
@@ -105,6 +124,9 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
                     ai_provider_cache,
                     voice: VoiceSessionState::default(),
                     pending_selections: Default::default(),
+                    plugin_roots,
+                    sound,
+                    plugin_tables,
                     _dictionary_access: dictionary_access,
                 },
             )
@@ -121,6 +143,8 @@ pub extern "C" fn msime_client_focus(handle: u64, focused: bool) -> *mut c_char 
             if !focused {
                 session.flush_selections();
                 msime_engine::flush_personal_learning();
+            } else {
+                session.refresh_plugin_tables()?;
             }
             let result = session.runtime.focus(focused).map_err(|e| e.to_string())?;
             let result = session.complete_transition(result);

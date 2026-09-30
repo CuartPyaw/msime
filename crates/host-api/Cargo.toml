@@ -27,6 +27,11 @@ time.workspace = true
 cpal = "0.18"
 rubato = "5"
 
+# Key sounds, the typing melody, commit and achievement sounds and background music (`key_sound`), for the desktop hosts only. kira mixes, pitches and streams over the cpal above (the same 0.18, not a second copy); symphonia is the decoder kira already uses, named here so samples are decoded under the pack bounds rather than whole. Android and iOS keep their own key feedback, and HarmonyOS plays packs natively from the paths `msime_client_key_sound_pack` resolves.
+[target.'cfg(not(any(target_os = "ios", target_os = "android", target_env = "ohos")))'.dependencies]
+kira = { version = "0.12.5", default-features = false, features = ["cpal", "wav", "pcm", "ogg", "vorbis"] }
+symphonia = { version = "0.6.1", default-features = false, features = ["wav", "pcm", "ogg", "vorbis"] }
+
 [dev-dependencies]
 rusqlite.workspace = true
 

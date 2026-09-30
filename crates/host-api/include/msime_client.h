@@ -73,6 +73,11 @@ char *msime_client_refresh_host(const uint8_t *path, size_t length);
  * Linux hosts may provide absolute online_provider_socket and
  * translation_provider_socket paths for user-managed Unix-socket services;
  * translation may reuse the online socket when omitted.
+ * preferences_directory also names the plugins root, <preferences_directory>/plugins: the
+ * installed plugin packs, the enabled command tables the "/" mode reads and the "@" mode's
+ * mentions.json. They are read at creation, on preference updates and when a field gains
+ * focus, and only while the mode that uses them is on. Optional sound_packs is the absolute
+ * path of the bundle's built-in sound packs; absent means sound-packs beside resources.
  * Do not delete .msime-dictionary-access.lock files. Legacy/external writers do
  * not participate; preparation/upgrades still require stopped sessions.
  */
@@ -191,6 +196,9 @@ char *msime_client_load_preferences(const uint8_t *directory, size_t length);
  * text is never returned or stored. May block on disk/file lock: use a worker.
  * `hour` is the commit's local hour and must come from the same instant as `day`;
  * omit it rather than guess, and the day keeps its counts with no hourly split.
+ * Record answers {recorded, milestone}: milestone is the achievement count (100, 1000, ...)
+ * the total just passed, or null. It is only computed while a session in this process has
+ * achievement sounds on, and on the desktop hosts the jingle is then already queued.
  */
 char *msime_client_typing_statistics(const uint8_t *request, size_t length);
 /* Read only the aggregate-statistics master switch from an absolute UTF-8
@@ -706,6 +714,16 @@ char *msime_client_host_capabilities(const uint8_t *platform, size_t length);
 char *msime_client_mcp_status(const uint8_t *request, size_t length);
 /* Write the msime entry into one assistant's configuration, keeping every other key. JSON request {options,client:"claude_desktop"|"cursor",replace:bool}. Returns "added"|"replaced"|"unchanged"; a different msime entry fails with mcp_entry_exists unless replace is set. Writes a file: use a worker thread. */
 char *msime_client_mcp_install(const uint8_t *request, size_t length);
+/* Effect sounds and background music, played by this library on macOS, Windows and Linux from the session's preferences.plugins. The three calls below are for the key path: they return whether a request was queued, never block, decode or read files, and need no free. False means nothing is switched on, the session handle is unknown or on another thread, the queue is full, this platform does not play (iOS, Android, HarmonyOS), or sound failed earlier in this process, which turns it off until the process restarts with one line on stderr. Nothing starts - no thread, no audio device - until a call finds something switched on, so a process that never calls them (the Windows TSF DLL) pays nothing; the device is let go again after 30 s without a sound or playing music. Do not call them for keys typed into a secure (password) field.
+ * key_sound: key_class 0 any other key, 1 space, 2 enter, 3 backspace; anything else queues nothing. Plays the key pack's sample for the class, or the melody pack's next note in melody mode.
+ * commit_sound: call when a transition commits text. Plays the key pack's commit sample when the commit sound is on, and the next note of a melody that advances on commits.
+ * music_set_active: true while the input method is active in a field that is not a secure one, false when it deactivates or a secure field gains focus; music plays only in between.
+ * Achievement sounds need no call: msime_client_typing_statistics record plays one when the count passes a milestone. */
+bool msime_client_key_sound(uint64_t session, uint32_t key_class);
+bool msime_client_commit_sound(uint64_t session);
+bool msime_client_music_set_active(uint64_t session, bool active);
+/* The validated files of one sound pack, for a host that plays packs itself (HarmonyOS). Request (<=65536 bytes): {state_root: absolute|null, sound_packs: absolute|null, pack: id}; state_root is the preferences directory holding plugins/, sound_packs the bundle's built-in pack root. Built-in ids ("default", "twinkle") always resolve from sound_packs. Value: {id, name, license, builtin, mode:"keys"|"sequence", sounds:{default, space, enter, backspace, commit, achievement: absolute path|null}, sequence:{sample: absolute path, semitones:[-24..24], advance:"key"|"commit"}|null, max_sample_millis, melody_idle_reset_millis}. Reads the pack from disk: not for the key path. */
+char *msime_client_key_sound_pack(const uint8_t *request, size_t length);
 char *msime_client_destroy(uint64_t session);
 /* Write the selection counts held by every session on the calling thread and all queued personal-context learning, without ending any session. Call from the host's will-terminate hook (e.g. NSApplicationWillTerminateNotification) on the thread that owns the sessions; the C++ Engine did this from atexit. Returns null on success. */
 char *msime_client_flush_all(void);

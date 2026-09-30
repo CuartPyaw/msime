@@ -469,6 +469,20 @@ impl<E: InputEngine> Runtime<E> {
         self.refresh()
     }
 
+    /// Hand the Engine a new `/` command table. An open command list is rebuilt from it, so the view is refreshed.
+    pub fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_command_table(table)?;
+        self.refresh()
+    }
+
+    /// Hand the Engine a new `@` name list, refreshing the view as `set_command_table` does.
+    pub fn set_mention_entries(&mut self, entries: &[MentionEntry]) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_mention_entries(entries)?;
+        self.refresh()
+    }
+
     pub fn new(engine: E, page_size: u8) -> Result<Self, RuntimeError> {
         Self::new_with_touch_layout(engine, page_size, TouchKeyboardLayout::default())
     }
