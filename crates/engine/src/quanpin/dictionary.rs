@@ -259,7 +259,7 @@ impl QuanpinDictionary {
             return cached;
         }
         let segments = split_segments(segmentation);
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(FUZZY_PATH_BUDGET.saturating_mul(FUZZY_ROW_LIMIT));
         let mut budget = FUZZY_PATH_BUDGET;
         for count in (1..=segments.len()).rev() {
             if budget <= 1 {
