@@ -274,7 +274,10 @@ pub(crate) fn dictionary_hotwords_with(
                 "user_only": true,
             });
             Ok::<_, ()>(list(&action).map(|page| {
-                let source_entries = page["entries"].as_array().cloned().unwrap_or_default();
+                let source_entries = page["entries"]
+                    .as_array()
+                    .map(|entries| entries.as_slice())
+                    .unwrap_or(&[]);
                 let mut entries = Vec::with_capacity(source_entries.len());
                 entries.extend(source_entries.iter().filter_map(|entry| {
                     Some((
