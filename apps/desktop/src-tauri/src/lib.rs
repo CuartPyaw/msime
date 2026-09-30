@@ -4704,6 +4704,8 @@ pub fn run() {
                 document: Arc::new(Mutex::new(host_document)),
                 skins: Some(directory.join("skins")),
             });
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_candidate_skin_community::start_sync(app.handle());
             #[cfg(target_os = "macos")]
             app.manage(DataDirectorySelectionState::default());
             #[cfg(target_os = "linux")]
@@ -4987,6 +4989,10 @@ pub fn run() {
             desktop_candidate_skin_community::candidate_skin_community_rate,
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             desktop_candidate_skin_community::candidate_skin_community_unpublish,
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_candidate_skin_community::candidate_skin_community_set_visibility,
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_candidate_skin_community::candidate_skin_community_sync,
             #[cfg(target_os = "android")]
             android_account::app_icon_info,
             #[cfg(target_os = "android")]
