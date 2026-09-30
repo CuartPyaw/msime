@@ -6554,7 +6554,25 @@ static void TestSessionUnavailableIsReported() {
     assert([log componentsSeparatedByString:@"reason=session refused the runtime options"].count - 1 == 1);
 }
 
+// Every preference object built here without an explicit skins root reads msime::mac::DefaultSkinsRoot(), which is otherwise the user's real skins folder: an external skin installed there adds a card to the skin page and breaks the counts below. The whole run gets an empty folder of its own, removed when main returns.
+struct IsolatedDefaultSkinsRoot {
+    std::filesystem::path path;
+    IsolatedDefaultSkinsRoot() {
+        std::string pattern = (std::filesystem::temp_directory_path() / "msime-shortcut-skins.XXXXXX").string();
+        assert(mkdtemp(pattern.data()) != nullptr);
+        path = pattern;
+        msime::mac::SetDefaultSkinsRoot(path);
+    }
+    ~IsolatedDefaultSkinsRoot() {
+        msime::mac::SetDefaultSkinsRoot({});
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+    }
+};
+
 int main(int argc, char **argv) {
+    const IsolatedDefaultSkinsRoot skinsRoot;
+    assert(msime::mac::DefaultSkinsRoot() == skinsRoot.path);
     assert(!MSIMEShouldRegisterInputSource(1, nullptr));
     const char *registerArguments[] = {"test", "--register-input-source"};
     assert(MSIMEShouldRegisterInputSource(2, registerArguments));

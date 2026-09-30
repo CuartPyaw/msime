@@ -31,6 +31,13 @@ int main() {
             [panel updateHighlightedKey:MSIMEShuangpinKeymapHighlightedKey(@{@"editing_text": raw})];
             assert(![panel.contentView.accessibilityValue containsString:@"当前按键"]);
         }
+        // The highlighted key takes the theme accent the controller hands over, and keeps it across profile changes.
+        assert(panel.accentColor != nil);
+        NSColor *accent = [NSColor colorWithSRGBRed:0.36 green:0.61 blue:1.0 alpha:1.0];
+        [panel setAccentColor:accent];
+        assert([panel.accentColor isEqual:accent]);
+        [panel setProfileName:@"ziranma"];
+        assert([panel.accentColor isEqual:accent]);
         [panel close];
     }
 }

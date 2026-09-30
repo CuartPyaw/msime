@@ -19,5 +19,8 @@ FOUNDATION_EXPORT NSRect MSIMEShuangpinKeymapPanelFrame(NSRect caretRect, NSSize
 @interface MSIMEShuangpinKeymapPanel : NSPanel
 - (void)setProfileName:(NSString *)profileName;
 - (void)updateHighlightedKey:(NSString *)key;
+/// The fill of the highlighted key: the theme's accent, as a dynamic colour so it resolves in the panel's appearance. Until set, the panel's own teal.
+- (void)setAccentColor:(NSColor *)accent;
+@property(nonatomic, readonly) NSColor *accentColor;
 - (void)showNearCaretRect:(NSRect)caretRect candidateClearance:(CGFloat)candidateClearance;
 @end
