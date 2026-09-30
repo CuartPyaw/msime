@@ -85,7 +85,8 @@ pub fn fuzzy_segmentations(
     let mut paths: Vec<Vec<String>> = vec![Vec::new()];
     for syllable in segments {
         let alternatives = fuzzy_syllables(syllable, options);
-        let mut next = Vec::new();
+        let capacity = limit.min(paths.len().saturating_mul(alternatives.len()));
+        let mut next = Vec::with_capacity(capacity);
         // The C++ only breaks the inner loop at the cap, which stops the product at `limit` all the same.
         'beam: for path in &paths {
             for alternative in &alternatives {
