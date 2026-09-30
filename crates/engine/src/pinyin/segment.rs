@@ -173,7 +173,7 @@ fn cut_one_piece_with_corrections(pinyin: &str) -> Vec<Vec<&'static str>> {
         correction_ranks: Vec::new(),
     }];
     for index in (0..length).rev() {
-        let mut ranked = Vec::new();
+        let mut ranked = Vec::with_capacity(CORRECTION_PATH_LIMIT);
         for end in (index + 1..=length.min(index + max_piece)).rev() {
             let Ok(typed) = std::str::from_utf8(&bytes[index..end]) else {
                 continue;
