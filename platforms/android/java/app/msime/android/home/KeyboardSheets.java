@@ -19,6 +19,7 @@ import app.msime.android.KeyboardGeometry;
 import app.msime.android.KeyboardScheme;
 import app.msime.android.KeyboardSkin;
 import app.msime.android.R;
+import app.msime.android.TextPolicy;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.materialswitch.MaterialSwitch;
@@ -329,6 +330,8 @@ public final class KeyboardSheets {
      *
      * <p>The token is stored under the endpoint's own origin, which is how the keyboard looks it up
      * and why moving the endpoint to another host does not carry the credential with it.
+     *
+     * <p>Like the other sheets there is no save button: the switch saves when flipped, and a text field saves when it loses focus, when its IME action is pressed, and when the sheet closes. Text is not saved while it is being typed, because a half-typed endpoint is another origin and the credential would be filed under it.
      */
     public static void showAi(Fragment fragment, JSONObject snapshot, Runnable changed) {
         Context context = fragment.requireContext();
@@ -336,7 +339,7 @@ public final class KeyboardSheets {
         if (preferences == null) return;
         JSONObject ai = preferences.optJSONObject("ai_assistant");
         SettingsSheet sheet = new SettingsSheet(context, "AI 润色与回复",
-            "由你自己的服务端提供。凭据只保存在本机，按端点的来源分别存放。");
+            "由你自己的服务端提供。凭据只保存在本机，按端点的来源分别存放。改动自动保存。");
         TextView status = sheet.addStatus();
 
         MaterialSwitch enabled = new MaterialSwitch(context);
@@ -355,22 +358,50 @@ public final class KeyboardSheets {
             InputType.TYPE_TEXT_VARIATION_PASSWORD);
         TextInputLayout prompt = field(context, "润色提示词",
             ai == null ? "" : ai.optString("prompt", ""), InputType.TYPE_CLASS_TEXT);
-        for (TextInputLayout entry : List.of(endpoint, model, token, prompt)) sheet.add(entry);
+        List<TextInputLayout> fields = List.of(endpoint, model, token, prompt);
+        for (TextInputLayout entry : fields) sheet.add(entry);
 
-        MaterialButton save = new MaterialButton(context);
-        save.setText("保存");
-        save.setOnClickListener(ignored -> {
-            JSONObject next = buildAi(ai, enabled.isChecked(), text(endpoint), text(model),
+        // What was last written (or what the sheet opened with), so a focus change or a close with nothing edited writes nothing. `base` is the object the next write starts from: the last one written, so a credential this sheet filed under an earlier origin is kept.
+        String[] committed = {aiInputs(enabled.isChecked(), text(endpoint), text(model),
+            text(prompt), text(token))};
+        JSONObject[] base = {ai};
+        Runnable commit = () -> {
+            String inputs = aiInputs(enabled.isChecked(), text(endpoint), text(model),
+                text(prompt), text(token));
+            if (inputs.equals(committed[0])) return;
+            JSONObject next = buildAi(base[0], enabled.isChecked(), text(endpoint), text(model),
                 text(prompt), text(token));
             if (next == null) {
+                // An endpoint the keyboard would refuse is not written; the stored one stays in force until this is corrected.
+                endpoint.setError("端点必须是一个 https 地址");
                 status.setText("端点必须是一个 https 地址");
                 return;
             }
+            endpoint.setError(null);
+            committed[0] = inputs;
+            base[0] = next;
             save(fragment, snapshot, "ai_assistant", next, status, null, changed);
-        });
-        sheet.add(save);
+        };
+        enabled.setOnCheckedChangeListener((button, checked) -> commit.run());
+        for (TextInputLayout entry : fields) {
+            if (entry.getEditText() == null) continue;
+            entry.getEditText().setOnFocusChangeListener((view, focused) -> {
+                if (!focused) commit.run();
+            });
+            entry.getEditText().setOnEditorActionListener((view, action, event) -> {
+                commit.run();
+                return false;
+            });
+        }
+        sheet.setOnDismiss(commit);
         sheet.addNote("端点必须是 HTTPS。留空凭据表示该来源不需要凭据，不会清掉其他来源已存的凭据。");
         sheet.show();
+    }
+
+    /** The sheet's inputs as one comparable value, to tell whether anything changed since the last write. */
+    private static String aiInputs(boolean enabled, String endpoint, String model, String prompt,
+            String token) {
+        return new JSONArray(List.of(enabled, endpoint, model, prompt, token)).toString();
     }
 
     @Nullable private static JSONObject buildAi(@Nullable JSONObject previous, boolean enabled,

@@ -116,6 +116,9 @@ public final class SettingsSheet {
 
     public void dismiss() { dialog.dismiss(); }
 
+    /** Runs `action` when the sheet closes, however it was closed, so a sheet that saves as it goes can write what is still pending. */
+    public void setOnDismiss(Runnable action) { dialog.setOnDismissListener(ignored -> action.run()); }
+
     private int dp(int value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
     }
