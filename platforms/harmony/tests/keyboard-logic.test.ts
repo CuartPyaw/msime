@@ -259,6 +259,15 @@ import { CandidateNumberFontPolicy } from "../entry/src/main/ets/keyboard/candid
 import { PreeditCaretPolicy } from "../entry/src/main/ets/keyboard/candidate/PreeditCaretPolicy";
 import { CandidatePreeditStylePolicy } from "../entry/src/main/ets/keyboard/candidate/CandidatePreeditStylePolicy";
 import {
+  KEY_SOUNDS_OFF,
+  KeySoundClass,
+  KeySoundEvent,
+  KeySoundMelody,
+  KeySoundPackFiles,
+  KeySoundPolicy,
+  KeySoundSettings,
+} from "../entry/src/main/ets/keyboard/KeySoundPolicy";
+import {
   EmojiPanelKeyAction,
   EmojiPanelKeyPolicy,
 } from "../entry/src/main/ets/keyboard/emoji/EmojiPanelKeyPolicy";
@@ -611,6 +620,14 @@ group("projects the same form factor into every settings capability", () => {
     "phone settings offer the hardware-keyboard switches the keyboard still acts on",
   );
   check(desktop.voiceHotkeys, "2-in-1 settings offer the voice hotkeys");
+  check(
+    desktop.keySound && desktop.pluginTriggers,
+    "2-in-1 settings offer key sounds and the V, / and @ modes",
+  );
+  check(
+    !phone.keySound && !phone.pluginTriggers,
+    "a phone keeps its own key feedback and does not claim the hardware-only modes",
+  );
   // The phone strip is always horizontal, so a layout select there is a control that does nothing; the 2in1 candidate window keeps the choice.
   check(
     phone.fixedCandidateLayout === "horizontal",
@@ -3732,6 +3749,28 @@ group("local modes are addressable by trigger and by preference key", () => {
   check(LocalInputMode.fromTrigger("Z") === null, "an unassigned letter enters nothing");
   const triggers = new Set(LocalInputMode.MODES.map((entry) => entry.trigger));
   check(triggers.size === LocalInputMode.MODES.length, "no two modes share a trigger");
+  // V, / and @ are named by the Engine's local_mode and entered from a hardware keyboard; the touch tools panel, which lists MODES, does not offer them as tiles.
+  check(
+    LocalInputMode.HARDWARE_MODES.map((entry) => entry.preferenceKey).join(",") ===
+      "expression,command,mention",
+    "the three hardware-only modes are named as the Engine names them",
+  );
+  const expression = LocalInputMode.fromPreferenceKey("expression");
+  check(
+    expression !== null && expression.trigger === "V" && expression.title === "计算",
+    "expression is entered with Shift+V and titled for the strip",
+  );
+  check(LocalInputMode.fromTrigger("/")?.preferenceKey === "command", "/ enters the command mode");
+  check(LocalInputMode.fromTrigger("@")?.preferenceKey === "mention", "@ enters the mention mode");
+  check(
+    LocalInputMode.MODES.every((entry) => LocalInputMode.HARDWARE_MODES.indexOf(entry) < 0),
+    "the touch tiles stay the eight they were",
+  );
+  const all = LocalInputMode.MODES.concat(LocalInputMode.HARDWARE_MODES);
+  check(
+    new Set(all.map((entry) => entry.trigger)).size === all.length,
+    "no hardware-only mode shares a trigger with a touch mode",
+  );
 });
 
 group("voice providers share one recording session", () => {
@@ -8905,7 +8944,12 @@ group("a hardware key spells or punctuates depending on what is being spelled", 
       true,
       { ...PLAIN_SPELLING, ...spelling },
     );
-  const unicode: Partial<HardwareSpelling> = { localMode: "unicode", editing: "u4e", caret: 3 };
+  const unicode: Partial<HardwareSpelling> = {
+    localMode: "unicode",
+    editing: "u4e",
+    caret: 3,
+    spellingSymbols: "0123456789",
+  };
   const digit = route({ keyCode: 2000, unicodeChar: 0x30 }, unicode);
   check(
     digit.action === HardwareKeyAction.COMPOSE && digit.character === 0x30,
@@ -8923,7 +8967,7 @@ group("a hardware key spells or punctuates depending on what is being spelled", 
   );
   const plus = route(
     { keyCode: 2058, unicodeChar: 0x2b, shiftKey: true },
-    { localMode: "unicode", editing: "U", caret: 1 },
+    { localMode: "unicode", editing: "U", caret: 1, spellingSymbols: "0123456789" },
   );
   check(
     plus.action === HardwareKeyAction.COMPOSE && plus.character === 0x2b,
@@ -10400,5 +10444,377 @@ group("LocalVoiceModelPolicy", () => {
       LocalVoiceModelPolicy.action('{"operation":"format","id":"x"}') === null &&
       LocalVoiceModelPolicy.action("[") === null,
     "a missing id, an unknown operation or unreadable text is refused",
+  );
+});
+
+group("V mode spells digits and operators the Engine lists, and Shift+digit picks", () => {
+  const route = (
+    over: Record<string, unknown>,
+    spelling: Partial<HardwareSpelling>,
+    wordCharacter: string = "disabled",
+  ) =>
+    HardwareKeyRouter.route(
+      {
+        keyCode: 0,
+        unicodeChar: 0,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+        logoKey: false,
+        ...over,
+      } as HardwareKey,
+      true,
+      true,
+      false,
+      undefined,
+      false,
+      false,
+      wordCharacter,
+      true,
+      { ...PLAIN_SPELLING, ...spelling },
+    );
+  // What the Engine exports in expression mode (`LocalInputMode::spelling_symbols`).
+  const expression: Partial<HardwareSpelling> = {
+    localMode: "expression",
+    editing: "V12",
+    caret: 3,
+    spellingSymbols: "0123456789+-*/.()%^",
+  };
+  const four = route({ keyCode: 2004, unicodeChar: 0x34 }, expression);
+  check(
+    four.action === HardwareKeyAction.COMPOSE && four.character === 0x34,
+    "a plain 4 is part of the number, not the fourth candidate",
+  );
+  const zero = route({ keyCode: 2000, unicodeChar: 0x30 }, expression);
+  check(
+    zero.action === HardwareKeyAction.COMPOSE && zero.character === 0x30,
+    "0 is a digit rather than the key that finishes the composition",
+  );
+  const pick = route({ keyCode: 2002, unicodeChar: 0x40, shiftKey: true }, expression);
+  check(
+    pick.action === HardwareKeyAction.SELECT && pick.index === 1,
+    "Shift+2 types @, which V mode does not spell, so it picks the second row",
+  );
+  const open = route({ keyCode: 2009, unicodeChar: 0x28, shiftKey: true }, expression);
+  check(
+    open.action === HardwareKeyAction.COMPOSE && open.character === 0x28,
+    "Shift+9 is the ( of the expression, not a pick",
+  );
+  const times = route({ keyCode: 2008, unicodeChar: 0x2a, shiftKey: true }, expression);
+  check(
+    times.action === HardwareKeyAction.COMPOSE && times.character === 0x2a,
+    "Shift+8 is the multiplication sign",
+  );
+  const minus = route({ keyCode: 2057, unicodeChar: 0x2d }, expression);
+  check(
+    minus.action === HardwareKeyAction.COMPOSE && minus.character === 0x2d,
+    "- is subtraction rather than the previous-page key",
+  );
+  const plus = route({ keyCode: 2058, unicodeChar: 0x2b, shiftKey: true }, expression);
+  check(
+    plus.action === HardwareKeyAction.COMPOSE && plus.character === 0x2b,
+    "Shift+= is addition rather than the next-page key",
+  );
+  const point = route({ keyCode: 2044, unicodeChar: 0x2e }, expression);
+  check(
+    point.action === HardwareKeyAction.COMPOSE && point.character === 0x2e,
+    ". is a decimal point rather than the next-page key",
+  );
+  const divide = route({ keyCode: 2064, unicodeChar: 0x2f }, expression);
+  check(
+    divide.action === HardwareKeyAction.COMPOSE && divide.character === 0x2f,
+    "/ is division rather than a mark that ends the composition",
+  );
+  const keypadDot = route({ keyCode: 2114, unicodeChar: 0x2e }, expression);
+  check(
+    keypadDot.action === HardwareKeyAction.COMPOSE && keypadDot.character === 0x2e,
+    "the keypad's point is the decimal point too",
+  );
+  const keypadSeven = route({ keyCode: 2110, unicodeChar: 0 }, expression);
+  check(
+    keypadSeven.action === HardwareKeyAction.COMPOSE && keypadSeven.character === 0x37,
+    "a keypad digit is a digit of the number",
+  );
+  check(
+    route({ keyCode: 2058, unicodeChar: 0x3d }, expression).action === HardwareKeyAction.NEXT_PAGE,
+    "= is not an operator the Engine takes, so it still pages",
+  );
+  check(
+    route({ keyCode: 2043, unicodeChar: 0x2c }, expression).action ===
+      HardwareKeyAction.PREVIOUS_PAGE,
+    ", still pages",
+  );
+  const wordCharacter = route({ keyCode: 2057, unicodeChar: 0x2d }, expression, "minus_equal");
+  check(
+    wordCharacter.action === HardwareKeyAction.COMPOSE,
+    "with -/= taking a word's first or last character, - is still subtraction in V mode",
+  );
+  check(
+    route({ keyCode: 2050, unicodeChar: 0x20 }, expression).action === HardwareKeyAction.COMMIT,
+    "Space takes the highlighted result",
+  );
+  check(
+    route({ keyCode: 2004, unicodeChar: 0x34 }, { ...expression, englishCandidates: true })
+      .action === HardwareKeyAction.SELECT,
+    "the English candidate mode spells letters only, whatever the symbols say",
+  );
+  check(
+    route({ keyCode: 2004, unicodeChar: 0x34 }, { editing: "ni", caret: 2 }).action ===
+      HardwareKeyAction.SELECT,
+    "an ordinary composition lists no symbols, so its digits still pick",
+  );
+  check(
+    route({ keyCode: 2114, unicodeChar: 0x2e }, { editing: "ni", caret: 2 }).action ===
+      HardwareKeyAction.COMMIT_THEN_TYPE,
+    "and the keypad's point still finishes it and types an ASCII point",
+  );
+  // The command and mention modes spell with letters, so they list no symbols and their keys route like any composition.
+  check(
+    route({ keyCode: 2001, unicodeChar: 0x31 }, { localMode: "command", editing: "/rq", caret: 3 })
+      .action === HardwareKeyAction.SELECT,
+    "a digit picks a command",
+  );
+});
+
+group(
+  "/ and @ with nothing composed reach the Engine as punctuation, which opens their modes",
+  () => {
+    const mark = (character: string, shiftKey: boolean): HardwareKey => ({
+      keyCode: 0,
+      unicodeChar: character.charCodeAt(0),
+      ctrlKey: false,
+      altKey: false,
+      logoKey: false,
+      shiftKey,
+    });
+    // The runtime sends a mark listed in spelling_symbols to the Engine as a character, which is where the modes open; the host only has to claim the key.
+    const slash = HardwareKeyRouter.route(mark("/", false), false, true);
+    check(
+      slash.action === HardwareKeyAction.PUNCTUATION && slash.character === 0x2f,
+      "/ is claimed for the Engine",
+    );
+    const at = HardwareKeyRouter.route(mark("@", true), false, true);
+    check(at.action === HardwareKeyAction.PUNCTUATION && at.character === 0x40, "@ is claimed too");
+    check(
+      HardwareKeyRouter.route(mark("/", false), false, false).action === HardwareKeyAction.RELEASE,
+      "in English the application types a literal /",
+    );
+  },
+);
+
+group("key sounds follow the desktop player's settings and pack rules", () => {
+  const files = (overrides: Partial<KeySoundPackFiles>): KeySoundPackFiles => ({
+    id: "default",
+    name: "清脆键盘",
+    license: "CC0-1.0",
+    builtin: true,
+    mode: "keys",
+    sounds: {
+      default: "/packs/default/key.wav",
+      space: "/packs/default/space.wav",
+      enter: null,
+      backspace: "/packs/default/backspace.wav",
+      commit: "/packs/default/commit.wav",
+      achievement: "/packs/default/achievement.wav",
+    },
+    sequence: null,
+    max_sample_millis: 1500,
+    melody_idle_reset_millis: 3000,
+    ...overrides,
+  });
+  const keys = files({});
+  const twinkle = files({
+    id: "twinkle",
+    mode: "sequence",
+    sounds: {
+      default: null,
+      space: null,
+      enter: null,
+      backspace: null,
+      commit: null,
+      achievement: null,
+    },
+    sequence: { sample: "/packs/twinkle/tone.wav", semitones: [0, 0, 7, 7, 9], advance: "key" },
+  });
+
+  check(
+    KeySoundPolicy.settings(undefined) === KEY_SOUNDS_OFF,
+    "no plugins record is every sound off",
+  );
+  check(!KeySoundPolicy.wanted(KEY_SOUNDS_OFF), "and nothing is loaded for it");
+  const on: KeySoundSettings = KeySoundPolicy.settings({ key_sound: { enabled: true } });
+  check(
+    on.key &&
+      !on.melody &&
+      on.pack === "default" &&
+      on.melodyPack === "twinkle" &&
+      on.volume === 50,
+    "a partial record takes the shared defaults for what it leaves out",
+  );
+  check(
+    KeySoundPolicy.settings({ key_sound: { enabled: true, volume: 250 } }).volume === 50,
+    "an out-of-range volume falls back rather than playing louder than full",
+  );
+  const melody: KeySoundSettings = KeySoundPolicy.settings({
+    key_sound: { enabled: true, mode: "melody", volume: 80 },
+    melody: { pack: "twinkle" },
+  });
+  check(melody.melody && melody.volume === 80, "melody mode and its volume are read");
+  check(
+    KeySoundPolicy.selection(melody).pack === null &&
+      KeySoundPolicy.selection(melody).melodyPack === "twinkle",
+    "a melody alone loads only the melody pack",
+  );
+  const commitToo: KeySoundSettings = { ...melody, commit: true };
+  check(
+    KeySoundPolicy.selection(commitToo).pack === "default",
+    "a commit sound loads the key pack beside the melody",
+  );
+  check(
+    KeySoundPolicy.settings({ achievements: { enabled: true } }).achievements &&
+      KeySoundPolicy.wanted(KeySoundPolicy.settings({ achievements: { enabled: true } })),
+    "achievements alone are enough to load the key pack",
+  );
+  check(
+    KeySoundPolicy.gain({ ...on, volume: 50 }) === 0.5,
+    "50 is half amplitude, as on the desktop",
+  );
+  check(KeySoundPolicy.gain({ ...on, volume: 0 }) === 0, "0 is silent");
+
+  check(KeySoundPolicy.keyClass(2050, 0x20, false, false, false) === KeySoundClass.SPACE, "space");
+  check(KeySoundPolicy.keyClass(2054, 0, false, false, false) === KeySoundClass.ENTER, "enter");
+  check(
+    KeySoundPolicy.keyClass(2119, 0, false, false, false) === KeySoundClass.ENTER,
+    "keypad enter",
+  );
+  check(
+    KeySoundPolicy.keyClass(2055, 0, false, false, false) === KeySoundClass.BACKSPACE,
+    "backspace",
+  );
+  check(
+    KeySoundPolicy.keyClass(2017, 0x61, false, false, false) === KeySoundClass.DEFAULT,
+    "a letter",
+  );
+  check(
+    KeySoundPolicy.keyClass(2017, 0x61, true, false, false) === -1,
+    "Ctrl+A is a shortcut, silent",
+  );
+  check(KeySoundPolicy.keyClass(2014, 0, false, false, false) === -1, "an arrow is silent");
+  check(KeySoundPolicy.keyClass(2047, 0, false, false, false) === -1, "Shift on its own is silent");
+
+  const requests = KeySoundPolicy.samples(keys, twinkle);
+  check(
+    requests.map((request) => request.file).join(",") ===
+      "/packs/default/key.wav,/packs/default/space.wav,/packs/default/backspace.wav," +
+        "/packs/default/commit.wav,/packs/default/achievement.wav,/packs/twinkle/tone.wav",
+    "each file is prepared once, a missing class falling back to the default at play time",
+  );
+  check(
+    requests[requests.length - 1].semitones.join(",") === "0,7,9",
+    "a melody sample is rendered once per distinct pitch of its tune",
+  );
+  check(
+    KeySoundPolicy.samples(twinkle, null).length === 0,
+    "a key pack in sequence mode has no key, commit or achievement samples here",
+  );
+
+  const state = new KeySoundMelody();
+  const keyCues = KeySoundPolicy.cues(
+    on,
+    keys,
+    null,
+    KeySoundEvent.KEY,
+    KeySoundClass.ENTER,
+    state,
+    0,
+  );
+  check(
+    keyCues.length === 1 &&
+      keyCues[0].file === "/packs/default/key.wav" &&
+      keyCues[0].semitone === 0,
+    "a class without its own sample plays the pack's default",
+  );
+  check(
+    KeySoundPolicy.cues(on, keys, null, KeySoundEvent.KEY, KeySoundClass.SPACE, state, 0)[0]
+      .file === "/packs/default/space.wav",
+    "space plays its own sample",
+  );
+  check(
+    KeySoundPolicy.cues(on, keys, null, KeySoundEvent.COMMIT, 0, state, 0).length === 0,
+    "a commit is silent while the commit sound is off",
+  );
+  check(
+    KeySoundPolicy.cues({ ...on, commit: true }, keys, null, KeySoundEvent.COMMIT, 0, state, 0)[0]
+      .file === "/packs/default/commit.wav",
+    "and plays the pack's commit sample while it is on",
+  );
+  check(
+    KeySoundPolicy.cues(
+      { ...on, achievements: true },
+      keys,
+      null,
+      KeySoundEvent.ACHIEVEMENT,
+      0,
+      state,
+      0,
+    )[0].file === "/packs/default/achievement.wav",
+    "a milestone plays the achievement sample",
+  );
+  check(
+    KeySoundPolicy.cues(on, keys, null, KeySoundEvent.ACHIEVEMENT, 0, state, 0).length === 0,
+    "but only with achievements on",
+  );
+  check(
+    KeySoundPolicy.cues({ ...on, key: false }, keys, null, KeySoundEvent.KEY, 0, state, 0)
+      .length === 0,
+    "keys are silent with the key sound off",
+  );
+  check(
+    KeySoundPolicy.cues(on, twinkle, null, KeySoundEvent.KEY, 0, state, 0).length === 0,
+    "a sequence pack chosen as the key pack leaves keys silent, as on the desktop",
+  );
+
+  const tune = new KeySoundMelody();
+  const notes: number[] = [];
+  for (let press = 0; press < 6; press++) {
+    const cue = KeySoundPolicy.cues(melody, null, twinkle, KeySoundEvent.KEY, 0, tune, press * 100);
+    notes.push(cue[0].semitone);
+  }
+  check(notes.join(",") === "0,0,7,7,9,0", "keys step through the tune and start over at its end");
+  const paused = KeySoundPolicy.cues(melody, null, twinkle, KeySoundEvent.KEY, 0, tune, 500 + 3000);
+  check(paused[0].semitone === 0, "three seconds without a note start the tune again");
+  check(
+    KeySoundPolicy.cues(melody, null, twinkle, KeySoundEvent.COMMIT, 0, tune, 3600).length === 0,
+    "a tune that advances on keys ignores commits",
+  );
+  const onCommit = files({
+    ...twinkle,
+    sequence: { sample: "/packs/twinkle/tone.wav", semitones: [4, 5], advance: "commit" },
+  });
+  const commitTune = new KeySoundMelody();
+  check(
+    KeySoundPolicy.cues(melody, null, onCommit, KeySoundEvent.KEY, 0, commitTune, 0).length === 0,
+    "a tune that advances on commits leaves keys silent",
+  );
+  check(
+    KeySoundPolicy.cues(melody, null, onCommit, KeySoundEvent.COMMIT, 0, commitTune, 0)[0]
+      .semitone === 4,
+    "and steps on each commit",
+  );
+  check(new KeySoundMelody().step([], 0, 3000) === null, "an empty tune has no note");
+
+  check(
+    KeySoundPolicy.isWav("/a/B.WAV") && !KeySoundPolicy.isWav("/a/b.ogg"),
+    "WAV is told by extension",
+  );
+  check(KeySoundPolicy.durationAllowed("1500", 1500), "exactly the bound is allowed");
+  check(!KeySoundPolicy.durationAllowed("1501", 1500), "a millisecond over is refused");
+  check(
+    !KeySoundPolicy.durationAllowed(undefined, 1500) && !KeySoundPolicy.durationAllowed("x", 1500),
+    "an unknown length is refused rather than trusted",
+  );
+  check(
+    KeySoundPolicy.cueKey("/a.wav", -2) !== KeySoundPolicy.cueKey("/a.wav", 2),
+    "each pitch of a file is its own sound",
   );
 });

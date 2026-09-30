@@ -66,7 +66,21 @@ export const savePreferences: (
 ) => string;
 export const dictionary: (request: string) => string;
 export const updatePreferences: (handle: number, snapshot: string) => string;
+/** `{directory,action}`; a `record` action answers `{recorded,milestone}`, where milestone is the commit count just passed while achievements are switched on, else null. */
 export const typingStatistics: (request: string) => string;
+/**
+ * `{state_root,sound_packs,pack}` in, all paths absolute; the validated files of that sound pack out: `{id,name,license,builtin,mode,sounds:{default,space,enter,backspace,commit,achievement},sequence:{sample,semitones,advance}|null,max_sample_millis,melody_idle_reset_millis}` with absolute paths. Reads the pack from disk: not for the key path.
+ */
+export const keySoundPack: (request: string) => string;
+/**
+ * Decodes the WAV sample at `sample` once per semitone and writes each note to `<directory>/note-<index>.wav` at 48 kHz, pitched as a playback rate. Resolves with the files in semitone order; rejects a sample that is not WAV, lasts longer than `maxMillis`, or decodes past its declared length.
+ */
+export const keySoundRenderNotes: (
+  sample: string,
+  semitones: number[],
+  directory: string,
+  maxMillis: number,
+) => Promise<string[]>;
 export const vocabularyReview: (request: string) => string;
 /**
  * Locked mobile history operations. Harmony opts into migration of its original

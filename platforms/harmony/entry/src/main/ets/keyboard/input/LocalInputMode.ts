@@ -2,8 +2,7 @@
  * Local input mode shortcuts the shared Engine exposes, ported from
  * platforms/android/java/app/msime/android/LocalInputMode.java.
  *
- * The trigger is the uppercase letter that enters the mode; the preference key is what the shared
- * settings store spells it as.
+ * The trigger is the uppercase letter, or for `/` and `@` the mark, that enters the mode; the preference key is what the shared settings store spells it as, which is also the Engine's `local_mode` name.
  */
 export interface LocalInputModeDefinition {
   readonly id: string;
@@ -32,11 +31,23 @@ const MODES: LocalInputModeDefinition[] = [
   mode("TEMPORARY_JAPANESE", "R", "临时日语", "temporary_japanese"),
 ];
 
+// Entered from a hardware keyboard only, with Shift+V on an empty composition or `/` and `@` with nothing composed, so they are named but not offered as tiles: the touch tools panel lists MODES, and these three spell with digits, operators and a list the touch keyboard has no face for. All three are off until the user turns them on.
+const HARDWARE_MODES: LocalInputModeDefinition[] = [
+  mode("EXPRESSION", "V", "计算", "expression"),
+  mode("COMMAND", "/", "指令", "command"),
+  mode("MENTION", "@", "名单", "mention"),
+];
+
+const ALL_MODES: LocalInputModeDefinition[] = MODES.concat(HARDWARE_MODES);
+
 export class LocalInputMode {
+  /** The modes the touch tools panel offers as tiles. */
   static readonly MODES: LocalInputModeDefinition[] = MODES;
+  /** The modes only a hardware keyboard enters; see HARDWARE_MODES. */
+  static readonly HARDWARE_MODES: LocalInputModeDefinition[] = HARDWARE_MODES;
 
   static fromTrigger(trigger: string): LocalInputModeDefinition | null {
-    for (const candidate of MODES) {
+    for (const candidate of ALL_MODES) {
       if (candidate.trigger === trigger) {
         return candidate;
       }
@@ -45,7 +56,7 @@ export class LocalInputMode {
   }
 
   static fromPreferenceKey(key: string): LocalInputModeDefinition | null {
-    for (const candidate of MODES) {
+    for (const candidate of ALL_MODES) {
       if (candidate.preferenceKey === key) {
         return candidate;
       }

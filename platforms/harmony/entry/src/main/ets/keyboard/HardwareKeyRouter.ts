@@ -113,6 +113,8 @@ export interface HardwareSpelling {
   readonly microsoftShuangpin: boolean;
   /** Ctrl+Shift+E's English candidate mode, where the Engine spells letters only. */
   readonly englishCandidates: boolean;
+  /** The Engine's `spelling_symbols`: the non-letter keys the active local mode takes as input, the digits in U mode and the digits and operators in V mode. */
+  readonly spellingSymbols: string;
 }
 
 export const PLAIN_SPELLING: HardwareSpelling = {
@@ -122,6 +124,7 @@ export const PLAIN_SPELLING: HardwareSpelling = {
   wubi: false,
   microsoftShuangpin: false,
   englishCandidates: false,
+  spellingSymbols: "",
 };
 
 const KEYCODE_SPACE: number = 2050;
@@ -357,6 +360,10 @@ export class HardwareKeyRouter {
     }
     // The keypad's decimal point is always an ASCII '.', which is what the Windows host does with `VK_DECIMAL` (`KeyHandler.cpp`, "Numpad decimal should always commit ASCII '.'"): someone typing a number on the keypad wants 3.14, not 3。14. Mid-composition it finishes the composition first, as that host does.
     if (key.keyCode === KEYCODE_NUMPAD_DOT) {
+      // Unless the composition spells with it: in V mode the keypad's point is the decimal point of the number being typed.
+      if (composing && HardwareKeyRouter.spells(spelling, FULL_STOP)) {
+        return decision(HardwareKeyAction.COMPOSE, FULL_STOP);
+      }
       return composing ? decision(HardwareKeyAction.COMMIT_THEN_TYPE, FULL_STOP) : RELEASE;
     }
     if (composing) {
@@ -387,6 +394,14 @@ export class HardwareKeyRouter {
       if (key.keyCode === KEYCODE_ESCAPE) {
         return decision(HardwareKeyAction.CANCEL);
       }
+      // Ahead of the word-character keys, navigation and the number row, all of which would otherwise claim these keys: Shift+= is the `+` of `U+`, a digit in U or V mode is part of the input rather than a pick, and V mode's `-` and `.` are an operator and a decimal point rather than paging keys.
+      const spellingDecision: HardwareKeyDecision | undefined = HardwareKeyRouter.spellingKey(
+        key,
+        spelling,
+      );
+      if (spellingDecision !== undefined) {
+        return spellingDecision;
+      }
       if (hasHighlightedCandidate && !key.shiftKey && wordCharacter === "brackets") {
         if (key.keyCode === KEYCODE_LEFT_BRACKET) {
           return decision(HardwareKeyAction.WORD_CHARACTER_FIRST);
@@ -411,14 +426,6 @@ export class HardwareKeyRouter {
         // 重输-adjacent raw commit means on the touch keyboard. The editor's own return action is
         // what Enter does when nothing is being composed, and that is the untouched path below.
         return decision(HardwareKeyAction.COMMIT_RAW);
-      }
-      // Ahead of navigation and of the number row, both of which would otherwise claim these keys: Shift+= is the `+` of `U+`, and a digit in U mode is part of the code point rather than a pick.
-      const spellingDecision: HardwareKeyDecision | undefined = HardwareKeyRouter.spellingKey(
-        key,
-        spelling,
-      );
-      if (spellingDecision !== undefined) {
-        return spellingDecision;
       }
       const japanesePunctuation: boolean =
         japanese && (key.keyCode === KEYCODE_MINUS || key.keyCode === KEYCODE_EQUALS);
@@ -514,6 +521,16 @@ export class HardwareKeyRouter {
     return RELEASE;
   }
 
+  /** Whether the Engine takes `character` as input in this state. Never in the English candidate mode, which spells letters only. */
+  private static spells(spelling: HardwareSpelling, character: number): boolean {
+    return (
+      !spelling.englishCandidates &&
+      character > 0x20 &&
+      character < 0x7f &&
+      spelling.spellingSymbols.indexOf(String.fromCharCode(character)) >= 0
+    );
+  }
+
   private static spellingKey(
     key: HardwareKey,
     spelling: HardwareSpelling,
@@ -522,16 +539,20 @@ export class HardwareKeyRouter {
     if (spelling.englishCandidates) {
       return undefined;
     }
-    if (spelling.localMode === "unicode") {
-      // U mode spells a hexadecimal code point, so the plain digits are input and Shift+1..9 picks, as on Windows.
-      if (!key.shiftKey && key.unicodeChar >= DIGIT_ZERO && key.unicodeChar <= DIGIT_ZERO + 9) {
+    if (spelling.spellingSymbols.length > 0) {
+      // A local mode that spells with more than letters: U mode's hexadecimal digits, V mode's digits and operators. What the Engine lists is input, decided by the character the key typed, so V mode's Shift+9 is its `(`. Shift+1..9 picks otherwise, as on Windows, since the plain digits are taken.
+      if (HardwareKeyRouter.spells(spelling, key.unicodeChar)) {
         return decision(HardwareKeyAction.COMPOSE, key.unicodeChar);
       }
       if (key.shiftKey && key.keyCode >= KEYCODE_1 && key.keyCode <= KEYCODE_9) {
         return decision(HardwareKeyAction.SELECT, 0, key.keyCode - KEYCODE_1);
       }
       // `U+1F600` as well as `u1f600`: the plus is only part of the spelling straight after the U.
-      if (key.unicodeChar === PLUS && spelling.editing === "U") {
+      if (
+        spelling.localMode === "unicode" &&
+        key.unicodeChar === PLUS &&
+        spelling.editing === "U"
+      ) {
         return decision(HardwareKeyAction.COMPOSE, PLUS);
       }
       return undefined;

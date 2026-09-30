@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | `metasequoiaime/Google-PinyinIME-Rev` | Apache-2.0 | 已移除。Google 整句解码器和它的 `dict_pinyin.dat` 随 C++ Engine 一并退役，整句候选只来自词格 |
 | `nemtrif/utfcpp` | BSL-1.0 | 引擎不再使用。Windows TSF 仍通过 vcpkg 引入它，见[各平台引入的第三方 SDK](#各平台引入的第三方-sdk) |
-| `mackron/miniaudio` | 公有领域 / MIT-0 双许可 | 不再随引擎来。Windows 提示音（`platforms/windows/src/voice/CuePlayer.cpp`）用的单头文件固定在 `platforms/windows/third_party/miniaudio/`，许可证全文在同目录 `LICENSE`；麦克风采集改由下表的 `cpal` 负责 |
+| `mackron/miniaudio` | 公有领域 / MIT-0 双许可 | 不再随引擎来。Windows 提示音（`platforms/windows/src/voice/CuePlayer.cpp`）用的单头文件固定在 `platforms/windows/third_party/miniaudio/`，许可证全文在同目录 `LICENSE`；麦克风采集改由下表的 `cpal` 负责。HarmonyOS 2in1 的按键音也用这同一份头文件（v0.11.25）：`platforms/harmony/native/key_sound_render.cpp` 只编译它的 WAV 解码、采样率转换和 WAV 编码（不编设备后端和其他编解码器），在长度上限内解码音效包的 WAV 样本并按旋律音高写出，再交给 SoundPool 播放 |
 | `ggml-org/whisper.cpp` | MIT | 已移除。Whisper 本地文件识别不再提供，本地语音识别只走下文的 sherpa-onnx |
 | Zinnia（Taku Kudo） | BSD-3-Clause | 不再编译 C++ 版。`crates/engine/src/handwriting/` 是其识别器的 Rust 移植，桌面包照旧携带 `Zinnia-LICENSE.txt` |
 | 手写模型 `handwriting-zh_CN.model` | LGPL-2.1 | 由 `resources/handwriting-model.lock.json` 固定长度与 SHA-256，许可证全文 `HandwritingModel-LICENSE.txt` 与模型一同固定、一同分发 |
@@ -132,7 +132,7 @@ print(json.loads(f.read(n))["__metadata__"]["attribution"])
 | --- | --- | --- | --- |
 | `zip`（关闭默认特性，只开 `deflate-flate2`） | 8.6 | MIT | 导入用户选中的 `.zip` 插件包（`crates/client-core/src/plugins/import.rs`）。带进 `typed-path`（MIT OR Apache-2.0）；其余依赖 `crc32fast`、`indexmap`、`memchr`、`flate2` 原本就在锁文件里 |
 
-播放音效包与背景音乐用到的 Rust crate，只链进 macOS、Windows、Linux 的 `host-api`（`crates/host-api/src/key_sound/`）；iOS、Android、HarmonyOS 不链接，HarmonyOS 2in1 用系统播放器播 `msime_client_key_sound_pack` 解析出的文件：
+播放音效包与背景音乐用到的 Rust crate，只链进 macOS、Windows、Linux 的 `host-api`（`crates/host-api/src/key_sound/`）；iOS、Android、HarmonyOS 不链接，HarmonyOS 2in1 用系统 SoundPool 播 `msime_client_key_sound_pack` 解析出的文件，WAV 样本先经上文的 miniaudio 在长度上限内解码、按旋律音高重写：
 
 | crate | 版本 | 许可证 | 用途 |
 | --- | --- | --- | --- |

@@ -1122,6 +1122,8 @@ class SettingsBridge {
       }
       value['candidate_follow_cursor'] = projection.candidateFollowCursor;
       value['input_mode_hud'] = projection.inputModeHud;
+      value['key_sound'] = projection.keySound;
+      value['plugin_triggers'] = projection.pluginTriggers;
       if (release !== null) {
         value['os_version'] = release;
       }

@@ -31,11 +31,16 @@ output="$repo_root/target/ohos/libs/$abi"
 mkdir -p "$output"
 cp "$repo_root/target/ohos-cargo/$rust_target/release/libmsime_host_api.so" "$output/"
 "$ndk/llvm/bin/llvm-readobj" --file-headers "$output/libmsime_host_api.so" | grep -q "EM_AARCH64\|EM_ARM\|EM_X86_64"
+# miniaudio decodes and pitches the key-sound samples (native/key_sound_render.cpp). It is the single header the Windows host already pins, and like there its implementation is third-party code compiled at the toolchain's default warning level, outside the -Werror set below.
+miniaudio="platforms/windows/third_party/miniaudio"
+"${compiler}++" -std=c++17 -fPIC -O2 -c platforms/harmony/native/miniaudio.cpp -I"$miniaudio" \
+  -o "$output/miniaudio.o"
 # The ArkTS side reaches the C ABI through this module. --no-undefined keeps a missing binding a link error here rather than a failed import on the device.
 "${compiler}++" -std=c++17 -shared -fPIC -Wall -Wextra -Werror \
   -Wl,--no-undefined -Wl,-soname,libmsimeclient.so \
-  platforms/harmony/native/client_napi.cpp -Icrates/host-api/include \
-  -L"$output" -lmsime_host_api -lace_napi.z -lz -o "$output/libmsimeclient.so"
+  platforms/harmony/native/client_napi.cpp platforms/harmony/native/key_sound_render.cpp \
+  "$output/miniaudio.o" -Icrates/host-api/include -I"$miniaudio" \
+  -L"$output" -lmsime_host_api -lace_napi.z -lz -lm -o "$output/libmsimeclient.so"
 "$ndk/llvm/bin/llvm-nm" -D --defined-only "$output/libmsimeclient.so" | grep -q RegisterClientModule
 # The C++ runtime has to travel with the module. OpenHarmony does not expose a system libc++_shared.so to applications, so leaving it out makes the NAPI import fail on the device with "Error loading shared library libc++_shared.so" while the build itself stays perfectly green.
 runtime="$ndk/llvm/lib/$runtime_triple/libc++_shared.so"

@@ -710,7 +710,15 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     } else if (event.action === KeyAction.DOWN) {
       this.backspaceHold.reset();
     }
+    // A key sound belongs to the typing, not to what became of the key, so every key-down from here on has one: composed, handed back or released to the application. Only a 2in1 has sounds configured, and the session leaves password fields silent.
+    const sound = (): void => {
+      if (event.action === KeyAction.DOWN && KeyboardFormFactor.isDesktop()) {
+        session.hardwareKeySound(event.key.code, event.unicodeChar, event.ctrlKey, event.altKey,
+          event.logoKey);
+      }
+    };
     if (!session.composes()) {
+      sound();
       return false;
     }
     const decision: HardwareKeyDecision =
@@ -725,12 +733,16 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
       if (event.action === KeyAction.DOWN) {
         session.recordPassthrough(event.unicodeChar, event.ctrlKey, event.altKey, event.logoKey);
       }
+      sound();
       return false;
     }
     if (event.action !== KeyAction.DOWN) {
       return true;
     }
-    if (!HardwareKeyDispatch.apply(decision, key.shiftKey, session)) {
+    const applied: boolean = HardwareKeyDispatch.apply(decision, key.shiftKey, session);
+    // After the key has done its work, so a commit it caused is heard with it.
+    sound();
+    if (!applied) {
       // Declined rather than swallowed, the way TSF treats a key the Windows host did not eat: a capital letter with nothing composed is the application's to type.
       this.releasedKeys.add(event.key.code);
       session.recordPassthrough(event.unicodeChar, event.ctrlKey, event.altKey, event.logoKey);
@@ -829,6 +841,8 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
       this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     // The packaged recording tones are read through this context, which the session has none of.
     KeyboardSession.shared.useVoiceContext(this.context);
+    // The built-in sound packs are read from, and pitched notes written under, this context's directories.
+    KeyboardSession.shared.useSoundContext(this.context);
     const started: boolean = KeyboardSession.shared.start(resources, state, systemDark);
     if (!started) {
       // Without a session there is nothing to show. Leaving the panel uncreated keeps the framework
