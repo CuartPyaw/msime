@@ -106,7 +106,7 @@ pub fn read_emoji_catalog_slice(
         next_offset: offset,
         complete: false,
     };
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::with_capacity(if deduplicate { limit } else { 0 });
     let mut rows = statement.raw_query();
     loop {
         let row = match rows.next() {
