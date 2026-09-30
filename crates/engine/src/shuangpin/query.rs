@@ -23,7 +23,7 @@ pub fn segment_input(raw: &str, profile: &ShuangpinProfile) -> String {
 /// Raw byte offsets of unit starts, always including 0 and the length (:56-102).
 pub fn segment_raw_boundaries(raw: &str, profile: &ShuangpinProfile) -> Vec<usize> {
     let bytes = raw.as_bytes();
-    let mut boundaries = Vec::new();
+    let mut boundaries = Vec::with_capacity(raw.len() + 1);
     if bytes.is_empty() {
         return boundaries;
     }
