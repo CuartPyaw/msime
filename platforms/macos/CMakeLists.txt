@@ -175,6 +175,12 @@ set(MSIME_VOICE_CUE_RESOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/../windows/installer/assets/audios/end.mp3")
 target_sources(MSIMEClientInputMethod PRIVATE ${MSIME_VOICE_CUE_RESOURCES})
 set_source_files_properties(${MSIME_VOICE_CUE_RESOURCES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/audios")
+# The built-in sound packs, synthesized by scripts/generate_sound_packs.py, one folder per pack under Resources/sound-packs: the directory the input method and the settings page name to client-core as the built-in pack root. Beside EngineResources rather than in it, because that directory has to hold exactly what the dictionary lock pins.
+foreach(MSIME_SOUND_PACK default twinkle)
+  file(GLOB MSIME_SOUND_PACK_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/sound-packs/${MSIME_SOUND_PACK}/*")
+  target_sources(MSIMEClientInputMethod PRIVATE ${MSIME_SOUND_PACK_FILES})
+  set_source_files_properties(${MSIME_SOUND_PACK_FILES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/sound-packs/${MSIME_SOUND_PACK}")
+endforeach()
 # LaunchServices takes the Dock and menu bar name from a localized InfoPlist.strings, not from the
 # CFBundleDisplayName in the plist; without these the Dock falls back to the executable's filename.
 # The TIS identifier keys name the entry in the system input menu.

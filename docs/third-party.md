@@ -112,6 +112,26 @@ print(json.loads(f.read(n))["__metadata__"]["attribution"])
 
 构成这张表所用的部件拆分与笔顺数据另有来源（rime-radical-pinyin，GPL-3.0，上游含 chaizi/CC-BY-3.0、CHISE/GPL-2+、yi-bai/ids/MIT；笔顺来自 cnchar，MIT），逐条同样见 NOTICE.md。另外五套辅助码表原先随 Engine 归档而来，现在同样放在 `resources/helpcodes/`，来源说明是从 Engine 原样带过来的 [`resources/helpcodes/ENGINE-NOTICE.md`](../resources/helpcodes/ENGINE-NOTICE.md)：它们同样没有拿到明确的再分发授权。
 
+## 自带音效包与插件包（`resources/sound-packs/`、`client-core::plugins`）
+
+内置的两套音效包是本项目自己的作品，随各平台安装包分发，放在资源目录的旁边（资源目录必须与锁文件完全一致）。
+
+| 项 | 值 |
+| --- | --- |
+| 文件 | `default/`：普通键、空格、回车、退格、上屏与里程碑共 6 段 WAV；`twinkle/`：1 段音色 `tone.wav`，按键时按清单里的半音序列变调演奏 |
+| 来源 | `scripts/generate_sound_packs.py` 用正弦、衰减包络和定种子的噪声逐样本合成，不录音、不下载任何素材 |
+| 许可证 | CC0-1.0，写在各包的 `plugin.toml` 里 |
+| 核对方式 | `scripts/test-sound-packs.py` 把样本重新合成一遍，与提交的文件逐样本比对（容差为 16 位量化的 1 级），不一致就失败，所以手工替换的样本进不来 |
+| 旋律 | `twinkle` 的音符序列是《小星星》（法国民谣 "Ah! vous dirai-je, maman"，18 世纪），属公有领域 |
+
+第三方插件包（音效、背景音乐、/指令表）由用户自行导入，本仓库不分发。每个包必须在清单里声明 `license`，设置页原样显示；包里只能有清单、清单点名的 WAV/Ogg 和文本说明，不能带任何可执行内容，`permissions` 必须为空。
+
+导入插件包用到的 Rust crate：
+
+| crate | 版本 | 许可证 | 用途 |
+| --- | --- | --- | --- |
+| `zip`（关闭默认特性，只开 `deflate-flate2`） | 8.6 | MIT | 导入用户选中的 `.zip` 插件包（`crates/client-core/src/plugins/import.rs`）。带进 `typed-path`（MIT OR Apache-2.0）；其余依赖 `crc32fast`、`indexmap`、`memchr`、`flate2` 原本就在锁文件里 |
+
 ## 背单词词书（`resources/wordbook.lock.json`）
 
 背单词模式的八本内置词书来自 ECDICT，不在 `desktop-dictionary.lock.json` 的覆盖范围里，所以单列一节。

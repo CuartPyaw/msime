@@ -282,6 +282,15 @@ pub struct HostCapabilities {
     /// every press fails. The same rule the other optional capabilities follow.
     #[serde(default)]
     pub vocabulary_review: bool,
+    /// The host plays the sound packs in `plugins`: a sample per key class, the melody, the commit sound and the achievement jingle. Only an input process that sees the keys can, and only where it has somewhere to play them; a host without the player keeps the settings but offers no switches for them.
+    #[serde(default)]
+    pub key_sound: bool,
+    /// The host routes the `/` command and `@` mention modes: it hands `/` and `@` to the runtime, stops treating digits as candidate numbers while a mode spells with them, and loads the enabled command tables and the name list into the Engine. The `V` mode needs only the digit routing and is covered by the same flag.
+    #[serde(default)]
+    pub plugin_triggers: bool,
+    /// The host streams the selected music pack while it is the active input method.
+    #[serde(default)]
+    pub music: bool,
     /// The operating system release, as the machine reports it, for the feedback
     /// page to attach. Not a platform assumption like the flags above -- the host
     /// fills it in after `for_platform`, the way `system_fonts` is filled in --
@@ -524,6 +533,10 @@ impl HostCapabilities {
             // no platform here that can and one that cannot. The flag exists for the version
             // skew: a host binary older than the entry point sends no field and gets `false`.
             vocabulary_review: true,
+            // The packs, the tables and the name list are all in place, but no host plays, routes or loads them yet. Each flips here in the change that wires it, the rule `for_platform` keeps: a switch with nothing behind it reads as a setting being ignored.
+            key_sound: false,
+            plugin_triggers: false,
+            music: false,
             os_version: None,
             candidate_panel_limit: None,
         }

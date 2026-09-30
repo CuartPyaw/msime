@@ -303,6 +303,10 @@ else {
 $targetHtml = Join-Path $targetAppData 'html'
 $targetAudios = Join-Path $targetAppData 'audios'
 Copy-DirectoryContents -Source $audioSource -Destination $targetAudios
+# The built-in sound packs, synthesized by scripts/generate_sound_packs.py. The Server names DataDir\sound-packs to client-core as the built-in pack root; installed packs live under DataDir\plugins, which is user state.
+$targetSoundPacks = Join-Path $targetAppData 'sound-packs'
+Reset-Directory -LiteralPath $targetSoundPacks
+Copy-DirectoryContents -Source (Join-Path $RepoRoot 'resources/sound-packs') -Destination $targetSoundPacks
 if (Test-Path -LiteralPath $targetHtml) {
     # Remove obsolete package staging, not the user's installed files.
     Remove-Item -LiteralPath $targetHtml -Recurse -Force

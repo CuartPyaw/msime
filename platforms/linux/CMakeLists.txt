@@ -663,6 +663,9 @@ endif()
 # 解析，所以这些文件决定了托盘、输入法列表和启动器上显示的是 logo 还是占位图。它们此前
 # 装在桌面二进制那个分支里，于是只装输入法、不装设置窗口的安装一张图标都没有，而那恰恰
 # 是最小可用的安装方式。
+# The built-in sound packs, synthesized by scripts/generate_sound_packs.py and dedicated to the public domain, beside the resource directory rather than in it: that directory has to hold exactly what the dictionary lock pins. The hosts and the settings window name this directory to client-core as the built-in pack root.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/sound-packs/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/sound-packs")
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/icons")
 configure_file(cmake/icon-cache.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/icon-cache.cmake @ONLY)

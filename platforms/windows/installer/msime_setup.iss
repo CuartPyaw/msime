@@ -773,6 +773,7 @@ begin
     (CompareText(FileName, 'config.default.toml') = 0) or
     (CompareText(FileName, 'helpcodes') = 0) or
     (CompareText(FileName, 'audios') = 0) or
+    (CompareText(FileName, 'sound-packs') = 0) or
     (CompareText(FileName, 'html') = 0) or
     (CompareText(FileName, 'dict_pinyin.dat') = 0) or
     (CompareText(FileName, 'sc.lm') = 0) or

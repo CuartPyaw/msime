@@ -792,7 +792,7 @@ fn generated_local_modes_are_off_by_default_and_in_older_documents() {
     let defaults = LocalModePreferences::default();
     assert!(!defaults.expression && !defaults.command && !defaults.mention);
 
-    // A document from before the three switches existed still loads, with them off and the rest as written.
+    // A document from before the three switches existed still loads, with them off and the rest as written. While off they are not written at all, so a default document is exactly what a build from before them wrote and can read back.
     let dir = tempfile::tempdir().unwrap();
     let store = PreferencesStore::new(dir.path());
     let mut legacy = serde_json::to_value(PreferencesSnapshot::default()).unwrap();
@@ -800,7 +800,7 @@ fn generated_local_modes_are_off_by_default_and_in_older_documents() {
         .as_object_mut()
         .unwrap();
     for key in ["expression", "command", "mention"] {
-        assert!(local_modes.remove(key).is_some(), "{key}");
+        assert!(!local_modes.contains_key(key), "{key}");
     }
     local_modes.insert("unicode".into(), false.into());
     let bytes = serde_json::to_vec(&legacy).unwrap();
@@ -828,12 +828,139 @@ fn generated_local_modes_are_off_by_default_and_in_older_documents() {
             [modes.expression, modes.command, modes.mention],
             [*key == "expression", *key == "command", *key == "mention"]
         );
+        let written: serde_json::Value =
+            serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
+        assert_eq!(written["preferences"]["local_modes"][*key], true);
     }
 
     // The fields stay closed to anything else.
     let mut unknown = serde_json::to_value(Preferences::default()).unwrap();
     unknown["local_modes"]["calculator"] = true.into();
     assert!(serde_json::from_value::<Preferences>(unknown).is_err());
+}
+
+#[test]
+fn plugin_preferences_are_off_by_default_and_absent_from_older_documents() {
+    let defaults = PluginPreferences::default();
+    assert!(!defaults.key_sound.enabled);
+    assert_eq!(defaults.key_sound.mode, KeySoundMode::Keys);
+    assert_eq!(defaults.key_sound.pack, crate::plugins::DEFAULT_SOUND_PACK);
+    assert_eq!(defaults.melody.pack, crate::plugins::DEFAULT_MELODY_PACK);
+    assert!(
+        !defaults.commit_sound.enabled && !defaults.music.enabled && !defaults.achievements.enabled
+    );
+    assert!(defaults.music.pack.is_empty() && defaults.command_tables.is_empty());
+
+    // Untouched, the section is not written, so a build from before plugins reads the document; a document from before plugins loads with them off and is not rewritten.
+    let serialized = serde_json::to_value(Preferences::default()).unwrap();
+    assert!(serialized.get("plugins").is_none());
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let legacy = serde_json::to_vec(&PreferencesSnapshot::default()).unwrap();
+    fs::write(store.path(), &legacy).unwrap();
+    assert_eq!(store.load().unwrap().preferences.plugins, defaults);
+    assert_eq!(fs::read(store.path()).unwrap(), legacy);
+
+    // A partial section fills the rest from the defaults.
+    let mut value = serialized.clone();
+    value["plugins"] = serde_json::json!({ "key_sound": { "enabled": true } });
+    let partial: Preferences = serde_json::from_value(value).unwrap();
+    assert!(partial.plugins.key_sound.enabled);
+    assert_eq!(partial.plugins.key_sound.volume, defaults.key_sound.volume);
+    assert_eq!(partial.plugins.melody, defaults.melody);
+
+    // Every part round-trips through the store.
+    let chosen = Preferences {
+        plugins: PluginPreferences {
+            key_sound: KeySoundPreferences {
+                enabled: true,
+                mode: KeySoundMode::Melody,
+                pack: "typewriter".into(),
+                volume: 100,
+            },
+            commit_sound: CommitSoundPreferences { enabled: true },
+            melody: MelodyPreferences {
+                pack: "scale".into(),
+            },
+            music: MusicPreferences {
+                enabled: true,
+                pack: "rain".into(),
+                volume: 0,
+            },
+            achievements: AchievementPreferences { enabled: true },
+            command_tables: vec!["sig".into(), "work.notes".into()],
+        },
+        ..Preferences::default()
+    };
+    let saved = store.save(0, chosen.clone()).unwrap();
+    assert_eq!(saved.preferences.plugins, chosen.plugins);
+    assert_eq!(store.load().unwrap().preferences.plugins, chosen.plugins);
+    let written: serde_json::Value =
+        serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
+    assert_eq!(
+        written["preferences"]["plugins"]["key_sound"]["mode"],
+        "melody"
+    );
+    // Restoring defaults turns them all off again.
+    assert_eq!(chosen.restored_to_defaults().plugins, defaults);
+
+    // Closed to anything else, at every level.
+    for (path, key) in [
+        (None, "scripts"),
+        (Some("key_sound"), "command"),
+        (Some("music"), "url"),
+    ] {
+        let mut value = serialized.clone();
+        value["plugins"] = serde_json::json!({});
+        match path {
+            None => value["plugins"][key] = true.into(),
+            Some(section) => value["plugins"][section] = serde_json::json!({ key: true }),
+        }
+        assert!(
+            serde_json::from_value::<Preferences>(value).is_err(),
+            "{key}"
+        );
+    }
+    let mut value = serialized;
+    value["plugins"] = serde_json::json!({ "key_sound": { "mode": "random" } });
+    assert!(serde_json::from_value::<Preferences>(value).is_err());
+}
+
+#[test]
+fn plugin_preferences_are_validated() {
+    let invalid: [fn(&mut PluginPreferences); 8] = [
+        |plugins| plugins.key_sound.volume = 101,
+        |plugins| plugins.music.volume = 255,
+        |plugins| plugins.key_sound.pack = "../default".into(),
+        |plugins| plugins.melody.pack = "Twinkle".into(),
+        |plugins| plugins.music.pack = "rain/..".into(),
+        |plugins| plugins.command_tables = vec!["sig".into(), "sig".into()],
+        |plugins| plugins.command_tables = vec![String::new()],
+        |plugins| {
+            plugins.command_tables = (0..=PluginPreferences::MAX_COMMAND_TABLES)
+                .map(|index| format!("table{index}"))
+                .collect()
+        },
+    ];
+    for (index, change) in invalid.into_iter().enumerate() {
+        let mut preferences = Preferences::default();
+        change(&mut preferences.plugins);
+        assert!(
+            matches!(
+                preferences.validate(),
+                Err(PreferencesError::InvalidPlugins)
+            ),
+            "{index}"
+        );
+    }
+    // An empty pack id means none chosen.
+    let mut preferences = Preferences::default();
+    preferences.plugins.key_sound.pack.clear();
+    preferences.plugins.melody.pack.clear();
+    preferences.plugins.command_tables = (0..PluginPreferences::MAX_COMMAND_TABLES)
+        .map(|index| format!("table{index}"))
+        .collect();
+    assert!(preferences.validate().is_ok());
 }
 
 #[test]

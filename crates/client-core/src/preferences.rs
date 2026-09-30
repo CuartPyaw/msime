@@ -694,6 +694,9 @@ pub struct Preferences {
     pub mixed_input: MixedInputPreferences,
     #[serde(default)]
     pub local_modes: LocalModePreferences,
+    /// Sound packs, background music, achievements and the enabled command tables. Left out of the document while every part is at its default, so a build from before plugins still reads a document that never touched them; the packs themselves and the @ name list live under the plugins directory, not here.
+    #[serde(default, skip_serializing_if = "PluginPreferences::is_default")]
+    pub plugins: PluginPreferences,
     #[serde(default)]
     pub clipboard_history: bool,
     /// Fetch one additional candidate from the configured cloud provider.
@@ -1146,14 +1149,14 @@ pub struct LocalModePreferences {
     pub super_jianpin: bool,
     pub temporary_english: bool,
     pub temporary_japanese: bool,
-    /// `V` on an empty composition: calculator, Chinese numerals and dates. Off by default and in documents written before it existed, because Shift+V used to type a capital V.
-    #[serde(default)]
+    /// `V` on an empty composition: calculator, Chinese numerals and dates. Off by default and in documents written before it existed, because Shift+V used to type a capital V. This and the next two are left out of the document while off, like `translation_account`, so a build from before them still reads a document that never switched them on.
+    #[serde(default, skip_serializing_if = "is_false")]
     pub expression: bool,
     /// `/` on an empty composition: built-in and installed commands. Off by default, because `/` used to type a mark.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub command: bool,
     /// `@` on an empty composition: the local mention list. Off by default, because `@` used to type itself.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub mention: bool,
 }
 
@@ -1173,6 +1176,123 @@ impl Default for LocalModePreferences {
             mention: false,
         }
     }
+}
+
+/// What the plugin packs do: which pack sounds and how loud, and which command tables the `/` mode reads. Everything is off in a fresh profile. Pack ids name a built-in pack or one installed under the plugins directory; a host that cannot find the named pack stays silent rather than falling back to another.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PluginPreferences {
+    pub key_sound: KeySoundPreferences,
+    pub commit_sound: CommitSoundPreferences,
+    pub melody: MelodyPreferences,
+    pub music: MusicPreferences,
+    pub achievements: AchievementPreferences,
+    /// Installed command-table packs the `/` mode reads, in priority order: the first pack that defines a trigger wins.
+    pub command_tables: Vec<String>,
+}
+
+impl PluginPreferences {
+    /// Most command tables enabled at once.
+    pub const MAX_COMMAND_TABLES: usize = 16;
+
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    fn validate(&self) -> bool {
+        let pack = |id: &str| id.is_empty() || crate::skin::catalog::safe_id(id);
+        pack(&self.key_sound.pack)
+            && pack(&self.melody.pack)
+            && pack(&self.music.pack)
+            && self.key_sound.volume <= 100
+            && self.music.volume <= 100
+            && self.command_tables.len() <= Self::MAX_COMMAND_TABLES
+            && self.command_tables.iter().enumerate().all(|(index, id)| {
+                crate::skin::catalog::safe_id(id) && !self.command_tables[..index].contains(id)
+            })
+    }
+}
+
+/// What a key sounds like.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeySoundMode {
+    /// The sound pack's sample for the key's class.
+    #[default]
+    Keys,
+    /// The next note of the melody pack.
+    Melody,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct KeySoundPreferences {
+    pub enabled: bool,
+    pub mode: KeySoundMode,
+    /// The sound pack keys, commits and achievements are played from.
+    pub pack: String,
+    /// 0-100, for every effect sound: keys, the melody, commits and achievements.
+    pub volume: u8,
+}
+
+impl Default for KeySoundPreferences {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: KeySoundMode::Keys,
+            pack: crate::plugins::DEFAULT_SOUND_PACK.to_owned(),
+            volume: 50,
+        }
+    }
+}
+
+/// A sound when text is committed, from the key sound pack's `commit` sample. Independent of the key sound switch.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CommitSoundPreferences {
+    pub enabled: bool,
+}
+
+/// The sequence pack a key plays a note of when `key_sound.mode` is `melody`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MelodyPreferences {
+    pub pack: String,
+}
+
+impl Default for MelodyPreferences {
+    fn default() -> Self {
+        Self {
+            pack: crate::plugins::DEFAULT_MELODY_PACK.to_owned(),
+        }
+    }
+}
+
+/// Background music, streamed from an installed music pack while the input method is active. Off, and with no pack chosen, until the user picks one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MusicPreferences {
+    pub enabled: bool,
+    pub pack: String,
+    /// 0-100.
+    pub volume: u8,
+}
+
+impl Default for MusicPreferences {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            pack: String::new(),
+            volume: 30,
+        }
+    }
+}
+
+/// A short jingle, the key sound pack's `achievement` sample, when the commit count passes one of `plugins::ACHIEVEMENT_MILESTONES`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AchievementPreferences {
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1502,6 +1622,7 @@ impl Default for Preferences {
             frequency: FrequencyPreferences::default(),
             mixed_input: MixedInputPreferences::default(),
             local_modes: LocalModePreferences::default(),
+            plugins: PluginPreferences::default(),
             clipboard_history: false,
             cloud_candidates: true,
             candidate_translations: true,
@@ -1901,6 +2022,9 @@ impl Preferences {
         if !(1..=8).contains(&self.mixed_input.minimum_prefix) {
             return Err(PreferencesError::InvalidMixedInput);
         }
+        if !self.plugins.validate() {
+            return Err(PreferencesError::InvalidPlugins);
+        }
         if !(1..=10).contains(&self.frequency.trigger_count)
             || !(1..=10).contains(&self.frequency.linear_step)
         {
@@ -2032,6 +2156,8 @@ pub enum PreferencesError {
     InvalidFrequency,
     #[error("mixed English minimum prefix must be between 1 and 8")]
     InvalidMixedInput,
+    #[error("plugin settings are invalid")]
+    InvalidPlugins,
     #[error("preferences changed; reload before saving")]
     Conflict,
     #[error("unsupported preferences format")]

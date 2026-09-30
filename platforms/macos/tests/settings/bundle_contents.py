@@ -129,6 +129,11 @@ def main() -> int:
         if not staged.is_file() or staged.stat().st_size == 0:
             failures.append(f"audios/{cue} was not staged; the voice cue falls back to a system sound")
 
+    # The built-in sound packs are what a fresh profile selects; without them key sounds have nothing to play.
+    for pack in ("default", "twinkle"):
+        if not (resources / "sound-packs" / pack / "plugin.toml").is_file():
+            failures.append(f"sound-packs/{pack} was not staged; the built-in sound pack is missing")
+
     # A macOS framework is mostly symlinks - Headers, Resources and the binary all point into
     # Versions/Current. A copy that follows them produces a directory codesign calls ambiguous and refuses
     # to seal, and an input method that cannot be signed cannot be registered as an input source at all.
@@ -162,7 +167,7 @@ def main() -> int:
             print(failure, file=sys.stderr)
         return 1
     print(f"{bundle.name}: icons staged, {len(usage)} usage descriptions and {len(identifiers)} input source names "
-          f"localised in {len(lprojs)} languages, voice cues staged, local voice helper, runtime and its licences staged.")
+          f"localised in {len(lprojs)} languages, voice cues and sound packs staged, local voice helper, runtime and its licences staged.")
     return 0
 
 

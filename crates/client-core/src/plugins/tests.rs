@@ -1,0 +1,1035 @@
+//! Unit tests for the plugin packs: the manifest rules, scanning, importing and removing, with hostile packs for every rule a third party could try to get around.
+
+use super::command_table::CommandRow;
+use super::sound_pack::{SequenceAdvance, SoundMode};
+use super::*;
+use std::io::Write;
+use tempfile::tempdir;
+
+const HEADER: &[u8] = b"RIFF\x24\0\0\0WAVEfmt ";
+
+fn wav() -> Vec<u8> {
+    let mut bytes = HEADER.to_vec();
+    bytes.extend_from_slice(&[0; 32]);
+    bytes
+}
+
+const SOUND: &str = "schema_version = 1\nkind = 'sound'\nid = 'typewriter'\nname = '打字机'\nversion = '1.0.0'\nlicense = 'CC-BY-4.0'\nauthor = 'Synthetic'\npermissions = []\nmode = 'keys'\n[sounds]\ndefault = 'key.wav'\nspace = 'space.wav'\ncommit = 'key.wav'\n";
+
+/// A valid keys-mode sound pack in `<directory>/<id>`, with its manifest as given.
+fn sound_pack(directory: &Path, manifest: &str) -> PathBuf {
+    let id = manifest
+        .lines()
+        .find_map(|line| line.strip_prefix("id = '"))
+        .and_then(|rest| rest.strip_suffix('\''))
+        .unwrap_or("typewriter");
+    let pack = directory.join(id);
+    fs::create_dir_all(&pack).unwrap();
+    fs::write(pack.join(MANIFEST_FILE), manifest).unwrap();
+    fs::write(pack.join("key.wav"), wav()).unwrap();
+    fs::write(pack.join("space.wav"), wav()).unwrap();
+    pack
+}
+
+fn installed_sound(root: &Path, manifest: &str) -> PathBuf {
+    sound_pack(&kind_directory(root, PluginKind::Sound), manifest)
+}
+
+fn command_manifest(id: &str, rows: &str) -> String {
+    format!("schema_version = 1\nkind = 'command_table'\nid = '{id}'\nname = '签名'\nversion = '1'\nlicense = 'CC0-1.0'\n{rows}")
+}
+
+fn installed_commands(root: &Path, id: &str, rows: &str) -> PathBuf {
+    let pack = kind_directory(root, PluginKind::CommandTable).join(id);
+    fs::create_dir_all(&pack).unwrap();
+    fs::write(pack.join(MANIFEST_FILE), command_manifest(id, rows)).unwrap();
+    pack
+}
+
+fn reason(root: &Path, kind: PluginKind, id: &str) -> String {
+    load_package(root, None, kind, id).unwrap_err()
+}
+
+fn builtin_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/sound-packs")
+}
+
+#[test]
+fn the_built_in_packs_the_bundles_ship_are_valid() {
+    let root = tempdir().unwrap();
+    let catalog = scan(root.path(), Some(&builtin_root()));
+    assert!(catalog.issues.is_empty(), "{:?}", catalog.issues);
+    let ids: Vec<_> = catalog.packages.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(ids.len(), BUILTIN_SOUND_PACKS.len());
+    for id in BUILTIN_SOUND_PACKS {
+        assert!(ids.contains(&id), "{id}");
+        let pack = load_package(root.path(), Some(&builtin_root()), PluginKind::Sound, id).unwrap();
+        assert!(pack.builtin);
+        assert_eq!(pack.license, "CC0-1.0");
+    }
+    let PluginContent::Sound(default) = load_package(
+        root.path(),
+        Some(&builtin_root()),
+        PluginKind::Sound,
+        DEFAULT_SOUND_PACK,
+    )
+    .unwrap()
+    .content
+    else {
+        panic!("default is a sound pack");
+    };
+    assert_eq!(default.mode, SoundMode::Keys);
+    for class in ["default", "space", "enter", "backspace"] {
+        assert!(default.key_sample(class).is_some(), "{class}");
+    }
+    assert!(default.sounds.commit.is_some() && default.sounds.achievement.is_some());
+    let PluginContent::Sound(melody) = load_package(
+        root.path(),
+        Some(&builtin_root()),
+        PluginKind::Sound,
+        DEFAULT_MELODY_PACK,
+    )
+    .unwrap()
+    .content
+    else {
+        panic!("the melody is a sound pack");
+    };
+    assert_eq!(melody.mode, SoundMode::Sequence);
+    assert_eq!(melody.key_sample("default"), None);
+    let sequence = melody.sequence.unwrap();
+    assert_eq!(sequence.semitones.len(), 42);
+    assert_eq!(sequence.advance, SequenceAdvance::Key);
+}
+
+#[test]
+fn scan_lists_each_kind_and_reports_what_is_not_a_pack() {
+    let root = tempdir().unwrap();
+    installed_sound(root.path(), SOUND);
+    installed_commands(
+        root.path(),
+        "sig",
+        "[[commands]]\ntrigger = 'sig'\ntitle = '签名'\ntemplate = '张三 {date}'\n",
+    );
+    let music = kind_directory(root.path(), PluginKind::Music).join("rain");
+    fs::create_dir_all(&music).unwrap();
+    fs::write(music.join("rain.ogg"), b"OggS\0\x02synthetic-track").unwrap();
+    fs::write(music.join("LICENSE.txt"), b"CC0").unwrap();
+    fs::write(
+        music.join(MANIFEST_FILE),
+        "schema_version = 1\nkind = 'music'\nid = 'rain'\nname = 'Rain'\nversion = '1'\nlicense = 'CC0-1.0'\n[music]\ntracks = ['rain.ogg']\n",
+    )
+    .unwrap();
+    // Not packs: a stray file, a leftover of an interrupted import, a folder without a manifest.
+    fs::write(
+        kind_directory(root.path(), PluginKind::Sound).join("notes.txt"),
+        b"x",
+    )
+    .unwrap();
+    fs::create_dir_all(kind_directory(root.path(), PluginKind::Sound).join(".replaced-old"))
+        .unwrap();
+    fs::create_dir_all(kind_directory(root.path(), PluginKind::Music).join("empty")).unwrap();
+
+    let catalog = scan(root.path(), None);
+    let listed: Vec<_> = catalog
+        .packages
+        .iter()
+        .map(|package| (package.kind(), package.id.as_str(), package.builtin))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            (PluginKind::Sound, "typewriter", false),
+            (PluginKind::Music, "rain", false),
+            (PluginKind::CommandTable, "sig", false),
+        ]
+    );
+    let issues: Vec<_> = catalog
+        .issues
+        .iter()
+        .map(|issue| (issue.kind, issue.folder.as_str()))
+        .collect();
+    assert_eq!(
+        issues,
+        [
+            (PluginKind::Sound, "notes.txt"),
+            (PluginKind::Music, "empty")
+        ]
+    );
+    let json = serde_json::to_value(&catalog.packages[0]).unwrap();
+    assert_eq!(json["kind"], "sound");
+    assert_eq!(json["mode"], "keys");
+    assert_eq!(json["sounds"]["default"], "key.wav");
+    assert_eq!(json["builtin"], false);
+    assert!(json.get("directory").is_none());
+}
+
+#[test]
+fn a_nonexistent_root_is_an_empty_catalog() {
+    let root = tempdir().unwrap();
+    assert_eq!(
+        scan(&root.path().join("plugins"), None),
+        PluginCatalog::default()
+    );
+}
+
+#[test]
+fn manifests_are_refused_for_every_rule_they_break() {
+    let root = tempdir().unwrap();
+    let cases: &[(&str, &str, &str)] = &[
+        ("kind = 'sound'", "kind = 'script'", "unknown plugin kind"),
+        ("kind = 'sound'", "kind = 'wasm'", "unknown plugin kind"),
+        (
+            "permissions = []",
+            "permissions = ['network']",
+            "may not request permissions",
+        ),
+        (
+            "permissions = []",
+            "permissions = 'none'",
+            "permissions must be an array",
+        ),
+        ("license = 'CC-BY-4.0'\n", "", "license must be a string"),
+        ("license = 'CC-BY-4.0'", "license = '<script>'", "SPDX"),
+        (
+            "license = 'CC-BY-4.0'",
+            "license = '   '",
+            "license has invalid",
+        ),
+        (
+            "schema_version = 1",
+            "schema_version = 2",
+            "unsupported schema_version",
+        ),
+        (
+            "author = 'Synthetic'",
+            "authors = 'Synthetic'",
+            "unknown manifest key authors",
+        ),
+        (
+            "mode = 'keys'",
+            "mode = 'keys'\nexec = 'rm -rf /'",
+            "unknown manifest key exec",
+        ),
+        (
+            "space = 'space.wav'",
+            "tab = 'space.wav'",
+            "unknown key tab in sounds",
+        ),
+        (
+            "default = 'key.wav'\n",
+            "",
+            "keys mode needs sounds.default",
+        ),
+        (
+            "mode = 'keys'",
+            "mode = 'loop'",
+            "mode must be keys or sequence",
+        ),
+        (
+            "mode = 'keys'",
+            "mode = 'sequence'",
+            "sequence mode needs a sequence",
+        ),
+        (
+            "space = 'space.wav'",
+            "space = '../space.wav'",
+            "not a .wav or .ogg file name",
+        ),
+        (
+            "space = 'space.wav'",
+            "space = '/etc/space.wav'",
+            "not a .wav or .ogg file name",
+        ),
+        (
+            "space = 'space.wav'",
+            "space = 'sub/space.wav'",
+            "not a .wav or .ogg file name",
+        ),
+        (
+            "space = 'space.wav'",
+            "space = 'space.mp3'",
+            "not a .wav or .ogg file name",
+        ),
+        (
+            "space = 'space.wav'",
+            "space = 'missing.wav'",
+            "missing audio file",
+        ),
+        ("name = '打字机'", "name = ''", "name has invalid"),
+        (
+            "name = '打字机'",
+            "name = \"a\\u0007b\"",
+            "name has invalid",
+        ),
+    ];
+    for (from, to, expected) in cases {
+        let manifest = SOUND.replacen(from, to, 1);
+        assert_ne!(manifest, SOUND, "{from}");
+        let pack = installed_sound(root.path(), &manifest);
+        let error = reason(root.path(), PluginKind::Sound, "typewriter");
+        assert!(error.contains(expected), "{to}: {error}");
+        fs::remove_dir_all(pack).unwrap();
+    }
+    // A pack in the wrong kind directory, or under another folder name.
+    let pack = sound_pack(&kind_directory(root.path(), PluginKind::Music), SOUND);
+    assert!(reason(root.path(), PluginKind::Music, "typewriter").contains("kind does not match"));
+    fs::remove_dir_all(pack).unwrap();
+    let pack = installed_sound(root.path(), SOUND);
+    fs::rename(&pack, pack.with_file_name("renamed")).unwrap();
+    assert!(reason(root.path(), PluginKind::Sound, "renamed").contains("id does not match"));
+}
+
+#[test]
+fn sequences_are_bounded() {
+    let root = tempdir().unwrap();
+    let base = "schema_version = 1\nkind = 'sound'\nid = 'tune'\nname = 'Tune'\nversion = '1'\nlicense = 'CC0-1.0'\nmode = 'sequence'\n[sequence]\nsample = 'key.wav'\n";
+    let too_many = format!("semitones = [{}]\n", vec!["0"; 129].join(","));
+    for (sequence, expected) in [
+        ("semitones = [0, 25]\n", "from -24 to 24"),
+        ("semitones = [0, 1.5]\n", "from -24 to 24"),
+        ("semitones = []\n", "too few or too many"),
+        (too_many.as_str(), "too few or too many"),
+        ("semitones = [0]\nadvance = 'time'\n", "advance must be"),
+        (
+            "semitones = [0]\nrate = 2\n",
+            "unknown key rate in sequence",
+        ),
+    ] {
+        let pack = installed_sound(root.path(), &format!("{base}{sequence}"));
+        let error = reason(root.path(), PluginKind::Sound, "tune");
+        assert!(error.contains(expected), "{sequence}: {error}");
+        fs::remove_dir_all(pack).unwrap();
+    }
+    installed_sound(
+        root.path(),
+        &format!("{base}semitones = [-24, 0, 24]\nadvance = 'commit'\n"),
+    );
+    // `space.wav` is in the directory but not in this manifest.
+    assert!(reason(root.path(), PluginKind::Sound, "tune").contains("space.wav is not used"));
+    fs::remove_file(kind_directory(root.path(), PluginKind::Sound).join("tune/space.wav")).unwrap();
+    let pack = load_package(root.path(), None, PluginKind::Sound, "tune").unwrap();
+    let PluginContent::Sound(sound) = pack.content else {
+        panic!("a sound pack");
+    };
+    assert_eq!(sound.sequence.unwrap().semitones, [-24, 0, 24]);
+    // A keys pack may not carry a melody.
+    let keys = format!(
+        "{}\n[sequence]\nsample = 'key.wav'\nsemitones = [0]\n",
+        SOUND
+    );
+    installed_sound(root.path(), &keys);
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter")
+        .contains("only allowed in sequence mode"));
+}
+
+#[test]
+fn pack_directories_hold_only_plain_files_the_manifest_accounts_for() {
+    let root = tempdir().unwrap();
+    let pack = installed_sound(root.path(), SOUND);
+    // Notices are allowed, within their size.
+    fs::write(pack.join("LICENSE.txt"), b"synthetic").unwrap();
+    fs::write(pack.join("README.md"), b"synthetic").unwrap();
+    assert!(load_package(root.path(), None, PluginKind::Sound, "typewriter").is_ok());
+    fs::write(
+        pack.join("README.md"),
+        vec![b'x'; MAX_NOTICE_BYTES as usize + 1],
+    )
+    .unwrap();
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("README.md is too large"));
+    fs::remove_file(pack.join("README.md")).unwrap();
+
+    for (name, contents, expected) in [
+        ("run.sh", &b"#!/bin/sh"[..], "run.sh is not used"),
+        ("extra.wav", &wav()[..], "extra.wav is not used"),
+        (
+            "lib.dylib",
+            &b"\xcf\xfa\xed\xfe"[..],
+            "lib.dylib is not used",
+        ),
+        ("Key.WAV.exe", &b"MZ"[..], "Key.WAV.exe is not used"),
+        (
+            "key wav.txt",
+            &b"x"[..],
+            "key wav.txt is not a valid file name",
+        ),
+    ] {
+        fs::write(pack.join(name), contents).unwrap();
+        let error = reason(root.path(), PluginKind::Sound, "typewriter");
+        assert!(error.contains(expected), "{name}: {error}");
+        fs::remove_file(pack.join(name)).unwrap();
+    }
+
+    // What Finder leaves behind is ignored, and never read.
+    fs::write(pack.join(".DS_Store"), b"finder").unwrap();
+    fs::create_dir(pack.join(".git")).unwrap();
+    assert!(load_package(root.path(), None, PluginKind::Sound, "typewriter").is_ok());
+
+    fs::create_dir(pack.join("nested")).unwrap();
+    assert!(
+        reason(root.path(), PluginKind::Sound, "typewriter").contains("nested is a subdirectory")
+    );
+    fs::remove_dir(pack.join("nested")).unwrap();
+
+    for index in 0..MAX_PACK_FILES {
+        fs::write(pack.join(format!("NOTICE-{index}.txt")), b"x").unwrap();
+    }
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("too many files"));
+}
+
+#[test]
+fn audio_is_checked_for_size_and_format_without_being_decoded() {
+    let root = tempdir().unwrap();
+    let pack = installed_sound(root.path(), SOUND);
+    fs::write(pack.join("space.wav"), b"#!/bin/sh\nnot audio at all").unwrap();
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("not a WAV or Ogg"));
+    fs::write(pack.join("space.wav"), b"OggS but named wav").unwrap();
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("not a WAV or Ogg"));
+    fs::write(pack.join("space.wav"), b"").unwrap();
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("empty or too large"));
+    let mut oversized = wav();
+    oversized.resize(sound_pack::MAX_SAMPLE_BYTES as usize + 1, 0);
+    fs::write(pack.join("space.wav"), oversized).unwrap();
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("empty or too large"));
+
+    assert!(sound_pack::sample_frames_allowed(44_100, 66_150));
+    assert!(!sound_pack::sample_frames_allowed(44_100, 66_151));
+    assert!(!sound_pack::sample_frames_allowed(44_100, 0));
+    assert!(!sound_pack::sample_frames_allowed(4_000, 10));
+    assert!(!sound_pack::sample_frames_allowed(48_000, u64::MAX));
+    assert!(music_pack::track_frames_allowed(48_000, 48_000 * 900));
+    assert!(!music_pack::track_frames_allowed(48_000, 48_000 * 900 + 1));
+}
+
+#[test]
+fn music_packs_are_bounded() {
+    let root = tempdir().unwrap();
+    let pack = kind_directory(root.path(), PluginKind::Music).join("rain");
+    fs::create_dir_all(&pack).unwrap();
+    let manifest = |tracks: &str| {
+        format!("schema_version = 1\nkind = 'music'\nid = 'rain'\nname = 'Rain'\nversion = '1'\nlicense = 'CC0-1.0'\n[music]\ntracks = [{tracks}]\n")
+    };
+    for (tracks, expected) in [
+        ("", "too few or too many"),
+        ("'a.ogg','a.ogg'", "listed twice"),
+        ("'a.flac'", "not a .wav or .ogg"),
+    ] {
+        fs::write(pack.join(MANIFEST_FILE), manifest(tracks)).unwrap();
+        let error = reason(root.path(), PluginKind::Music, "rain");
+        assert!(error.contains(expected), "{tracks}: {error}");
+    }
+    let nine: Vec<_> = (0..9).map(|index| format!("'t{index}.ogg'")).collect();
+    fs::write(pack.join(MANIFEST_FILE), manifest(&nine.join(","))).unwrap();
+    assert!(reason(root.path(), PluginKind::Music, "rain").contains("too few or too many"));
+
+    // Five tracks just under the per-track limit are over the pack limit together. Sparse files keep this cheap.
+    let names: Vec<_> = (0..5).map(|index| format!("t{index}.ogg")).collect();
+    for name in &names {
+        let mut file = fs::File::create(pack.join(name)).unwrap();
+        file.write_all(b"OggS").unwrap();
+        file.set_len(music_pack::MAX_TRACK_BYTES - 1).unwrap();
+    }
+    let quoted: Vec<_> = names.iter().map(|name| format!("'{name}'")).collect();
+    fs::write(pack.join(MANIFEST_FILE), manifest(&quoted.join(","))).unwrap();
+    assert!(reason(root.path(), PluginKind::Music, "rain").contains("too large together"));
+    fs::remove_file(pack.join(&names[4])).unwrap();
+    fs::write(pack.join(MANIFEST_FILE), manifest(&quoted[..4].join(","))).unwrap();
+    let loaded = load_package(root.path(), None, PluginKind::Music, "rain").unwrap();
+    let PluginContent::Music(music) = loaded.content else {
+        panic!("a music pack");
+    };
+    assert_eq!(music.tracks, names[..4]);
+}
+
+#[test]
+fn command_tables_follow_the_rules_the_engine_expands_them_by() {
+    let root = tempdir().unwrap();
+    let row = |trigger: &str, template: &str| {
+        format!("[[commands]]\ntrigger = '{trigger}'\ntitle = '标题'\ntemplate = '{template}'\n")
+    };
+    let long = "字".repeat(command_table::MAX_TEXT_UTF16 - 12);
+    let cases = [
+        (row("Sig", "x"), "lowercase letters"),
+        (row("sig1", "x"), "lowercase letters"),
+        (row("", "x"), "lowercase letters"),
+        (row(&"a".repeat(33), "x"), "lowercase letters"),
+        (row("sig", "{clipboard}"), "unknown placeholder"),
+        (row("sig", "{env:HOME}"), "unknown placeholder"),
+        (row("sig", "{date"), "unknown placeholder"),
+        (row("sig", "date}"), "unknown placeholder"),
+        (row("sig", "{{date}}"), "unknown placeholder"),
+        (row("sig", "{date:%Y-%Q}"), "unknown placeholder"),
+        (row("sig", ""), "empty or too long"),
+        (
+            row("sig", &"字".repeat(command_table::MAX_TEXT_UTF16 + 1)),
+            "empty or too long",
+        ),
+        (
+            row("sig", &format!("{long}{{date:%A %B}}")),
+            "expands past the limit",
+        ),
+        (
+            format!("{}{}", row("sig", "a"), row("sig", "b")),
+            "listed twice",
+        ),
+        (
+            "[[commands]]\ntrigger = 'sig'\ntemplate = 'x'\n".to_owned(),
+            "needs a title",
+        ),
+        (
+            "[[commands]]\ntrigger = 'sig'\ntitle = 't'\ntemplate = 'x'\nrun = 'x'\n".to_owned(),
+            "unknown key run",
+        ),
+        ("commands = []\n".to_owned(), "too few or too many"),
+        (
+            (0..=command_table::MAX_COMMANDS)
+                .map(|index| {
+                    row(
+                        &"abcdefghij"
+                            .chars()
+                            .map(|c| ((c as u8) + (index % 16) as u8) as char)
+                            .collect::<String>(),
+                        "x",
+                    )
+                })
+                .collect::<String>(),
+            "too few or too many",
+        ),
+    ];
+    for (rows, expected) in cases {
+        installed_commands(root.path(), "sig", &rows);
+        let error = reason(root.path(), PluginKind::CommandTable, "sig");
+        assert!(error.contains(expected), "{rows}: {error}");
+    }
+    installed_commands(
+        root.path(),
+        "sig",
+        &format!(
+            "{}{}{}",
+            row("sig", "张三 {date:%Y年%m月%d日} {weekday}"),
+            row("now", "{time} {time:%H:%M:%S}"),
+            row("tag", &format!("{long}{{date:%d}}"))
+        ),
+    );
+    let loaded = load_package(root.path(), None, PluginKind::CommandTable, "sig").unwrap();
+    let PluginContent::CommandTable(table) = loaded.content else {
+        panic!("a command table");
+    };
+    assert_eq!(table.commands.len(), 3);
+    assert_eq!(table.commands[0].title, "标题");
+}
+
+#[test]
+fn enabled_command_tables_merge_in_priority_order() {
+    let root = tempdir().unwrap();
+    let row = |trigger: &str, template: &str| {
+        format!("[[commands]]\ntrigger = '{trigger}'\ntitle = 't'\ntemplate = '{template}'\n")
+    };
+    installed_commands(
+        root.path(),
+        "first",
+        &format!("{}{}", row("sig", "one"), row("mail", "a@example.com")),
+    );
+    installed_commands(
+        root.path(),
+        "second",
+        &format!("{}{}", row("sig", "two"), row("tel", "000")),
+    );
+    installed_commands(root.path(), "broken", &row("Bad", "x"));
+    let enabled = |ids: &[&str]| -> Vec<(String, String)> {
+        let ids: Vec<String> = ids.iter().map(|id| (*id).to_owned()).collect();
+        command_table::enabled_commands(root.path(), &ids)
+            .into_iter()
+            .map(
+                |CommandRow {
+                     trigger, template, ..
+                 }| (trigger, template),
+            )
+            .collect()
+    };
+    let pair = |trigger: &str, template: &str| (trigger.to_owned(), template.to_owned());
+    assert_eq!(
+        enabled(&["first", "second"]),
+        [
+            pair("sig", "one"),
+            pair("mail", "a@example.com"),
+            pair("tel", "000")
+        ]
+    );
+    assert_eq!(
+        enabled(&["second", "missing", "broken", "first"]),
+        [
+            pair("sig", "two"),
+            pair("tel", "000"),
+            pair("mail", "a@example.com")
+        ]
+    );
+    assert!(enabled(&[]).is_empty());
+    assert!(enabled(&["../first"]).is_empty());
+
+    // The merged table stops where the Engine would.
+    let many = |offset: usize| -> String {
+        (0..200)
+            .map(|index| {
+                let index = index + offset;
+                let trigger: String = [index / 676, index / 26 % 26, index % 26]
+                    .iter()
+                    .map(|digit| (b'a' + *digit as u8) as char)
+                    .collect();
+                row(&trigger, "x")
+            })
+            .collect()
+    };
+    installed_commands(root.path(), "many", &many(0));
+    installed_commands(root.path(), "more", &many(1000));
+    assert_eq!(
+        enabled(&["many", "more"]).len(),
+        command_table::MAX_COMMANDS
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symbolic_links_are_never_followed_into_or_out_of_a_pack() {
+    let root = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    fs::write(outside.path().join("secret.wav"), wav()).unwrap();
+
+    let pack = installed_sound(root.path(), SOUND);
+    fs::remove_file(pack.join("space.wav")).unwrap();
+    std::os::unix::fs::symlink(outside.path().join("secret.wav"), pack.join("space.wav")).unwrap();
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter")
+        .contains("space.wav is a symbolic link"));
+    fs::remove_file(pack.join("space.wav")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), pack.join("assets")).unwrap();
+    assert!(
+        reason(root.path(), PluginKind::Sound, "typewriter").contains("assets is a symbolic link")
+    );
+    fs::remove_dir_all(&pack).unwrap();
+
+    // A linked pack directory, and a linked manifest.
+    let real = sound_pack(outside.path(), SOUND);
+    std::os::unix::fs::symlink(
+        &real,
+        kind_directory(root.path(), PluginKind::Sound).join("typewriter"),
+    )
+    .unwrap();
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("not a plugin directory"));
+    let catalog = scan(root.path(), None);
+    assert!(catalog.packages.is_empty());
+    assert_eq!(catalog.issues[0].folder, "typewriter");
+    fs::remove_file(kind_directory(root.path(), PluginKind::Sound).join("typewriter")).unwrap();
+    let pack = installed_sound(root.path(), SOUND);
+    fs::remove_file(pack.join(MANIFEST_FILE)).unwrap();
+    std::os::unix::fs::symlink(real.join(MANIFEST_FILE), pack.join(MANIFEST_FILE)).unwrap();
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("symbolic link"));
+}
+
+#[test]
+fn built_in_ids_are_reserved_and_resolved_only_from_the_bundle() {
+    let root = tempdir().unwrap();
+    installed_sound(root.path(), &SOUND.replace("typewriter", "default"));
+    assert!(reason(root.path(), PluginKind::Sound, "default").contains("not available"));
+    let catalog = scan(root.path(), None);
+    assert!(catalog.issues[0].reason.contains("reserved"));
+    let resolved = load_package(
+        root.path(),
+        Some(&builtin_root()),
+        PluginKind::Sound,
+        "default",
+    )
+    .unwrap();
+    assert!(resolved.builtin);
+    assert_ne!(resolved.name, "打字机");
+    assert!(load_package(root.path(), None, PluginKind::Sound, "../default").is_err());
+}
+
+#[test]
+fn a_manifest_past_its_size_is_not_parsed() {
+    let root = tempdir().unwrap();
+    let pack = installed_sound(root.path(), SOUND);
+    let mut manifest = SOUND.to_owned();
+    manifest.push_str(&format!("# {}\n", "x".repeat(MAX_MANIFEST_BYTES as usize)));
+    fs::write(pack.join(MANIFEST_FILE), manifest).unwrap();
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("too large"));
+}
+
+fn picked_folder(parent: &Path, manifest: &str) -> PathBuf {
+    let folder = sound_pack(parent, manifest);
+    fs::write(folder.join(".DS_Store"), b"finder").unwrap();
+    fs::create_dir(folder.join(".git")).unwrap();
+    folder
+}
+
+#[test]
+fn import_installs_a_picked_folder_and_replaces_an_older_version_whole() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    let installed = import(&picked_folder(files.path(), SOUND), &root).unwrap();
+    assert_eq!(installed.id, "typewriter");
+    assert_eq!(installed.kind(), PluginKind::Sound);
+    assert_eq!(installed.directory, root.join("sound").join("typewriter"));
+    assert!(!installed.directory.join(".DS_Store").exists());
+    assert_eq!(scan(&root, None).packages.len(), 1);
+
+    // A new version without `space.wav` leaves no trace of the old one.
+    let newer = tempdir().unwrap();
+    let manifest = SOUND
+        .replace("space = 'space.wav'\n", "")
+        .replace("1.0.0", "2.0.0");
+    let folder = sound_pack(newer.path(), &manifest);
+    fs::remove_file(folder.join("space.wav")).unwrap();
+    let installed = import(&folder, &root).unwrap();
+    assert_eq!(installed.version, "2.0.0");
+    assert!(!installed.directory.join("space.wav").exists());
+    let names: Vec<_> = fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(names, ["sound"]);
+    let names: Vec<_> = fs::read_dir(root.join("sound"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(names, ["typewriter"]);
+}
+
+#[test]
+fn a_refused_import_leaves_the_installed_pack_and_no_staging() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    import(&picked_folder(files.path(), SOUND), &root).unwrap();
+    let before = fs::read(root.join("sound/typewriter").join(MANIFEST_FILE)).unwrap();
+
+    let hostile = tempdir().unwrap();
+    let folder = sound_pack(
+        hostile.path(),
+        &SOUND.replace("permissions = []", "permissions = ['exec']"),
+    );
+    assert!(
+        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("permissions"))
+    );
+    fs::remove_dir_all(&folder).unwrap();
+    let folder = sound_pack(hostile.path(), SOUND);
+    fs::create_dir(folder.join("payload")).unwrap();
+    assert!(
+        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("subdirectory"))
+    );
+    fs::remove_dir_all(&folder).unwrap();
+    let folder = sound_pack(hostile.path(), SOUND);
+    fs::write(folder.join("big.txt"), vec![b'x'; 1]).unwrap();
+    fs::File::create(folder.join("huge.txt"))
+        .unwrap()
+        .set_len(music_pack::MAX_TRACK_BYTES + 1)
+        .unwrap();
+    assert!(
+        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("too large"))
+    );
+
+    assert_eq!(
+        fs::read(root.join("sound/typewriter").join(MANIFEST_FILE)).unwrap(),
+        before
+    );
+    let leftovers: Vec<_> = fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.starts_with('.'))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+#[test]
+fn import_refuses_built_in_ids_and_what_is_not_a_pack() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    let folder = sound_pack(files.path(), &SOUND.replace("typewriter", "default"));
+    assert!(matches!(import(&folder, &root), Err(PluginError::Reserved)));
+    assert!(!root.join("sound").join("default").exists());
+
+    let text = files.path().join("pack.txt");
+    fs::write(&text, b"x").unwrap();
+    assert!(matches!(
+        import(&text, &root),
+        Err(PluginError::UnsupportedSource)
+    ));
+    assert!(matches!(
+        import(&files.path().join("missing"), &root),
+        Err(PluginError::UnsupportedSource)
+    ));
+    let bare = files.path().join("bare");
+    fs::create_dir(&bare).unwrap();
+    assert!(
+        matches!(import(&bare, &root), Err(PluginError::Invalid(reason)) if reason.contains("missing plugin.toml"))
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn import_follows_no_symbolic_link() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    let root = state.path().join("plugins");
+
+    let folder = sound_pack(files.path(), SOUND);
+    std::os::unix::fs::symlink("/etc/passwd", folder.join("passwd.txt")).unwrap();
+    assert!(
+        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("symbolic link"))
+    );
+    fs::remove_file(folder.join("passwd.txt")).unwrap();
+
+    let linked = files.path().join("linked");
+    std::os::unix::fs::symlink(&folder, &linked).unwrap();
+    assert!(matches!(
+        import(&linked, &root),
+        Err(PluginError::UnsupportedSource)
+    ));
+
+    let linked_root = state.path().join("linked-plugins");
+    std::os::unix::fs::symlink(outside.path(), &linked_root).unwrap();
+    assert!(matches!(
+        import(&folder, &linked_root),
+        Err(PluginError::Storage)
+    ));
+    assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
+
+    fs::create_dir_all(&root).unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.join("sound")).unwrap();
+    assert!(matches!(import(&folder, &root), Err(PluginError::Storage)));
+    assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
+}
+
+/// An archive member: `(name, Some(bytes))` for a file, `(name, None)` for a directory.
+type Member<'a> = (&'a str, Option<&'a [u8]>);
+
+/// A zip at `path` holding `members`.
+fn zip_file(path: &Path, members: &[Member]) {
+    let mut writer = zip::ZipWriter::new(fs::File::create(path).unwrap());
+    let options = zip::write::SimpleFileOptions::default();
+    for (name, contents) in members {
+        match contents {
+            Some(bytes) => {
+                writer.start_file(*name, options).unwrap();
+                writer.write_all(bytes).unwrap();
+            }
+            None => writer.add_directory(*name, options).unwrap(),
+        }
+    }
+    writer.finish().unwrap();
+}
+
+#[test]
+fn import_installs_an_archive_flat_or_in_one_folder() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    let wav = wav();
+    let flat = files.path().join("Typewriter.ZIP");
+    zip_file(
+        &flat,
+        &[
+            (MANIFEST_FILE, Some(SOUND.as_bytes())),
+            ("key.wav", Some(&wav)),
+            ("space.wav", Some(&wav)),
+        ],
+    );
+    assert_eq!(import(&flat, &root).unwrap().id, "typewriter");
+
+    // What Finder's Compress makes: the folder, its files, and resource forks beside them.
+    let wrapped = files.path().join("wrapped.zip");
+    zip_file(
+        &wrapped,
+        &[
+            ("typewriter/", None),
+            (
+                "typewriter/plugin.toml",
+                Some(SOUND.replace("1.0.0", "1.1.0").as_bytes()),
+            ),
+            ("typewriter/key.wav", Some(&wav)),
+            ("typewriter/space.wav", Some(&wav)),
+            ("typewriter/.DS_Store", Some(b"finder")),
+            ("__MACOSX/", None),
+            ("__MACOSX/typewriter/._key.wav", Some(b"fork")),
+        ],
+    );
+    let installed = import(&wrapped, &root).unwrap();
+    assert_eq!(installed.version, "1.1.0");
+    assert!(!installed.directory.join(".DS_Store").exists());
+}
+
+#[test]
+fn hostile_archives_are_refused_before_anything_is_installed() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    let wav = wav();
+    let manifest = SOUND.as_bytes();
+    let bomb = vec![0u8; music_pack::MAX_TRACK_BYTES as usize + 1];
+    let cases: Vec<(&str, Vec<Member>)> = vec![
+        (
+            "traversal",
+            vec![(MANIFEST_FILE, Some(manifest)), ("../key.wav", Some(&wav))],
+        ),
+        (
+            "absolute",
+            vec![
+                (MANIFEST_FILE, Some(manifest)),
+                ("/tmp/key.wav", Some(&wav)),
+            ],
+        ),
+        (
+            "nested",
+            vec![
+                (MANIFEST_FILE, Some(manifest)),
+                ("key.wav", Some(&wav)),
+                ("space.wav", Some(&wav)),
+                ("sub/", None),
+                ("sub/x.wav", Some(&wav)),
+            ],
+        ),
+        (
+            "mixed",
+            vec![("a/plugin.toml", Some(manifest)), ("key.wav", Some(&wav))],
+        ),
+        (
+            "two folders",
+            vec![("a/plugin.toml", Some(manifest)), ("b/key.wav", Some(&wav))],
+        ),
+        (
+            "duplicate",
+            vec![
+                ("a/plugin.toml", Some(manifest)),
+                ("a/key.wav", Some(&wav)),
+                ("a/./key.wav", Some(&wav)),
+            ],
+        ),
+        (
+            "bomb",
+            vec![(MANIFEST_FILE, Some(manifest)), ("key.wav", Some(&bomb))],
+        ),
+        (
+            "bad name",
+            vec![(MANIFEST_FILE, Some(manifest)), ("key wav.wav", Some(&wav))],
+        ),
+    ];
+    for (label, members) in cases {
+        let archive = files
+            .path()
+            .join(format!("{}.zip", label.replace(' ', "-")));
+        zip_file(&archive, &members);
+        let result = import(&archive, &root);
+        assert!(
+            matches!(
+                result,
+                Err(PluginError::Invalid(_) | PluginError::Archive(_))
+            ),
+            "{label}: {result:?}"
+        );
+    }
+    let many: Vec<_> = (0..65).map(|index| format!("n{index}.txt")).collect();
+    let archive = files.path().join("many.zip");
+    zip_file(
+        &archive,
+        &many
+            .iter()
+            .map(|name| (name.as_str(), Some(&b"x"[..])))
+            .collect::<Vec<_>>(),
+    );
+    assert!(matches!(
+        import(&archive, &root),
+        Err(PluginError::Archive(_))
+    ));
+    let garbage = files.path().join("garbage.zip");
+    fs::write(&garbage, b"PK\x03\x04 not really").unwrap();
+    assert!(matches!(
+        import(&garbage, &root),
+        Err(PluginError::Archive(_))
+    ));
+
+    assert!(!root.join("sound").exists());
+    let leftovers: Vec<_> = fs::read_dir(&root).unwrap().collect();
+    assert!(leftovers.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn an_archived_symbolic_link_is_refused() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let archive = files.path().join("link.zip");
+    let mut writer = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
+    let options = zip::write::SimpleFileOptions::default();
+    writer.start_file(MANIFEST_FILE, options).unwrap();
+    writer.write_all(SOUND.as_bytes()).unwrap();
+    writer
+        .add_symlink("key.wav", "/etc/passwd", options)
+        .unwrap();
+    writer.finish().unwrap();
+    assert!(matches!(
+        import(&archive, &state.path().join("plugins")),
+        Err(PluginError::Invalid(reason)) if reason.contains("symbolic link")
+    ));
+}
+
+#[test]
+fn remove_deletes_an_installed_pack_and_nothing_else() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    import(&picked_folder(files.path(), SOUND), &root).unwrap();
+    remove(&root, PluginKind::Sound, "typewriter").unwrap();
+    assert!(scan(&root, None).packages.is_empty());
+    assert!(fs::read_dir(root.join("sound")).unwrap().next().is_none());
+    // Removing what is not installed succeeds; ids that are not ids and built-in packs do not.
+    remove(&root, PluginKind::Sound, "typewriter").unwrap();
+    remove(&root, PluginKind::Music, "typewriter").unwrap();
+    assert!(matches!(
+        remove(&root, PluginKind::Sound, "../sound"),
+        Err(PluginError::Invalid(_))
+    ));
+    assert!(matches!(
+        remove(&root, PluginKind::Sound, ""),
+        Err(PluginError::Invalid(_))
+    ));
+    assert!(matches!(
+        remove(&root, PluginKind::Sound, "default"),
+        Err(PluginError::Reserved)
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn remove_unlinks_a_link_without_touching_its_target() {
+    let state = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    let target = sound_pack(outside.path(), SOUND);
+    fs::create_dir_all(root.join("sound")).unwrap();
+    std::os::unix::fs::symlink(&target, root.join("sound").join("typewriter")).unwrap();
+    remove(&root, PluginKind::Sound, "typewriter").unwrap();
+    assert!(target.join(MANIFEST_FILE).is_file());
+    assert!(fs::symlink_metadata(root.join("sound").join("typewriter")).is_err());
+}
+
+#[test]
+fn achievements_fire_once_per_milestone_passed() {
+    assert_eq!(achievement_milestone(0, 99), None);
+    assert_eq!(achievement_milestone(99, 100), Some(100));
+    assert_eq!(achievement_milestone(100, 101), None);
+    assert_eq!(achievement_milestone(999, 1_001), Some(1_000));
+    assert_eq!(achievement_milestone(50, 20_000), Some(10_000));
+    assert_eq!(achievement_milestone(2_000, 10), None);
+    assert_eq!(achievement_milestone(u64::MAX - 1, u64::MAX), None);
+}
+
+#[test]
+fn kinds_are_a_closed_set() {
+    for kind in PluginKind::ALL {
+        assert_eq!(PluginKind::parse(kind.as_str()), Some(kind));
+    }
+    for other in ["", "script", "wasm", "dylib", "Sound", "command-table"] {
+        assert_eq!(PluginKind::parse(other), None);
+    }
+}

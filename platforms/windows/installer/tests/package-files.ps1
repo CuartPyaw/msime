@@ -46,7 +46,9 @@ try {
         'target/handwriting-model/handwriting-zh_CN.model',
         'target/handwriting-model/HandwritingModel-LICENSE.txt',
         'resources/helpcodes/helpcode.txt',
-        'resources/helpcodes/NOTICE.md'
+        'resources/helpcodes/NOTICE.md',
+        'resources/sound-packs/default/plugin.toml',
+        'resources/sound-packs/default/key.wav'
     )) { Write-Fixture $file }
     Write-Fixture 'windows/build32-release/Release/msime_host_api.dll' 'synthetic x86 host'
     Write-Fixture 'windows/build64-release/Release/msime_host_api.dll' 'synthetic x64 host'
@@ -114,7 +116,9 @@ try {
                          'server_exe/msime-client-prepare.pdb',
                          'server_exe/handwriting/handwriting-zh_CN.model',
                          'server_exe/handwriting/HandwritingModel-LICENSE.txt',
-                         'app_data/helpcodes/helpcode.txt', 'THIRD_PARTY_NOTICES.txt', 'LICENSE.txt')) {
+                         'app_data/helpcodes/helpcode.txt',
+                         'app_data/sound-packs/default/plugin.toml', 'app_data/sound-packs/default/key.wav',
+                         'THIRD_PARTY_NOTICES.txt', 'LICENSE.txt')) {
         if (-not (Test-Path (Join-Path $installer $file))) { throw "Missing packaged file: $file" }
     }
     if (Test-Path (Join-Path $installer 'app_data/helpcodes/NOTICE.md')) { throw 'Staged a helpcode notice as a table' }
