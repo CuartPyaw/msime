@@ -21,7 +21,7 @@ const snapshot: Snapshot = {
       enabled: true,
       language: "zh-CN",
       asr_provider: "local",
-      asr_model_path: "/old/model.bin",
+      asr_model_path: "/old/voice-models/paraformer",
     },
   },
 };
@@ -45,7 +45,7 @@ async function openVoice(client: Record<string, unknown>) {
 test("choosing a model fills the path the recognizer loads", async () => {
   const pickVoiceModelPath = vi.fn(async () => "/Users/someone/voice-models/sense-voice");
   const field = (await openVoice({ pickVoiceModelPath })) as HTMLInputElement;
-  expect(field.value).toBe("/old/model.bin");
+  expect(field.value).toBe("/old/voice-models/paraformer");
 
   fireEvent.click(screen.getByRole("button", { name: "选择…" }));
 
@@ -60,12 +60,12 @@ test("cancelling leaves the path that already worked", async () => {
   fireEvent.click(screen.getByRole("button", { name: "选择…" }));
 
   await waitFor(() => expect(pickVoiceModelPath).toHaveBeenCalledTimes(1));
-  expect(field.value).toBe("/old/model.bin");
+  expect(field.value).toBe("/old/voice-models/paraformer");
 });
 
 test("a host that cannot pick files offers typing only", async () => {
   const field = (await openVoice({})) as HTMLInputElement;
 
   expect(screen.queryByRole("button", { name: "选择…" })).toBeNull();
-  expect(field.value).toBe("/old/model.bin");
+  expect(field.value).toBe("/old/voice-models/paraformer");
 });

@@ -258,13 +258,25 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
     body: string,
   ): Promise<string | null | undefined> {
     if (client.saveExport) {
+      let path: string | null;
       try {
-        return await client.saveExport(name, body);
-      } catch {
+        path = await client.saveExport(name, body);
+      } catch (error) {
+        // A host that knows why its own save failed (the Harmony save picker) says so in an Error; anything else is the macOS Downloads write.
         setPhraseNotice("");
-        setPhraseError("无法写入“下载”文件夹，词库未导出。");
+        setPhraseError(
+          error instanceof Error && error.message
+            ? error.message
+            : "无法写入“下载”文件夹，词库未导出。",
+        );
         return undefined;
       }
+      // A host with a save picker resolves null when the user closes it, which is neither a failure nor an export.
+      if (path === null) {
+        setPhraseNotice("已取消导出。");
+        return undefined;
+      }
+      return path;
     }
     const url = URL.createObjectURL(new Blob([body], { type: "text/plain;charset=utf-8" }));
     const anchor = document.createElement("a");

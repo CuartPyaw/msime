@@ -5,6 +5,7 @@ import { MaintenanceShortcutsSection } from "./maintenance-shortcuts-section";
 import { PanelShortcutsSection } from "./panel-shortcuts-section";
 import { InputMethodServiceSection } from "./input-method-service-section";
 import { ShortcutsIntroSection } from "./shortcuts-intro-section";
+import * as settings from "./settings-style";
 import type { NavigationPreferences } from "./word-character-section";
 
 export interface ShortcutsSettingsSectionProps {
@@ -66,39 +67,41 @@ export function ShortcutsSettingsSection({
   return (
     <fieldset disabled={disabled} hidden={hidden} aria-label="快捷键">
       <ShortcutsIntroSection mobile={mobile} />
-      <InputModeShortcutsSection
-        keybindings={keybindings}
-        onChange={onKeybindingsChange}
-        onInputModeHUDChange={onInputModeHUDChange}
-        showModeSwitchShortcuts={showModeSwitchShortcuts}
-        macos={macos}
-        showInputModeHUD={showInputModeHUD}
-        inputModeHUD={inputModeHUD}
-        showFullwidthChord={showFullwidthChord}
-        fullwidthChord={fullwidthChord}
-        windows={windows}
-      />
-      <PanelShortcutsSection visible={showPanelShortcuts} macos={macos} harmony={harmony} />
-      <CandidateShortcutsSection
-        navigation={navigation}
-        numberRowSelection={numberRowSelection}
-        showNumberRowSelection={showNumberRowSelection}
-        mobile={mobile}
-        onNumberRowSelectionChange={onNumberRowSelectionChange}
-      />
-      <MaintenanceShortcutsSection
-        visible={showDesktopMaintenanceShortcuts}
-        macos={macos}
-        linux={linux}
-        maintenanceChord={maintenanceChord}
-      />
-      <InputMethodServiceSection
-        visible={showRestartInputMethod}
-        macos={macos}
-        linux={linux}
-        restartInputMethod={restartInputMethod}
-        installInputSource={installInputSource}
-      />
+      <div className={settings.groups}>
+        <InputModeShortcutsSection
+          keybindings={keybindings}
+          onChange={onKeybindingsChange}
+          onInputModeHUDChange={onInputModeHUDChange}
+          showModeSwitchShortcuts={showModeSwitchShortcuts}
+          macos={macos}
+          showInputModeHUD={showInputModeHUD}
+          inputModeHUD={inputModeHUD}
+          showFullwidthChord={showFullwidthChord}
+          fullwidthChord={fullwidthChord}
+          windows={windows}
+        />
+        <PanelShortcutsSection visible={showPanelShortcuts} macos={macos} harmony={harmony} />
+        <CandidateShortcutsSection
+          navigation={navigation}
+          numberRowSelection={numberRowSelection}
+          showNumberRowSelection={showNumberRowSelection}
+          mobile={mobile}
+          onNumberRowSelectionChange={onNumberRowSelectionChange}
+        />
+        <MaintenanceShortcutsSection
+          visible={showDesktopMaintenanceShortcuts}
+          macos={macos}
+          linux={linux}
+          maintenanceChord={maintenanceChord}
+        />
+        <InputMethodServiceSection
+          visible={showRestartInputMethod}
+          macos={macos}
+          linux={linux}
+          restartInputMethod={restartInputMethod}
+          installInputSource={installInputSource}
+        />
+      </div>
     </fieldset>
   );
 }

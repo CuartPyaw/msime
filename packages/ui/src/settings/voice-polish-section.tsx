@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { SettingToggle } from "./setting-toggle";
+import { GroupList, Row, Select, Switch } from "../core/platform-controls";
+import * as settings from "./settings-style";
 
 export interface VoicePolishSectionProps {
   enabled: boolean;
@@ -31,20 +32,13 @@ export function VoicePolishSection({
   onModelChange,
 }: VoicePolishSectionProps) {
   return (
-    <div className="section">
-      <div className="section-title">
-        文本润色 provider<small>识别结果可交给用户管理的服务润色</small>
-      </div>
-      <SettingToggle
-        label="启用润色"
-        ariaLabel="启用文本润色"
-        checked={enabled}
-        compact
-        onChange={onEnabledChange}
-      />
-      <label className="section-header">
-        <span className="section-title">服务提供商</span>
-        <select
+    <GroupList title="文本润色 provider">
+      <p className={settings.groupNote}>识别结果可交给用户管理的服务润色</p>
+      <Row title="启用润色">
+        <Switch aria-label="启用文本润色" checked={enabled} onChange={onEnabledChange} />
+      </Row>
+      <Row title="服务提供商">
+        <Select
           aria-label="文本润色服务提供商"
           value={provider}
           onChange={(event) => onProviderChange(event.target.value)}
@@ -54,18 +48,17 @@ export function VoicePolishSection({
               {label}
             </option>
           ))}
-        </select>
-      </label>
+        </Select>
+      </Row>
       {providerPreset}
-      <label className="section-header">
-        <span className="section-title">模型</span>
+      <Row title="模型">
         <input
           aria-label="文本润色模型"
           value={model}
           onChange={(event) => onModelChange(event.target.value)}
         />
-      </label>
+      </Row>
       {children}
-    </div>
+    </GroupList>
   );
 }

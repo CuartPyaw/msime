@@ -6,6 +6,7 @@ import { PolishCredentialFieldsSection } from "./polish-credential-fields-sectio
 import { PolishPromptSection } from "./polish-prompt-section";
 import type { ProviderPresetControlFactory } from "./provider-preset-control";
 import { VoicePolishSection } from "./voice-polish-section";
+import * as settings from "./settings-style";
 
 export interface VoicePolishSettingsSectionProps {
   voiceInput: VoiceInputPreferences;
@@ -33,11 +34,9 @@ export function VoicePolishSettingsSection({
         POLISH_PROVIDER_DEFAULTS[voiceInput.polish_provider ?? "siliconflow"],
         voiceInput.polish_model ?? "",
         (polish_model) => updateVoice({ polish_model }),
-        "provider-preset-section",
+        settings.managerBlock,
       )}
-      onEnabledChange={(enabled) =>
-        updateVoice({ polish_text: enabled, polish_enabled: enabled })
-      }
+      onEnabledChange={(enabled) => updateVoice({ polish_text: enabled, polish_enabled: enabled })}
       onProviderChange={(provider) => updateVoice(polishProviderUpdate(provider, voiceInput))}
       onModelChange={(polish_model) => updateVoice({ polish_model })}
     >
@@ -67,8 +66,8 @@ export function VoicePolishSettingsSection({
           })
         }
         onRestore={(polish_prompt) => updateVoice({ polish_prompt })}
+        actions={children}
       />
-      {children}
     </VoicePolishSection>
   );
 }
