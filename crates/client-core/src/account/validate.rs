@@ -1,6 +1,7 @@
 //! Every value crossing the account boundary is bounded and checked here.
 //! The backend is not trusted to keep its own limits, and neither is the caller.
 
+use super::google::valid_google_loopback_target;
 use super::*;
 
 pub(super) fn validate_clipboard_search(value: &str) -> Result<(), AccountError> {
@@ -481,6 +482,11 @@ pub(super) fn validate_provider_target(provider: &str, target: &str) -> Result<(
     if provider == "apple" {
         return target.is_empty().then_some(()).ok_or(AccountError::Invalid);
     }
+    if provider == "google" {
+        return valid_google_loopback_target(target)
+            .then_some(())
+            .ok_or(AccountError::Invalid);
+    }
     if !matches!(provider, "email" | "phone")
         || target.is_empty()
         || !crate::text::is_bounded_text(target, 320)
@@ -529,6 +535,29 @@ pub(super) fn validate_apple_login(challenge: &str, credential: &str) -> Result<
         return Err(AccountError::Invalid);
     }
     Ok(())
+}
+
+/// A Google authorization code arrives on the loopback redirect and goes straight to the backend, which exchanges it with the desktop client secret. Codes are opaque printable ASCII, so anything else is refused before it leaves the process.
+pub(super) fn validate_google_login(challenge: &str, credential: &str) -> Result<(), AccountError> {
+    if challenge.is_empty()
+        || !crate::text::is_bounded_text(challenge, 256)
+        || credential.is_empty()
+        || credential.len() > 2048
+        || !credential.bytes().all(|byte| byte.is_ascii_graphic())
+    {
+        return Err(AccountError::Invalid);
+    }
+    Ok(())
+}
+
+/// The transport check for `/v1/auth/login`. The session has already applied the provider's own rule (six digits, an Apple identity token or a Google authorization code), so the client accepts a credential that satisfies any of them.
+pub(super) fn validate_login_request(
+    challenge: &str,
+    credential: &str,
+) -> Result<(), AccountError> {
+    validate_login(challenge, credential)
+        .or_else(|_| validate_apple_login(challenge, credential))
+        .or_else(|_| validate_google_login(challenge, credential))
 }
 
 pub(super) fn validate_display_name(value: &str) -> Result<(), AccountError> {

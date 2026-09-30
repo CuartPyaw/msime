@@ -1,6 +1,7 @@
 //! `BackendAccountSession`: token refresh, single-flight, and the saved session
 //! the host persists.
 
+use super::google::*;
 use super::validate::*;
 use super::*;
 
@@ -131,6 +132,53 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
     ) -> Result<AccountUser, AccountError> {
         validate_apple_login(challenge, credential)?;
         self.sign_in_validated(challenge, credential)
+    }
+
+    /// Completes a Google challenge with the authorization code the system browser delivered to the loopback redirect. The backend holds the PKCE verifier and the client secret and performs the exchange; this process only forwards the code.
+    pub fn sign_in_google(
+        &self,
+        challenge: &str,
+        credential: &str,
+    ) -> Result<AccountUser, AccountError> {
+        validate_google_login(challenge, credential)?;
+        self.sign_in_validated(challenge, credential)
+    }
+
+    /// Runs the desktop Google sign-in (RFC 8252 loopback redirect): binds a loopback listener, requests a challenge for its redirect URI, hands the backend's authorization URL to `open_browser`, waits up to [`GOOGLE_SIGN_IN_TIMEOUT`] for the redirect, and signs in with the returned code. `open_browser` receives a URL already checked to be a Google authorization URL for this listener.
+    pub fn sign_in_google_with_browser<F>(
+        &self,
+        open_browser: F,
+    ) -> Result<AccountUser, AccountError>
+    where
+        F: FnOnce(&str) -> Result<(), AccountError>,
+    {
+        self.sign_in_google_with_timeout(open_browser, GOOGLE_SIGN_IN_TIMEOUT)
+    }
+
+    pub(super) fn sign_in_google_with_timeout<F>(
+        &self,
+        open_browser: F,
+        timeout: Duration,
+    ) -> Result<AccountUser, AccountError>
+    where
+        F: FnOnce(&str) -> Result<(), AccountError>,
+    {
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .map_err(|_| AccountError::Unavailable)?;
+        let port = listener
+            .local_addr()
+            .map_err(|_| AccountError::Unavailable)?
+            .port();
+        let target = google_loopback_target(port);
+        let challenge = self.request_code("google", &target)?;
+        let url = challenge
+            .authorization_url
+            .as_deref()
+            .ok_or(AccountError::Unavailable)?;
+        let state = google_authorization_state(url, &target)?;
+        open_browser(url)?;
+        let code = receive_google_callback(&listener, &state, timeout)?;
+        self.sign_in_google(&challenge.challenge_id, &code)
     }
 
     fn sign_in_validated(
