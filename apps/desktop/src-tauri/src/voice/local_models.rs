@@ -337,7 +337,7 @@ pub(crate) fn add_hotwords_within(options: &mut Value, hotwords: &[Hotword], bud
     // `"voice_hotwords":""` plus the comma that joins it to the previous key.
     let mut size = serde_json::to_string(&*object).map_or(usize::MAX, |text| text.len())
         + r#","voice_hotwords":"""#.len();
-    let mut packed = String::new();
+    let mut packed = String::with_capacity(budget.saturating_sub(size));
     for hotword in hotwords {
         let breaks = |value: &str| value.contains(['\t', '\r', '\n']);
         if hotword.text.is_empty() || breaks(&hotword.text) || breaks(&hotword.pinyin) {
