@@ -1095,6 +1095,10 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
   }
 
   func localDictionaryStateVersion() throws -> String {
+    // A runtime that failed to prepare has no options to describe, and asking the snapshot API about the empty dictionary only answers "invalid snapshot options" - which the snapshot worker then shows in place of the real reason on the keyboard's diagnostic line.
+    if let initializationDiagnostic, options["user_data"] == nil {
+      throw InputBridgeFailure.response(initializationDiagnostic)
+    }
     let result = try Self.callOptions(msimeClientSnapshotVersion, options)
     guard let version = result["version"] as? String, version.utf8.count == 64,
           let generation = result["generation"] as? String,
