@@ -191,8 +191,8 @@ fn recognize_inner(strokes: &[Stroke]) -> Result<Result<Vec<String>, InkError>, 
         .join()
         .map_err(|_| InkError::Unavailable)?;
 
-    let mut chinese: Vec<String> = Vec::new();
-    let mut other: Vec<String> = Vec::new();
+    let mut chinese: Vec<String> = Vec::with_capacity(12);
+    let mut other: Vec<String> = Vec::with_capacity(12);
     for result in results {
         let Ok(candidates) = result.GetTextCandidates() else {
             continue;
