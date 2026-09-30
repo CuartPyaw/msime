@@ -675,7 +675,12 @@ impl<E: InputEngine> Runtime<E> {
             shuangpin_profile: self.cached.shuangpin_profile.clone(),
             answered_by_pinyin_fallback: self.cached.answered_by_pinyin_fallback,
             local_mode: self.cached.local_mode.clone(),
-            spelling_symbols: self.cached.spelling_symbols.clone(),
+            // A held phrase piece is a composition too: no key opens a mode behind it, and a host that reads the symbols (Harmony) must not compose or pick with them.
+            spelling_symbols: if self.phrase_prefix.is_empty() || self.cached.local_mode != "none" {
+                self.cached.spelling_symbols.clone()
+            } else {
+                String::new()
+            },
             dedicated_english: self.cached.dedicated_english,
             session: self.session,
             generation: self.generation,
@@ -1608,6 +1613,10 @@ impl<E: InputEngine> Runtime<E> {
         {
             return self.engine.character(value, false);
         }
+        // A mark on a bare `/` or `@` ends the mode as punctuation; finishing first would commit the first row.
+        if self.bare_mode_prefix() {
+            return self.engine.punctuation(value);
+        }
         // Finish through Engine with the host highlight BEFORE asking it to translate.
         // Calling Engine punctuation on an active composition would choose candidate zero.
         let mut finished = self.engine.finish(self.engine_index(self.highlighted))?;
@@ -1626,6 +1635,10 @@ impl<E: InputEngine> Runtime<E> {
             Err(error) => return Err(error),
         };
         if !finished.has_commit {
+            if !punctuation.handled && !self.phrase_prefix.is_empty() {
+                // The held phrase piece goes out ahead of the mark (`hold_phrase_progress`), which marks the key handled, so a mark with no Chinese form has to go out with it rather than be left to the host.
+                return Ok(literal_mark(value, punctuation.diagnostic));
+            }
             return Ok(punctuation);
         }
         finished.handled = true;
@@ -1643,6 +1656,12 @@ impl<E: InputEngine> Runtime<E> {
         Ok(finished)
     }
 
+    /// A `/` or `@` mode holding nothing but its prefix.
+    fn bare_mode_prefix(&self) -> bool {
+        matches!(self.cached.local_mode.as_str(), "command" | "mention")
+            && self.cached.editing_text.len() == 1
+    }
+
     fn punctuation_ascii(&mut self, value: u8) -> Result<EngineResult, RuntimeError> {
         // A spelling symbol still extends the composition in progress. With nothing composed the host asked for the literal mark after weighing the surrounding text (a `/` after a digit), so it never opens a mode.
         if self.cached.local_mode != "none"
@@ -1653,8 +1672,17 @@ impl<E: InputEngine> Runtime<E> {
         // Keep the same highlighted-candidate completion semantics as normal
         // punctuation, but do not ask Engine to translate the trailing mark.
         // The Linux host has already applied its surrounding-text policy.
-        let mut finished = self.engine.finish(self.engine_index(self.highlighted))?;
+        // A bare `/` or `@` commits as the literal prefix rather than its first row.
+        let mut finished = if self.bare_mode_prefix() {
+            self.engine.command(Command::CommitRaw)?
+        } else {
+            self.engine.finish(self.engine_index(self.highlighted))?
+        };
         if !finished.has_commit {
+            // As in `punctuation`: a held phrase piece takes the key, so the mark goes out with it.
+            if !self.phrase_prefix.is_empty() {
+                return Ok(literal_mark(value, finished.diagnostic));
+            }
             return Ok(finished);
         }
         finished.handled = true;
@@ -1799,6 +1827,14 @@ impl<E: InputEngine> Runtime<E> {
                     self.engine.character(value, shift)?;
                     Ok(committed)
                 }),
+            // A symbol that would open a mode behind a held phrase piece ends the phrase as punctuation instead, as on the punctuation route.
+            Action::Character { value, .. }
+                if !self.phrase_prefix.is_empty()
+                    && self.cached.local_mode == "none"
+                    && self.cached.spelling_symbols.as_bytes().contains(&value) =>
+            {
+                self.punctuation(value)
+            }
             Action::Character { value, shift } => {
                 self.engine.character(value, shift).and_then(|result| {
                     // The nine-key separator is a layout action, not Chinese quote punctuation.
@@ -1917,6 +1953,16 @@ impl<E: InputEngine> Runtime<E> {
             }
         }
         Ok(transition)
+    }
+}
+
+/// `value` committed as it is, for a mark that has to leave together with a held phrase piece.
+fn literal_mark(value: u8, diagnostic: String) -> EngineResult {
+    EngineResult {
+        handled: true,
+        has_commit: true,
+        commit: char::from(value).to_string(),
+        diagnostic,
     }
 }
 

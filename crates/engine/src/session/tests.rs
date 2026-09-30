@@ -2345,6 +2345,46 @@ fn slash_after_a_composition_is_still_the_typed_character() {
 }
 
 #[test]
+fn a_mark_on_a_bare_prefix_types_punctuation_instead_of_a_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = generated_modes_session(&fixture);
+    session.character(b'/', false);
+    let result = session.punctuation(b'/');
+    assert_eq!(result.commit.as_deref(), Some("//"));
+    assert_eq!(session.snapshot().local_mode, LocalInputMode::None);
+    session.character(b'/', false);
+    assert_eq!(session.punctuation(b',').commit.as_deref(), Some("/，"));
+    session.character(b'/', false);
+    assert_eq!(session.punctuation(b'\\').commit.as_deref(), Some("/、"));
+    session.character(b'@', false);
+    assert_eq!(session.punctuation(b'@').commit.as_deref(), Some("@@"));
+    // The character route reaches the same answer instead of swallowing the key.
+    session.character(b'@', false);
+    assert_eq!(
+        session.character(b'.', false).commit.as_deref(),
+        Some("@。")
+    );
+    assert_eq!(session.snapshot().local_mode, LocalInputMode::None);
+    // Once a letter follows, a mark is not input and the mode keeps it out.
+    session.character(b'/', false);
+    type_text(&mut session, "rq");
+    assert!(session.character(b',', false).commit.is_none());
+    assert_eq!(session.snapshot().local_mode, LocalInputMode::Command);
+    // Space still picks the first row and Enter the literal prefix.
+    session.command(Command::Cancel);
+    session.character(b'/', false);
+    assert_eq!(
+        session.command(Command::CommitCandidate).commit.as_deref(),
+        Some("张三 2026-08-09")
+    );
+    session.character(b'/', false);
+    assert_eq!(
+        session.command(Command::CommitRaw).commit.as_deref(),
+        Some("/")
+    );
+}
+
+#[test]
 fn symbol_entries_follow_the_punctuation_mode() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = generated_modes_session(&fixture);

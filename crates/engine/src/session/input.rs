@@ -315,6 +315,9 @@ impl InputSession {
                         .contains(&value)
             }
             LocalInputMode::Command | LocalInputMode::Mention => {
+                if self.local_preedit.len() == 1 && value.is_ascii_punctuation() {
+                    return self.commit_bare_prefix(value);
+                }
                 self.local_preedit.len() < GENERATED_MODE_INPUT_LIMIT && value.is_ascii_lowercase()
             }
             LocalInputMode::None => return KeyResult::unhandled(),
@@ -438,6 +441,13 @@ impl InputSession {
 
     /// input_session.cpp:260-292. `/` and `@` never open their modes here: a runtime finishes the composition before it asks for the mark, so an empty composition at this point does not mean the key was typed with nothing composed. They open through `handle_character`, which the runtime reaches first.
     pub fn handle_punctuation(&mut self, value: u8) -> KeyResult {
+        if matches!(
+            self.local_mode,
+            LocalInputMode::Command | LocalInputMode::Mention
+        ) && self.local_preedit.len() == 1
+        {
+            return self.commit_bare_prefix(value);
+        }
         // A spelling symbol of the active mode is part of the input, not a mark that ends it.
         if self
             .local_mode
@@ -481,6 +491,22 @@ impl InputSession {
         text.push_str(mark);
         result.commit = Some(text);
         result
+    }
+
+    /// A mark typed on a bare `/` or `@` ends the mode instead of choosing a row: both keys commit as the punctuation they are with the mode off, so `/` `,` still types /， rather than the first command followed by ，.
+    fn commit_bare_prefix(&mut self, value: u8) -> KeyResult {
+        let prefix = self.local_preedit.as_bytes()[0];
+        self.reset_composition();
+        self.chain.reset();
+        let translate = self.chinese_punctuation_enabled && self.punctuation_lock != 2;
+        let mut text = String::new();
+        for key in [prefix, value] {
+            match translate.then(|| self.punctuation.translate(key)).flatten() {
+                Some(mark) => text.push_str(mark),
+                None => text.push(char::from(key)),
+            }
+        }
+        KeyResult::committed(text)
     }
 
     /// `SessionSnapshot::spelling_symbols`.

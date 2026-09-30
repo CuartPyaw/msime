@@ -1388,6 +1388,8 @@ struct PhraseEngine {
     /// the end of this list finishes the composition.
     consumes: Vec<usize>,
     words: Vec<String>,
+    /// Published with nothing composed, as the Engine publishes `/` and `@` when their modes are on.
+    idle_symbols: String,
 }
 
 impl PhraseEngine {
@@ -1397,6 +1399,7 @@ impl PhraseEngine {
             caret: 0,
             consumes,
             words: vec!["海滩".into(), "跑步".into()],
+            idle_symbols: String::new(),
         }
     }
 }
@@ -1418,7 +1421,11 @@ impl InputEngine for PhraseEngine {
             answered_by_pinyin_fallback: false,
             wubi_unique_four_code: false,
             local_mode: "none".into(),
-            spelling_symbols: String::new(),
+            spelling_symbols: if self.reading.is_empty() {
+                self.idle_symbols.clone()
+            } else {
+                String::new()
+            },
             dedicated_english: false,
             preedit: self.reading.clone(),
             reading: String::new(),
@@ -1483,8 +1490,13 @@ impl InputEngine for PhraseEngine {
         })
     }
     fn finish(&mut self, index: usize) -> Result<EngineResult, RuntimeError> {
+        // Like the real Engine, there is nothing to finish without a reading.
+        if self.reading.is_empty() {
+            return Ok(empty_result(false));
+        }
         self.select(index)
     }
+    // Every mark is one without a Chinese form, such as `/`.
     fn punctuation(&mut self, _value: u8) -> Result<EngineResult, RuntimeError> {
         Ok(empty_result(false))
     }
@@ -1494,6 +1506,38 @@ impl InputEngine for PhraseEngine {
         _edge: CandidateEdge,
     ) -> Result<EngineResult, RuntimeError> {
         self.select(index)
+    }
+}
+
+// A held piece over an emptied reading is a composition: `/` ends it as a mark on every route instead of opening a mode behind it, and a host that reads the View's symbols (Harmony) sees none to compose or pick with.
+#[test]
+fn a_mode_symbol_behind_a_held_phrase_ends_the_phrase() {
+    let emptied = || {
+        let mut runtime = phrase_runtime("haitanpaobu", vec![6]);
+        runtime.engine.idle_symbols = "/@".into();
+        let id = runtime.view().candidates[0].id;
+        runtime.dispatch(Action::Select(id)).unwrap();
+        let kept = runtime.dispatch(Action::SegmentBackspace).unwrap();
+        assert_eq!(kept.view.phrase_prefix, "海滩");
+        assert!(kept.view.editing_text.is_empty());
+        assert!(kept.view.spelling_symbols.is_empty());
+        runtime
+    };
+    for action in [
+        Action::Character {
+            value: b'/',
+            shift: false,
+        },
+        Action::Punctuation(b'/'),
+        Action::PunctuationAscii(b'/'),
+    ] {
+        let mut runtime = emptied();
+        let ended = runtime.dispatch(action).unwrap();
+        assert!(ended.handled);
+        assert_eq!(ended.commit.as_deref(), Some("海滩/"));
+        assert!(ended.view.phrase_prefix.is_empty());
+        assert!(ended.view.editing_text.is_empty());
+        assert_eq!(ended.view.spelling_symbols, "/@");
     }
 }
 
@@ -3169,6 +3213,43 @@ fn expression_operators_sent_as_punctuation_extend_the_expression() {
     assert_eq!(context.local_mode, "expression");
     assert!(!context.typing_statistics);
     assert_eq!(committed.view.local_mode, "none");
+}
+
+// A mark on a bare `/` or `@` is punctuation on every route: the mode ends and nothing from its list is committed.
+#[test]
+fn a_mark_on_a_bare_slash_or_at_is_not_a_pick() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = generated_mode_runtime(directory.path());
+    for (open, action, expected) in [
+        (b'/', Action::Punctuation(b'/'), "//"),
+        (b'/', Action::Punctuation(b','), "/，"),
+        (b'/', Action::PunctuationAscii(b','), "/,"),
+        (
+            b'/',
+            Action::Character {
+                value: b'/',
+                shift: false,
+            },
+            "//",
+        ),
+        (b'@', Action::Punctuation(b'@'), "@@"),
+    ] {
+        assert_eq!(character(&mut runtime, open).view.editing_text.len(), 1);
+        let ended = runtime.dispatch(action).unwrap();
+        assert!(ended.handled);
+        assert_eq!(ended.commit.as_deref(), Some(expected));
+        assert_eq!(ended.view.local_mode, "none");
+    }
+    // Space still takes the first row, and Enter the literal prefix.
+    character(&mut runtime, b'/');
+    let first = runtime.view().candidates[0].text.clone();
+    let picked = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(picked.commit, Some(first));
+    character(&mut runtime, b'/');
+    let raw = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert_eq!(raw.commit.as_deref(), Some("/"));
 }
 
 #[test]
