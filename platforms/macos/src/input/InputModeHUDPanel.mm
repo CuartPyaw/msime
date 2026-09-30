@@ -5,7 +5,8 @@
 namespace {
 constexpr CGFloat kPanelWidth = 100.0;
 constexpr CGFloat kPanelHeight = 56.0;
-constexpr CGFloat kLogoSide = 26.0;
+// The mark is a portrait rectangle (about 0.79 wide for its height) with a soft halo, so it needs the glyph's full em box to carry the same weight as the square 30pt character beside it; at 26pt it read a size smaller.
+constexpr CGFloat kLogoSide = 30.0;
 constexpr CGFloat kContentSpacing = 6.0;
 constexpr CGFloat kCornerRadius = 16.0;
 constexpr CGFloat kBorderWidth = 1.0;
