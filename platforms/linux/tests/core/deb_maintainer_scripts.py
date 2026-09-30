@@ -28,6 +28,7 @@ printf '%s\\n' "$*" >> "$STUB_LOG"
 case " $* " in
   *" -M $STUB_UNREACHABLE@ "*) exit 1 ;;
   *" $STUB_FAILING_UNIT "*) exit 5 ;;
+  *" is-active "*) [ -n "$STUB_ACTIVE_UNIT" ] && case " $* " in *" $STUB_ACTIVE_UNIT "*) exit 0 ;; esac; exit 3 ;;
 esac
 exit 0
 """
@@ -45,7 +46,8 @@ printf 'notify-send ran in the maintainer script\\n' >> "$STUB_LOG"
 exit 1
 """
 
-NOTICE = "notify-send -a 水杉输入法 -i msime-linux 水杉输入法已升级 重启输入法后生效：IBus 执行 ibus restart，Fcitx5 执行 fcitx5 -r，或注销后重新登录"
+NOTICE = "notify-send -a 水杉输入法 -i msime-linux 水杉输入法已升级 重启输入法后生效：IBus 执行 ibus restart，Fcitx5 执行 {fcitx5}，或注销后重新登录"
+OMARCHY_RESTART = "systemctl --user restart omarchy-fcitx5.service"
 NOTIFYING = ("systemctl", "loginctl", "systemd-run", "notify-send")
 
 LOGINCTL = """#!/bin/sh
@@ -71,6 +73,7 @@ def run(script: str, *args: str, tools=("systemctl", "loginctl"), **env: str):
             "STUB_FAILING_UNIT": "",
             "STUB_LOGINCTL_FAILS": "",
             "STUB_SYSTEMD_RUN_FAILS": "",
+            "STUB_ACTIVE_UNIT": "",
             **env,
         }
         result = subprocess.run(
@@ -112,8 +115,8 @@ def configure_calls(uid: str, account: bool = True) -> list:
     return calls[:1] + (account_call(uid) if account else []) + calls[1:]
 
 
-def notify_call(uid: str) -> list:
-    return [f"systemd-run --user -M {uid}@ --collect --quiet {NOTICE}"]
+def notify_call(uid: str, fcitx5: str = "fcitx5 -r") -> list:
+    return [f"--user -M {uid}@ is-active --quiet omarchy-fcitx5.service", f"systemd-run --user -M {uid}@ --collect --quiet {NOTICE.format(fcitx5=fcitx5)}"]
 
 
 def main() -> None:
@@ -193,6 +196,11 @@ def main() -> None:
     result, calls = run("postinst", "configure", "1.0.0", tools=NOTIFYING, STUB_UNREACHABLE="1000")
     expect(result, calls, restart_calls("1000")[:1] + configure_calls("1001") + notify_call("1001"), stderr_lines=1)
     assert "alice" in result.stderr and "ibus restart" in result.stderr and "fcitx5 -r" in result.stderr, result.stderr
+    assert OMARCHY_RESTART in result.stderr, result.stderr
+
+    # Omarchy runs fcitx5 as the omarchy-fcitx5 user service, where fcitx5 -r would start a copy outside the unit; its users are told to restart the unit.
+    result, calls = run("postinst", "configure", "1.0.0", tools=NOTIFYING, STUB_ACTIVE_UNIT="omarchy-fcitx5.service")
+    expect(result, calls, configure_calls("1000") + notify_call("1000", OMARCHY_RESTART) + configure_calls("1001") + notify_call("1001", OMARCHY_RESTART))
 
     # Without either program there is nothing to send; the services are still restarted.
     for tools in (("systemctl", "loginctl", "systemd-run"), ("systemctl", "loginctl", "notify-send")):

@@ -40,6 +40,7 @@
 #include "../src/core/RuntimeOptionsRefresh.h"
 #include "../src/core/FirstRunGuidance.h"
 #include "../src/core/InputModeIndicator.h"
+#include "../src/core/InputStatus.h"
 #include "../src/core/ReplacedProgram.h"
 #ifdef MSIME_FCITX5_MODE_BADGE
 #include "../src/overlay/ModeBadgeSurface.h"
@@ -552,8 +553,16 @@ public:
     }
     return "中";
   }
+  // The focused context's mode for a bar without a tray (see InputStatus.h); `active` is false when MSIME gives the focused context up.
+  void publishInputStatus(bool active) const {
+    msime::linux_host::publish_input_status(
+        std::getenv("XDG_RUNTIME_DIR"),
+        msime::linux_host::input_status_document(
+            active, modeIndicatorLabel(), scheme_override_.value_or(preferences_.value("scheme", std::string("quanpin")))));
+  }
   // Called wherever the mode can change; the status area is asked to redraw only when the label actually does.
   void refreshModeIndicator() {
+    if (ic_.hasFocus()) publishInputStatus(true);
     auto label = modeIndicatorLabel();
     if (label == mode_indicator_label_) return;
     mode_indicator_label_ = std::move(label);
@@ -5368,6 +5377,7 @@ public:
       }
     } catch (const OptionsNotConfigured &) { notConfigured(*state, true); }
     catch (...) { unavailable(*state); }
+    state->publishInputStatus(true);
     noticeReplacedAddon(*state);
   }
   void deactivate(const fcitx::InputMethodEntry &, fcitx::InputContextEvent &event) override {
@@ -5382,6 +5392,7 @@ public:
              &candidate_group_action_, &voice_action_, &toolbar_action_, &desktop_tools_action_})
       event.inputContext()->statusArea().removeAction(action);
     state->close(); state->clearPanel();
+    state->publishInputStatus(false);
   }
   void reset(const fcitx::InputMethodEntry &, fcitx::InputContextEvent &event) override {
     auto *state = event.inputContext()->propertyFor(&factory_);
@@ -5421,9 +5432,10 @@ public:
     if (current == ProgramFileState::Current || current == shown) return;
     shown = current;
     msime_linux_diagnostic_write(current == ProgramFileState::Replaced ? "addon_replaced_notice" : "addon_removed_notice");
+    const auto restart = msime::linux_host::fcitx5_restart_command();
     state.ic_.inputPanel().setAuxUp(fcitx::Text(current == ProgramFileState::Replaced
-        ? "水杉输入法已升级：执行 fcitx5 -r 或注销后重新登录即可使用新版本"
-        : "水杉输入法已卸载：执行 fcitx5 -r 或注销后重新登录即可完成卸载"));
+        ? "水杉输入法已升级：执行 " + restart + " 或注销后重新登录即可使用新版本"
+        : "水杉输入法已卸载：执行 " + restart + " 或注销后重新登录即可完成卸载"));
     state.ic_.updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
   }
   // Keys still reach the application: the addon never filters an event it could not route, so the user can keep typing while the hint is up. Only activation may open the settings window; a key never does, because a window that appears mid-typing can take the keyboard focus and swallow what follows.

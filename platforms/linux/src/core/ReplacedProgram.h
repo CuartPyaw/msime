@@ -95,4 +95,41 @@ inline ProgramFileState mapped_file_state(const void *address) {
   return state;
 }
 
+// The systemd user service this process runs as, read from /proc/self/cgroup, or none. A service manager that owns the process also restarts it: `fcitx5 -r` inside such a service starts a second fcitx5 outside it, which takes the bus name while the unit restarts its own copy and loses (Omarchy's omarchy-fcitx5.service has Restart=always), so the restart hint names the unit instead. The unified hierarchy's line is "0::/user.slice/user-1000.slice/user@1000.service/app.slice/omarchy-fcitx5.service". A program a desktop autostarts sits in an app-*.scope or an app-*@autostart.service that `fcitx5 -r` replaces cleanly, so those do not count.
+inline std::optional<std::string> user_service_unit(std::string_view cgroup) {
+  constexpr std::string_view unified = "0::";
+  constexpr std::string_view service = ".service";
+  while (!cgroup.empty()) {
+    const auto end = cgroup.find('\n');
+    auto line = cgroup.substr(0, end);
+    cgroup = end == std::string_view::npos ? std::string_view{} : cgroup.substr(end + 1);
+    if (line.substr(0, unified.size()) != unified)
+      continue;
+    line.remove_prefix(unified.size());
+    if (line.find("/user@") == std::string_view::npos)
+      return std::nullopt;
+    const auto unit = line.substr(line.rfind('/') + 1);
+    if (unit.size() <= service.size() || unit.substr(unit.size() - service.size()) != service ||
+        unit.substr(0, 4) == "app-" || unit.substr(0, 5) == "user@")
+      return std::nullopt;
+    return std::string(unit);
+  }
+  return std::nullopt;
+}
+
+// The command that restarts the running fcitx5 so it loads the replaced addon.
+inline std::string fcitx5_restart_command() {
+  std::string cgroup;
+  if (FILE *file = std::fopen("/proc/self/cgroup", "re")) {
+    char buffer[4096];
+    size_t length;
+    while ((length = std::fread(buffer, 1, sizeof buffer, file)) > 0)
+      cgroup.append(buffer, length);
+    std::fclose(file);
+  }
+  if (const auto unit = user_service_unit(cgroup))
+    return "systemctl --user restart " + *unit;
+  return "fcitx5 -r";
+}
+
 }  // namespace msime::linux_host
