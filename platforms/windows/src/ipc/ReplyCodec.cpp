@@ -268,10 +268,11 @@ std::vector<std::vector<uint8_t>> tsf_config_frames(const TsfLocalConfig &config
                        static_cast<wchar_t>(config.smart_punctuation_direct_letter ? L'1' : L'0')};
   frames.push_back(
       worker_text_frame(FanyImeWorkerReplyType::PunctuationLockChanged, lock));
-  // Last, so the frames before it keep the positions older TIPs and tests know; a TIP that predates it ignores the unknown type.
-  const std::wstring triggers = {config.expression_mode && !config.dedicated_english ? L'1' : L'0',
-                                 config.command_mode ? L'1' : L'0',
-                                 config.mention_mode ? L'1' : L'0'};
+  // Last, so the frames before it keep the positions older TIPs and tests know; a TIP that predates it ignores the unknown type. The Engine's own English mode opens none of the three (its spelling_symbols is empty), so all of them go off while it holds: a "/" the TIP composed there would never reach the Engine.
+  const bool pinyin_modes = !config.dedicated_english;
+  const std::wstring triggers = {config.expression_mode && pinyin_modes ? L'1' : L'0',
+                                 config.command_mode && pinyin_modes ? L'1' : L'0',
+                                 config.mention_mode && pinyin_modes ? L'1' : L'0'};
   frames.push_back(worker_text_frame(
       FanyImeWorkerReplyType::LocalModeTriggersChanged, triggers));
   return frames;

@@ -94,7 +94,7 @@ struct TsfLocalConfig {
   bool expression_mode = false;
   bool command_mode = false;
   bool mention_mode = false;
-  // The focused client's Engine is in its own English mode, where a capital is composed English and V is a letter rather than the expression mode. Not a preference: the Server follows the focused session and sends the V flag off while it holds, so the TIP keeps digits selecting and '-'/'.' paging in an English word that starts with V.
+  // The focused client's Engine is in its own English mode, where a capital is composed English and V is a letter rather than the expression mode. Not a preference: the Server follows the focused session and sends the V, "/" and "@" flags off while it holds, so the TIP keeps digits selecting and '-'/'.' paging in an English word that starts with V.
   bool dedicated_english = false;
 };
 // One frame per setting, in the order the reference pushes them.
