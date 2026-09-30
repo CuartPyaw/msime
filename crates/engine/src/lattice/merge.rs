@@ -53,11 +53,14 @@ pub fn merge_lattice_candidates(
         if options.emit > 0 {
             paths.truncate(options.emit);
         }
-        paths
-            .iter()
-            .filter(|path| already.insert(path.sentence.clone()))
-            .map(|path| sentence_row(typed_pinyin, path, CandidateSource::Generated))
-            .collect()
+        let mut block = Vec::with_capacity(paths.len());
+        block.extend(
+            paths
+                .iter()
+                .filter(|path| already.insert(path.sentence.clone()))
+                .map(|path| sentence_row(typed_pinyin, path, CandidateSource::Generated)),
+        );
+        block
     } else {
         let mut keyboard = None;
         for reranker in rerankers
