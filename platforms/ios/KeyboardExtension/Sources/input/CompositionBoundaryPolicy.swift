@@ -17,10 +17,13 @@ enum CompositionBoundaryAction: Equatable {
 }
 
 /// What a boundary does to an open composition, the rule the Windows host and the HarmonyOS keyboard share: switching modes or pressing Return keeps what was typed as typed (any half-chosen phrase, then the raw letters), so `iphone` + Return is `iphone` and a wubi code + 英 is the code, while leaving the composition any other way commits the conversion. Japanese always converts, since its raw romaji is not what anyone meant to write, and so does nine-key, whose raw keys are digits rather than letters.
+///
+/// A Korean syllable is already the text being written, so every boundary commits it. Return takes the raw commit, which the runtime answers unhandled, so the newline (or the field's send action) still follows the syllable as it does on every Korean keyboard; the other boundaries finish it.
 enum CompositionBoundaryPolicy {
   static func action(composing: Bool, scheme: ChineseInputScheme,
                      boundary: CompositionBoundary) -> CompositionBoundaryAction {
     guard composing else { return .none }
+    if scheme.isKorean { return boundary == .returnKey ? .commitRaw : .finishComposition }
     if boundary == .deactivate || scheme.isJapanese || scheme == .nineKey { return .finishComposition }
     return .commitRaw
   }

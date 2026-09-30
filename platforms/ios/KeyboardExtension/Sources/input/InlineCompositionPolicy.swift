@@ -18,6 +18,14 @@ enum InlineCompositionPolicy {
     return next.isEmpty ? .clear : .mark(next)
   }
 
+  /// The marked text for a composition. Korean always marks its syllable, whatever 行内预编辑 says: the syllable is the text being written rather than a spelling waiting to be converted, and a Korean keyboard that kept it off the field would leave the user typing into a strip above it. Every other scheme follows the chosen style.
+  static func markedText(korean: Bool, style: InlinePreeditPreference.Style, phrasePrefix: String, preedit: String,
+                         editingText: String, japaneseReading: String?) -> String {
+    if korean { return preedit }
+    return style.text(phrasePrefix: phrasePrefix, preedit: preedit, editingText: editingText,
+                      japaneseReading: japaneseReading)
+  }
+
   /// The document text before the composition, which is what punctuation and smart-punctuation context mean by "before the caret".
   static func contextBefore(_ before: String?, marked: String) -> String? {
     guard !marked.isEmpty, let before, before.hasSuffix(marked) else { return before }

@@ -1,9 +1,15 @@
 import Foundation
 
 enum ChineseInputScheme: String, CaseIterable {
-  case quanpin, nineKey, shuangpin, ziranma, microsoft, shoudao, wubi, japaneseNineKey, japanese, handwriting, thoughtfulReply
+  case quanpin, nineKey, shuangpin, ziranma, microsoft, shoudao, wubi, japaneseNineKey, japanese, korean, handwriting, thoughtfulReply
 
   var isJapanese: Bool { self == .japanese || self == .japaneseNineKey }
+
+  /// Korean Hangul on the Dubeolsik layout: the Engine composes one syllable at a time and offers no candidates.
+  var isKorean: Bool { self == .korean }
+
+  /// Whether the scheme writes Chinese, which is what traditional output, Chinese punctuation, candidate glosses and the local input modes are about. Japanese and Korean write their own scripts.
+  var writesChinese: Bool { !isJapanese && !isKorean }
 
   /// Whether a held backspace and a quick space-bar flick edit the spelling a syllable at a time. Only a lettered pinyin spelling has syllables to step over: a nine-key digit run is still ambiguous, and a wubi code is not made of syllables, so those keep a hold that clears the composition.
   var editsBySyllable: Bool { self == .quanpin || shuangpinProfile != nil }
@@ -29,6 +35,7 @@ enum ChineseInputScheme: String, CaseIterable {
     case .wubi: "wubi"
     case .japaneseNineKey: "japanese_nine_key"
     case .japanese: "japanese"
+    case .korean: "korean"
     case .handwriting: "handwriting"
     case .thoughtfulReply: "thoughtful_reply"
     }
@@ -47,6 +54,7 @@ enum ChineseInputScheme: String, CaseIterable {
     case .wubi: "86 五笔"
     case .japanese: "日语 26 键"
     case .japaneseNineKey: "日语 9 键"
+    case .korean: "韩语 26 键"
     case .handwriting: "手写"
     case .thoughtfulReply: "高情商回复"
     }

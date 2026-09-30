@@ -1277,7 +1277,7 @@ final class NineKeyKeyboardTests: XCTestCase {
           let punctuation = try button("quickPunctuationKey", in: controller)
           XCTAssertEqual(punctuation.isHidden, symbols || [.nineKey, .japaneseNineKey, .handwriting].contains(scheme))
           if !punctuation.isHidden {
-            XCTAssertEqual(punctuation.configuration?.title, scheme.isJapanese ? "、" : "，")
+            XCTAssertEqual(punctuation.configuration?.title, scheme.isJapanese ? "、" : scheme.isKorean ? "," : "，")
             XCTAssertEqual(punctuation.bounds.width, 44, accuracy: 0.5)
             XCTAssertGreaterThanOrEqual(try button("spaceKey", in: controller).bounds.width, 79.2)
             XCTAssertEqual(punctuation.menu?.children.count, 7)
@@ -1288,7 +1288,11 @@ final class NineKeyKeyboardTests: XCTestCase {
           if !symbols && ![.nineKey, .japaneseNineKey, .handwriting].contains(scheme) {
             let delete = try button("letterDeleteKey", in: controller)
             let shift = try button("shiftButton", in: controller)
-            let m = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityLabel == "字母 M" } as? UIButton)
+            // Korean keys are named by the jamo they type.
+            let letterLabel = { (letter: String) in
+              "字母 \(scheme.isKorean ? DubeolsikKeyLayout.keycap(for: letter, shifted: false) ?? letter : letter)"
+            }
+            let m = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityLabel == letterLabel("M") } as? UIButton)
             XCTAssertEqual(delete.superview, m.superview)
             XCTAssertGreaterThan(delete.frame.minX, m.frame.maxX)
             XCTAssertEqual(delete.bounds.width, 44, accuracy: 0.5)
@@ -1296,7 +1300,7 @@ final class NineKeyKeyboardTests: XCTestCase {
             XCTAssertEqual(delete.bounds.height, reference, accuracy: 0.5)
             XCTAssertLessThanOrEqual(delete.convert(delete.bounds, to: controller.view).maxX, width - 4.5)
             for label in ["Q", "A", "Z", "P", "L", "M"] {
-              let key = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityLabel == "字母 \(label)" } as? UIButton)
+              let key = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityLabel == letterLabel(label) } as? UIButton)
               XCTAssertEqual(key.bounds.height, reference, accuracy: 0.5)
               let frame = key.convert(key.bounds, to: controller.view)
               XCTAssertGreaterThanOrEqual(frame.minX, 4.5)
