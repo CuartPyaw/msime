@@ -569,7 +569,7 @@ pub fn dictionary_request_json(bytes: &[u8]) -> Result<serde_json::Value, String
             // that had it in upper case could never be matched to the row it stored.
             let previous = previous.map(Entry::normalized_for_engine);
             if let Some(entry) = &previous {
-                validate_entry(entry)?;
+                validate_previous_entry(entry)?;
             }
             // Only the replacement is re-cut: the previous entry is a row the list returned, and it has to reach the Engine exactly as stored to be found.
             let replacement = replacement.map(replacement_for_engine).transpose()?;
@@ -1251,6 +1251,15 @@ fn replacement_for_engine(entry: Entry) -> Result<Entry, String> {
 
 /// The host's bounds on an entry, each refusal naming the rule it broke. The reasons are fixed text and never repeat the entry.
 fn validate_entry(entry: &Entry) -> Result<(), String> {
+    validate_entry_up_to(entry, 100_000_000)
+}
+
+/// The row an edit or removal starts from. It is one the list returned and has to reach the Engine exactly as stored, and English frequency learning lifts a user's own word past 100000000 without a ceiling, so only the floor applies to its weight; otherwise that word could never be edited or removed.
+fn validate_previous_entry(entry: &Entry) -> Result<(), String> {
+    validate_entry_up_to(entry, i64::MAX)
+}
+
+fn validate_entry_up_to(entry: &Entry, max_weight: i64) -> Result<(), String> {
     let key_limit = match entry.kind {
         Kind::Pinyin => 512,
         Kind::Wubi => 4,
@@ -1280,7 +1289,7 @@ fn validate_entry(entry: &Entry) -> Result<(), String> {
         "word is empty or too long"
     } else if value_has_invalid_control {
         "word contains a control character"
-    } else if !(1..=100_000_000).contains(&entry.weight) {
+    } else if !(1..=max_weight).contains(&entry.weight) {
         "weight is outside 1 to 100000000"
     } else {
         return Ok(());

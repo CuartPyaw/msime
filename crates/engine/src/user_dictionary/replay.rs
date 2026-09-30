@@ -4,11 +4,12 @@
 
 use std::path::Path;
 
-use rusqlite::{params, Connection, OpenFlags, Row};
+use rusqlite::types::{ToSqlOutput, ValueRef};
+use rusqlite::{params, Connection, OpenFlags, Row, ToSql};
 
 use crate::dictionary::english::ensure_english_schema;
 use crate::format;
-use crate::user_dictionary::journal::{open_database, pinyin_segments};
+use crate::user_dictionary::journal::open_database;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReplayResult {
@@ -55,7 +56,9 @@ pub fn replay(user_db: &Path, main_db: &Path, english_db: &Path) -> ReplayResult
         let mut cursor = rows.query([])?;
         while let Some(row) = cursor.next()? {
             let operation = JournalRow::read(row)?;
-            if operation.kind == "pinyin" && operation.operation == "upsert" && operation.weight < 1
+            if operation.kind == b"pinyin"
+                && operation.operation == b"upsert"
+                && operation.weight < 1
             {
                 // Rows the old rebalance staircase left below the floor would bury shipped frequencies (J:1695-1699).
                 result.skipped += 1;
@@ -99,35 +102,38 @@ pub fn replay(user_db: &Path, main_db: &Path, english_db: &Path) -> ReplayResult
     result
 }
 
-/// One `user_dictionary_operations` row as replay reads it. Text columns are read strictly: a NULL or a value that is not UTF-8 ends the read as a cursor failure and rolls the replay back, rather than applying a key that differs from the stored one.
+/// One `user_dictionary_operations` row as replay reads it. Text columns are raw bytes, as `sqlite3_column_text` gave them to the reference (J:1688-1694), and are written back as the same bytes: a journal an older build wrote with text that is not UTF-8 replays exactly as it did there, rather than rolling back every generation built from it. A NULL, which the reference could not read either, still ends the read as a cursor failure.
 struct JournalRow {
-    kind: String,
-    key: String,
-    value: String,
-    operation: String,
+    kind: Vec<u8>,
+    key: Vec<u8>,
+    value: Vec<u8>,
+    operation: Vec<u8>,
     weight: i64,
-    display: String,
+    display: Vec<u8>,
 }
 
 impl JournalRow {
     fn read(row: &Row<'_>) -> rusqlite::Result<Self> {
+        let text = |index: usize| -> rusqlite::Result<Vec<u8>> {
+            Ok(row.get_ref(index)?.as_bytes()?.to_vec())
+        };
         Ok(Self {
-            kind: row.get(0)?,
-            key: row.get(1)?,
-            value: row.get(2)?,
-            operation: row.get(3)?,
+            kind: text(0)?,
+            key: text(1)?,
+            value: text(2)?,
+            operation: text(3)?,
             weight: row.get(4)?,
-            display: row.get(5)?,
+            display: text(5)?,
         })
     }
 
     /// `Ok(false)` for a row that cannot be stored: an unknown dictionary or a malformed pinyin key.
     fn apply(&self, main: &Connection) -> rusqlite::Result<bool> {
-        let delete = self.operation == "delete";
-        match self.kind.as_str() {
-            "pinyin" => apply_pinyin(main, &self.key, &self.value, delete, self.weight),
-            "wubi" => apply_simple(main, "wubi86", &self.key, &self.value, delete, self.weight),
-            "quick" => apply_simple(
+        let delete = self.operation == b"delete";
+        match self.kind.as_slice() {
+            b"pinyin" => apply_pinyin(main, &self.key, &self.value, delete, self.weight),
+            b"wubi" => apply_simple(main, "wubi86", &self.key, &self.value, delete, self.weight),
+            b"quick" => apply_simple(
                 main,
                 "quick_parases",
                 &self.key,
@@ -135,7 +141,7 @@ impl JournalRow {
                 delete,
                 self.weight,
             ),
-            "english" => apply_english(
+            b"english" => apply_english(
                 main,
                 &self.key,
                 &self.value,
@@ -145,6 +151,15 @@ impl JournalRow {
             ),
             _ => Ok(false),
         }
+    }
+}
+
+/// Bytes bound as TEXT the way `sqlite3_bind_text` bound the reference's `std::string`, whatever their encoding; `&[u8]` alone would bind a BLOB, which never equals a stored text value.
+struct Text<'a>(&'a [u8]);
+
+impl ToSql for Text<'_> {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::Borrowed(ValueRef::Text(self.0)))
     }
 }
 
@@ -160,16 +175,21 @@ pub(super) fn attach(connection: &Connection, path: &Path, schema: &str) -> rusq
 /// Delete, or update and insert when no row changed, a pinyin row with its jianpin column (J:306-332). A delete that finds nothing still succeeds.
 pub(super) fn apply_pinyin(
     main: &Connection,
-    key: &str,
-    value: &str,
+    key: &[u8],
+    value: &[u8],
     delete: bool,
     weight: i64,
 ) -> rusqlite::Result<bool> {
-    let segments = pinyin_segments(key);
-    // An empty segment, or an initial outside `a..=z`, names no table: the row cannot be stored.
-    let Some(table) = format::build_table_name(&segments) else {
+    // The reference's `pinyin_segments` on bytes (J:182-199): an empty segment means the key cannot be stored.
+    let segments: Vec<&[u8]> = key.split(|&byte| byte == b'\'').collect();
+    if segments.iter().any(|segment| segment.is_empty()) {
+        return Ok(false);
+    }
+    // An initial outside `a..=z` names no table: the row cannot be stored.
+    let Some(table) = format::quanpin_table(segments.len(), segments[0][0]) else {
         return Ok(false);
     };
+    let (key, value) = (Text(key), Text(value));
     if delete {
         main.prepare_cached(&format!(
             "DELETE FROM \"{table}\" WHERE key=?1 AND value=?2"
@@ -177,9 +197,10 @@ pub(super) fn apply_pinyin(
         .execute(params![key, value])?;
         return Ok(true);
     }
+    // The first character of each syllable. The reference took the first byte, which is the same for every key a writer accepts (lowercase ASCII); a segment that does not start with valid UTF-8 contributes U+FFFD here rather than a stray byte, since `jp` is only ever matched against typed letters.
     let jianpin: String = segments
         .iter()
-        .filter_map(|segment| segment.chars().next())
+        .filter_map(|segment| String::from_utf8_lossy(segment).chars().next())
         .collect();
     let changed = main
         .prepare_cached(&format!(
@@ -200,11 +221,12 @@ pub(super) fn apply_pinyin(
 pub(super) fn apply_simple(
     main: &Connection,
     table: &str,
-    key: &str,
-    value: &str,
+    key: &[u8],
+    value: &[u8],
     delete: bool,
     weight: i64,
 ) -> rusqlite::Result<bool> {
+    let (key, value) = (Text(key), Text(value));
     if delete {
         main.prepare_cached(&format!(
             "DELETE FROM \"{table}\" WHERE \"key\"=?1 AND \"value\"=?2"
@@ -230,13 +252,14 @@ pub(super) fn apply_simple(
 /// Upsert or delete in the English dictionary attached as `replay_english`, keyed by `(word, display)`; an empty journal display means the value is the display (J:357-371).
 pub(super) fn apply_english(
     main: &Connection,
-    key: &str,
-    value: &str,
+    key: &[u8],
+    value: &[u8],
     delete: bool,
     weight: i64,
-    display: &str,
+    display: &[u8],
 ) -> rusqlite::Result<bool> {
-    let display = if display.is_empty() { value } else { display };
+    let display = Text(if display.is_empty() { value } else { display });
+    let key = Text(key);
     if delete {
         main.prepare_cached(
             "DELETE FROM replay_english.english_words WHERE word=?1 AND display=?2",
@@ -456,18 +479,70 @@ pub(super) mod tests {
         );
     }
 
+    /// user_dictionary_journal.cpp:1688-1708 copies each column's bytes with no encoding check and binds them back as text, so a legacy row whose text is not UTF-8 replays byte for byte instead of blocking every future generation.
     #[test]
-    fn a_journal_row_that_is_not_utf8_rolls_back_as_an_incomplete_read() {
+    fn a_journal_row_that_is_not_utf8_replays_byte_for_byte() {
         let fixture = fixture();
         journal_row(&fixture, "('pinyin','ni''hao','您好','upsert',500,'',1)");
         journal_row(
             &fixture,
             "('pinyin','ni''hao',CAST(x'ff' AS TEXT),'upsert',10,'',2)",
         );
+        journal_row(
+            &fixture,
+            "('quick',CAST(x'6bff' AS TEXT),'phrase','upsert',5,'',3)",
+        );
+        journal_row(
+            &fixture,
+            "('english','hello','hello','upsert',7,CAST(x'68ff' AS TEXT),4)",
+        );
         let result = replay(&fixture.journal, &fixture.main, &fixture.english);
+        assert_eq!(result.error, "");
+        assert_eq!(result.applied, 4);
+        assert_eq!(
+            weight(
+                &fixture.main,
+                "SELECT weight FROM tbl_2_n WHERE value='您好'"
+            ),
+            Some(500)
+        );
+        assert_eq!(
+            weight(
+                &fixture.main,
+                "SELECT weight FROM tbl_2_n WHERE key='ni''hao' AND hex(value)='FF' AND jp='nh' AND typeof(value)='text'"
+            ),
+            Some(10)
+        );
+        assert_eq!(
+            weight(
+                &fixture.main,
+                "SELECT weight FROM quick_parases WHERE hex(key)='6BFF' AND value='phrase' AND typeof(key)='text'"
+            ),
+            Some(5)
+        );
+        assert_eq!(
+            weight(
+                &fixture.english,
+                "SELECT weight FROM english_words WHERE word='hello' AND hex(display)='68FF'"
+            ),
+            Some(7)
+        );
+    }
+
+    /// A key that names no table fails in the reference too (pinyin_table yields no name, so the statement does not prepare), which rolls the whole replay back.
+    #[test]
+    fn a_pinyin_key_that_is_not_utf8_and_names_no_table_rolls_back() {
+        let fixture = fixture();
+        journal_row(&fixture, "('pinyin','ni''hao','您好','upsert',500,'',1)");
+        journal_row(
+            &fixture,
+            "('pinyin',CAST(x'ff' AS TEXT),'你','upsert',10,'',2)",
+        );
+        let result = replay(&fixture.journal, &fixture.main, &fixture.english);
+        assert_eq!(result.failed, 1);
         assert_eq!(
             result.error,
-            "cannot read the complete user dictionary journal; changes were rolled back"
+            "one or more operations failed; changes were rolled back"
         );
         assert_eq!(
             weight(

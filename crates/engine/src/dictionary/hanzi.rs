@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::Duration;
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
@@ -49,11 +50,14 @@ fn open(path: &Path) -> Option<Connection> {
     if path.as_os_str().is_empty() {
         return None;
     }
-    Connection::open_with_flags(
+    let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
     )
-    .ok()
+    .ok()?;
+    // bridge.cpp:749-753 set no busy timeout, so SQLite's default of none applied: a locked dictionary answers empty at once rather than stalling each word of a validation batch for rusqlite's default 5 s.
+    connection.busy_timeout(Duration::ZERO).ok()?;
+    Some(connection)
 }
 
 /// bridge.cpp:285-305. The table is `tbl_<len>_<c>` written out for every letter, not `quanpin_table`, so past seven characters no table exists and the per-character path answers; tables that fail to prepare (`i`, `u`, `v`) are skipped.
@@ -81,19 +85,34 @@ fn exact_hanzi_pinyin(connection: &Connection, word: &str, length: usize) -> Str
     String::new()
 }
 
-/// Walks all single-character tables, heaviest first, keeping the first key per character (bridge.cpp:239-256).
-fn single_hanzi_map(connection: &Connection) -> HanziReadings {
+/// Walks all single-character tables, heaviest first, keeping the first key per character (bridge.cpp:239-256). The flag is false when a table could not be read because the file was busy, so the partial map is used once but not cached.
+fn single_hanzi_map(connection: &Connection) -> (HanziReadings, bool) {
+    let busy = |error: &rusqlite::Error| {
+        matches!(
+            error.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+        )
+    };
+    let mut complete = true;
     let mut result = HanziReadings::new();
     for initial in b'a'..=b'z' {
         let sql = format!(
             "SELECT \"key\", \"value\" FROM \"tbl_1_{}\" ORDER BY \"weight\" DESC, \"key\" ASC",
             initial as char
         );
-        let Ok(mut statement) = connection.prepare_cached(&sql) else {
-            continue;
+        let mut statement = match connection.prepare_cached(&sql) {
+            Ok(statement) => statement,
+            Err(error) => {
+                complete &= !busy(&error);
+                continue;
+            }
         };
-        let Ok(mut rows) = statement.query(()) else {
-            continue;
+        let mut rows = match statement.query(()) {
+            Ok(rows) => rows,
+            Err(error) => {
+                complete &= !busy(&error);
+                continue;
+            }
         };
         while let Ok(Some(row)) = rows.next() {
             let null = |index| matches!(row.get_ref(index), Ok(ValueRef::Null));
@@ -106,7 +125,7 @@ fn single_hanzi_map(connection: &Connection) -> HanziReadings {
             result.entry(value).or_insert(key);
         }
     }
-    result
+    (result, complete)
 }
 
 /// The single-character scan walks about twenty thousand rows with no index to sort by, and the personal dictionary validation calls this once per word for up to a thousand words, so the map is built once per dictionary path (bridge.cpp:257-284). Keyed by path because two sessions may point at different dictionaries. It is built outside the lock: two callers arriving together may both scan, the first to finish wins, and no caller waits behind another's scan.
@@ -120,7 +139,12 @@ fn cached_single_hanzi_map(connection: &Connection, path: &Path) -> Arc<HanziRea
     {
         return Arc::clone(found);
     }
-    let built = Arc::new(single_hanzi_map(connection));
+    let (built, complete) = single_hanzi_map(connection);
+    let built = Arc::new(built);
+    // With no busy timeout (bridge.cpp parity) a scan that met a writer's lock is partial; keeping it would answer empty for the rest of the process.
+    if !complete {
+        return built;
+    }
     Arc::clone(
         cache
             .lock()
@@ -200,6 +224,26 @@ mod tests {
             "ni'".repeat(127) + "ni"
         );
         assert_eq!(hanzi_to_pinyin(&path, &"你".repeat(129)), "");
+    }
+
+    /// bridge.cpp:749-753 opened the dictionary with no busy timeout, so a locked file answers empty at once rather than stalling every word of a validation batch for rusqlite's default 5 s.
+    #[test]
+    fn a_locked_dictionary_answers_empty_at_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture(directory.path());
+        let locker = Connection::open(&path).unwrap();
+        locker.execute_batch("BEGIN EXCLUSIVE;").unwrap();
+        let start = std::time::Instant::now();
+        assert_eq!(hanzi_to_pinyin(&path, "你好"), "");
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(1_000),
+            "a locked lookup took {:?}",
+            start.elapsed()
+        );
+        locker.execute_batch("COMMIT;").unwrap();
+        assert_eq!(hanzi_to_pinyin(&path, "你好"), "ni'hao");
+        // The per-character map scanned under the lock was not kept.
+        assert_eq!(hanzi_to_pinyin(&path, "你们"), "ni'men");
     }
 
     #[test]

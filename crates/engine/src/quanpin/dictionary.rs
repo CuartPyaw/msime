@@ -92,8 +92,7 @@ pub struct QuanpinDictionary {
     sentence_alternatives: bool,
     sentence_association: SentenceAssociationOptions,
     rescoring_context: String,
-    /// The raw input, reading and mask of the query being answered; the typo edges and the expansion's cache write read them.
-    pinyin_sequence: String,
+    /// The reading and mask of the query being answered; marking and the typo edges read them within that query.
     pinyin_segmentation: String,
     /// Every non-primary correction cut, joined; marking compares against them on every query, cached or not.
     alternative_segmentations: Vec<String>,
@@ -131,7 +130,6 @@ impl QuanpinDictionary {
             sentence_alternatives: false,
             sentence_association: SentenceAssociationOptions::default(),
             rescoring_context: String::new(),
-            pinyin_sequence: String::new(),
             pinyin_segmentation: String::new(),
             alternative_segmentations: Vec::new(),
             current_autocorrect_types: 0,
@@ -190,9 +188,12 @@ impl QuanpinDictionary {
             .collect()
     }
 
-    /// Replace the capped 24-row run with every row of the initial (QD:506-558); updates the row and series caches.
+    /// Replace the capped 24-row run with every row of the initial (QD:506-558); updates the row cache and the series slot of the query `(raw, segmentation, autocorrect_types)` that produced `candidates`.
     pub fn expand_initial_candidates(
         &mut self,
+        raw: &str,
+        segmentation: &str,
+        autocorrect_types: u32,
         code: &str,
         candidates: &mut Vec<WordItem>,
     ) -> bool {
@@ -231,11 +232,13 @@ impl QuanpinDictionary {
         }
         *candidates = merged;
         self.cache.insert(code.to_string(), expanded);
-        // Keyed without the `C:` prefix, as the reference writes it (QD:554): a one-letter input is never corrected, so the key is the one its query used.
+        // Keyed without the `C:` prefix, as the reference writes it (QD:554): a one-letter input is never corrected, so the key is the one its query used. The reference read the last query's fields here; the key is recomputed from the caller's query instead, because a caret-prefix decode is a second query on this dictionary and would otherwise receive the whole input's expanded list in its own slot.
+        let segments = self.resolve_segments(raw, segmentation);
+        let resolution = self.resolution(raw, segmentation, &segments, autocorrect_types);
         let key = self.series_slot(&series_cache_key(
-            &self.pinyin_sequence,
-            &self.pinyin_segmentation,
-            self.current_autocorrect_types,
+            raw,
+            &resolution.segmentation,
+            autocorrect_types,
         ));
         self.series_cache.insert(key, candidates.clone());
         true
@@ -350,7 +353,7 @@ impl QuanpinDictionary {
         self.series_cache.clear();
     }
 
-    /// Loads the keyboard sentence model from the resource bundle when its switch is on. The desktop model is not the engine's: only the runtime's settled reranker runs it. The options are part of every series slot, so a change needs no reset and switching back finds the earlier lists still cached.
+    /// Loads the keyboard sentence model from the resource bundle when its switch is on. The desktop model is not the engine's: only the runtime's settled reranker runs it. A change resets the caches (neural-association.patch:2667-2682), as shuangpin does, so a cached online row does not come back after the options are switched away and back.
     pub fn set_sentence_association(&mut self, options: SentenceAssociationOptions) {
         if self.sentence_association == options {
             return;
@@ -364,6 +367,7 @@ impl QuanpinDictionary {
                     .push(NeuralReranker::new(CandidateSource::NeuralKeyboard, model));
             }
         }
+        self.reset_cache();
     }
 
     /// Keeps the part of the committed text the rerankers read; while they run it is part of every series slot (`series_slot`).
@@ -410,7 +414,6 @@ impl QuanpinDictionary {
         if raw.is_empty() {
             return Vec::new();
         }
-        self.pinyin_sequence = raw.to_string();
         self.current_autocorrect_types = types;
         if types & TYPO_EDGE_TYPES != 0 {
             // Only a stat per query unless the journal changed. Lists built without a mask never depend on the profile.

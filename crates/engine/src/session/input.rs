@@ -537,11 +537,23 @@ impl InputSession {
         self.prefix_query_input.clear();
     }
 
-    /// input_session_composition.cpp:379-385.
+    /// input_session_composition.cpp:379-385. While a caret prefix is decoded the prefix list is the one on screen, so it is the one widened; the reference's caret-prefix overlay widened only the hidden whole-input list and reported growth the host could not see.
     pub(super) fn expand_initial_candidates(&mut self) -> bool {
-        if !self.engine.expand_initial_candidates() {
+        self.refresh_prefix_candidates();
+        let grew = if self.prefix_active {
+            let raw_with_cases = self.raw_with_cases()[..self.prefix_end()].to_owned();
+            self.engine.expand_raw_initial_candidates(
+                &self.prefix_query_input,
+                &raw_with_cases,
+                &mut self.prefix_candidates,
+            )
+        } else {
+            self.engine.expand_initial_candidates()
+        };
+        if !grew {
             return false;
         }
+        // The prefix is unchanged, so the refresh keeps the widened prefix list instead of querying it again.
         self.update_mixed_candidates();
         true
     }

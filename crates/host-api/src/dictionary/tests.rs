@@ -627,6 +627,53 @@ fn a_refused_edit_says_which_rule_it_broke() {
     );
 }
 
+/// English frequency learning lifts a user's own word past 100000000 with no ceiling, and the list hands that row back as it is stored, so an edit or removal of it must not be refused as out of range. The replacement keeps the ceiling.
+#[test]
+fn a_listed_english_word_above_the_ceiling_can_be_edited() {
+    let english = |weight: i64| Entry {
+        kind: Kind::English,
+        key: "foo".into(),
+        value: "foo".into(),
+        weight,
+        source: None,
+    };
+    assert!(validate_previous_entry(&english(20_000_001_000)).is_ok());
+    assert_eq!(
+        validate_previous_entry(&english(0)).unwrap_err(),
+        "invalid dictionary entry: weight is outside 1 to 100000000"
+    );
+    assert_eq!(
+        replacement_for_engine(english(20_000_001_000))
+            .err()
+            .unwrap(),
+        "invalid dictionary entry: weight is outside 1 to 100000000"
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().to_str().unwrap();
+    let request = json!({
+        "options": {
+            "api_version": 1,
+            "resources": format!("{root}/resources"),
+            "user_data": format!("{root}/user"),
+            "cache": format!("{root}/cache"),
+            "dictionaries": format!("{root}/dictionaries"),
+            "preferences": msime_client_core::preferences::Preferences::default(),
+        },
+        "action": {
+            "operation": "edit",
+            "previous": english(20_000_001_000),
+            "replacement": english(500),
+            "request_id": "synthetic-edit",
+        },
+    });
+    // With no dictionary behind these paths it fails later, on storage, not as an invalid entry.
+    let refused = dictionary_request_json(&serde_json::to_vec(&request).unwrap()).unwrap_err();
+    assert!(
+        !refused.starts_with("invalid dictionary entry"),
+        "{refused}"
+    );
+}
+
 fn quick(key: &str, value: &str) -> Entry {
     Entry {
         kind: Kind::QuickPhrase,
