@@ -4715,14 +4715,14 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     [_session setMusicActive:NO];
 }
 
-// Every key press this input method is given makes its key sound, handled or passed on to the application, except auto-repeat (a held key is one press) and anything typed while secure event input is on. The session only queues the request, so this costs the key nothing when sound is off.
+// Every key press this input method is given makes its key sound, handled or passed on to the application, except auto-repeat (a held key is one press), anything typed while secure event input is on, and English mode, which is silent on every desktop host (Windows only hears the keys it composes). The session only queues the request, so this costs the key nothing when sound is off.
 - (void)playKeySound:(NSEvent *)event {
     const BOOL secure = [self secureEventInputActive];
     if (secure != _secureEventInput) {
         _secureEventInput = secure;
         if (MSIMEMusicOwner == self) [_session setMusicActive:!secure];
     }
-    if (!secure) [_session keySound:msime::mac::PhysicalKeySoundClass(event.keyCode)];
+    if (!secure && !_appearance.englishMode) [_session keySound:msime::mac::PhysicalKeySoundClass(event.keyCode)];
 }
 
 // Every key down leaves through here, so the smart punctuation shadow sees each one exactly once, after it has been handled and with what became of it. Events this host posted itself (the voice sendinput route and the smart punctuation rewrite) are skipped: whoever posted them has already recorded what they carry.

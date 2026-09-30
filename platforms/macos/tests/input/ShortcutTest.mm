@@ -2647,6 +2647,11 @@ static void TestSoundsFollowKeysCommitsAndActivation() {
     [controller handleEvent:key(NSEventTypeKeyDown, 0, @"a", YES) client:client];
     [controller handleEvent:key(NSEventTypeKeyUp, 0, @"a", NO) client:client];
     assert(session.keySounds.count == 6);
+    // English mode is silent, as it is on Windows and Linux.
+    appearance.englishMode = YES;
+    [controller handleEvent:key(NSEventTypeKeyDown, 0, @"a", NO) client:client];
+    assert(session.keySounds.count == 6);
+    appearance.englishMode = NO;
 
     // Activation lets music play; secure event input stops it and silences every key and commit until it is off again.
     [controller claimBackgroundMusic];
