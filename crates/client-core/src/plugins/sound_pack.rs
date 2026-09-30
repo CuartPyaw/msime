@@ -145,13 +145,13 @@ pub(crate) fn parse(table: &toml::map::Map<String, Value>) -> Result<SoundPack, 
         Some(value) => match value.as_str() {
             Some("keys") => SoundMode::Keys,
             Some("sequence") => SoundMode::Sequence,
-            _ => return Err("mode must be keys or sequence".into()),
+            _ => return Err("mode 只能是 keys 或 sequence".into()),
         },
     };
     let sounds = match table.get("sounds") {
         None => SoundFiles::default(),
         Some(value) => {
-            let sounds = value.as_table().ok_or("sounds must be a table")?;
+            let sounds = value.as_table().ok_or("sounds 必须是一个表")?;
             only_keys(sounds, &SOUND_KEYS, "sounds")?;
             let file = |key: &str| sounds.get(key).map(audio_file).transpose();
             SoundFiles {
@@ -167,18 +167,18 @@ pub(crate) fn parse(table: &toml::map::Map<String, Value>) -> Result<SoundPack, 
     let sequence = match table.get("sequence") {
         None => None,
         Some(value) => Some(parse_sequence(
-            value.as_table().ok_or("sequence must be a table")?,
+            value.as_table().ok_or("sequence 必须是一个表")?,
         )?),
     };
     match mode {
         SoundMode::Keys if sounds.default.is_none() => {
-            return Err("keys mode needs sounds.default".into())
+            return Err("keys 模式需要 sounds.default".into())
         }
         SoundMode::Keys if sequence.is_some() => {
-            return Err("sequence is only allowed in sequence mode".into())
+            return Err("只有 sequence 模式才能有 sequence".into())
         }
         SoundMode::Sequence if sequence.is_none() => {
-            return Err("sequence mode needs a sequence table".into())
+            return Err("sequence 模式需要 sequence 表".into())
         }
         _ => {}
     }
@@ -191,20 +191,20 @@ pub(crate) fn parse(table: &toml::map::Map<String, Value>) -> Result<SoundPack, 
 
 fn parse_sequence(table: &toml::map::Map<String, Value>) -> Result<Sequence, String> {
     only_keys(table, &["sample", "semitones", "advance"], "sequence")?;
-    let sample = audio_file(table.get("sample").ok_or("sequence needs a sample")?)?;
+    let sample = audio_file(table.get("sample").ok_or("sequence 缺少 sample")?)?;
     let items = table
         .get("semitones")
         .and_then(Value::as_array)
-        .ok_or("sequence needs semitones")?;
+        .ok_or("sequence 缺少 semitones")?;
     if items.is_empty() || items.len() > MAX_SEMITONES {
-        return Err("sequence has too few or too many notes".into());
+        return Err("旋律的音符数量不在允许范围内".into());
     }
     let mut semitones = Vec::with_capacity(items.len());
     for item in items {
         let semitone = item
             .as_integer()
             .filter(|semitone| SEMITONE_RANGE.contains(semitone))
-            .ok_or("semitones must be integers from -24 to 24")?;
+            .ok_or("semitones 必须是 -24 到 24 之间的整数")?;
         semitones.push(semitone as i8);
     }
     let advance = match table.get("advance") {
@@ -212,7 +212,7 @@ fn parse_sequence(table: &toml::map::Map<String, Value>) -> Result<Sequence, Str
         Some(value) => match value.as_str() {
             Some("key") => SequenceAdvance::Key,
             Some("commit") => SequenceAdvance::Commit,
-            _ => return Err("advance must be key or commit".into()),
+            _ => return Err("advance 只能是 key 或 commit".into()),
         },
     };
     Ok(Sequence {
@@ -224,9 +224,9 @@ fn parse_sequence(table: &toml::map::Map<String, Value>) -> Result<Sequence, Str
 
 /// A manifest value naming an audio file in the pack directory.
 pub(crate) fn audio_file(value: &Value) -> Result<String, String> {
-    let name = value.as_str().ok_or("audio file names must be strings")?;
+    let name = value.as_str().ok_or("音频文件名必须是字符串")?;
     if !valid_file_name(name) || !is_audio(name) {
-        return Err(format!("{name} is not a .wav or .ogg file name"));
+        return Err(format!("{name} 不是 .wav 或 .ogg 文件名"));
     }
     Ok(name.to_owned())
 }

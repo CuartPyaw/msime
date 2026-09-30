@@ -173,7 +173,7 @@ pub fn scan(root: &Path, builtin_sounds: Option<&Path>) -> PluginCatalog {
             Ok(_) => catalog.issues.push(PluginIssue {
                 kind,
                 folder: String::new(),
-                reason: "kind directory is not a directory".into(),
+                reason: "扩展类别目录不是文件夹".into(),
             }),
             Err(_) => {}
         }
@@ -200,7 +200,7 @@ fn scan_kind(directory: &Path, kind: PluginKind, builtin: bool, catalog: &mut Pl
             Ok(file_type) if file_type.is_dir() => {
                 load_installed(directory, &folder, kind, builtin)
             }
-            _ => Err("not a plugin directory".to_owned()),
+            _ => Err("不是扩展包文件夹".to_owned()),
         };
         match loaded {
             Ok(package) => catalog.packages.push(package),
@@ -221,10 +221,10 @@ pub fn load_package(
     id: &str,
 ) -> Result<PluginSummary, String> {
     if !safe_id(id) {
-        return Err("invalid plugin id".into());
+        return Err("扩展包 id 无效".into());
     }
     if kind == PluginKind::Sound && BUILTIN_SOUND_PACKS.contains(&id) {
-        let builtin = builtin_sounds.ok_or("built-in sound packs are not available")?;
+        let builtin = builtin_sounds.ok_or("内置音效包不可用")?;
         return load_installed(builtin, id, kind, true);
     }
     load_installed(&kind_directory(root, kind), id, kind, false)
@@ -238,25 +238,25 @@ fn load_installed(
     builtin: bool,
 ) -> Result<PluginSummary, String> {
     if !safe_id(folder) {
-        return Err("invalid plugin id".into());
+        return Err("扩展包 id 无效".into());
     }
     if !builtin && kind == PluginKind::Sound && BUILTIN_SOUND_PACKS.contains(&folder) {
-        return Err("id is reserved for a built-in pack".into());
+        return Err("这个 id 属于内置音效包".into());
     }
     let package = directory.join(folder);
-    let metadata = fs::symlink_metadata(&package).map_err(|_| "missing plugin directory")?;
+    let metadata = fs::symlink_metadata(&package).map_err(|_| "扩展包文件夹不存在")?;
     if !metadata.is_dir() {
-        return Err("not a plugin directory".into());
+        return Err("不是扩展包文件夹".into());
     }
     if !contained(directory, &package) {
-        return Err("plugin escapes its directory".into());
+        return Err("扩展包指向了所在目录之外".into());
     }
     let mut summary = load_directory(&package)?;
     if summary.id != folder {
-        return Err("manifest id does not match folder".into());
+        return Err("plugin.toml 里的 id 与文件夹名不一致".into());
     }
     if summary.kind() != kind {
-        return Err("manifest kind does not match its directory".into());
+        return Err("plugin.toml 里的 kind 与所在目录不一致".into());
     }
     summary.builtin = builtin;
     Ok(summary)
@@ -282,25 +282,25 @@ pub(crate) type PackFiles = BTreeMap<String, u64>;
 pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> {
     let files = list_files(directory)?;
     if !files.contains_key(MANIFEST_FILE) {
-        return Err("missing plugin.toml".into());
+        return Err("缺少 plugin.toml".into());
     }
     let bytes = read_file(directory, MANIFEST_FILE, MAX_MANIFEST_BYTES)
-        .map_err(|_| "plugin.toml is unreadable or too large".to_owned())?;
+        .map_err(|_| "plugin.toml 无法读取或太大".to_owned())?;
     let value: Value =
-        toml::from_str(std::str::from_utf8(&bytes).map_err(|_| "plugin.toml is not UTF-8")?)
-            .map_err(|_| "invalid TOML")?;
-    let table = value.as_table().ok_or("manifest must be a table")?;
+        toml::from_str(std::str::from_utf8(&bytes).map_err(|_| "plugin.toml 不是 UTF-8 编码")?)
+            .map_err(|_| "plugin.toml 不是有效的 TOML")?;
+    let table = value.as_table().ok_or("plugin.toml 的内容必须是一个表")?;
     if table.get("schema_version").and_then(Value::as_integer) != Some(1) {
-        return Err("unsupported schema_version".into());
+        return Err("不支持这个 schema_version".into());
     }
     let kind = table
         .get("kind")
         .and_then(Value::as_str)
         .and_then(PluginKind::parse)
-        .ok_or("unknown plugin kind")?;
+        .ok_or("kind 不是已知的扩展类型")?;
     let id = required_string(table, "id", 64)?;
     if !safe_id(&id) {
-        return Err("invalid plugin id".into());
+        return Err("扩展包 id 无效".into());
     }
     let name = required_string(table, "name", 80)?;
     let version = required_string(table, "version", 32)?;
@@ -309,15 +309,15 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '(' | ')' | ' '))
     {
-        return Err("license must be an SPDX expression".into());
+        return Err("license 必须是 SPDX 许可证表达式".into());
     }
     let author = optional_string(table, "author", 120)?;
     let description = optional_string(table, "description", 500)?;
     match table.get("permissions") {
         None => {}
         Some(Value::Array(items)) if items.is_empty() => {}
-        Some(Value::Array(_)) => return Err("plugins may not request permissions".into()),
-        Some(_) => return Err("permissions must be an array".into()),
+        Some(Value::Array(_)) => return Err("扩展包不能申请权限，permissions 必须为空".into()),
+        Some(_) => return Err("permissions 必须是数组".into()),
     }
     let kind_keys: &[&str] = match kind {
         PluginKind::Sound => &sound_pack::MANIFEST_KEYS,
@@ -328,7 +328,7 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
         .keys()
         .find(|key| !COMMON_KEYS.contains(&key.as_str()) && !kind_keys.contains(&key.as_str()))
     {
-        return Err(format!("unknown manifest key {key}"));
+        return Err(format!("plugin.toml 里有未知的键 {key}"));
     }
     let (content, audio, limits) = match kind {
         PluginKind::Sound => {
@@ -380,39 +380,34 @@ impl AudioLimits {
 /// The regular files of a pack directory, hidden names aside. Anything else in it - a subdirectory, a symbolic link, a device - refuses the pack, as does a name that is not one plain component or an entry count past `MAX_PACK_FILES`.
 fn list_files(directory: &Path) -> Result<PackFiles, String> {
     let mut files = PackFiles::new();
-    let entries = fs::read_dir(directory).map_err(|_| "unreadable plugin directory")?;
+    let entries = fs::read_dir(directory).map_err(|_| "扩展包文件夹无法读取")?;
     for entry in entries {
-        let entry = entry.map_err(|_| "unreadable plugin directory")?;
+        let entry = entry.map_err(|_| "扩展包文件夹无法读取")?;
         let name = entry
             .file_name()
             .into_string()
-            .map_err(|_| "file name is not UTF-8")?;
+            .map_err(|_| "有文件名不是 UTF-8 编码")?;
         // What a file manager leaves in a folder it has shown (`.DS_Store`) is not part of the pack. Nothing reads it: every file a host opens is named by the manifest, and those names cannot start with a dot.
         if name.starts_with('.') {
             continue;
         }
         if files.len() == MAX_PACK_FILES {
-            return Err("too many files".into());
+            return Err("文件太多".into());
         }
-        let file_type = entry
-            .file_type()
-            .map_err(|_| "unreadable plugin directory")?;
+        let file_type = entry.file_type().map_err(|_| "扩展包文件夹无法读取")?;
         if file_type.is_symlink() {
-            return Err(format!("{name} is a symbolic link"));
+            return Err(format!("{name} 是符号链接"));
         }
         if file_type.is_dir() {
-            return Err(format!("{name} is a subdirectory"));
+            return Err(format!("{name} 是子文件夹"));
         }
         if !file_type.is_file() {
-            return Err(format!("{name} is not a regular file"));
+            return Err(format!("{name} 不是普通文件"));
         }
         if !valid_file_name(&name) {
-            return Err(format!("{name} is not a valid file name"));
+            return Err(format!("{name} 不是有效的文件名"));
         }
-        let size = entry
-            .metadata()
-            .map_err(|_| "unreadable plugin directory")?
-            .len();
+        let size = entry.metadata().map_err(|_| "扩展包文件夹无法读取")?.len();
         files.insert(name, size);
     }
     Ok(files)
@@ -456,33 +451,33 @@ fn check_files(
     distinct.sort_unstable();
     distinct.dedup();
     if distinct.len() > limits.files {
-        return Err("too many audio files".into());
+        return Err("音频文件太多".into());
     }
     let mut total = 0u64;
     for name in &distinct {
         let size = *files
             .get(*name)
-            .ok_or_else(|| format!("missing audio file {name}"))?;
+            .ok_or_else(|| format!("缺少音频文件 {name}"))?;
         if size == 0 || size > limits.file_bytes {
-            return Err(format!("{name} is empty or too large"));
+            return Err(format!("{name} 为空或太大"));
         }
         total += size;
         if !audio_signature_matches(directory, name) {
-            return Err(format!("{name} is not a WAV or Ogg file"));
+            return Err(format!("{name} 不是 WAV 或 Ogg 音频"));
         }
     }
     if total > limits.total_bytes {
-        return Err("audio files are too large together".into());
+        return Err("音频文件加起来太大".into());
     }
     for (name, size) in files {
         if name == MANIFEST_FILE || distinct.contains(&name.as_str()) {
             continue;
         }
         if !is_notice(name) {
-            return Err(format!("{name} is not used by the manifest"));
+            return Err(format!("{name} 没有在 plugin.toml 里用到"));
         }
         if *size > MAX_NOTICE_BYTES {
-            return Err(format!("{name} is too large"));
+            return Err(format!("{name} 太大"));
         }
     }
     Ok(())
@@ -527,9 +522,9 @@ pub(crate) fn required_string(
     let value = table
         .get(key)
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("{key} must be a string"))?;
+        .ok_or_else(|| format!("{key} 必须是字符串"))?;
     if value.trim().is_empty() || !crate::text::is_bounded_text(value, max) {
-        return Err(format!("{key} has invalid length or characters"));
+        return Err(format!("{key} 的长度或字符不符合要求"));
     }
     Ok(value.to_owned())
 }
@@ -552,7 +547,7 @@ pub(crate) fn only_keys(
     what: &str,
 ) -> Result<(), String> {
     match table.keys().find(|key| !allowed.contains(&key.as_str())) {
-        Some(key) => Err(format!("unknown key {key} in {what}")),
+        Some(key) => Err(format!("{what} 里有未知的键 {key}")),
         None => Ok(()),
     }
 }
@@ -560,7 +555,7 @@ pub(crate) fn only_keys(
 /// Delete an installed pack. A built-in id is refused; removing a pack that is not installed succeeds.
 pub fn remove(root: &Path, kind: PluginKind, id: &str) -> Result<(), PluginError> {
     if !safe_id(id) {
-        return Err(PluginError::Invalid("invalid plugin id".into()));
+        return Err(PluginError::Invalid("扩展包 id 无效".into()));
     }
     if kind == PluginKind::Sound && BUILTIN_SOUND_PACKS.contains(&id) {
         return Err(PluginError::Reserved);

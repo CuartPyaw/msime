@@ -46,20 +46,20 @@ pub(crate) fn parse(table: &toml::map::Map<String, Value>) -> Result<MusicPack, 
     let music = table
         .get("music")
         .and_then(Value::as_table)
-        .ok_or("music pack needs a music table")?;
+        .ok_or("音乐包缺少 music 表")?;
     only_keys(music, &["tracks"], "music")?;
     let items = music
         .get("tracks")
         .and_then(Value::as_array)
-        .ok_or("music needs tracks")?;
+        .ok_or("music 缺少 tracks")?;
     if items.is_empty() || items.len() > MAX_TRACKS {
-        return Err("music has too few or too many tracks".into());
+        return Err("曲目数量不在允许范围内".into());
     }
     let mut tracks: Vec<String> = Vec::with_capacity(items.len());
     for item in items {
         let track = audio_file(item)?;
         if tracks.contains(&track) {
-            return Err(format!("{track} is listed twice"));
+            return Err(format!("{track} 重复了"));
         }
         tracks.push(track);
     }

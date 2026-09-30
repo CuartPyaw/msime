@@ -127,7 +127,7 @@ impl Budget {
         self.files += 1;
         self.bytes += bytes;
         if self.files > MAX_PACK_FILES || bytes > MAX_FILE_BYTES || self.bytes > MAX_TOTAL_BYTES {
-            return Err(PluginError::Invalid("the pack is too large".into()));
+            return Err(PluginError::Invalid("扩展包太大".into()));
         }
         Ok(())
     }
@@ -140,21 +140,19 @@ fn copy_folder(source: &Path, staging: &Path) -> Result<(), PluginError> {
         let name = entry
             .file_name()
             .into_string()
-            .map_err(|_| PluginError::Invalid("a file name is not UTF-8".into()))?;
+            .map_err(|_| PluginError::Invalid("有文件名不是 UTF-8 编码".into()))?;
         if name.starts_with('.') {
             continue;
         }
         let kind = entry.file_type()?;
         if kind.is_symlink() {
-            return Err(PluginError::Invalid(format!("{name} is a symbolic link")));
+            return Err(PluginError::Invalid(format!("{name} 是符号链接")));
         }
         if kind.is_dir() {
-            return Err(PluginError::Invalid(format!("{name} is a subdirectory")));
+            return Err(PluginError::Invalid(format!("{name} 是子文件夹")));
         }
         if !kind.is_file() {
-            return Err(PluginError::Invalid(format!(
-                "{name} is not a regular file"
-            )));
+            return Err(PluginError::Invalid(format!("{name} 不是普通文件")));
         }
         let input = File::open(entry.path())?;
         let size = input.metadata()?.len();
@@ -167,33 +165,27 @@ fn copy_folder(source: &Path, staging: &Path) -> Result<(), PluginError> {
 fn extract(source: &Path, staging: &Path) -> Result<(), PluginError> {
     let file = File::open(source)?;
     if file.metadata()?.len() > MAX_ARCHIVE_BYTES {
-        return Err(PluginError::Archive("the archive is too large".into()));
+        return Err(PluginError::Archive("压缩包太大".into()));
     }
     let directory = zip::ZipArchive::new(ReadBudget {
         inner: file,
         left: MAX_DIRECTORY_READ_BYTES,
     })
-    .map_err(|error| PluginError::Archive(error.to_string()))?;
+    .map_err(archive_error)?;
     if directory.len() > MAX_ARCHIVE_MEMBERS {
-        return Err(PluginError::Archive(
-            "the archive has too many members".into(),
-        ));
+        return Err(PluginError::Archive("压缩包里的文件太多".into()));
     }
     // The directory is known to be small now; members are read without the budget, each bounded by `Budget` instead.
-    let mut archive = zip::ZipArchive::new(directory.into_inner().inner)
-        .map_err(|error| PluginError::Archive(error.to_string()))?;
+    let mut archive = zip::ZipArchive::new(directory.into_inner().inner).map_err(archive_error)?;
     // Every file member's path, as plain components, with the members to leave behind already dropped.
     let mut members: Vec<(usize, Vec<String>)> = Vec::with_capacity(archive.len());
     for index in 0..archive.len() {
-        let member = archive
-            .by_index_raw(index)
-            .map_err(|error| PluginError::Archive(error.to_string()))?;
-        let path = member.enclosed_name().ok_or_else(|| {
-            PluginError::Archive(format!("{} escapes the archive", member.name()))
-        })?;
-        let components = plain_components(&path).ok_or_else(|| {
-            PluginError::Archive(format!("{} is not a plain path", member.name()))
-        })?;
+        let member = archive.by_index_raw(index).map_err(archive_error)?;
+        let path = member
+            .enclosed_name()
+            .ok_or_else(|| PluginError::Archive(format!("{} 指向了压缩包之外", member.name())))?;
+        let components = plain_components(&path)
+            .ok_or_else(|| PluginError::Archive(format!("{} 不是普通的文件路径", member.name())))?;
         if components.first().is_some_and(|first| first == "__MACOSX")
             || components.iter().any(|part| part.starts_with('.'))
         {
@@ -201,14 +193,14 @@ fn extract(source: &Path, staging: &Path) -> Result<(), PluginError> {
         }
         if member.is_symlink() {
             return Err(PluginError::Invalid(format!(
-                "{} is a symbolic link",
+                "{} 是符号链接",
                 member.name()
             )));
         }
         if member.is_dir() {
             if components.len() > 1 {
                 return Err(PluginError::Invalid(format!(
-                    "{} is a subdirectory",
+                    "{} 是子文件夹",
                     member.name()
                 )));
             }
@@ -228,14 +220,12 @@ fn extract(source: &Path, staging: &Path) -> Result<(), PluginError> {
             (Some(wrapper), [folder, name]) if folder == wrapper => name.clone(),
             _ => {
                 return Err(PluginError::Invalid(format!(
-                    "{} is a subdirectory",
+                    "{} 是子文件夹",
                     components.join("/")
                 )))
             }
         };
-        let member = archive
-            .by_index(index)
-            .map_err(|error| PluginError::Archive(error.to_string()))?;
+        let member = archive.by_index(index).map_err(archive_error)?;
         let size = member.size();
         budget.take(size)?;
         write_member(staging, &name, member, size)?;
@@ -252,14 +242,37 @@ struct ReadBudget<R> {
 impl<R: Read> Read for ReadBudget<R> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let read = self.inner.read(buffer)?;
-        self.left = self.left.checked_sub(read as u64).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "the archive directory is too large",
-            )
-        })?;
+        self.left = self
+            .left
+            .checked_sub(read as u64)
+            .ok_or_else(|| io::Error::other(DirectoryTooLarge))?;
         Ok(read)
     }
+}
+
+/// `ReadBudget` ran out: the archive's directory declares far more members than a pack may have.
+#[derive(Debug)]
+struct DirectoryTooLarge;
+
+impl std::fmt::Display for DirectoryTooLarge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("压缩包的目录太大，里面的文件远多于扩展包允许的数量")
+    }
+}
+
+impl std::error::Error for DirectoryTooLarge {}
+
+/// A `zip` failure as the reason the settings page shows. `zip`'s own messages are English and name format internals, so they become one sentence; the budget this module sets keeps its own.
+fn archive_error(error: zip::result::ZipError) -> PluginError {
+    if let zip::result::ZipError::Io(io) = &error {
+        if let Some(budget) = io
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<DirectoryTooLarge>())
+        {
+            return PluginError::Archive(budget.to_string());
+        }
+    }
+    PluginError::Archive("不是有效的 zip 文件，或用了不支持的压缩方式".into())
 }
 
 impl<R: Seek> Seek for ReadBudget<R> {
@@ -289,23 +302,19 @@ fn write_member(
     declared: u64,
 ) -> Result<(), PluginError> {
     if !super::valid_file_name(name) {
-        return Err(PluginError::Invalid(format!(
-            "{name} is not a valid file name"
-        )));
+        return Err(PluginError::Invalid(format!("{name} 不是有效的文件名")));
     }
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(staging.join(name))
         .map_err(|error| match error.kind() {
-            io::ErrorKind::AlreadyExists => PluginError::Invalid(format!("{name} appears twice")),
+            io::ErrorKind::AlreadyExists => PluginError::Invalid(format!("{name} 出现了两次")),
             _ => PluginError::Io(error),
         })?;
     let copied = io::copy(&mut input.take(declared.saturating_add(1)), &mut output)?;
     if copied != declared {
-        return Err(PluginError::Invalid(format!(
-            "{name} is not the size it claims"
-        )));
+        return Err(PluginError::Invalid(format!("{name} 的大小与记录的不符")));
     }
     output.flush()?;
     Ok(())

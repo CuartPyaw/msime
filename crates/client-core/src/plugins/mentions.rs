@@ -58,7 +58,7 @@ pub fn validate_entry(entry: &MentionEntry) -> Result<(), String> {
         || crate::text::has_disallowed_control_with_allowed(&entry.text, &[])
         || !crate::text::is_bounded_utf16(&entry.text, MAX_TEXT_UTF16)
     {
-        return Err(format!("{} is empty or too long", entry.text));
+        return Err(format!("「{}」为空或太长", entry.text));
     }
     let key = &entry.key;
     if key.len() > MAX_KEY_BYTES
@@ -68,7 +68,7 @@ pub fn validate_entry(entry: &MentionEntry) -> Result<(), String> {
             }))
     {
         return Err(format!(
-            "the key of {} must be lowercase letters joined by '",
+            "「{}」的拼音只能是小写字母，音节之间用 ' 分隔",
             entry.text
         ));
     }
@@ -132,7 +132,7 @@ impl MentionStore {
         })
         .map_err(|_| MentionError::Format)?;
         if bytes.len() as u64 > MAX_DOCUMENT_BYTES {
-            return Err(MentionError::Invalid("the list is too large".into()));
+            return Err(MentionError::Invalid("名单太大".into()));
         }
         let mut temporary = tempfile::NamedTempFile::new_in(&self.directory)?;
         temporary.write_all(&bytes)?;
@@ -146,12 +146,12 @@ impl MentionStore {
 
 fn check(entries: &[MentionEntry]) -> Result<(), String> {
     if entries.len() > MAX_ENTRIES {
-        return Err("too many names".into());
+        return Err("名单里的条目太多".into());
     }
     for (index, entry) in entries.iter().enumerate() {
         validate_entry(entry)?;
         if entries[..index].iter().any(|kept| kept.text == entry.text) {
-            return Err(format!("{} is listed twice", entry.text));
+            return Err(format!("「{}」重复了", entry.text));
         }
     }
     Ok(())

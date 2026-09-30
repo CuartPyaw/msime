@@ -298,9 +298,9 @@ mod tests {
 
     #[test]
     fn mention_errors_name_the_entry() {
-        let error = PluginCommandError::from(MentionError::Invalid("张三 is empty".into()));
+        let error = PluginCommandError::from(MentionError::Invalid("「张三」为空或太长".into()));
         assert_eq!(error.code, "mention_invalid");
-        assert_eq!(error.detail.as_deref(), Some("张三 is empty"));
+        assert_eq!(error.detail.as_deref(), Some("「张三」为空或太长"));
         assert_eq!(
             PluginCommandError::from(MentionError::Format),
             PluginCommandError::code("mention_format")

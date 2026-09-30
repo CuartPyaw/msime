@@ -44,19 +44,19 @@ pub(crate) fn parse(table: &toml::map::Map<String, Value>) -> Result<CommandTabl
     let items = table
         .get("commands")
         .and_then(Value::as_array)
-        .ok_or("command table needs commands")?;
+        .ok_or("指令表缺少 commands")?;
     if items.is_empty() || items.len() > MAX_COMMANDS {
-        return Err("command table has too few or too many commands".into());
+        return Err("指令表的指令条数不在允许范围内".into());
     }
     let mut commands: Vec<CommandRow> = Vec::with_capacity(items.len());
     for item in items {
-        let row = item.as_table().ok_or("each command must be a table")?;
+        let row = item.as_table().ok_or("每条指令都必须是一个表")?;
         only_keys(row, &["trigger", "title", "template"], "a command")?;
         let field = |key: &str| {
             row.get(key)
                 .and_then(Value::as_str)
                 .map(str::to_owned)
-                .ok_or_else(|| format!("each command needs a {key}"))
+                .ok_or_else(|| format!("每条指令都需要 {key}"))
         };
         let command = CommandRow {
             trigger: field("trigger")?,
@@ -65,7 +65,7 @@ pub(crate) fn parse(table: &toml::map::Map<String, Value>) -> Result<CommandTabl
         };
         validate(&command)?;
         if commands.iter().any(|kept| kept.trigger == command.trigger) {
-            return Err(format!("trigger {} is listed twice", command.trigger));
+            return Err(format!("指令 {} 重复了", command.trigger));
         }
         commands.push(command);
     }
@@ -79,34 +79,28 @@ pub fn validate(command: &CommandRow) -> Result<(), String> {
         || trigger.len() > MAX_TRIGGER_BYTES
         || !trigger.bytes().all(|byte| byte.is_ascii_lowercase())
     {
-        return Err(format!(
-            "trigger {trigger} must be 1 to 32 lowercase letters"
-        ));
+        return Err(format!("指令 {trigger} 必须是 1 到 32 个小写字母"));
     }
     if command.title.trim().is_empty()
         || !crate::text::is_bounded_text(&command.title, MAX_TITLE_BYTES)
     {
-        return Err(format!("the title of {trigger} is empty or too long"));
+        return Err(format!("指令 {trigger} 的标题为空或太长"));
     }
     let template = &command.template;
     if template.trim().is_empty() || !crate::text::is_bounded_utf16(template, MAX_TEXT_UTF16) {
-        return Err(format!("the template of {trigger} is empty or too long"));
+        return Err(format!("指令 {trigger} 的模板为空或太长"));
     }
     // A candidate row shows one line, so a newline or tab would reach the application unseen: a line break in a terminal runs whatever follows it. `%n` and `%t` expand to them, so the expansion is checked too.
     if crate::text::has_disallowed_control_with_allowed(template, &[]) {
-        return Err(format!(
-            "the template of {trigger} contains a control character"
-        ));
+        return Err(format!("指令 {trigger} 的模板含有换行、制表符等控制字符"));
     }
-    let expanded = expand_longest(template)
-        .ok_or_else(|| format!("the template of {trigger} has an unknown placeholder"))?;
+    let expanded =
+        expand_longest(template).ok_or_else(|| format!("指令 {trigger} 的模板有不认识的占位符"))?;
     if crate::text::has_disallowed_control_with_allowed(&expanded, &[]) {
-        return Err(format!(
-            "the template of {trigger} contains a control character"
-        ));
+        return Err(format!("指令 {trigger} 的模板含有换行、制表符等控制字符"));
     }
     if !crate::text::is_bounded_utf16(&expanded, MAX_TEXT_UTF16) {
-        return Err(format!("the template of {trigger} expands past the limit"));
+        return Err(format!("指令 {trigger} 的模板展开后太长"));
     }
     Ok(())
 }

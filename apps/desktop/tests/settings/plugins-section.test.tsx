@@ -50,7 +50,7 @@ const catalog: PluginCatalogResult = {
       commands: [{ trigger: "sig", title: "签名", template: "{date} 测试" }],
     }),
   ],
-  issues: [{ kind: "sound", folder: "broken", reason: "missing plugin.toml" }],
+  issues: [{ kind: "sound", folder: "broken", reason: "缺少 plugin.toml" }],
 };
 
 function fakeClient(overrides: Partial<PluginClient> = {}): PluginClient {
@@ -214,7 +214,7 @@ test("lists every pack with its licence and removes only installed ones", async 
   expect(within(list).getAllByText("音效包 · 内置 · 许可证 CC0-1.0")).toHaveLength(2);
   expect(within(list).getByText("音乐包 · 许可证 CC-BY-4.0")).toBeTruthy();
   expect(within(list).queryByRole("button", { name: "删除默认" })).toBeNull();
-  expect(screen.getByText("音效包 broken 无法载入：missing plugin.toml")).toBeTruthy();
+  expect(screen.getByText("音效包 broken 无法载入：缺少 plugin.toml")).toBeTruthy();
 
   fireEvent.click(within(list).getByRole("button", { name: "删除打字机" }));
   await waitFor(() => expect(client!.remove).toHaveBeenCalledWith("sound", "typewriter"));
@@ -260,7 +260,7 @@ test("imports through the host picker and reports what was installed", async () 
 test("says which rule a refused pack broke", async () => {
   const client = fakeClient({
     importPack: vi.fn(async () => {
-      throw { code: "plugin_invalid", detail: "plugins may not request permissions" };
+      throw { code: "plugin_invalid", detail: "扩展包不能申请权限，permissions 必须为空" };
     }),
   });
   const { onError } = renderSection({ client });
@@ -269,7 +269,7 @@ test("says which rule a refused pack broke", async () => {
   fireEvent.click(screen.getByRole("button", { name: "导入文件夹" }));
   await waitFor(() =>
     expect(onError).toHaveBeenCalledWith(
-      "扩展包不符合要求（plugins may not request permissions）。",
+      "扩展包不符合要求（扩展包不能申请权限，permissions 必须为空）。",
     ),
   );
 });
@@ -356,8 +356,8 @@ test("decodes host failures, falling back for unknown ones", () => {
   expect(pluginErrorMessage({ code: "plugin_reserved" }, "失败")).toBe(
     "这个 id 属于内置音效包，不能覆盖或删除。",
   );
-  expect(pluginErrorMessage({ code: "plugin_archive", detail: "too many members" }, "失败")).toBe(
-    "压缩包无法读取（too many members）。",
+  expect(pluginErrorMessage({ code: "plugin_archive", detail: "压缩包里的文件太多" }, "失败")).toBe(
+    "压缩包无法读取（压缩包里的文件太多）。",
   );
   expect(pluginErrorMessage({ code: "mention_invalid", detail: null }, "失败")).toBe("名单有误。");
   expect(pluginErrorMessage(new Error("boom"), "失败")).toBe("失败");
