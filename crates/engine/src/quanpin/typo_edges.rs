@@ -55,7 +55,7 @@ pub fn collect_typo_edges(
         }
     }
 
-    let mut edges = Vec::new();
+    let mut edges = Vec::with_capacity(planned.len() * TYPO_ROWS_PER_KEY);
     for entry in &planned {
         let Some(found) = rows.get(&entry.key) else {
             continue;
