@@ -90,6 +90,10 @@ public final class CandidateTranslationStore {
         requestEpoch = requestEpoch == Long.MAX_VALUE ? 0 : requestEpoch + 1;
         if (pending != null) scheduler.removeCallbacks(pending);
         pending = null;
+        // Any in-flight request is fenced by the new epoch. Its signature must
+        // be released too, otherwise an identical refresh would be deduplicated
+        // even though the old response can no longer populate the cache.
+        signature = null;
     }
 
     public void clear() {

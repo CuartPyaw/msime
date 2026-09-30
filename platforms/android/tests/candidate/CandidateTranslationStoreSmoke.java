@@ -39,6 +39,36 @@ public final class CandidateTranslationStoreSmoke {
             worker.shutdownNow();
         }
 
+        FakeScheduler retryScheduler = new FakeScheduler();
+        ExecutorService retryWorker = Executors.newSingleThreadExecutor();
+        AtomicInteger retryCalls = new AtomicInteger();
+        CountDownLatch firstRetryCall = new CountDownLatch(1);
+        CountDownLatch releaseRetryCall = new CountDownLatch(1);
+        CountDownLatch secondRetryCall = new CountDownLatch(1);
+        CandidateTranslationStore retryStore = new CandidateTranslationStore(
+            (texts, target) -> {
+                if (retryCalls.incrementAndGet() == 1) {
+                    firstRetryCall.countDown();
+                    releaseRetryCall.await(2, TimeUnit.SECONDS);
+                } else {
+                    secondRetryCall.countDown();
+                }
+                return List.of("retry translation");
+            }, retryWorker, retryScheduler, generation -> { });
+        try {
+            retryStore.refresh(List.of("你好"), List.of("en"), 4);
+            retryScheduler.runDelayed();
+            check(firstRetryCall.await(2, TimeUnit.SECONDS), "first retry request started");
+            retryStore.refresh(List.of("你好"), List.of("en"), 4);
+            retryScheduler.runDelayed();
+            releaseRetryCall.countDown();
+            check(secondRetryCall.await(2, TimeUnit.SECONDS),
+                "cancelled request can retry with the same signature");
+        } finally {
+            releaseRetryCall.countDown();
+            retryWorker.shutdownNow();
+        }
+
         FakeScheduler normalizationScheduler = new FakeScheduler();
         ExecutorService normalizationWorker = Executors.newSingleThreadExecutor();
         AtomicInteger normalizationArrivals = new AtomicInteger();
