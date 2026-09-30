@@ -440,7 +440,13 @@ pub(super) fn decode_typo_on_graph(
     edges: &[TypoEdge],
 ) -> Option<TypoSentence> {
     let n = graph.len();
-    let mut extra: Graph = (0..n).map(|_| Vec::new()).collect();
+    let mut capacities = vec![0usize; n];
+    for typo in edges {
+        if typo.start < typo.end && typo.end <= n && !typo.value.is_empty() {
+            capacities[typo.start] = capacities[typo.start].saturating_add(1);
+        }
+    }
+    let mut extra: Graph = capacities.into_iter().map(Vec::with_capacity).collect();
     let mut any = false;
     for typo in edges {
         if typo.start >= typo.end || typo.end > n || typo.value.is_empty() {
