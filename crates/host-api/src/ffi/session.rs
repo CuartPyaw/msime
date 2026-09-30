@@ -81,6 +81,8 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
             sentence_model_settled(&options.resources, settled_model_path.as_deref())
                 .map(Reranker::new),
         );
+        // Loaded whenever it is installed, run only while the desktop model preference is on; `apply_pending` follows later changes of the switch.
+        runtime.set_settled_rerank_enabled(applied.sentence_association.neural_desktop);
 
         let view = runtime.view();
         let output = serde_json::to_value(&view).map_err(|e| e.to_string())?;

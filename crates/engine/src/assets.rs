@@ -27,8 +27,6 @@ pub const GENERATION_READY: &str = ".ready";
 
 /// Keyboard sentence model (speed), `CandidateSource::NeuralKeyboard`.
 pub const NEURAL_MODEL_KEYBOARD: &str = "sentence-model.safetensors";
-/// Desktop sentence model (accuracy), `CandidateSource::NeuralDesktop`.
-pub const NEURAL_MODEL_DESKTOP: &str = "sentence-model-desktop.safetensors";
 
 /// Built-in helpcode schemas and their files under the resource root.
 pub const HELPCODES: [(&str, &str); 6] = [

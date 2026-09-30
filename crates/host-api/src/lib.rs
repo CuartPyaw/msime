@@ -232,6 +232,17 @@ fn punctuation_lock_code(lock: msime_client_core::preferences::PunctuationLock) 
     }
 }
 
+/// The Engine's sentence association switches. The desktop model switch is not among them: it gates the runtime's settled reranker (`Runtime::set_settled_rerank_enabled`), the only place that model runs.
+fn engine_sentence_association(
+    preferences: &msime_client_core::preferences::SentenceAssociationPreferences,
+) -> msime_engine::host::SentenceAssociationOptions {
+    msime_engine::host::SentenceAssociationOptions {
+        word_lattice: preferences.word_lattice,
+        neural_keyboard: preferences.neural_keyboard,
+        show_next_on_duplicate: preferences.show_next_on_duplicate,
+    }
+}
+
 /// The switch the Engine is handed. Windows turns the punctuation switch on whenever punctuation is locked to Chinese, while the Engine drops Chinese punctuation whenever its switch is off, so a lock to Chinese has to carry the switch with it.
 fn engine_chinese_punctuation(enabled: bool, lock: u8) -> bool {
     enabled || lock == 1
@@ -349,6 +360,8 @@ impl HostSession {
         options.local_super_jianpin = snapshot.preferences.local_modes.super_jianpin;
         options.local_temporary_english = snapshot.preferences.local_modes.temporary_english;
         options.local_temporary_japanese = snapshot.preferences.local_modes.temporary_japanese;
+        options.sentence_association =
+            engine_sentence_association(&snapshot.preferences.sentence_association);
         // Unconditional, because `Runtime::crop_alternative_readings` runs whether or not a model is
         // attached: the host always shows one whole-sentence reading. Asking for the rest only ever
         // gives it more to choose from, and even with no model the engine's own pick among them is
@@ -415,6 +428,8 @@ impl HostSession {
                 snapshot.preferences.touch_keyboard_layout,
             )
             .map_err(|e| e.to_string())?;
+        self.runtime
+            .set_settled_rerank_enabled(snapshot.preferences.sentence_association.neural_desktop);
         self.options = options;
         self.applied = snapshot.preferences.clone();
         self.preferences_pending = false;
@@ -586,16 +601,9 @@ impl HostOptions {
             local_super_jianpin: self.preferences.local_modes.super_jianpin,
             local_temporary_english: self.preferences.local_modes.temporary_english,
             local_temporary_japanese: self.preferences.local_modes.temporary_japanese,
-            sentence_association: msime_engine::host::SentenceAssociationOptions {
-                word_lattice: self.preferences.sentence_association.word_lattice,
-                // The engine loads the desktop model from the settled-model directory beside the resources and scores it only when the runtime settles a composition.
-                neural_desktop: self.preferences.sentence_association.neural_desktop,
-                neural_keyboard: self.preferences.sentence_association.neural_keyboard,
-                show_next_on_duplicate: self
-                    .preferences
-                    .sentence_association
-                    .show_next_on_duplicate,
-            },
+            sentence_association: engine_sentence_association(
+                &self.preferences.sentence_association,
+            ),
             rescoring_context: String::new(),
             sentence_alternatives: true,
             helpcode: helpcode.enabled,

@@ -413,68 +413,6 @@ fn context_changes_keep_the_caches_without_a_model() {
     assert!(words(&engine.query(&typed, None)).contains(&"甲"));
 }
 
-/// Both switches on: the keyboard model scores every query and the desktop model waits for `set_settling` (overlays.md §1.6.3 option b), then answers once, after the keyboard one. Needs both shipped models (`lattice::neural::test_model_path`).
-#[test]
-fn the_desktop_model_waits_for_settling() {
-    let models = (
-        crate::lattice::neural::test_model_path(assets::NEURAL_MODEL_KEYBOARD),
-        crate::lattice::neural::test_model_path(assets::NEURAL_MODEL_DESKTOP),
-    );
-    let (keyboard, desktop) = match models {
-        (Ok(keyboard), Ok(desktop)) => (keyboard, desktop),
-        (Err(reason), _) | (_, Err(reason)) => {
-            eprintln!("skipped: {reason}");
-            return;
-        }
-    };
-    let fixture = Fixture::new(
-        "BEGIN;CREATE TABLE tbl_2_s(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_2_s VALUES('shu''ru', 'sr', '输入', 20000);CREATE TABLE tbl_1_f(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_f VALUES('fa', 'f', '法', 800000),('fa', 'f', '发', 900000),('fa', 'f', '罚', 100000);COMMIT;",
-    );
-    std::fs::copy(
-        keyboard,
-        fixture.paths.resource(assets::NEURAL_MODEL_KEYBOARD),
-    )
-    .unwrap();
-    std::fs::copy(
-        desktop,
-        fixture.paths.resource(assets::NEURAL_MODEL_DESKTOP),
-    )
-    .unwrap();
-    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
-    let mut typed = request("uurufa", false);
-    typed.sentence_association = SentenceAssociationOptions {
-        word_lattice: true,
-        neural_keyboard: true,
-        neural_desktop: true,
-        show_next_on_duplicate: true,
-    };
-    typed.rescoring_context = "我在用一个新的".into();
-    let count =
-        |rows: &[WordItem], source| rows.iter().filter(|item| item.source == source).count();
-    let keystroke = engine.query(&typed, None);
-    assert_eq!(
-        count(&keystroke, CandidateSource::NeuralKeyboard),
-        1,
-        "{:?}",
-        words(&keystroke)
-    );
-    assert_eq!(count(&keystroke, CandidateSource::NeuralDesktop), 0);
-    assert!(engine.set_settling(true));
-    let settled = engine.query(&typed, None);
-    assert!(engine.set_settling(false));
-    assert_eq!(count(&settled, CandidateSource::NeuralKeyboard), 1);
-    assert_eq!(
-        count(&settled, CandidateSource::NeuralDesktop),
-        1,
-        "{:?}",
-        words(&settled)
-    );
-    assert_eq!(
-        count(&engine.query(&typed, None), CandidateSource::NeuralDesktop),
-        0
-    );
-}
-
 /// With a sentence model loaded the trimmed context joins the series key (overlays.md §1.6.2): an answer cached under one context is not read under another, and it is read again when that context comes back. Needs the keyboard model in `MSIME_EVAL_RESOURCES`.
 #[test]
 fn a_loaded_model_keys_the_series_cache_by_context() {

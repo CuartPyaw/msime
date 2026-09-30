@@ -20,20 +20,6 @@ use crate::user_dictionary::positions::{
 use crate::user_dictionary::removal::delete_dictionary_candidate;
 
 impl InputSession {
-    /// Settle the live list with the desktop sentence model (overlays.md §1.6.3 option b). Local modes, dedicated English and a caret-prefix decode show lists the pinyin engine did not answer for the whole composition, so they have nothing to settle. True when the shown list changed.
-    pub(super) fn settle_sentence_rows(&mut self) -> bool {
-        if self.dedicated_english
-            || self.local_mode != LocalInputMode::None
-            || self.prefix_active
-            || !self.has_composition()
-            || !self.engine.settle()
-        {
-            return false;
-        }
-        self.update_mixed_candidates();
-        true
-    }
-
     /// Prefix or engine rows, then personal context rerank, mixed English / emoji / kaomoji, fixed positions (input_session.cpp:1057-1078).
     pub(super) fn update_mixed_candidates(&mut self) {
         self.refresh_prefix_candidates();

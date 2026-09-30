@@ -12,7 +12,7 @@ use super::{LatticeLookup, TypoEdgeSource};
 use crate::pinyin::syllables::has_only_complete_pinyin_segments;
 use crate::types::{CandidateSource, WordItem};
 
-/// Decode `syllables` and insert the sentence rows (Generated, and NeuralKeyboard / NeuralDesktop picks when rerankers are given) as one block at `whole_sentence_insert_position`. Nothing for fewer than two syllables or an incomplete one. With `typo_source` and three or more syllables, also returns the typo sentence for the caller to place; the source receives the literal best path and returns the planned typo edges.
+/// Decode `syllables` and insert the sentence rows (Generated, and the NeuralKeyboard pick when the keyboard reranker is given) as one block at `whole_sentence_insert_position`. Nothing for fewer than two syllables or an incomplete one. With `typo_source` and three or more syllables, also returns the typo sentence for the caller to place; the source receives the literal best path and returns the planned typo edges.
 #[allow(clippy::too_many_arguments)]
 pub fn merge_lattice_candidates(
     candidates: &mut Vec<WordItem>,
@@ -59,25 +59,18 @@ pub fn merge_lattice_candidates(
             .collect()
     } else {
         let mut keyboard = None;
-        let mut desktop = None;
-        let mut keyboard_enabled = false;
-        for reranker in rerankers.iter_mut() {
-            keyboard_enabled |= reranker.source == CandidateSource::NeuralKeyboard;
+        for reranker in rerankers
+            .iter_mut()
+            .filter(|reranker| reranker.source == CandidateSource::NeuralKeyboard)
+        {
             let mut reranked = paths.clone();
-            if !reranker.rerank(&mut reranked, rescoring_context) {
-                continue;
-            }
-            match reranker.source {
-                CandidateSource::NeuralKeyboard => keyboard = Some(reranked),
-                CandidateSource::NeuralDesktop => desktop = Some(reranked),
-                _ => {}
+            if reranker.rerank(&mut reranked, rescoring_context) {
+                keyboard = Some(reranked);
             }
         }
         reranked_block(
             &paths,
             keyboard.as_deref(),
-            desktop.as_deref(),
-            keyboard_enabled,
             options,
             typed_pinyin,
             &mut already,
@@ -103,12 +96,10 @@ fn sentence_row(typed_pinyin: &str, path: &SentencePath, source: CandidateSource
     item
 }
 
-/// One row per source when neural rerankers ran (overlays.md §1.6.2 rules 2-8): the unreranked best as Generated when `include_lattice_best`, then each model's first path not already listed. When both models agree on their first pick, keyboard takes it and desktop moves to its next distinct path; otherwise desktop goes first. Desktop alone is withheld while keyboard is enabled but has not answered, so the desktop pick never takes the keyboard's seat. The rows carry their words like every sentence row; selecting one stores the sentence as a user phrase (`CandidateSource::is_sentence_learning`), while the personal context chain, which reads Generated and Fallback rows only, starts afresh after it as in the reference.
+/// One row per source when the keyboard reranker ran (overlays.md §1.6.2 rules 2-8): the unreranked best as Generated when `include_lattice_best`, then the keyboard model's first path not already listed. The reference's desktop row is gone: the desktop model runs only as the input runtime's settled reranker. The rows carry their words like every sentence row; selecting one stores the sentence as a user phrase (`CandidateSource::is_sentence_learning`), while the personal context chain, which reads Generated and Fallback rows only, starts afresh after it as in the reference.
 fn reranked_block(
     paths: &[SentencePath],
     keyboard: Option<&[SentencePath]>,
-    desktop: Option<&[SentencePath]>,
-    keyboard_enabled: bool,
     options: &LatticeOptions<'_>,
     typed_pinyin: &str,
     already: &mut HashSet<String>,
@@ -135,33 +126,9 @@ fn reranked_block(
     } else {
         None
     };
-    let mut picks = Vec::new();
-    match (keyboard, desktop) {
-        (Some(keyboard), Some(desktop)) => {
-            let keyboard_best =
-                first_distinct(keyboard, already).map(|index| &keyboard[index].sentence);
-            let desktop_best =
-                first_distinct(desktop, already).map(|index| &desktop[index].sentence);
-            if keyboard_best.is_some() && keyboard_best == desktop_best {
-                picks.push(take(keyboard, CandidateSource::NeuralKeyboard, already));
-                picks.push(take(desktop, CandidateSource::NeuralDesktop, already));
-            } else {
-                picks.push(take(desktop, CandidateSource::NeuralDesktop, already));
-                picks.push(take(keyboard, CandidateSource::NeuralKeyboard, already));
-            }
-        }
-        (Some(keyboard), None) => {
-            picks.push(take(keyboard, CandidateSource::NeuralKeyboard, already))
-        }
-        (None, Some(desktop)) if !keyboard_enabled => {
-            picks.push(take(desktop, CandidateSource::NeuralDesktop, already))
-        }
-        _ => {}
-    }
-    lattice
-        .into_iter()
-        .chain(picks.into_iter().flatten())
-        .collect()
+    let pick =
+        keyboard.and_then(|keyboard| take(keyboard, CandidateSource::NeuralKeyboard, already));
+    lattice.into_iter().chain(pick).collect()
 }
 
 /// The count of leading dictionary rows that answer the whole key: canonical key equal to the joined syllables, or covering every syllable (WL:625-641, WL:372-381). A prefix-range row with the same character count (滚球 for typed gun'qi) is not an exact hit and must not pin a correctly pronounced sentence behind it.
@@ -609,28 +576,18 @@ mod tests {
     fn block(
         lattice: &[SentencePath],
         keyboard: Option<&[SentencePath]>,
-        desktop: Option<&[SentencePath]>,
-        keyboard_enabled: bool,
         options: &LatticeOptions<'_>,
         listed: &[&str],
     ) -> Vec<(String, CandidateSource)> {
         let mut already = listed.iter().map(|word| (*word).to_owned()).collect();
-        reranked_block(
-            lattice,
-            keyboard,
-            desktop,
-            keyboard_enabled,
-            options,
-            "ab",
-            &mut already,
-        )
-        .into_iter()
-        .map(|item| {
-            assert!(item.sentence_association);
-            assert_eq!(item.sentence_words, std::slice::from_ref(&item.word));
-            (item.word, item.source)
-        })
-        .collect()
+        reranked_block(lattice, keyboard, options, "ab", &mut already)
+            .into_iter()
+            .map(|item| {
+                assert!(item.sentence_association);
+                assert_eq!(item.sentence_words, std::slice::from_ref(&item.word));
+                (item.word, item.source)
+            })
+            .collect()
     }
 
     fn words(rows: &[(String, CandidateSource)]) -> Vec<(&str, CandidateSource)> {
@@ -639,56 +596,7 @@ mod tests {
             .collect()
     }
 
-    use CandidateSource::{Generated, NeuralDesktop as Desk, NeuralKeyboard as Key};
-
-    #[test]
-    fn neural_rows_one_per_source() {
-        let lattice = [path("甲", -1.0), path("乙", -2.0), path("丙", -3.0)];
-        let keyboard = [path("乙", -2.0), path("甲", -1.0), path("丙", -3.0)];
-        let desktop = [path("丙", -3.0), path("甲", -1.0), path("乙", -2.0)];
-        let options = LatticeOptions::default();
-        let rows = block(
-            &lattice,
-            Some(&keyboard),
-            Some(&desktop),
-            true,
-            &options,
-            &[],
-        );
-        assert_eq!(
-            words(&rows),
-            [("甲", Generated), ("丙", Desk), ("乙", Key)],
-            "different picks: desktop first"
-        );
-    }
-
-    #[test]
-    fn neural_agreeing_picks_put_keyboard_first() {
-        let lattice = [path("甲", -1.0), path("乙", -2.0), path("丙", -3.0)];
-        let keyboard = [path("乙", -2.0), path("丙", -3.0), path("甲", -1.0)];
-        let desktop = [path("乙", -2.0), path("丙", -3.0), path("甲", -1.0)];
-        let options = LatticeOptions::default();
-        let rows = block(
-            &lattice,
-            Some(&keyboard),
-            Some(&desktop),
-            true,
-            &options,
-            &[],
-        );
-        assert_eq!(
-            words(&rows),
-            [("甲", Generated), ("乙", Key)],
-            "desktop's first pick is now listed and it breaks"
-        );
-
-        let next = LatticeOptions {
-            show_next_on_duplicate: true,
-            ..LatticeOptions::default()
-        };
-        let rows = block(&lattice, Some(&keyboard), Some(&desktop), true, &next, &[]);
-        assert_eq!(words(&rows), [("甲", Generated), ("乙", Key), ("丙", Desk)]);
-    }
+    use CandidateSource::{Generated, NeuralKeyboard as Key};
 
     #[test]
     fn neural_duplicate_first_pick_breaks_or_moves_on() {
@@ -696,7 +604,7 @@ mod tests {
         let keyboard = [path("甲", -1.0), path("乙", -2.0)];
         let options = LatticeOptions::default();
         assert_eq!(
-            words(&block(&lattice, Some(&keyboard), None, true, &options, &[])),
+            words(&block(&lattice, Some(&keyboard), &options, &[])),
             [("甲", Generated)]
         );
         let next = LatticeOptions {
@@ -704,35 +612,13 @@ mod tests {
             ..LatticeOptions::default()
         };
         assert_eq!(
-            words(&block(&lattice, Some(&keyboard), None, true, &next, &[])),
+            words(&block(&lattice, Some(&keyboard), &next, &[])),
             [("甲", Generated), ("乙", Key)]
         );
         // A word already in the candidate list counts as listed too.
         assert_eq!(
-            words(&block(
-                &lattice,
-                Some(&keyboard),
-                None,
-                true,
-                &options,
-                &["甲"]
-            )),
+            words(&block(&lattice, Some(&keyboard), &options, &["甲"])),
             []
-        );
-    }
-
-    #[test]
-    fn neural_desktop_alone_waits_for_an_enabled_keyboard() {
-        let lattice = [path("甲", -1.0), path("乙", -2.0)];
-        let desktop = [path("乙", -2.0), path("甲", -1.0)];
-        let options = LatticeOptions::default();
-        assert_eq!(
-            words(&block(&lattice, None, Some(&desktop), true, &options, &[])),
-            [("甲", Generated)]
-        );
-        assert_eq!(
-            words(&block(&lattice, None, Some(&desktop), false, &options, &[])),
-            [("甲", Generated), ("乙", Desk)]
         );
     }
 
@@ -745,15 +631,15 @@ mod tests {
             ..LatticeOptions::default()
         };
         assert_eq!(
-            words(&block(&lattice, Some(&keyboard), None, true, &options, &[])),
+            words(&block(&lattice, Some(&keyboard), &options, &[])),
             [("乙", Key)]
         );
         let keyboard = [path("甲", -1.0), path("乙", -2.0)];
         assert_eq!(
-            words(&block(&lattice, Some(&keyboard), None, true, &options, &[])),
+            words(&block(&lattice, Some(&keyboard), &options, &[])),
             [("甲", Key)],
             "without the lattice row the keyboard may pick the lattice best"
         );
-        assert_eq!(words(&block(&lattice, None, None, true, &options, &[])), []);
+        assert_eq!(words(&block(&lattice, None, &options, &[])), []);
     }
 }

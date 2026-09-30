@@ -27,10 +27,6 @@ pub trait InputEngine {
     fn reset_context(&mut self) {}
     /// The committed text the Engine's neural sentence models condition on, pushed by the runtime whenever the text it keeps changes. Engines without such models ignore it.
     fn set_rescoring_context(&mut self, _context: &str) {}
-    /// Re-answers the composition with a model too slow for a keystroke, reporting whether the candidates changed. The next refresh of the composition answers without it again. Engines without such a model answer no.
-    fn settle_sentence_rows(&mut self) -> bool {
-        false
-    }
     /// Moves the caret prefix decoding answers for; `None` returns to the end of the composition. Engines without
     /// prefix decoding ignore it and report nothing pending below.
     fn set_caret(&mut self, _caret: Option<usize>) {}
@@ -165,9 +161,6 @@ impl InputEngine for Session {
     }
     fn set_rescoring_context(&mut self, context: &str) {
         Session::set_rescoring_context(self, context);
-    }
-    fn settle_sentence_rows(&mut self) -> bool {
-        Session::settle_sentence_rows(self)
     }
     fn set_caret(&mut self, caret: Option<usize>) {
         Session::set_caret(self, caret);

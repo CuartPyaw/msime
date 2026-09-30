@@ -209,7 +209,6 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         local_temporary_japanese: true,
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
-            neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
         },
@@ -3012,6 +3011,37 @@ fn settled_rerank_without_movement_omits_the_unused_view() {
     assert_eq!(result["ok"], true);
     assert_eq!(result["value"]["moved"], false);
     assert!(result["value"].get("view").is_none());
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+/// The desktop model preference switches the runtime's settled rerank, at creation and on a later update, and the keyboard model switch reaches the rebuilt Engine the same way.
+#[test]
+fn sentence_model_switches_follow_the_preferences() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut preferences = chinese_preferences();
+    preferences.sentence_association.neural_desktop = true;
+    preferences.sentence_association.neural_keyboard = true;
+    let handle = test_host_preferences(directory.path(), preferences.clone());
+    let switches = || {
+        SESSIONS.with(|sessions| {
+            let session = &sessions.borrow()[&handle];
+            (
+                session.runtime.settled_rerank_enabled(),
+                session.options.sentence_association.neural_keyboard,
+            )
+        })
+    };
+    assert_eq!(switches(), (true, true));
+
+    preferences.sentence_association.neural_desktop = false;
+    preferences.sentence_association.neural_keyboard = false;
+    let updated = update(handle, 1, &preferences);
+    assert_eq!(updated["value"]["deferred"], false, "{updated}");
+    assert_eq!(switches(), (false, false));
+
+    preferences.sentence_association.neural_desktop = true;
+    assert_eq!(update(handle, 2, &preferences)["ok"], true);
+    assert_eq!(switches(), (true, false));
     assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }
 

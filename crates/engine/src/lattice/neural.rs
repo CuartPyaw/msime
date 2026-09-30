@@ -1,4 +1,4 @@
-//! Neural reranking of the lattice's n-best (overlays.md §1.6.2-§1.6.3) on the `chinese-ime-lm` crate. The model never generates sentences; it only reorders lattice paths, and each enabled source contributes one row. Scoring is synchronous on the session's own `Reranker`: the keyboard model on every keystroke, whose prefix cache keeps it cheap, and the desktop model only when the host settles a composition (`Session::settle_sentence_rows`, §1.6.3 option b), because its p95 of 153 ms does not fit a keystroke.
+//! Neural reranking of the lattice's n-best (overlays.md §1.6.2-§1.6.3) on the `chinese-ime-lm` crate. The model never generates sentences; it only reorders lattice paths and contributes one row. Only the keyboard model runs here, synchronously on the session's own `Reranker` on every keystroke, whose prefix cache keeps it cheap. The desktop model, whose p95 of 153 ms does not fit a keystroke, is not the engine's: the input runtime runs it as its settled reranker once typing pauses.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -15,7 +15,7 @@ use crate::types::CandidateSource;
 pub const RERANK_LAMBDA: f64 = 0.5;
 pub const MAX_RERANK_PATHS: usize = 12;
 pub const CONTEXT_CHARACTERS: usize = 64;
-/// The shipped desktop model is about 25 MiB; this leaves room for a larger compatible model without letting a configured path make startup allocate without bound.
+/// The shipped keyboard model is about 4.5 MiB; the bound leaves room for a larger compatible model without letting a stray file make a session allocate without bound.
 pub const MAX_MODEL_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The lattice score is converted as log10 the way the C++ did (patch:869-871); the arithmetic is ported unchanged so the two models' blend keeps the weight it was tuned with.
@@ -98,7 +98,7 @@ pub struct NeuralReranker {
 }
 
 impl NeuralReranker {
-    /// `source` is `NeuralKeyboard` or `NeuralDesktop`.
+    /// `source` is `NeuralKeyboard`, the one sentence-model row the engine emits.
     pub fn new(source: CandidateSource, model: Arc<SentenceModel>) -> Self {
         Self {
             source,
@@ -259,25 +259,6 @@ mod tests {
         assert!(means[0] < 0.0);
     }
 
-    /// The desktop model reorders like the keyboard one, under its own source.
-    #[test]
-    fn a_real_desktop_model_scores_and_reorders() {
-        let model = match resource_model(assets::NEURAL_MODEL_DESKTOP) {
-            Ok(model) => model,
-            Err(reason) => {
-                eprintln!("skipping a_real_desktop_model_scores_and_reorders: {reason}");
-                return;
-            }
-        };
-        let mut reranker = NeuralReranker::new(CandidateSource::NeuralDesktop, model);
-        let mut paths = vec![path("输入发", -5.0), path("输入法", -5.1)];
-        assert!(reranker.rerank(&mut paths, "我在用一个新的"));
-        assert_eq!(
-            paths[0].sentence, "输入法",
-            "the model knows the common word"
-        );
-    }
-
     /// 904bd0976: with a reranker running, the typo decode still runs and still starts from the unreranked best, so the typo sentence answers the literal reading rather than whatever the model preferred.
     #[test]
     fn the_typo_decode_reads_the_unreranked_best_while_a_model_runs() {
@@ -363,67 +344,5 @@ mod tests {
         assert_eq!(seen, ["他时间"]);
         assert_eq!(typo.sentence, "他事件");
         assert!(candidates.iter().all(|item| item.word != "他事件"));
-    }
-
-    #[test]
-    fn two_rerankers_emit_one_path_each() {
-        let (keyboard, desktop) = match (
-            resource_model(assets::NEURAL_MODEL_KEYBOARD),
-            resource_model(assets::NEURAL_MODEL_DESKTOP),
-        ) {
-            (Ok(keyboard), Ok(desktop)) => (keyboard, desktop),
-            (Err(reason), _) | (_, Err(reason)) => {
-                eprintln!("skipping two_rerankers_emit_one_path_each: {reason}");
-                return;
-            }
-        };
-        let rows = table(&[
-            ("shu'ru", &[("输入", 20000)]),
-            ("fa", &[("法", 800000), ("发", 900000), ("罚", 100000)]),
-        ]);
-        let mut rerankers = vec![
-            NeuralReranker::new(CandidateSource::NeuralKeyboard, keyboard),
-            NeuralReranker::new(CandidateSource::NeuralDesktop, desktop),
-        ];
-        let options = LatticeOptions {
-            nbest: MAX_RERANK_PATHS,
-            show_next_on_duplicate: true,
-            ..LatticeOptions::default()
-        };
-        let mut candidates: Vec<WordItem> = Vec::new();
-        merge_lattice_candidates(
-            &mut candidates,
-            &syllables("shu'ru'fa"),
-            &mut lookup(&rows),
-            "shurufa",
-            &options,
-            None,
-            &mut rerankers,
-            "",
-        );
-        assert_eq!(candidates[0].source, CandidateSource::Generated);
-        assert_eq!(
-            candidates[0].word, "输入发",
-            "the lattice best is unreranked"
-        );
-        let sources: Vec<_> = candidates.iter().map(|item| item.source).collect();
-        assert_eq!(
-            sources
-                .iter()
-                .filter(|source| **source == CandidateSource::NeuralKeyboard)
-                .count(),
-            1
-        );
-        assert_eq!(
-            sources
-                .iter()
-                .filter(|source| **source == CandidateSource::NeuralDesktop)
-                .count(),
-            1
-        );
-        assert_eq!(candidates.len(), 3);
-        let words: std::collections::HashSet<_> =
-            candidates.iter().map(|item| item.word.as_str()).collect();
-        assert_eq!(words.len(), 3, "each source adds a distinct sentence");
     }
 }

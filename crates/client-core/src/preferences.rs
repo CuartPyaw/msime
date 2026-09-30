@@ -446,6 +446,7 @@ pub enum CharacterWidthPreference {
 pub struct SentenceAssociationPreferences {
     #[serde(default = "enabled_by_default")]
     pub word_lattice: bool,
+    /// Runs the desktop sentence model as the input runtime's settled reranker once typing pauses, when a host has installed it; the Engine never loads that model.
     #[serde(default)]
     pub neural_desktop: bool,
     #[serde(default)]

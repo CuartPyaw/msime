@@ -2902,7 +2902,6 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine::host::EngineOpti
         local_temporary_japanese: true,
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
-            neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
         },
@@ -2990,100 +2989,71 @@ fn settling_while_idle_is_inert() {
     assert!(!runtime.rerank_settled());
 }
 
-/// Settling asks the Engine for its desktop sentence model, which no keystroke runs: the row it answers with appears only after the settle, once, and the next keystroke takes it away again. Needs the dictionary resource set (`MSIME_EVAL_RESOURCES`) and the desktop model (in it, or in `MSIME_NEURAL_MODEL_DIR`, where `scripts/fetch_neural_model.py` puts it).
-#[cfg(unix)]
+/// The desktop sentence model switch gates the settled rerank without detaching the model: off, a settle leaves the list and its generation alone; back on, the same attached model reorders. Needs a shipped sentence model in `MSIME_NEURAL_MODEL_DIR` or `MSIME_EVAL_RESOURCES` (the desktop one, else the keyboard one standing in).
 #[test]
-fn settling_shows_the_engine_desktop_model_row() {
-    const NEURAL_DESKTOP: u8 = 10;
-    const DESKTOP_MODEL: &str = "sentence-model-desktop.safetensors";
-    let Some(resources) = std::env::var_os("MSIME_EVAL_RESOURCES").map(std::path::PathBuf::from)
-    else {
-        eprintln!(
-            "skipping settling_shows_the_engine_desktop_model_row: MSIME_EVAL_RESOURCES is not set"
-        );
-        return;
-    };
+fn the_desktop_switch_gates_the_settled_rerank() {
+    let directories: Vec<std::path::PathBuf> = ["MSIME_NEURAL_MODEL_DIR", "MSIME_EVAL_RESOURCES"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(Into::into)
+        .collect();
     let Some(model) = [
-        Some(resources.clone()),
-        std::env::var_os("MSIME_NEURAL_MODEL_DIR").map(Into::into),
+        "sentence-model-desktop.safetensors",
+        "sentence-model.safetensors",
     ]
     .into_iter()
-    .flatten()
-    .map(|directory: std::path::PathBuf| directory.join(DESKTOP_MODEL))
+    .flat_map(|name| {
+        directories
+            .iter()
+            .map(move |directory| directory.join(name))
+    })
     .find(|path| path.is_file()) else {
-        eprintln!("skipping settling_shows_the_engine_desktop_model_row: {DESKTOP_MODEL} is in neither MSIME_EVAL_RESOURCES nor MSIME_NEURAL_MODEL_DIR");
+        eprintln!("skipping the_desktop_switch_gates_the_settled_rerank: no sentence model in MSIME_NEURAL_MODEL_DIR or MSIME_EVAL_RESOURCES");
         return;
     };
-    // The Engine finds the desktop model in the settled-model directory beside the resources, where desktop hosts install it.
-    let directory = tempfile::tempdir().unwrap();
-    let mut options = real_engine_options(directory.path());
-    let linked = directory.path().join("resources");
-    for entry in std::fs::read_dir(&resources).unwrap() {
-        let entry = entry.unwrap();
-        std::os::unix::fs::symlink(entry.path(), linked.join(entry.file_name())).unwrap();
-    }
-    let settled = directory.path().join("settled-model");
-    std::fs::create_dir_all(&settled).unwrap();
-    std::os::unix::fs::symlink(&model, settled.join(DESKTOP_MODEL)).unwrap();
-    // The dictionaries are read from a prepared generation, as every host prepares one.
-    let prepared = msime_engine::prepare_runtime_paths(
-        &linked,
-        &directory.path().join("user"),
-        &directory.path().join("cache"),
-        "settle",
+    let model = SentenceModel::load(&std::fs::read(&model).unwrap()).unwrap();
+    // Two lattice readings the model tells apart: the lattice put the misspelt one first.
+    let mut runtime = Runtime::new(
+        Fixture {
+            local_mode: "none".into(),
+            words: vec!["输入发".into(), "输入法".into()],
+            codes: vec!["shu'ru'fa".into(), "shu'ru'fa".into()],
+            sources: vec![LATTICE_SOURCE, LATTICE_SOURCE],
+            ..Fixture::default()
+        },
+        5,
     )
     .unwrap();
-    options.dictionaries = prepared.dictionaries.to_str().unwrap().to_owned();
-    options.sentence_association.neural_desktop = true;
-    // The desktop pick agrees with the dictionary's first row here; the duplicate option gives it a row of its own instead of folding it away.
-    options.sentence_association.show_next_on_duplicate = true;
-    let session = msime_engine::host::Session::new(&options).unwrap();
-    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.set_settled_reranker(Some(Reranker::new(std::sync::Arc::new(model))));
     runtime.focus(true).unwrap();
-    let type_text = |runtime: &mut Runtime<msime_engine::host::Session>, text: &[u8]| {
-        for byte in text {
-            runtime
-                .dispatch(Action::Character {
-                    value: *byte,
-                    shift: false,
-                })
-                .unwrap();
-        }
-    };
-    let desktop_rows = |runtime: &Runtime<msime_engine::host::Session>| {
+    runtime
+        .dispatch(Action::Character {
+            value: b's',
+            shift: false,
+        })
+        .unwrap();
+    let texts = |runtime: &Runtime<Fixture>| -> Vec<String> {
         runtime
             .view()
             .candidates
             .iter()
-            .filter(|candidate| candidate.source == NEURAL_DESKTOP)
-            .count()
+            .map(|candidate| candidate.text.clone())
+            .collect()
     };
-    type_text(&mut runtime, b"shurufa");
-    assert_eq!(desktop_rows(&runtime), 0);
+    let before = texts(&runtime);
+    assert_eq!(before, ["输入发", "输入法"]);
     let generation = runtime.view().generation;
-    assert!(runtime.rerank_settled());
-    let view = runtime.view();
-    assert_eq!(
-        desktop_rows(&runtime),
-        1,
-        "{:?}",
-        view.candidates
-            .iter()
-            .map(|candidate| (&candidate.text, candidate.source))
-            .collect::<Vec<_>>()
-    );
-    assert!(
-        view.generation > generation,
-        "old IDs must not select from the settled list"
-    );
-    assert!(
-        !runtime.rerank_settled(),
-        "a second settle has nothing to change"
-    );
-    runtime
-        .dispatch(Action::Command(Command::Backspace))
-        .unwrap();
-    assert_eq!(desktop_rows(&runtime), 0);
+
+    runtime.set_settled_rerank_enabled(false);
+    assert!(!runtime.settled_rerank_enabled());
+    assert!(!runtime.rerank_settled(), "switched off, nothing runs");
+    assert_eq!(texts(&runtime), before);
+    assert_eq!(runtime.view().generation, generation);
+
+    runtime.set_settled_rerank_enabled(true);
+    assert!(runtime.rerank_settled(), "switched back on, the model runs");
+    assert_eq!(texts(&runtime), ["输入法", "输入发"]);
+    assert!(runtime.view().generation > generation);
 }
 
 fn withholding_runtime(offered: usize, withheld: usize, page_size: u8) -> Runtime<Fixture> {

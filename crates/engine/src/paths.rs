@@ -7,9 +7,6 @@ use std::path::{Component, Path, PathBuf};
 use crate::diagnostics;
 use crate::error::{EngineError, Result};
 
-/// The sibling of the resource bundle that holds the desktop sentence model.
-const SETTLED_MODEL_DIRECTORY: &str = "settled-model";
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimePaths {
     /// The immutable packaged bundle.
@@ -25,22 +22,6 @@ impl RuntimePaths {
     /// A file in the resource bundle. Names are the constants in `assets` or a custom helpcode stem that `helpcode::custom_schema_stem` has already reduced to one normal component.
     pub fn resource(&self, name: &str) -> PathBuf {
         join(&self.resources, name)
-    }
-
-    /// A sentence model: the copy in the resource bundle, else, for the desktop model, the one in the `settled-model` directory beside the bundle. The bundle must match the shared dictionary lock exactly, so desktop hosts install the 25 MB desktop model in that sibling directory (platforms/macos/stage-resources.sh, the Windows and Linux installers), where host-api's `settled_model_beside` also finds it.
-    pub fn neural_model(&self, name: &str) -> PathBuf {
-        let bundled = self.resource(name);
-        if bundled.is_file() || name != crate::assets::NEURAL_MODEL_DESKTOP {
-            return bundled;
-        }
-        let beside = self
-            .resources
-            .parent()
-            .map(|parent| parent.join(SETTLED_MODEL_DIRECTORY).join(name));
-        match beside {
-            Some(path) if path.is_file() => path,
-            _ => bundled,
-        }
     }
 
     pub fn user(&self, name: &str) -> PathBuf {
@@ -114,35 +95,5 @@ mod tests {
         assert_eq!(paths.user("/abs"), PathBuf::new());
         assert!(join_checked(Path::new("/r"), "helpcodes/../x").is_err());
         assert!(paths.validate().is_err());
-    }
-
-    #[test]
-    fn the_desktop_model_is_found_beside_the_bundle_and_the_bundle_wins() {
-        use crate::assets::{NEURAL_MODEL_DESKTOP, NEURAL_MODEL_KEYBOARD};
-        let root = tempfile::tempdir().unwrap();
-        let paths = RuntimePaths {
-            resources: root.path().join("resources"),
-            ..RuntimePaths::default()
-        };
-        std::fs::create_dir_all(&paths.resources).unwrap();
-        let beside = root.path().join("settled-model");
-        std::fs::create_dir_all(&beside).unwrap();
-        std::fs::write(beside.join(NEURAL_MODEL_DESKTOP), b"model").unwrap();
-        std::fs::write(beside.join(NEURAL_MODEL_KEYBOARD), b"model").unwrap();
-
-        assert_eq!(
-            paths.neural_model(NEURAL_MODEL_DESKTOP),
-            beside.join(NEURAL_MODEL_DESKTOP)
-        );
-        // Only the desktop model is looked for outside the bundle.
-        assert_eq!(
-            paths.neural_model(NEURAL_MODEL_KEYBOARD),
-            paths.resources.join(NEURAL_MODEL_KEYBOARD)
-        );
-        std::fs::write(paths.resources.join(NEURAL_MODEL_DESKTOP), b"model").unwrap();
-        assert_eq!(
-            paths.neural_model(NEURAL_MODEL_DESKTOP),
-            paths.resources.join(NEURAL_MODEL_DESKTOP)
-        );
     }
 }

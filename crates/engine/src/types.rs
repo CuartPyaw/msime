@@ -17,7 +17,7 @@ pub enum CandidateSource {
     Kaomoji = 7,
     Generated = 8,
     Fallback = 9,
-    /// A lattice path the desktop (accuracy) sentence model picked.
+    /// A lattice path the desktop (accuracy) sentence model picked. The engine no longer emits it (that model runs only as the runtime's settled reranker); the value stays reserved so the wire numbering and learned rows keep their meaning.
     NeuralDesktop = 10,
     /// A lattice path the keyboard (speed) sentence model picked.
     NeuralKeyboard = 11,
@@ -240,11 +240,10 @@ pub fn request_autocorrect_mask(transposition: bool, neighbor: bool) -> u32 {
     }
 }
 
-/// Neural sentence association switches.
+/// Neural sentence association switches. The desktop-model switch is not among them: that model runs only as the input runtime's settled reranker, which the host gates on the preference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SentenceAssociationOptions {
     pub word_lattice: bool,
-    pub neural_desktop: bool,
     pub neural_keyboard: bool,
     pub show_next_on_duplicate: bool,
 }
@@ -253,7 +252,6 @@ impl Default for SentenceAssociationOptions {
     fn default() -> Self {
         Self {
             word_lattice: true,
-            neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
         }

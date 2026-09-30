@@ -321,11 +321,6 @@ impl Session {
         }
     }
 
-    /// `session::Session::settle_sentence_rows`: true when the candidates changed.
-    pub fn settle_sentence_rows(&mut self) -> bool {
-        self.inner.settle_sentence_rows()
-    }
-
     pub fn select(&mut self, index: usize) -> Result<EngineResult> {
         Ok(result_for(self.inner.select(index)))
     }

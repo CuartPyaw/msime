@@ -67,15 +67,6 @@ impl ProviderRegistry {
     }
 
     /// Either pinyin scheme resets both pinyin engines (pinyin_candidate_provider.cpp:44-48).
-    /// Whether the scheme's engine has a desktop model to settle with; wubi and Japanese never do.
-    pub fn set_settling(&mut self, scheme: SchemeType, on: bool) -> bool {
-        match scheme {
-            SchemeType::Quanpin => self.quanpin.set_settling(on),
-            SchemeType::Shuangpin => self.shuangpin.set_settling(on),
-            SchemeType::Wubi | SchemeType::JapaneseRomaji => false,
-        }
-    }
-
     pub fn reset_cache(&mut self, scheme: SchemeType) {
         match scheme {
             SchemeType::Quanpin | SchemeType::Shuangpin => {

@@ -49,7 +49,6 @@ fn options(root: &Path) -> EngineOptions {
         local_temporary_japanese: true,
         sentence_association: SentenceAssociationOptions {
             word_lattice: true,
-            neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
         },
@@ -996,7 +995,7 @@ fn session_options_map_every_host_field() {
     value.mixed_kaomoji = true;
     value.local_date_time = false;
     value.local_temporary_japanese = false;
-    value.sentence_association.neural_desktop = true;
+    value.sentence_association.neural_keyboard = true;
     value.rescoring_context = "上文".into();
     value.sentence_alternatives = false;
     let mapped = super::options::session_options(&value).unwrap();
@@ -1027,7 +1026,7 @@ fn session_options_map_every_host_field() {
     assert!(mapped.expressive.emoji_candidates && mapped.expressive.kaomoji_candidates);
     assert!(!mapped.local_modes.date_time && !mapped.local_modes.temporary_japanese);
     assert!(mapped.local_modes.unicode && mapped.local_modes.temporary_english);
-    assert!(mapped.sentence_association.neural_desktop);
+    assert!(mapped.sentence_association.neural_keyboard);
     assert_eq!(mapped.rescoring_context, "上文");
     assert!(!mapped.sentence_alternatives);
     assert!(mapped.personal_context);

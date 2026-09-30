@@ -110,6 +110,8 @@ pub struct Runtime<E: InputEngine = Session> {
     /// plausible now; when the user stops to read the candidates, it has to be right. The fast
     /// model owns the first job and this one owns the second.
     pub(crate) settled_reranker: Option<Reranker>,
+    /// Whether [`Runtime::rerank_settled`] runs the settled model: the product's desktop sentence model switch. On unless a host turns it off, so a caller that attaches a model and says nothing else gets it.
+    pub(crate) settled_rerank_enabled: bool,
 }
 
 /// `CandidateSource::Generated`: a whole-sentence path the word lattice assembled. The one source
@@ -487,6 +489,7 @@ impl<E: InputEngine> Runtime<E> {
             ai_context: String::new(),
             reranker: None,
             settled_reranker: None,
+            settled_rerank_enabled: true,
             focused: false,
             page_size: page_size.into(),
             highlighted: 0,
@@ -532,36 +535,35 @@ impl<E: InputEngine> Runtime<E> {
         self.settled_reranker = reranker;
     }
 
-    /// Settle the current candidates: the Engine re-answers with its desktop sentence model, then the settled reranker reorders them. Reports whether the list changed.
+    /// Turn the settled rerank on or off without dropping the attached model, so switching it back on needs no reload. Hosts drive this from the desktop sentence model preference.
+    pub fn set_settled_rerank_enabled(&mut self, enabled: bool) {
+        self.settled_rerank_enabled = enabled;
+    }
+
+    pub fn settled_rerank_enabled(&self) -> bool {
+        self.settled_rerank_enabled
+    }
+
+    /// Re-rank the current candidates with the settled model, reporting whether the order moved. Nothing happens without an attached model or while the settled rerank is switched off.
     ///
-    /// The host decides when this is: it owns the clock and already runs a settle timer for cloud
-    /// candidates. The runtime has no timer of its own and should not grow one — a keystroke that
-    /// arrives while this is deciding makes the whole answer stale, and only the host knows that
-    /// a keystroke arrived.
+    /// The host decides when this is: it owns the clock and already runs a settle timer for cloud candidates. The runtime has no timer of its own and should not grow one — a keystroke that arrives while this is deciding makes the whole answer stale, and only the host knows that a keystroke arrived.
     ///
-    /// Returns false when nothing changed, so a host can skip redrawing the candidate window. A
-    /// window that repaints identically on every pause is a flicker the user cannot explain.
+    /// Returns false when nothing changed, so a host can skip redrawing the candidate window. A window that repaints identically on every pause is a flicker the user cannot explain.
     pub fn rerank_settled(&mut self) -> bool {
-        // A reorder has to advance the generation (old IDs would otherwise select by the new seats),
-        // so an exhausted generation cannot reorder at all.
-        if self.is_idle() || self.generation.checked_add(1).is_none() {
+        // A reorder has to advance the generation (old IDs would otherwise select by the new seats), so an exhausted generation cannot reorder at all.
+        if !self.settled_rerank_enabled
+            || self.settled_reranker.is_none()
+            || self.is_idle()
+            || self.generation.checked_add(1).is_none()
+        {
             return false;
         }
-        // The Engine's desktop sentence model answers only here, never on a keystroke. Any later refresh of the same composition (an online answer arriving, a switched option) brings back the keystroke list, so the host settles again after it.
-        let mut moved = self.engine.settle_sentence_rows();
-        if moved && self.refresh().is_err() {
-            // The refresh dropped the cached list, which the host has to redraw as well; the old IDs must not select from what replaces it.
-            let _ = self.advance();
-            return true;
-        }
-        if self.settled_reranker.is_some() {
-            std::mem::swap(&mut self.reranker, &mut self.settled_reranker);
-            moved |= self.rerank();
-            std::mem::swap(&mut self.reranker, &mut self.settled_reranker);
-            // The same passes the fast path runs after its rerank, so the seats they fix stay fixed.
-            moved |= self.demote_runner_up_readings();
-            moved |= self.normalize_online_slots();
-        }
+        std::mem::swap(&mut self.reranker, &mut self.settled_reranker);
+        let mut moved = self.rerank();
+        std::mem::swap(&mut self.reranker, &mut self.settled_reranker);
+        // The same passes the fast path runs after its rerank, so the seats they fix stay fixed.
+        moved |= self.demote_runner_up_readings();
+        moved |= self.normalize_online_slots();
         if moved {
             self.snapshot_valid = true;
             self.highlighted = 0;

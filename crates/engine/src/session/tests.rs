@@ -966,51 +966,6 @@ INSERT INTO tbl_3_n VALUES('ni''hao''ma','nhm','你好吗',900);",
     assert!(session.snapshot().preedit.is_empty());
 }
 
-/// overlays.md §1.6.3 option b through the session: typing never shows the desktop model's row; settling adds it once and a second settle has nothing to change. Needs both shipped models (`lattice::neural::test_model_path`).
-#[test]
-fn settling_adds_the_desktop_row_once() {
-    let models = (
-        crate::lattice::neural::test_model_path(assets::NEURAL_MODEL_KEYBOARD),
-        crate::lattice::neural::test_model_path(assets::NEURAL_MODEL_DESKTOP),
-    );
-    let (keyboard, desktop) = match models {
-        (Ok(keyboard), Ok(desktop)) => (keyboard, desktop),
-        (Err(reason), _) | (_, Err(reason)) => {
-            eprintln!("skipping settling_adds_the_desktop_row_once: {reason}");
-            return;
-        }
-    };
-    let fixture = Fixture::new(
-        "CREATE TABLE tbl_2_s(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
-INSERT INTO tbl_2_s VALUES('shu''ru','sr','输入',20000);\
-CREATE TABLE tbl_1_f(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
-INSERT INTO tbl_1_f VALUES('fa','f','法',800000),('fa','f','发',900000),('fa','f','罚',100000);",
-    );
-    std::fs::copy(keyboard, fixture.path().join(assets::NEURAL_MODEL_KEYBOARD)).unwrap();
-    std::fs::copy(desktop, fixture.path().join(assets::NEURAL_MODEL_DESKTOP)).unwrap();
-    let mut session = fixture.session_with(|options| {
-        options.sentence_association.neural_keyboard = true;
-        options.sentence_association.neural_desktop = true;
-        options.sentence_association.show_next_on_duplicate = true;
-    });
-    let desktop_rows = |session: &Session| {
-        session
-            .snapshot()
-            .candidates
-            .iter()
-            .filter(|item| item.source == CandidateSource::NeuralDesktop)
-            .count()
-    };
-    type_text(&mut session, "shurufa");
-    assert_eq!(desktop_rows(&session), 0);
-    assert!(session.settle_sentence_rows());
-    assert_eq!(desktop_rows(&session), 1, "{:?}", words(&session));
-    assert!(!session.settle_sentence_rows());
-    // The next keystroke answers without the desktop model again.
-    session.command(Command::Backspace);
-    assert_eq!(desktop_rows(&session), 0);
-}
-
 // ---- isolation between sessions (test_runtime_isolation.cpp:367-413, :447-464) ----
 
 /// One root of test_runtime_isolation.cpp:39-85: its own `ni` rows, quick phrase, helpcode tables and Japanese model, each naming `own` so a leak from the other root shows.

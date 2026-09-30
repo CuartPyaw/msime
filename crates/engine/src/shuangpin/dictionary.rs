@@ -12,7 +12,7 @@ use crate::dictionary::pinyin::PinyinDatabase;
 use crate::helpcode::{
     match_single_helpcode, matches_double_helpcodes, HelpcodeKeymap, SingleHelpcodeMatch,
 };
-use crate::ime::online_batch::{carry_online_rows, replace_online_candidate_batch};
+use crate::ime::online_batch::replace_online_candidate_batch;
 use crate::lattice::decode::make_sentence_lattice_options;
 use crate::lattice::merge::merge_lattice_candidates;
 use crate::lattice::neural::{
@@ -41,12 +41,7 @@ pub struct ShuangpinDictionary {
     database: PinyinDatabase,
     paths: RuntimePaths,
     personal: Arc<PersonalNgramStore>,
-    /// The keystroke rerankers: the keyboard model only.
     rerankers: Vec<NeuralReranker>,
-    /// The desktop model, scored only by `set_settling` (overlays.md §1.6.3 option b).
-    settled_reranker: Option<NeuralReranker>,
-    /// While true the desktop model is the last entry of `rerankers` and answers go to their own cache entries.
-    settling: bool,
     sentence_alternatives: bool,
     sentence_association: SentenceAssociationOptions,
     rescoring_context: String,
@@ -87,8 +82,6 @@ impl ShuangpinDictionary {
             paths: paths.clone(),
             personal,
             rerankers: Vec::new(),
-            settled_reranker: None,
-            settling: false,
             sentence_alternatives: false,
             sentence_association: SentenceAssociationOptions::default(),
             rescoring_context: String::new(),
@@ -102,15 +95,9 @@ impl ShuangpinDictionary {
         }
     }
 
-    /// Series and helpcode answers carry the reranked sentence rows, which depend on the committed context. The C++ bypassed these caches while a model was loaded because its rows arrived asynchronously; the keyboard model scores synchronously, so the trimmed context joins the key instead and a commit moves to fresh entries without clearing the context-free row cache (overlays.md §1.6.2). Without a reranker no answer reads the context, so the key stays the raw input. A settled answer, which the desktop model also scored, has entries of its own.
+    /// Series and helpcode answers carry the reranked sentence rows, which depend on the committed context. The C++ bypassed these caches while a model was loaded because its rows arrived asynchronously; scoring here is synchronous, so the trimmed context joins the key instead and a commit moves to fresh entries without clearing the context-free row cache (overlays.md §1.6.2). Without a reranker no answer reads the context, so the key stays the raw input.
     fn sentence_cache_key(&self, key: &str) -> String {
-        self.cache_key_for(key, self.settling)
-    }
-
-    fn cache_key_for(&self, key: &str, settled: bool) -> String {
-        if settled {
-            format!("{key}\u{1}{}\u{1}settled", self.rescoring_context)
-        } else if self.rerankers.is_empty() {
+        if self.rerankers.is_empty() {
             key.to_string()
         } else {
             format!("{key}\u{1}{}", self.rescoring_context)
@@ -240,12 +227,6 @@ impl ShuangpinDictionary {
             self.profile,
         ));
         self.merge_sentences(&mut candidates, &segments, pure);
-        if self.settling {
-            // Online answers were stored in the keystroke list; the settled list keeps them in their slots.
-            if let Some(keystroke) = self.series_cache.get(&self.cache_key_for(rows_key, false)) {
-                carry_online_rows(&keystroke, &mut candidates);
-            }
-        }
 
         self.series_cache.insert(key.clone(), candidates.clone());
         // Only keys long enough for the lattice carry personal scores.
@@ -448,19 +429,13 @@ impl ShuangpinDictionary {
         if raw.is_empty() {
             return false;
         }
-        let key = self.cache_key_for(raw, false);
+        let key = self.sentence_cache_key(raw);
         // An absent key starts an empty list: the rows show on the next query for `raw` (SD:1373-1384).
         let mut list = self.series_cache.get(&key).unwrap_or_default();
         if !replace_online_candidate_batch(&mut list, raw, words, source) {
             return false;
         }
         self.series_cache.insert(key, list);
-        // An answer that arrives after the host settled this key belongs in the settled list too.
-        let settled = self.cache_key_for(raw, true);
-        if let Some(mut list) = self.series_cache.get(&settled) {
-            replace_online_candidate_batch(&mut list, raw, words, source);
-            self.series_cache.insert(settled, list);
-        }
         true
     }
 
@@ -508,46 +483,22 @@ impl ShuangpinDictionary {
         self.series_cache.clear();
     }
 
-    /// Loads the enabled sentence models: the keyboard model scores every keystroke, the desktop model waits for `set_settling`; a model that fails to load contributes no rows. A change resets the caches (neural-association.patch:3080-3095).
+    /// Loads the keyboard sentence model from the resource bundle when its switch is on; a model that fails to load contributes no rows. The desktop model is not the engine's: only the runtime's settled reranker runs it. A change resets the caches (neural-association.patch:3080-3095).
     pub fn set_sentence_association(&mut self, options: SentenceAssociationOptions) {
         if self.sentence_association == options {
             return;
         }
-        self.set_settling(false);
         self.sentence_association = options;
         self.rerankers.clear();
-        self.settled_reranker = None;
         if options.neural_keyboard {
             if let Some(model) =
-                shared_sentence_model(&self.paths.neural_model(assets::NEURAL_MODEL_KEYBOARD))
+                shared_sentence_model(&self.paths.resource(assets::NEURAL_MODEL_KEYBOARD))
             {
                 self.rerankers
                     .push(NeuralReranker::new(CandidateSource::NeuralKeyboard, model));
             }
         }
-        if options.neural_desktop {
-            self.settled_reranker =
-                shared_sentence_model(&self.paths.neural_model(assets::NEURAL_MODEL_DESKTOP))
-                    .map(|model| NeuralReranker::new(CandidateSource::NeuralDesktop, model));
-        }
         self.reset_cache();
-    }
-
-    /// While on, queries also score the desktop model, after the keyboard one so the merge's tie rules take the keyboard pick first when both agree (overlays.md §1.6.2), and their answers are cached apart from the keystroke answers. Returns whether a desktop model is loaded; without one this does nothing.
-    pub fn set_settling(&mut self, on: bool) -> bool {
-        if on == self.settling {
-            return self.settling || self.settled_reranker.is_some();
-        }
-        if on {
-            let Some(reranker) = self.settled_reranker.take() else {
-                return false;
-            };
-            self.rerankers.push(reranker);
-        } else {
-            self.settled_reranker = self.rerankers.pop();
-        }
-        self.settling = on;
-        true
     }
 
     /// Only the last 64 characters condition the models, so committed text beyond that window keys the same entries. A change clears nothing: the context is part of the sentence cache keys (`sentence_cache_key`).

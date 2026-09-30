@@ -4,14 +4,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::assets::{
-    BIGRAM_TABLE, MAIN_DICTIONARY, NEURAL_MODEL_DESKTOP, NEURAL_MODEL_KEYBOARD, TRIGRAM_TABLE,
-    USER_JOURNAL,
+    BIGRAM_TABLE, MAIN_DICTIONARY, NEURAL_MODEL_KEYBOARD, TRIGRAM_TABLE, USER_JOURNAL,
 };
 use crate::cache::FifoCache;
 use crate::dictionary::pinyin::{PinyinDatabase, INSERTED_WEIGHT};
 use crate::dictionary::DictRow;
 use crate::error::{EngineError, Result};
-use crate::ime::online_batch::{carry_online_rows, replace_online_candidate_batch};
+use crate::ime::online_batch::replace_online_candidate_batch;
 use crate::lattice::decode::make_sentence_lattice_options;
 use crate::lattice::merge::{merge_lattice_candidates, whole_sentence_insert_position};
 use crate::lattice::neural::{
@@ -89,12 +88,7 @@ pub struct QuanpinDictionary {
     resolution_cache: FifoCache<String, SeriesResolution>,
     /// Rows of typo-variant span keys, empty answers included. Dictionary rows only, so it is cleared with the other caches.
     typo_span_cache: FifoCache<String, Vec<DictRow>>,
-    /// The keystroke rerankers: the keyboard model only.
     rerankers: Vec<NeuralReranker>,
-    /// The desktop model, scored only by `set_settling` (overlays.md §1.6.3 option b): its p95 of 153 ms per query does not fit a keystroke.
-    settled_reranker: Option<NeuralReranker>,
-    /// While true the desktop model is the last entry of `rerankers` and answers go to their own series slots.
-    settling: bool,
     sentence_alternatives: bool,
     sentence_association: SentenceAssociationOptions,
     rescoring_context: String,
@@ -134,8 +128,6 @@ impl QuanpinDictionary {
             resolution_cache: FifoCache::new(CACHE_CAPACITY),
             typo_span_cache: FifoCache::new(TYPO_SPAN_CACHE_CAPACITY),
             rerankers: Vec::new(),
-            settled_reranker: None,
-            settling: false,
             sentence_alternatives: false,
             sentence_association: SentenceAssociationOptions::default(),
             rescoring_context: String::new(),
@@ -311,18 +303,12 @@ impl QuanpinDictionary {
         // The key is recomputed exactly as the query computed it, so the rows land in the slot the next refresh reads.
         let segments = self.resolve_segments(raw, segmentation);
         let resolution = self.resolution(raw, segmentation, &segments, autocorrect_types);
-        let key = self.slot(&resolution.cache_key, false);
+        let key = self.series_slot(&resolution.cache_key);
         let mut list = self.series_cache.get(&key).unwrap_or_default();
         if !replace_online_candidate_batch(&mut list, raw, words, source) {
             return false;
         }
         self.series_cache.insert(key, list);
-        // An answer that arrives after the host settled this key belongs in the settled list too.
-        let settled = self.slot(&resolution.cache_key, true);
-        if let Some(mut list) = self.series_cache.get(&settled) {
-            replace_online_candidate_batch(&mut list, raw, words, source);
-            self.series_cache.insert(settled, list);
-        }
         true
     }
 
@@ -364,45 +350,20 @@ impl QuanpinDictionary {
         self.series_cache.clear();
     }
 
-    /// Loads the enabled models: the keyboard model scores every keystroke, the desktop model waits for `set_settling`. The options are part of every series slot, so a change needs no reset and switching back finds the earlier lists still cached.
+    /// Loads the keyboard sentence model from the resource bundle when its switch is on. The desktop model is not the engine's: only the runtime's settled reranker runs it. The options are part of every series slot, so a change needs no reset and switching back finds the earlier lists still cached.
     pub fn set_sentence_association(&mut self, options: SentenceAssociationOptions) {
         if self.sentence_association == options {
             return;
         }
-        self.set_settling(false);
         self.sentence_association = options;
         self.rerankers.clear();
-        self.settled_reranker = None;
         if options.neural_keyboard {
-            if let Some(model) =
-                shared_sentence_model(&self.paths.neural_model(NEURAL_MODEL_KEYBOARD))
+            if let Some(model) = shared_sentence_model(&self.paths.resource(NEURAL_MODEL_KEYBOARD))
             {
                 self.rerankers
                     .push(NeuralReranker::new(CandidateSource::NeuralKeyboard, model));
             }
         }
-        if options.neural_desktop {
-            self.settled_reranker =
-                shared_sentence_model(&self.paths.neural_model(NEURAL_MODEL_DESKTOP))
-                    .map(|model| NeuralReranker::new(CandidateSource::NeuralDesktop, model));
-        }
-    }
-
-    /// While on, queries also score the desktop model, after the keyboard one so the merge's tie rules take the keyboard pick first when both agree (overlays.md §1.6.2), and their answers are cached apart from the keystroke answers. Returns whether a desktop model is loaded; without one this does nothing.
-    pub fn set_settling(&mut self, on: bool) -> bool {
-        if on == self.settling {
-            return self.settling || self.settled_reranker.is_some();
-        }
-        if on {
-            let Some(reranker) = self.settled_reranker.take() else {
-                return false;
-            };
-            self.rerankers.push(reranker);
-        } else {
-            self.settled_reranker = self.rerankers.pop();
-        }
-        self.settling = on;
-        true
     }
 
     /// Keeps the part of the committed text the rerankers read; while they run it is part of every series slot (`series_slot`).
@@ -414,28 +375,18 @@ impl QuanpinDictionary {
         }
     }
 
-    /// The series cache slot of a resolution's key (overlays.md §1.6.2). The association switches decide which sentence rows a list carries, so they are always part of the slot. The reference bypassed the cache while a neural model ran, because its scores came from an asynchronous worker; the keyboard model scores synchronously, so a reranked list is cached under the trimmed context it was scored with and a commit moves the next query to a fresh slot instead of clearing every list. A settled list, which the desktop model also scored, has a slot of its own, so the keystroke list for the same key never shows the desktop row before the host settles.
+    /// The series cache slot of a resolution's key (overlays.md §1.6.2). The association switches decide which sentence rows a list carries, so they are always part of the slot. The reference bypassed the cache while a neural model ran, because its scores came from an asynchronous worker; scoring here is synchronous, so a reranked list is cached under the trimmed context it was scored with and a commit moves the next query to a fresh slot instead of clearing every list.
     fn series_slot(&self, cache_key: &str) -> String {
-        self.slot(cache_key, self.settling)
-    }
-
-    fn slot(&self, cache_key: &str, settled: bool) -> String {
         let options = self.sentence_association;
         let switches: String = [
             options.word_lattice,
             options.neural_keyboard,
-            options.neural_desktop,
             options.show_next_on_duplicate,
         ]
         .into_iter()
         .map(|on| if on { '1' } else { '0' })
         .collect();
-        if settled {
-            format!(
-                "{cache_key}\u{1f}S{switches}\u{1f}{}\u{1f}settled",
-                self.rescoring_context
-            )
-        } else if self.rerankers.is_empty() {
+        if self.rerankers.is_empty() {
             format!("{cache_key}\u{1f}S{switches}")
         } else {
             format!(
@@ -529,15 +480,6 @@ impl QuanpinDictionary {
                     &alternatives,
                     result,
                 );
-            }
-        }
-        if self.settling {
-            // Online answers were stored in the keystroke list; the settled list keeps them in their slots.
-            if let Some(keystroke) = self
-                .series_cache
-                .get(&self.slot(&resolution.cache_key, false))
-            {
-                carry_online_rows(&keystroke, &mut result);
             }
         }
         self.series_cache.insert(slot.clone(), result.clone());

@@ -269,7 +269,6 @@ fn discard_does_not_require_maintenance_lock_for_live_paths() {
         local_temporary_japanese: true,
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
-            neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
         },
@@ -357,7 +356,6 @@ fn activation_case(nested_dictionaries: bool, hold_session: bool, handle: u64) {
         sentence_alternatives: true,
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
-            neural_desktop: false,
             neural_keyboard: false,
             show_next_on_duplicate: false,
         },

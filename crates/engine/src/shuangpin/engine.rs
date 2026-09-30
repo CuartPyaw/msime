@@ -256,11 +256,6 @@ impl ShuangpinEngine {
         self.dictionary.find_candidate(key, value)
     }
 
-    /// `ShuangpinDictionary::set_settling`; fuzzy rows carry no sentence rows, so the fuzzy dictionary has nothing to settle.
-    pub fn set_settling(&mut self, on: bool) -> bool {
-        self.dictionary.set_settling(on)
-    }
-
     pub fn reset_cache(&mut self) {
         self.dictionary.reset_cache();
         if let Some(fuzzy_dictionary) = &mut self.fuzzy_dictionary {
