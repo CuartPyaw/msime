@@ -551,9 +551,23 @@ fn rank_candidates(candidates: &mut Vec<WordItem>) {
             .then_with(|| a.fuzzy.cmp(&b.fuzzy))
             .then_with(|| b.weight.cmp(&a.weight))
     });
-    let mut seen = HashSet::with_capacity(candidates.len());
-    candidates.retain(|item| seen.insert(item.word.clone()));
+    retain_unique_words(candidates);
     candidates.truncate(CANDIDATE_LIMIT);
+}
+
+fn retain_unique_words(candidates: &mut Vec<WordItem>) {
+    let mut seen = HashSet::with_capacity(candidates.len());
+    let keep: Vec<bool> = candidates
+        .iter()
+        .map(|item| seen.insert(item.word.as_str()))
+        .collect();
+    drop(seen);
+    let mut index = 0;
+    candidates.retain(|_| {
+        let keep_item = keep[index];
+        index += 1;
+        keep_item
+    });
 }
 
 /// A word spelling the typed code exactly leads, but only when people type it: 64426 is 你好 and `ogham` is the only five-letter word those keys spell, so a zero-weight exact word gets no privilege. Then weight, then shorter (NK:199-220).
@@ -810,6 +824,23 @@ mod tests {
         let candidates = vec![item("old", "653", 1, CandidateSource::EnglishDictionary)];
         assert!(has_candidate_word(&candidates, "old"));
         assert!(!has_candidate_word(&candidates, "older"));
+    }
+
+    #[test]
+    fn unique_word_retain_keeps_the_first_sorted_row() {
+        let mut candidates = vec![
+            item("你", "644", 10, CandidateSource::Database),
+            item("你", "64", 1, CandidateSource::Generated),
+            item("泥", "64", 2, CandidateSource::Database),
+        ];
+        retain_unique_words(&mut candidates);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.word.as_str())
+                .collect::<Vec<_>>(),
+            ["你", "泥"]
+        );
     }
 
     #[test]
