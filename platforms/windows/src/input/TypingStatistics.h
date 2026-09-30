@@ -168,23 +168,26 @@ inline std::optional<LocalTimeParts> local_time_parts(std::time_t instant) {
 // are best effort and must never manufacture a record they cannot place.
 // Whether the directory is absolute is not re-decided here - the shared host
 // owns that rule and rejects the request - because a second copy would drift.
+// `quiet` keeps the achievement jingle a milestone would play silent, as every other effect sound is while a full-screen application is in front; the commit is still counted.
 inline std::string typing_statistics_record_request(std::string_view directory,
                                                     const std::string &text,
                                                     TypingSource source,
                                                     const std::string &day,
-                                                    int hour) {
+                                                    int hour,
+                                                    bool quiet = false) {
   if (text.empty() || directory.empty() || day.size() != 10 || hour < 0 ||
       hour > 23)
     return {};
+  auto action = nlohmann::json{{"operation", "record"},
+                               {"text", text},
+                               {"source", std::string(typing_source_id(source))},
+                               {"day", day},
+                               {"hour", hour}};
+  if (quiet)
+    action["quiet"] = true;
   const auto request =
-      nlohmann::json{
-          {"directory", std::string(directory)},
-          {"action",
-           nlohmann::json{{"operation", "record"},
-                          {"text", text},
-                          {"source", std::string(typing_source_id(source))},
-                          {"day", day},
-                          {"hour", hour}}}}
+      nlohmann::json{{"directory", std::string(directory)},
+                     {"action", std::move(action)}}
           .dump();
   // The shared entry point rejects buffers past 64 KiB. A single commit never
   // approaches that; a pathological paste is dropped instead of truncated,

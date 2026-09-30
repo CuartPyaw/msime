@@ -455,6 +455,9 @@ pub unsafe extern "C" fn msime_client_typing_statistics(
             /// honest result, since this layer cannot resolve the host's timezone itself.
             #[serde(default)]
             hour: Option<u8>,
+            /// Set by a host that must keep effect sounds quiet right now (Windows while a full-screen application is in front): the commit is still counted and the milestone still reported, but no jingle plays.
+            #[serde(default)]
+            quiet: bool,
         },
         SetEnabled {
             enabled: bool,
@@ -491,6 +494,7 @@ pub unsafe extern "C" fn msime_client_typing_statistics(
                 source,
                 day,
                 hour,
+                quiet,
             } => {
                 // The count is read first only when a session asked for achievement sounds, so recording stays one read and one write for everyone else.
                 let before = key_sound::achievements_armed()
@@ -505,7 +509,7 @@ pub unsafe extern "C" fn msime_client_typing_statistics(
                         before.saturating_add(recorded),
                     )
                 });
-                if milestone.is_some() {
+                if milestone.is_some() && !quiet {
                     key_sound::achievement();
                 }
                 Ok(json!({"recorded": recorded, "milestone": milestone}))

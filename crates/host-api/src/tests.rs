@@ -7130,4 +7130,10 @@ fn statistics_record_reports_the_milestone_field() {
     );
     assert_eq!(recorded["value"]["recorded"], 2, "{recorded}");
     assert_eq!(recorded["value"]["milestone"], Value::Null);
+    // A host keeping sounds quiet (Windows behind a full-screen application) still has the commit counted.
+    let quiet = call(
+        json!({"operation": "record", "text": "输入", "source": "quanpin", "day": "2026-10-01", "quiet": true}),
+    );
+    assert_eq!(quiet["value"]["recorded"], 2, "{quiet}");
+    assert!(quiet["value"].get("milestone").is_some());
 }

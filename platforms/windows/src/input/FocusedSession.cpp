@@ -25,14 +25,14 @@ FocusedSession::typing_statistics_directory(const std::string &options) {
 }
 void record_typing_statistics_async(const std::string &directory,
                                     const std::string &text,
-                                    TypingSource source) {
+                                    TypingSource source, bool quiet) {
   if (directory.empty())
     return;
   const auto local = local_time_parts(std::time(nullptr));
   if (!local)
     return;
-  auto request = typing_statistics_record_request(directory, text, source,
-                                                  local->day, local->hour);
+  auto request = typing_statistics_record_request(
+      directory, text, source, local->day, local->hour, quiet);
   if (request.empty())
     return;
   // Off the calling thread: the shared store takes a file lock, and neither a commit nor a pipe listener may wait on statistics. Detached like the other hosts do; the request is a self-contained copy, so nothing here outlives it.
@@ -64,7 +64,9 @@ std::optional<FocusedSession::Commit> FocusedSession::pending_commit() const {
 void FocusedSession::record_commit(const std::optional<Commit> &delivered) {
   if (!delivered)
     return;
-  if (sound_allowed())
+  // Sampled once, at commit time: the achievement jingle a milestone plays follows the same full-screen rule as the commit sound.
+  const bool allowed = sound_allowed();
+  if (allowed)
     (void)session_.commit_sound();
   if (!delivered->typing)
     return;
@@ -73,7 +75,7 @@ void FocusedSession::record_commit(const std::optional<Commit> &delivered) {
     return;
   }
   record_typing_statistics_async(statistics_directory_, delivered->text,
-                                 delivered->source);
+                                 delivered->source, !allowed);
 }
 void FocusedSession::check_thread() const {
   if (std::this_thread::get_id() != thread_)

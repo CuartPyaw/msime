@@ -119,6 +119,11 @@ int main() {
     require(parsed.at("action").at("source") == "quanpin");
     require(parsed.at("action").at("day") == "2026-09-21");
     require(parsed.at("action").at("hour") == 9);
+    // Only a record made behind a full-screen application carries the flag.
+    require(!parsed.at("action").contains("quiet"));
+    const auto quiet = Json::parse(typing_statistics_record_request(
+        "C:\\state", "你好", TypingSource::Quanpin, "2026-09-21", 9, true));
+    require(quiet.at("action").at("quiet") == true);
     // Nothing usable in, nothing out: a record with no text, no home, or no
     // resolvable day or hour would have to invent one of them.
     require(typing_statistics_record_request("C:\\state", "", TypingSource::Ai,

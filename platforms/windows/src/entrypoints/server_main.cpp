@@ -1404,9 +1404,11 @@ int wmain(int argc, wchar_t **argv) {
                                   batch.characters.data(), wide_size,
                                   text.data(), size, nullptr, nullptr) != size)
             return false;
+          // A milestone's jingle stays quiet behind a full-screen application, as every other effect sound does.
           record_typing_statistics_async(
               statistics_directory, text,
-              batch.english ? TypingSource::English : TypingSource::Unknown);
+              batch.english ? TypingSource::English : TypingSource::Unknown,
+              foreground_is_fullscreen(GetForegroundWindow()));
           return true;
         });
     // The fifth pipe: TIP diagnostics. The TIP has always produced batches on
