@@ -162,7 +162,7 @@ impl PinyinDatabase {
             return Vec::new();
         }
         let mut keys_by_table: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::with_capacity(segmentations.len());
         for segments in segmentations {
             if !has_only_complete_pinyin_segments(segments) {
                 continue;
