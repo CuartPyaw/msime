@@ -17,6 +17,8 @@ export enum ReturnDispatch {
   FINISH_COMPOSITION = "finish-composition",
   COMMIT_HIGHLIGHTED = "commit-highlighted",
   COMMIT_READING = "commit-reading",
+  /** Korean: commit the open syllable, then let Return do what it does in the editor. */
+  FINISH_THEN_EDITOR = "finish-then-editor",
 }
 
 export class ReturnKeyAction {
@@ -25,7 +27,12 @@ export class ReturnKeyAction {
     composing: boolean,
     candidateCount: number,
     japaneseConverted: boolean = false,
+    korean: boolean = false,
   ): ReturnDispatch {
+    // A Korean syllable is finished text rather than a spelling to confirm, so Return commits it and still breaks the line or submits, as every Korean keyboard does.
+    if (korean) {
+      return composing ? ReturnDispatch.FINISH_THEN_EDITOR : ReturnDispatch.EDITOR;
+    }
     if (japanese && composing) {
       return japaneseConverted ? ReturnDispatch.COMMIT_HIGHLIGHTED : ReturnDispatch.COMMIT_READING;
     }

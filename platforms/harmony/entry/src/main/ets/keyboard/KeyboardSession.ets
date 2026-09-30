@@ -15,6 +15,7 @@ import { KeyboardFormFactor } from './KeyboardFormFactor';
 import { KeyboardScheme, PreferenceMapping, SchemeDefinition } from './KeyboardScheme';
 import { EditorPolicy, EditorTraits } from './input/EditorPolicy';
 import { JapaneseSpacePolicy } from './input/JapaneseSpacePolicy';
+import { KoreanCompositionPolicy } from './input/KoreanCompositionPolicy';
 import {
   CapitalizationMode, EnglishCapitalizationPolicy
 } from './input/EnglishCapitalizationPolicy';
@@ -1924,6 +1925,11 @@ export class KeyboardSession implements HardwareKeyTarget {
     return !this.englishMode && this.schemeName === 'japanese';
   }
 
+  /** Whether letters go to the Korean Hangul automaton: the Korean scheme with neither English nor a local utility mode taking the keys. */
+  isKorean(): boolean {
+    return KoreanCompositionPolicy.selected(this.schemeName, this.englishMode, this.localMode);
+  }
+
   /** Which mode-switch gestures the user left bound, as the shared document has them. */
   modeBindings(): ModeBindings {
     return this.bindings;
@@ -2028,8 +2034,10 @@ export class KeyboardSession implements HardwareKeyTarget {
       english: this.englishMode,
       temporaryEnglish: this.localMode === 'temporary_english' || this.isEnglishCandidates(),
       japanese: !this.englishMode && this.schemeName === 'japanese',
+      korean: !this.englishMode && this.schemeName === 'korean',
       capsLock: this.capsLock,
-      chinesePunctuation: this.chinesePunctuation,
+      // Korean writes ASCII punctuation whatever the switch says, and the face reports what is written.
+      chinesePunctuation: this.chinesePunctuation && !this.isKorean(),
       fullWidth: this.fullWidth, traditional: this.traditional
     };
     this.onToolbar(state, FloatingToolbarLayout.buttons(this.toolbarComponents()),
@@ -2232,7 +2240,7 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   private finishCompositionBoundary(boundary: CompositionBoundary): void {
     const action: CompositionBoundaryAction = CompositionBoundaryPolicy.action(
-      this.composing(), this.schemeName === 'japanese', boundary);
+      this.composing(), this.schemeName === 'japanese', boundary, this.isKorean());
     if (action === CompositionBoundaryAction.FINISH_COMPOSITION) {
       this.finishComposition();
     } else if (action === CompositionBoundaryAction.COMMIT_RAW) {
@@ -2573,7 +2581,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   private insertEditorText(text: string): void {
     const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
     if (inputClient === undefined) return;
-    if (this.previewText.length > 0) {
+    if (this.previewText.length > 0 || this.commitSynchronously) {
       // The insertion takes the preview text's place. It has to land before the next preview update, which is synchronous, and an asynchronous insert gives no such order.
       try {
         this.insertEditorTextSync(text);
@@ -2617,7 +2625,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     const view: EngineView | undefined = this.lastView;
     const wanted: string = view === undefined ? '' : InlinePreeditPolicy.text(this.inlinePreeditStyle,
       KeyboardFormFactor.isDesktop(), this.previewSupported, view.editing_text, view.preedit,
-      view.phrase_prefix ?? '');
+      view.phrase_prefix ?? '', KoreanCompositionPolicy.active(view.scheme, view.dedicated_english,
+        view.local_mode));
     if (inputClient === undefined || wanted === this.previewText) return;
     const shown: string = this.previewText;
     this.pendingOwnEdits++;
@@ -2853,8 +2862,9 @@ export class KeyboardSession implements HardwareKeyTarget {
         && this.inputClient !== undefined && !this.composing()
         && this.currentCandidates.length === 0) {
       try {
-        const literal: string = FullWidthInputPolicy.output(String.fromCharCode(ascii), this.fullWidth)
-          ?? String.fromCharCode(ascii);
+        // Korean punctuation is half-width ASCII in either character width.
+        const literal: string = FullWidthInputPolicy.output(String.fromCharCode(ascii),
+          this.fullWidth && !this.isKorean()) ?? String.fromCharCode(ascii);
         this.insertEditorTextSync(literal);
         this.recordTypingStatistics(literal, this.typingSource());
         this.refreshEnglishSuggestions();
@@ -2999,6 +3009,17 @@ export class KeyboardSession implements HardwareKeyTarget {
     const literal: string = String.fromCharCode(ascii);
     this.insertEditorText(literal);
     this.recordTypingStatistics(literal, this.typingSource());
+  }
+
+  /**
+   * Korean: commit the open syllable ahead of a key that goes on to do its own work (Return, a caret key, Delete).
+   *
+   * The commit is written synchronously, so it is in the document before the key that ended it reaches the editor or the application; left to the asynchronous insert, a Return could break the line ahead of the syllable it was meant to follow.
+   */
+  finishBeforeKey(): void {
+    this.commitSynchronously = true;
+    this.finishComposition();
+    this.commitSynchronously = false;
   }
 
   /** Commit Japanese kana as entered, without forcing the first converted candidate. */
@@ -3266,6 +3287,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   private phrasePrefix: string = '';
   private japaneseConversionIndex: number = -1;
   private japaneseConversionReading: string = '';
+  /** Set by finishBeforeKey while its commit must reach the editor before the key that follows it. */
+  private commitSynchronously: boolean = false;
   // Where the segment keys have put the caret. Drawn by the candidate window, which is the
   // only place it is visible: the editor sees a committed string, not a composition.
   private editingCaret: number = 0;
@@ -3305,6 +3328,7 @@ export class KeyboardSession implements HardwareKeyTarget {
         this.onComposition(active);
       }
     }
+    const reading: string = KeyboardSession.drawnReading(view);
     const entries: CandidateEntry[] = [];
     for (const candidate of view.candidates) {
       entries.push({
@@ -3328,8 +3352,8 @@ export class KeyboardSession implements HardwareKeyTarget {
       this.onChanged({
         candidates: entries,
         // 已选的那一段领在读音前面，与来源把 word_for_creating_word 拼在读音前面是同一件事。
-        editing: (view.phrase_prefix ?? '') + view.editing_text,
-        editingCaret: view.caret_position + (view.phrase_prefix ?? '').length,
+        editing: (view.phrase_prefix ?? '') + reading,
+        editingCaret: KeyboardSession.drawnCaret(view, reading) + (view.phrase_prefix ?? '').length,
         phrasePrefix: view.phrase_prefix ?? '',
         spellings: view.nine_key_spellings,
         scheme: view.scheme,
@@ -3342,7 +3366,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       });
     }
     if (this.onCandidateWidth !== undefined) {
-      this.onCandidateWidth(this.candidateWidthVp(entries, view.editing_text, view.page, view.page_count));
+      this.onCandidateWidth(this.candidateWidthVp(entries, reading, view.page, view.page_count));
     }
     if (this.onCandidateCount !== undefined) {
       this.onCandidateCount(entries.length);
@@ -3374,9 +3398,10 @@ export class KeyboardSession implements HardwareKeyTarget {
       annotationIsTranslation: CandidateGlossPolicy.annotationIsTranslation(candidate.annotation,
         candidate.translation ?? null, this.candidateGlossEnabled)
     }));
+    const reading: string = KeyboardSession.drawnReading(view);
     this.onChanged({
-      candidates: entries, editing: (view.phrase_prefix ?? '') + view.editing_text,
-      editingCaret: view.caret_position + (view.phrase_prefix ?? '').length,
+      candidates: entries, editing: (view.phrase_prefix ?? '') + reading,
+      editingCaret: KeyboardSession.drawnCaret(view, reading) + (view.phrase_prefix ?? '').length,
       phrasePrefix: view.phrase_prefix ?? '',
       spellings: view.nine_key_spellings,
       scheme: view.scheme, shuangpinProfile: view.shuangpin_profile, localMode: view.local_mode,
@@ -3384,9 +3409,21 @@ export class KeyboardSession implements HardwareKeyTarget {
       page: view.page, pageCount: view.page_count
     });
     if (this.onCandidateWidth !== undefined) {
-      this.onCandidateWidth(this.candidateWidthVp(entries, view.editing_text, view.page, view.page_count));
+      this.onCandidateWidth(this.candidateWidthVp(entries, reading, view.page, view.page_count));
     }
     if (this.onCandidateCount !== undefined) this.onCandidateCount(entries.length);
+  }
+
+  /** The composition the strip draws: Korean's editing_text is only the key letters of the open syllable, so there the syllable itself is drawn. */
+  private static drawnReading(view: EngineView): string {
+    return KoreanCompositionPolicy.reading(
+      KoreanCompositionPolicy.active(view.scheme, view.dedicated_english, view.local_mode),
+      view.editing_text, view.preedit);
+  }
+
+  /** The caret within drawnReading: the Engine's own for a spelling, the end of a Korean syllable. */
+  private static drawnCaret(view: EngineView, reading: string): number {
+    return reading === view.editing_text ? view.caret_position : reading.length;
   }
 
   /** A horizontal candidate window on a machine with its own keys is as wide as its whole page; a vertical list is as wide as its widest row. A 2in1 window that shows the composition line also makes room on it for the brand mark and the page indicator. */
@@ -4845,6 +4882,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     return this.smartPunctuation && this.smartPunctuationRepeat
       && this.chinesePunctuation && this.punctuationLock === 'follow'
       && !dedicatedEnglish && this.localMode === 'none' && this.schemeName !== 'japanese'
+      && this.schemeName !== 'korean'
       && !this.composing() && this.currentCandidates.length === 0
       && SmartPunctuationRepeatPolicy.chineseMark(ascii) !== null
       && SmartPunctuationRepeatPolicy.isAsciiAlphanumeric(preceding);

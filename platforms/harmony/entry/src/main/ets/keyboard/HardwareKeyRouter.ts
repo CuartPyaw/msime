@@ -74,6 +74,8 @@ export enum HardwareKeyAction {
   WIDEN,
   /** Finish the composition, then type `character` after it: a key that carries text but means nothing to the composition. */
   COMMIT_THEN_TYPE,
+  /** Korean: commit the open syllable, then hand the key to the application to do its own work (Return, a caret key, Delete, Tab). */
+  COMMIT_THEN_RELEASE,
 }
 
 export interface HardwareKeyDecision {
@@ -167,6 +169,23 @@ const APOSTROPHE: number = 0x27;
 // Local modes whose own spellings are split with `'`, as the Linux host's `accepted_apostrophe` lists them.
 const APOSTROPHE_LOCAL_MODES: string[] = ["emoji", "kaomoji", "temporary_japanese"];
 
+// Keys that end an open Korean syllable and then do their own work in the application.
+const KOREAN_COMMIT_KEYS: number[] = [
+  KEYCODE_ENTER,
+  KEYCODE_NUMPAD_ENTER,
+  KEYCODE_TAB,
+  KEYCODE_DEL,
+  KEYCODE_FORWARD_DEL,
+  KEYCODE_DPAD_UP,
+  KEYCODE_DPAD_DOWN,
+  KEYCODE_DPAD_LEFT,
+  KEYCODE_DPAD_RIGHT,
+  KEYCODE_MOVE_HOME,
+  KEYCODE_MOVE_END,
+  KEYCODE_PAGE_UP,
+  KEYCODE_PAGE_DOWN,
+];
+
 const RELEASE: HardwareKeyDecision = {
   action: HardwareKeyAction.RELEASE,
   character: 0,
@@ -245,6 +264,7 @@ export class HardwareKeyRouter {
    * @param composing whether the Engine is holding a composition right now, as `composing` answers it
    * @param chinese whether the Engine would spell with a letter rather than pass it through
    * @param chinesePunctuationInEnglish whether punctuation is still the keyboard's in English mode, which the Windows host does when `punctuation_lock` is Chinese (`ResolvePunctuationOpen`)
+   * @param korean whether letters go to the Korean Hangul automaton, which routes on rules of its own; see routeKorean
    */
   static route(
     key: HardwareKey,
@@ -267,12 +287,16 @@ export class HardwareKeyRouter {
     spelling: HardwareSpelling = PLAIN_SPELLING,
     fullWidth: boolean = false,
     chinesePunctuationInEnglish: boolean = false,
+    korean: boolean = false,
   ): HardwareKeyDecision {
     // Applied once, before anything reads the key, so no digit path can be left out of it. The
     // resolved character is filled in as well as the code: with Ctrl+Shift+Alt held the system
     // resolves nothing, which is why the chord matches on the code, but candidate selection reads
     // the character and a keypad digit does not always carry one.
     key = HardwareKeyRouter.normalizeNumpad(key);
+    if (korean) {
+      return HardwareKeyRouter.routeKorean(key, composing);
+    }
     // Japanese romaji reserves an unmodified minus for the long-vowel mark. It is a composition key even before the first kana exists. '=' and shifted '-' are never paging keys in Japanese (`IsJapaneseDisabledPagingKey` on Windows): mid-composition they are punctuation that commits the highlighted candidate first, and with nothing composed they are the application's.
     if (
       japanese &&
@@ -438,6 +462,42 @@ export class HardwareKeyRouter {
       return HardwareKeyRouter.passThrough(key, composing, fullWidth);
     }
     return decision(HardwareKeyAction.COMPOSE, key.unicodeChar);
+  }
+
+  /**
+   * A key on the Korean Hangul automaton, which has no candidates to pick, page or navigate and no Chinese punctuation.
+   *
+   * Letters always compose, in the case the caller normalized them to (Shift gives ㄲ ㄸ ㅃ ㅆ ㅉ ㅒ ㅖ). With nothing composed every other key is the application's, punctuation included: Korean writes it as half-width ASCII, so the application typing the key is exactly right, and fullwidth does not apply. With a syllable open, Backspace takes one jamo back and Escape discards the syllable; a punctuation mark goes through the Engine, which commits the syllable and the mark as one; Space and the other printable keys commit the syllable and are typed after it by the keyboard, so their order against the commit is not left to the editor; and Return, the caret keys, Delete, Tab and the page keys, with or without a modifier, commit the syllable and then do their own work in the application. Any other chord, and a modifier on its own, leaves the syllable open, as it does for every other scheme.
+   */
+  private static routeKorean(key: HardwareKey, composing: boolean): HardwareKeyDecision {
+    const character: number = key.unicodeChar;
+    const modified: boolean = key.ctrlKey || key.altKey || key.logoKey;
+    const letter: boolean =
+      (character >= 0x61 && character <= 0x7a) || (character >= 0x41 && character <= 0x5a);
+    if (!modified && letter) {
+      return decision(HardwareKeyAction.COMPOSE, character);
+    }
+    if (!composing) {
+      return RELEASE;
+    }
+    if (!modified) {
+      if (key.keyCode === KEYCODE_DEL) {
+        return decision(HardwareKeyAction.BACKSPACE);
+      }
+      if (key.keyCode === KEYCODE_ESCAPE) {
+        return decision(HardwareKeyAction.CANCEL);
+      }
+      if (isAsciiPunctuation(character)) {
+        return decision(HardwareKeyAction.PUNCTUATION, character);
+      }
+      if (character >= 0x20 && character <= 0x7e) {
+        return decision(HardwareKeyAction.COMMIT_THEN_TYPE, character);
+      }
+    }
+    if (KOREAN_COMMIT_KEYS.indexOf(key.keyCode) >= 0) {
+      return decision(HardwareKeyAction.COMMIT_THEN_RELEASE);
+    }
+    return RELEASE;
   }
 
   /**

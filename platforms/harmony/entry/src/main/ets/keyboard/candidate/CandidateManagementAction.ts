@@ -94,7 +94,7 @@ export class CandidateManagementAction {
 
   /** Dictionary mutations are only valid for local/user-dictionary candidates. */
   static candidateActionsAvailable(scheme: string, source: number): boolean {
-    if (scheme === "japanese") {
+    if (scheme === "japanese" || scheme === "korean") {
       return false;
     }
     return source === 0 || source === 1 || source === 4;

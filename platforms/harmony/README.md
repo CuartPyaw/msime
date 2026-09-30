@@ -271,6 +271,16 @@ Apple 的 `AppIconSettingsView` 和 Android 的同名入口在共享页面上是
 
 模拟器上按 `attached to editor` 的 `pattern` 实测过一个来回（方案设为全拼 9 键）：共享设置页 AI 那一屏的「模型」是 `pattern=0`，键面是九宫格、方案标签「全拼 9 键」；紧挨着的「接口地址」声明为 `type="url"`，WebView 把它报成 `pattern=6`（`PATTERN_URI`），键面立刻变成小写 26 键、标签「英文 26 键」、空格键写 `space`；点回「模型」，`pattern=0`，九宫格和「全拼 9 键」都回来了。小写是对的：`capitalizationMode` 对 URI 返回 `NONE`，与 Apple 那条断言里 `q` 而非 `Q` 的判断一致。
 
+## 韩语 Dubeolsik（두벌식）
+
+韩语是输入法里与日语并列的又一个方案，不是单独的系统语言：选择器末尾多一张「韩语 26 键」卡（`KeyboardScheme.KOREAN`，偏好 id 与 Engine 方案名都是 `korean`，Engine 编号 4），选中时和日语一样把被替换的中文方案记进 `last_chinese_scheme`。账号同步的 `input.schema` 接受 `korean`，打字统计记在 `korean` 名下。没有候选、云候选、学习和繁体转换。
+
+26 键面换成 `DubeolsikLayout` 的字母键：键帽画的是该键对应的韩文字母（ㅂㅈㄷㄱㅅ…），按住 Shift 时 Q W E R T O P 换成 ㅃㅉㄸㄲㅆㅒㅖ；点击发出的仍是 ASCII 字母，Shift 下发大写，Engine 按大小写区分 ㄱ 与 ㄲ。第二排去掉了 `;` 键，符号键面、`,` 键和快捷标点菜单都显示并输出半角 ASCII，语言键写「한」。
+
+组字中的音节在编辑器里以预览文本内联显示（手机上也是，不看 `tsf_preedit_style`），候选条画的是音节本身而不是 `editing_text` 里的按键字母。空格、数字先提交音节再由键盘自己打出这个键；回车先同步提交音节再执行编辑器动作；标点由 Engine 与音节一起提交；切换方案、切到英文、失去焦点都提交而不是丢弃音节。
+
+硬件键盘走 `HardwareKeyRouter.routeKorean`：字母总是组字，大小写只看 Shift、不看 Caps Lock；空闲时其余按键全部交还应用；组字时退格删一个字母、Esc 丢弃，回车、方向键、Home/End、Delete、Tab、翻页键先同步提交音节再交还应用（`COMMIT_THEN_RELEASE`）。以上只由 `tests/run.sh` 的逻辑测试覆盖，尚未在设备上验证。
+
 ## 2026-09-21：首次在模拟器上跑起来
 
 在 API 21 的 `Mate 70 Pro` arm64 模拟器（DevEco 自带镜像，`hdc` 连 `127.0.0.1:5555`）上完成了一次装机运行，实测到的东西比之前所有交叉构建加起来都多。
