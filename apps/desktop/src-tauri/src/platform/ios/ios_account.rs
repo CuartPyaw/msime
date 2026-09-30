@@ -10,8 +10,9 @@ use crate::platform::mobile::mobile_account_helpers::{
     account_request_code as shared_account_request_code, account_status as shared_account_status,
     call_session, cleanup_stale_snapshot_previews, clear_snapshot_previews,
     clear_snapshot_previews_after, cloud_dictionary_account_request, replace_pending_snapshot,
-    snapshot_command_error, snapshot_response_without_account, take_pending_snapshot,
-    valid_mobile_haptic_strength, validate_pending_snapshot, PendingSnapshot, SnapshotMetadata,
+    snapshot_command_error, snapshot_response_without_account, snapshot_text_within_limit,
+    take_pending_snapshot, valid_mobile_haptic_strength, validate_pending_snapshot,
+    PendingSnapshot, SnapshotMetadata,
 };
 #[cfg(target_os = "ios")]
 use crate::shared::account_dto::{
@@ -464,6 +465,11 @@ async fn dictionary_snapshot_restore_preview(
     state: State<'_, AccountState>,
     text: String,
 ) -> Result<Value, crate::CommandError> {
+    if !snapshot_text_within_limit(text.len()) {
+        return Err(crate::CommandError {
+            code: "snapshot_invalid",
+        });
+    }
     let session = Arc::clone(&state.session);
     let directory = state.snapshot_directory.clone();
     let token = uuid::Uuid::new_v4().to_string();
@@ -498,6 +504,11 @@ async fn dictionary_snapshot_restore(
     expected_sha256: String,
     revision: i64,
 ) -> Result<Value, crate::CommandError> {
+    if !snapshot_text_within_limit(text.len()) {
+        return Err(crate::CommandError {
+            code: "snapshot_invalid",
+        });
+    }
     let session = Arc::clone(&state.session);
     let directory = state.snapshot_directory.clone();
     let token = uuid::Uuid::new_v4().to_string();
