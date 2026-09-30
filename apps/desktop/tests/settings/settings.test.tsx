@@ -5503,7 +5503,7 @@ test.each(referenceSections)(
             list: vi.fn().mockResolvedValue({ entries: [], has_more: false }),
             edit: vi.fn(),
           },
-          scanSkinCatalog: vi.fn().mockResolvedValue({ skins: [] }),
+          scanSkinCatalog: vi.fn().mockResolvedValue({ directory: "", packages: [], issues: [] }),
           // The capabilities `host_surface.rs` gives the Windows host, since these are the
           // reference's own sections: several of them are behind a capability and a bare fixture
           // would assert they are missing when the host simply never declared it.
@@ -5608,7 +5608,7 @@ test.each(referenceSections)(
             list: vi.fn().mockResolvedValue({ entries: [], has_more: false }),
             edit: vi.fn(),
           },
-          scanSkinCatalog: vi.fn().mockResolvedValue({ skins: [] }),
+          scanSkinCatalog: vi.fn().mockResolvedValue({ directory: "", packages: [], issues: [] }),
         }}
       />,
     );
@@ -5849,7 +5849,7 @@ test.each(
             list: vi.fn().mockResolvedValue({ entries: [], has_more: false }),
             edit: vi.fn(),
           },
-          scanSkinCatalog: vi.fn().mockResolvedValue({ skins: [] }),
+          scanSkinCatalog: vi.fn().mockResolvedValue({ directory: "", packages: [], issues: [] }),
         }}
       />,
     );
