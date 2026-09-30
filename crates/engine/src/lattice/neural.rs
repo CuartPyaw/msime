@@ -60,10 +60,11 @@ fn load_model(path: &Path) -> Option<Arc<SentenceModel>> {
         return None;
     }
     let file = File::open(path).ok()?;
-    if file.metadata().ok()?.len() > MAX_MODEL_BYTES {
+    let file_size = file.metadata().ok()?.len();
+    if file_size > MAX_MODEL_BYTES {
         return None;
     }
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(file_size as usize);
     // Bounded again while reading, in case the file grew after the size check.
     file.take(MAX_MODEL_BYTES + 1)
         .read_to_end(&mut bytes)
