@@ -22,6 +22,8 @@
 #define IDI_IME_MODE_ON_JP_DARK 32
 #define IDI_IME_MODE_CAP 33
 #define IDI_IME_MODE_CAP_DARK 34
+#define IDI_IME_MODE_ON_KR 35
+#define IDI_IME_MODE_ON_KR_DARK 36
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED

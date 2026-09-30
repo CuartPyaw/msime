@@ -43,9 +43,12 @@ EncodedReply uiless_composition(uint64_t request, const std::string &display,
     throw std::logic_error("Missing candidate highlight");
   return uiless_reply(request, display, candidates, highlighted);
 }
-// The reference's CandidateTextForOutput: the Japanese scheme's kana and kanji never go through the simplified-to-traditional table, whatever the character-set toggle says. The toggle itself is untouched, so leaving Japanese restores traditional output.
+// The reference's CandidateTextForOutput: the Japanese scheme's kana and kanji never go through the simplified-to-traditional table, whatever the character-set toggle says. Korean Hangul is not Chinese text either. The toggle itself is untouched, so leaving Japanese or Korean restores traditional output.
 bool traditional_projection(const ServerSession &session) {
-  return session.traditional_output() && session.view().value("scheme", 0u) != 3u;
+  if (!session.traditional_output())
+    return false;
+  const auto scheme = session.view().value("scheme", 0u);
+  return scheme != 3u && scheme != 4u;
 }
 } // namespace
 ReplyComposer::ReplyComposer(uint64_t client, uint64_t epoch)
@@ -173,6 +176,23 @@ ReplyComposer::stage(const KeyResult &result, ReplyPath path, bool uiless,
     } else {
       next.encoded = uiless_composition(result.request_id, prefix_ + display, view);
     }
+    break;
+  case ReplyPath::SyllableCommit:
+    // No selected prefix exists in Korean, and the commit is already in the document by the time this reply is read: the TIP's host session produced the same syllable for the same key. Only the composition after it is encoded.
+    if (!prefix_.empty()) {
+      invalid();
+      break;
+    }
+    if (result.reply_expected) {
+      if (raw.empty())
+        next.encoded = ignored_reply(result.request_id);
+      else
+        next.encoded = uiless ? uiless_composition(result.request_id, display, view)
+                              : preedit_reply(result.request_id, display);
+    }
+    next.next_prefix.clear();
+    if (!output_delta.empty())
+      next.committed_text = output_delta;
     break;
   case ReplyPath::AutoCommitAndContinue: {
     // Two Wubi commits take this path: the fourth letter of a unique code, which leaves nothing to compose, and a letter typed after a complete code (顶字), which commits the first candidate and leaves that letter composing. The worker frame tells the TIP to consume the four letters of the committed code from its own buffer and keep whatever follows, so the key reply only has to show the composition the Engine now holds.
@@ -302,6 +322,8 @@ std::optional<PendingReply> ReplyComposer::basic_key(
                                                     : session.view()}}};
     return stage(result, toggle ? ReplyPath::LocalCancel : ReplyPath::NoReply, uiless);
   }
+  if (auto korean = korean_syllable_end(session, packet, epoch))
+    return korean;
   // Control+Enter is a candidate-only translation action. It must be checked
   // before the generic modifier fallback, which intentionally forwards other
   // Control combinations to the host application.
@@ -396,7 +418,14 @@ ReplyComposer::edit(ServerSession &session, const FanyImeNamedpipeData &packet,
       !result.transition.at("commit").is_null() &&
       !result.transition.at("commit_context").is_null() &&
       result.transition.at("commit_context").value("scheme", 255u) == 2u;
-  return stage(result, auto_wubi_commit ? ReplyPath::AutoCommitAndContinue : path,
+  // A Korean letter that starts a new syllable carries the finished one as its commit.
+  const bool korean_commit =
+      !result.transition.at("commit").is_null() &&
+      result.transition.at("view").value("scheme", 0u) == 4u;
+  return stage(result,
+               auto_wubi_commit ? ReplyPath::AutoCommitAndContinue
+               : korean_commit  ? ReplyPath::SyllableCommit
+                                : path,
                uiless);
 }
 std::optional<PendingReply>
@@ -648,6 +677,42 @@ std::optional<PendingReply> ReplyComposer::restore_segment(
   return pending_;
 }
 
+std::optional<PendingReply> ReplyComposer::korean_syllable_end(
+    ServerSession &session, const FanyImeNamedpipeData &packet,
+    uint64_t epoch) {
+  if (!session.input_enabled() ||
+      packet.event_type != FanyImePipeEventType::KeyEvent ||
+      (PipeMetadata::key_modifiers(packet.modifiers_down) & ~1u) != 0)
+    return std::nullopt;
+  switch (packet.keycode) {
+  case 0x09: // Tab
+  case 0x0D: // Enter
+  case 0x21: // Page Up
+  case 0x22: // Page Down
+  case 0x23: // End
+  case 0x24: // Home
+  case 0x25: // Left
+  case 0x26: // Up
+  case 0x27: // Right
+  case 0x28: // Down
+  case 0x2D: // Insert
+  case 0x2E: // Delete
+    break;
+  default:
+    return std::nullopt;
+  }
+  const auto current = session.view();
+  if (current.value("scheme", 0u) != 4u ||
+      current.at("local_mode").get<std::string>() != "none" ||
+      current.at("editing_text").get<std::string>().empty())
+    return std::nullopt;
+  // The TIP committed the syllable and the key goes on to the application, directly or replayed after a queued commit, so nothing is sent back.
+  return stage({client_, epoch_, packet.request_id, false,
+                session.finish_composition(epoch)},
+               ReplyPath::SyllableCommit,
+               (packet.modifiers_down & FanyImePipeFlags::UiLess) != 0);
+}
+
 std::optional<PendingReply> ReplyComposer::translation_page_key(
     ServerSession &session, const FanyImeNamedpipeData &packet,
     uint64_t epoch) {
@@ -753,7 +818,8 @@ std::optional<PendingReply> ReplyComposer::configured_key(
       !current.at("editing_text").get<std::string>().empty();
   // Checked first: the numpad decimal is also on the candidate punctuation list, where it would be translated to '。'.
   if ((composing && literal_candidate_punctuation(packet)) ||
-      candidate_punctuation(packet, bindings, current.value("scheme", 0u) == 3u))
+      candidate_punctuation(packet, bindings, current.value("scheme", 0u) == 3u,
+                            current.value("scheme", 0u) == 4u))
     return dispatch(session, packet, epoch, ReplyPath::Punctuation,
                     (packet.modifiers_down & FanyImePipeFlags::UiLess) != 0);
   if (!composing)

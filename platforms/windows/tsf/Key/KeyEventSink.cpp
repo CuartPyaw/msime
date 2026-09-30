@@ -17,6 +17,7 @@
 #include "FanyUtils.h"
 #include "FanyLog.h"
 #include "../Utils/PerfTimer.h"
+#include "../HostKoreanKey.h"
 #include "../../common/PipeMetadata.h"
 #include <chrono>
 #include "../../../../shared/contracts/ipc_negotiation.h"
@@ -165,6 +166,8 @@ void ApplyDeferredKeyState(DeferredShadowState &shadow, const _KEYSTROKE_STATE &
         }
         break;
     case FUNCTION_FINALIZE_TEXTSTORE:
+    case FUNCTION_COMMIT_SYLLABLE:
+    case FUNCTION_COMMIT_SYLLABLE_AND_REPLAY:
     case FUNCTION_FINALIZE_CANDIDATELIST:
     case FUNCTION_FINALIZE_CANDIDATELISTForVKReturn:
     case FUNCTION_SELECT_BY_NUMBER:
@@ -582,6 +585,13 @@ bool CMetasequoiaIME::_MatchChordInputHotkey(WPARAM wParam, _Out_ GUID *hotkeyGu
         *hotkeyGuid = Global::MetasequoiaIMEGuidPunctuationPreserveKey;
         return true;
     }
+    // The Korean keyboard's 한/영 key switches between Korean and English as Shift does, committing the open syllable first. VK_HANGUL shares its code with VK_KANA, so it only means this while the Korean scheme is active.
+    if (code == msime::tsf::kVirtualKeyHangul && !ctrl && !alt &&
+        Global::KoreanInputModeEnabled.load(std::memory_order_relaxed))
+    {
+        *hotkeyGuid = Global::MetasequoiaIMEGuidImeModePreserveKey;
+        return true;
+    }
     return false;
 }
 
@@ -753,6 +763,12 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
     {
         return isTouchKeyboardSpecialKeys;
     }
+    // Korean writes half-width ASCII in either mode, so with the keyboard closed the punctuation and full-width switches have nothing to convert.
+    const bool korean = Global::KoreanInputModeEnabled.load(std::memory_order_relaxed);
+    if (!isOpen && korean)
+    {
+        return isTouchKeyboardSpecialKeys;
+    }
 
     if (pwch)
     {
@@ -777,9 +793,8 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
             }
             return TRUE;
         }
-        // Keep the Chinese compartment open: this only toggles the
-        // Server-owned English candidate sub-mode.
-        if (IsEnglishInputModeToggle(*pCodeOut, shortcutModifiers))
+        // Keep the Chinese compartment open: this only toggles the Server-owned English candidate sub-mode. Korean has no such mode here: the TIP composes Hangul in its own host session, which would not follow a mode only the Server session entered, so the chord belongs to the application like any other Ctrl chord.
+        if (!korean && IsEnglishInputModeToggle(*pCodeOut, shortcutModifiers))
         {
             if (pKeyState)
             {
@@ -816,6 +831,48 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
                 return TRUE;
             }
             return isTouchKeyboardSpecialKeys;
+        }
+
+        // Korean has no candidates, no Chinese punctuation and no smart punctuation to arm, so its keys are settled here before any of those paths can claim them (see HostKoreanKey.h).
+        if (korean)
+        {
+            const bool koreanComposing = !freshCompositionState && _IsComposing() != FALSE;
+            switch (msime::tsf::korean_key_action(*pCodeOut, wch, koreanComposing))
+            {
+            case msime::tsf::KoreanKeyAction::Compose:
+                if (pwch)
+                {
+                    // A VK_PACKET letter (touch keyboard, injected text) carries its case itself; a physical key takes it from Shift, never from Caps Lock.
+                    const bool upper = LOWORD(codeIn) == VK_PACKET ? (wch >= L'A' && wch <= L'Z')
+                                                                   : (shortcutModifiers & 0b00000001u) != 0;
+                    *pwch = msime::tsf::korean_letter(wch, upper);
+                }
+                if (pKeyState)
+                {
+                    pKeyState->Category = CATEGORY_COMPOSING;
+                    pKeyState->Function = FUNCTION_INPUT;
+                }
+                return TRUE;
+            case msime::tsf::KoreanKeyAction::CommitWithText:
+                if (pKeyState)
+                {
+                    pKeyState->Category = CATEGORY_COMPOSING;
+                    pKeyState->Function = FUNCTION_COMMIT_SYLLABLE;
+                }
+                return TRUE;
+            case msime::tsf::KoreanKeyAction::CommitAndPass:
+                // Not eaten: the syllable is committed in an edit session and the key then does its own work in the application.
+                if (pKeyState)
+                {
+                    pKeyState->Category = CATEGORY_INVOKE_COMPOSITION_EDIT_SESSION;
+                    pKeyState->Function = FUNCTION_COMMIT_SYLLABLE;
+                }
+                return FALSE;
+            case msime::tsf::KoreanKeyAction::Pass:
+                return isTouchKeyboardSpecialKeys;
+            case msime::tsf::KoreanKeyAction::Default:
+                break;
+            }
         }
 
         const bool isComposing = freshCompositionState ? false : _IsComposing() != FALSE;
@@ -1293,7 +1350,9 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
         keyState->Function = FUNCTION_TOGGLE_CHARACTER_SET;
         return true;
     }
-    if (projectedImeOpen && IsEnglishInputModeToggle(*classifiedCode, capturedModifiers))
+    // Korean has no Server-owned English candidate mode, as in _IsKeyEaten.
+    if (projectedImeOpen && !Global::KoreanInputModeEnabled.load(std::memory_order_relaxed) &&
+        IsEnglishInputModeToggle(*classifiedCode, capturedModifiers))
     {
         keyState->Category = CATEGORY_COMPOSING;
         keyState->Function = FUNCTION_CANCEL;
@@ -1374,6 +1433,36 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
         keyState->Function = function;
         return true;
     };
+
+    if (Global::KoreanInputModeEnabled.load(std::memory_order_relaxed))
+    {
+        if (!shadow.imeOpen)
+        {
+            // Korean writes half-width ASCII with the keyboard closed too; queue printable keys as application text so they keep their place behind earlier keys.
+            return *classifiedWch != L'\0' && std::iswprint(static_cast<wint_t>(*classifiedWch)) != 0;
+        }
+        // Keys queued ahead of this one may still be composing, so a syllable counts as open when the projection or the document has one.
+        const bool composing = shadow.inputLength > 0 || _IsComposing() != FALSE;
+        switch (msime::tsf::korean_key_action(*classifiedCode, *classifiedWch, composing))
+        {
+        case msime::tsf::KoreanKeyAction::Compose: {
+            const bool upper = LOWORD(wParam) == VK_PACKET ? (*classifiedWch >= L'A' && *classifiedWch <= L'Z')
+                                                           : (capturedModifiers & 0b00000001u) != 0;
+            *classifiedWch = msime::tsf::korean_letter(*classifiedWch, upper);
+            return setKeyState(CATEGORY_COMPOSING, FUNCTION_INPUT);
+        }
+        case msime::tsf::KoreanKeyAction::CommitWithText:
+            return setKeyState(CATEGORY_COMPOSING, FUNCTION_COMMIT_SYLLABLE);
+        case msime::tsf::KoreanKeyAction::CommitAndPass:
+            // Behind a barrier the key cannot reach the application in order, so it is eaten and queued; once the syllable is committed the key is replayed to the application.
+            return setKeyState(CATEGORY_COMPOSING, FUNCTION_COMMIT_SYLLABLE_AND_REPLAY);
+        case msime::tsf::KoreanKeyAction::Pass:
+            // Printable keys become queued application text, the same as the closed-keyboard case above; Hanja carries no text and goes straight to the application.
+            return *classifiedWch != L'\0' && std::iswprint(static_cast<wint_t>(*classifiedWch)) != 0;
+        case msime::tsf::KoreanKeyAction::Default:
+            break;
+        }
+    }
 
     _KEYSTROKE_STATE inputState = {};
     WCHAR inputWch = *classifiedWch;

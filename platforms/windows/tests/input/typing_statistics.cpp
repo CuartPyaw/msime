@@ -42,6 +42,8 @@ int main() {
             TypingSource::Wubi);
     require(resolve_typing_source(3, false, false, "none", "xiaohe") ==
             TypingSource::Japanese);
+    require(resolve_typing_source(4, false, false, "none", "xiaohe") ==
+            TypingSource::Korean);
     require(resolve_typing_source(-1, false, false, "none", "xiaohe") ==
             TypingSource::Unknown);
     // Local modes outrank the keyboard scheme, and the temporary Japanese mode
@@ -58,6 +60,7 @@ int main() {
     require(resolve_typing_source(0, false, true, "emoji", "xiaohe") ==
             TypingSource::Local);
     require(typing_source_id(TypingSource::NineKey) == "nineKey");
+    require(typing_source_id(TypingSource::Korean) == "korean");
     require(typing_source_id(TypingSource::Unknown) == "unknown");
 
     // Attribution follows the mode in force when the key was dispatched.
@@ -70,6 +73,11 @@ int main() {
     // Without a commit context the view is all there is.
     require(resolve_typing_source_from_transition(
                 transition(2, "none", false, "xiaohe")) == TypingSource::Wubi);
+    // A Korean syllable finished by the next letter is attributed to Korean, the scheme recorded when the key was dispatched.
+    require(resolve_typing_source_from_transition(
+                transition(4, "none", false, "xiaohe",
+                           Json{{"scheme", 4}, {"local_mode", "none"}})) ==
+            TypingSource::Korean);
     require(resolve_typing_source_from_transition(
                 transition(1, "none", false, "ziranma")) ==
             TypingSource::Ziranma);

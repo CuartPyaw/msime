@@ -60,6 +60,7 @@ int main() {
         {K::Item, C::SelectShuangpin},
         {K::Item, C::SelectWubi},
         {K::Item, C::SelectJapanese},
+        {K::Item, C::SelectKorean},
         {K::Separator, C::OpenSettings},
         {K::Tool, C::ToggleFloatingToolbar},
         {K::Tool, C::OpenEmojiPanel},
@@ -84,9 +85,10 @@ int main() {
             items[7].label == "显示译文");
     require(items[9].label == "输入方案");
     require(items[10].label == "全拼" && items[11].label == "双拼（小鹤）" &&
-            items[12].label == "五笔 86" && items[13].label == "日文");
-    require(items[21].label == "主题" && items[22].label == "词库…" &&
-            items[23].label == "设置…" && items[24].label == "关于水杉输入法");
+            items[12].label == "五笔 86" && items[13].label == "日文" &&
+            items[14].label == "韩文");
+    require(items[22].label == "主题" && items[23].label == "词库…" &&
+            items[24].label == "设置…" && items[25].label == "关于水杉输入法");
   }
 
   // Hints: the configured CN/EN key, the TIP's own shortcuts and the theme name.
@@ -118,16 +120,18 @@ int main() {
   require(checked(items, TrayMenuCommand::SelectQuanpin) &&
           !checked(items, TrayMenuCommand::SelectShuangpin) &&
           !checked(items, TrayMenuCommand::SelectWubi) &&
-          !checked(items, TrayMenuCommand::SelectJapanese));
+          !checked(items, TrayMenuCommand::SelectJapanese) &&
+          !checked(items, TrayMenuCommand::SelectKorean));
   // Exactly one scheme is marked, whichever it is.
-  for (const char *scheme : {"quanpin", "shuangpin", "wubi", "japanese"}) {
+  for (const char *scheme : {"quanpin", "shuangpin", "wubi", "japanese", "korean"}) {
     auto next = state;
     next.scheme = scheme;
     const auto rows = tray_menu_items(all, next);
     int marked = 0;
     for (auto command :
          {TrayMenuCommand::SelectQuanpin, TrayMenuCommand::SelectShuangpin,
-          TrayMenuCommand::SelectWubi, TrayMenuCommand::SelectJapanese})
+          TrayMenuCommand::SelectWubi, TrayMenuCommand::SelectJapanese,
+          TrayMenuCommand::SelectKorean})
       marked += checked(rows, command) ? 1 : 0;
     require(marked == 1);
   }
@@ -138,6 +142,14 @@ int main() {
     const auto rows = tray_menu_items(all, japanese);
     require(rows[find(rows, TrayMenuCommand::SelectChinese)].label == "日文");
     require(checked(rows, TrayMenuCommand::SelectJapanese));
+  }
+  {
+    // Korean is the language of the Korean scheme, as the toolbar's 한 shows.
+    auto korean = state;
+    korean.scheme = "korean";
+    const auto rows = tray_menu_items(all, korean);
+    require(rows[find(rows, TrayMenuCommand::SelectChinese)].label == "韩文");
+    require(checked(rows, TrayMenuCommand::SelectKorean));
   }
   // The shuangpin row names the stored layout, and falls back to the plain name.
   require(tray_menu_shuangpin_label("ziranma") == "双拼（自然码）");
@@ -225,7 +237,7 @@ int main() {
   require(near(geometry.size.width, 260.0));
   const double expected_height =
       metrics.padding * 2.0 + metrics.header_height +
-      metrics.separator_height * 5.0 + metrics.row_height * 13.0 +
+      metrics.separator_height * 5.0 + metrics.row_height * 14.0 +
       metrics.label_height + metrics.tool_height;
   require(near(geometry.size.height, expected_height));
   require(near(tray_menu_size(items, metrics).height, expected_height));
@@ -351,7 +363,7 @@ int main() {
     selected.scheme = scheme;
     require(checked(tray_menu_items(all, selected), row.command));
   }
-  require(scheme_rows == 4);
+  require(scheme_rows == 5);
   require(!tray_menu_scheme(TrayMenuCommand::SelectChinese));
   require(!tray_menu_scheme(TrayMenuCommand::OpenSettings));
 }

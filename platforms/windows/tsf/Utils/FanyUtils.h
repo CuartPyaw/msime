@@ -18,6 +18,8 @@ BOOL ReadConfiguredDefaultImeModeChinese();
 // Read the active scheme from shared PreferencesStore. TRUE when Japanese input
 // is active. The legacy TOML file remains a compatibility fallback.
 BOOL ReadConfiguredJapaneseInputMode();
+// TRUE when the shared PreferencesStore selects the Korean scheme, with the same legacy TOML fallback (`mode = "korean"`).
+BOOL ReadConfiguredKoreanInputMode();
 // Read punctuation_lock from shared PreferencesStore (with legacy TOML fallback).
 // 0 = follow IME, 1 = always Chinese punctuation, 2 = always English punctuation.
 int ReadConfiguredPunctuationLock();

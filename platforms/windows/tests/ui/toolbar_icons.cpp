@@ -107,6 +107,18 @@ int main() {
       // that produces Latin letters tells the user the wrong thing.
       require(toolbar_icon(kToolbarLanguage, false, japanese).codepoint == 0xE983);
 
+      // Korean draws its syllable as text: the icon font has no Hangul glyph, and a codepoint it lacks would render as a blank box. The English toggle and Caps Lock beat it exactly as they beat Japanese.
+      ToolbarLanguageState korean;
+      korean.korean = true;
+      const auto hangul = toolbar_icon(kToolbarLanguage, true, korean);
+      require(!hangul.codepoint && std::wcscmp(hangul.fallback, L"한") == 0);
+      require(!hangul.underline);
+      require(toolbar_icon(kToolbarLanguage, false, korean).codepoint == 0xE983);
+      ToolbarLanguageState capped_korean;
+      capped_korean.caps_lock = true;
+      capped_korean.korean = true;
+      require(toolbar_icon(kToolbarLanguage, true, capped_korean).codepoint == 0xE7B5);
+
       // Caps Lock beats Japanese too, and the two together are not a fourth
       // state.
       ToolbarLanguageState both;

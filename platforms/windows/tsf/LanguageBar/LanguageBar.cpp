@@ -47,6 +47,10 @@ DWORD ResolveThemeIconIndex(DWORD lightIconIndex)
     {
         return static_cast<DWORD>(IME_MODE_ON_JP_DARK_ICON_INDEX);
     }
+    if (lightIconIndex == static_cast<DWORD>(IME_MODE_ON_KR_ICON_INDEX))
+    {
+        return static_cast<DWORD>(IME_MODE_ON_KR_DARK_ICON_INDEX);
+    }
     if (lightIconIndex == static_cast<DWORD>(IME_MODE_CAP_ICON_INDEX))
     {
         return static_cast<DWORD>(IME_MODE_CAP_DARK_ICON_INDEX);
@@ -170,7 +174,7 @@ void CMetasequoiaIME::_UpdateLanguageBarOnSetFocus(_In_ ITfDocumentMgr *pDocMgrF
     // Consequently, returning to a document may not change the status bits and
     // therefore may not generate an ITfLangBarItemSink update.  Always refresh
     // the newly focused thread's item: Windows caches each host/thread's icon,
-    // and another host may have changed the shared Chinese/Japanese mode while
+    // and another host may have changed the shared Chinese/Japanese/Korean mode while
     // this one was in the background.
     if (!needDisableButtons)
     {
@@ -650,6 +654,11 @@ STDAPI CLangBarItemButton::GetIcon(_Out_ HICON *phIcon)
              Global::JapaneseInputModeEnabled.load(std::memory_order_relaxed))
     {
         lightIconIndex = static_cast<DWORD>(IME_MODE_ON_JP_ICON_INDEX);
+    }
+    else if (isOn && !(status & TF_LBI_STATUS_DISABLED) && _onIconIndex == static_cast<DWORD>(IME_MODE_ON_ICON_INDEX) &&
+             Global::KoreanInputModeEnabled.load(std::memory_order_relaxed))
+    {
+        lightIconIndex = static_cast<DWORD>(IME_MODE_ON_KR_ICON_INDEX);
     }
     const DWORD iconIndex = ResolveThemeIconIndex(lightIconIndex);
 

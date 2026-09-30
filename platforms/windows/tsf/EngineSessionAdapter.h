@@ -21,6 +21,8 @@ struct EngineView {
   std::vector<EngineCandidate> candidates;
   uint64_t generation = 0;
   std::size_t caret = 0;
+  // 0 quanpin, 1 shuangpin, 2 wubi, 3 japanese, 4 korean.
+  uint32_t scheme = 0;
 };
 struct EngineResult {
   bool handled = false;

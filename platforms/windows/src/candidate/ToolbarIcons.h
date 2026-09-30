@@ -38,12 +38,11 @@ enum ToolbarButton {
 // rather than a guessed state, which would tell the user the wrong thing.
 // Extra state the language button reflects beyond Chinese/English.
 //
-// The shipped toolbar renders four distinct things there: 'A' while Caps Lock
-// is on, 日 in Japanese input mode, and 中/英 otherwise. Showing 中 while Caps
-// Lock is on tells the user the wrong thing about what the next key will do.
+// The shipped toolbar renders these distinct things there: 'A' while Caps Lock is on, 日 in Japanese input mode, 한 in Korean input mode, and 中/英 otherwise. Showing 中 while Caps Lock is on tells the user the wrong thing about what the next key will do.
 struct ToolbarLanguageState {
   bool caps_lock = false;
   bool japanese = false;
+  bool korean = false;
   // The Engine's own English mode, as opposed to the temporary Chinese/English
   // toggle carried in `state`. It outlives a commit, so it is worth telling
   // apart on the button.
@@ -66,6 +65,9 @@ inline ToolbarIcon toolbar_icon(int button, std::optional<bool> state,
       return {0, L"En", true};
     if (language.japanese)
       return {0xE7DE, L"日"};
+    // The icon font has no Hangul glyph, so the syllable itself is drawn.
+    if (language.korean)
+      return {0, L"한"};
     if (!state)
       return unknown;
     return ToolbarIcon{0xE982, L"中"}; // 中

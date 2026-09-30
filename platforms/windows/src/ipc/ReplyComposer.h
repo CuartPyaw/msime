@@ -12,6 +12,8 @@ namespace msime::windows {
 enum class ReplyPath {
   Composition,
   AutoCommitAndContinue,
+  // A Korean key that finished a syllable. The TIP inserts that syllable from its own host session, so the reply carries at most the composition that follows it.
+  SyllableCommit,
   Selection,
   Punctuation,
   CandidatePunctuationFallback,
@@ -103,6 +105,10 @@ public:
                                      uint64_t epoch,
                                      const nlohmann::json &view);
   std::optional<PendingReply> restore_segment(
+      ServerSession &session, const FanyImeNamedpipeData &packet,
+      uint64_t epoch);
+  // A Korean caret or editing key (Enter, Tab, arrows, Home/End, Page Up/Down, Delete) that the TIP ate because earlier keys were still queued ends the open syllable. Null for every other key and scheme.
+  std::optional<PendingReply> korean_syllable_end(
       ServerSession &session, const FanyImeNamedpipeData &packet,
       uint64_t epoch);
   // Null: not an editing key; no Engine action. Non-null may have no frame

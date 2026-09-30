@@ -72,6 +72,15 @@ int main() {
     require(frame_text(frames[3]) == L"1"); // paired punctuation on
     require(frame_text(frames[4]) == L"1"); // Microsoft shuangpin on
 
+    // The input-mode frame names the scheme: "0" Chinese, "1" Japanese, "2" Korean.
+    require(frame_text(frames[5]) == L"0");
+    config.japanese_input_mode = true;
+    require(frame_text(tsf_config_frames(config)[5]) == L"1");
+    config.japanese_input_mode = false;
+    config.korean_input_mode = true;
+    require(frame_text(tsf_config_frames(config)[5]) == L"2");
+    config.korean_input_mode = false;
+
     // The preedit style rides along with the paging frame after a '|'; there is
     // no separate message type for it, which is why it stayed stuck at raw.
     config.paging_comma_period = true;

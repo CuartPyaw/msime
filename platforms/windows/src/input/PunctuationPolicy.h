@@ -7,11 +7,17 @@ namespace msime::windows {
 // Native routing only, not translation. Resolve input separators, Unicode
 // selection and word-to-character priority before calling this predicate.
 // The Japanese scheme never pages on minus/equals (the reference's IsJapaneseDisabledPagingKey), and the TSF sends those keys as punctuation there, so '_', '=' and '+' commit the highlighted candidate. A bare '-' stays the long-vowel mark.
+// Korean has no candidates to page, so every ASCII punctuation key is punctuation there, '-' '=' '[' ']' ',' '.' included; the Engine writes it half-width after the open syllable.
 inline bool candidate_punctuation(const FanyImeNamedpipeData &packet,
                                   const NavigationBindings &bindings,
-                                  bool japanese = false) {
+                                  bool japanese = false, bool korean = false) {
   if (translate_key(packet).kind != KeyKind::Character)
     return false;
+  if (korean)
+    return packet.wch >= 0x21 && packet.wch <= 0x7E &&
+           !((packet.wch >= '0' && packet.wch <= '9') ||
+             (packet.wch >= 'A' && packet.wch <= 'Z') ||
+             (packet.wch >= 'a' && packet.wch <= 'z'));
   switch (packet.keycode) {
   case 0xBD:
   case 0xBB:

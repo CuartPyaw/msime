@@ -77,6 +77,7 @@ tray_menu_mode_command(TrayMenuCommand command, std::optional<bool> chinese,
   case TrayMenuCommand::SelectShuangpin:
   case TrayMenuCommand::SelectWubi:
   case TrayMenuCommand::SelectJapanese:
+  case TrayMenuCommand::SelectKorean:
   case TrayMenuCommand::OpenTheme:
   case TrayMenuCommand::OpenDictionary:
     break;

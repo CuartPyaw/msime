@@ -62,7 +62,7 @@ int main() {
           TrayMenuCommand::ToggleChinesePunctuation,
           TrayMenuCommand::ToggleTranslations, TrayMenuCommand::SelectQuanpin,
           TrayMenuCommand::SelectShuangpin, TrayMenuCommand::SelectWubi,
-          TrayMenuCommand::SelectJapanese})
+          TrayMenuCommand::SelectJapanese, TrayMenuCommand::SelectKorean})
       require(!shell_surface_request(command));
     require(shell_route_argument(*settings) == L"settings");
     require(shell_route_argument(*about) == L"settings:about");
