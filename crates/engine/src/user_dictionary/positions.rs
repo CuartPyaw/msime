@@ -122,7 +122,7 @@ pub fn apply_fixed_positions(
         });
     }
 
-    let mut rows: Vec<(WordItem, i32)> = Vec::new();
+    let mut rows: Vec<(WordItem, i32)> = Vec::with_capacity(fixed.len());
     for (entry_key, value, position) in fixed {
         let found = match candidates.iter().find(|item| item.word == value) {
             Some(existing) => Some(existing.clone()),
