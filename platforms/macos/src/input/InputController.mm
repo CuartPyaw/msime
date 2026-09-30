@@ -3151,7 +3151,20 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     if (changed && _appearance.inputModeHUD && _activeClient) {
         NSRect caret = NSZeroRect;
         [(id<IMKTextInput>)_activeClient attributesForCharacterIndex:0 lineHeightRectangle:&caret];
-        [[MSIMEInputModeHUDPanel sharedPanel] showEnglishInputMode:enabled nearCaretRect:caret];
+        // The badge takes the floating toolbar's palette in each appearance, so it follows the selected theme and skin.
+        const auto light = [_appearance toolbarSkinForDark:NO];
+        const auto dark = [_appearance toolbarSkinForDark:YES];
+        auto themed = ^NSColor *(NSString *name, msime::mac::Rgba lightColor, msime::mac::Rgba darkColor) {
+            NSColor *lightValue = SkinColor(lightColor), *darkValue = SkinColor(darkColor);
+            return [NSColor colorWithName:name dynamicProvider:^NSColor *(NSAppearance *appearance) {
+                return [appearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] == NSAppearanceNameDarkAqua ? darkValue : lightValue;
+            }];
+        };
+        MSIMEInputModeHUDPanel *hud = [MSIMEInputModeHUDPanel sharedPanel];
+        [hud setSurfaceColor:themed(@"MSIMEInputModeHUDSurface", light.surface, dark.surface)
+                 borderColor:themed(@"MSIMEInputModeHUDBorder", light.border, dark.border)
+                   textColor:themed(@"MSIMEInputModeHUDText", light.text, dark.text)];
+        [hud showEnglishInputMode:enabled nearCaretRect:caret];
     }
 }
 // Keeps the selected input mode - 中, 英 or 日 in the input menu - in step with the Chinese/English state and the scheme. A switch the system reported is already recorded as shown, so this does not echo it back.

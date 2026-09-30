@@ -4,8 +4,6 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-FOUNDATION_EXPORT NSColor *MSIMEInputModeHUDForestColor(void);
-FOUNDATION_EXPORT NSColor *MSIMEInputModeHUDOnForestColor(void);
 FOUNDATION_EXPORT NSString *MSIMEInputModeHUDText(BOOL englishInputMode);
 FOUNDATION_EXPORT BOOL MSIMEInputModeHUDUsableCaretRect(NSRect caretRect);
 FOUNDATION_EXPORT NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSize, NSRect visibleFrame);
@@ -14,6 +12,11 @@ FOUNDATION_EXPORT NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSi
 @interface MSIMEInputModeHUDPanel : NSPanel
 + (instancetype)sharedPanel;
 - (void)showEnglishInputMode:(BOOL)englishInputMode nearCaretRect:(NSRect)caretRect;
+/// The badge's fill, outline and glyph colour: the floating toolbar's, so it follows the selected theme and skin. Pass dynamic colours to follow the appearance. Until set, the system window colours.
+- (void)setSurfaceColor:(NSColor *)surface borderColor:(NSColor *)border textColor:(NSColor *)text;
+@property(nonatomic, readonly) NSColor *surfaceColor;
+@property(nonatomic, readonly) NSColor *borderColor;
+@property(nonatomic, readonly) NSColor *textColor;
 @property(nonatomic, copy, readonly, nullable) NSString *displayedText;
 @property(nonatomic, readonly) BOOL showsLogo;
 @end

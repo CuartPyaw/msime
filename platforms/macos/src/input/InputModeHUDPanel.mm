@@ -5,9 +5,10 @@
 namespace {
 constexpr CGFloat kPanelWidth = 100.0;
 constexpr CGFloat kPanelHeight = 56.0;
-constexpr CGFloat kLogoSide = 30.0;
+constexpr CGFloat kLogoSide = 26.0;
 constexpr CGFloat kContentSpacing = 6.0;
 constexpr CGFloat kCornerRadius = 16.0;
+constexpr CGFloat kBorderWidth = 1.0;
 constexpr CGFloat kScreenMargin = 8.0;
 constexpr CGFloat kCaretGap = 10.0;
 constexpr NSTimeInterval kVisibleDuration = 0.6;
@@ -17,24 +18,6 @@ CGFloat Clamp(CGFloat value, CGFloat minimum, CGFloat maximum) {
     if (maximum < minimum) return minimum;
     return value < minimum ? minimum : (value > maximum ? maximum : value);
 }
-}
-
-// The HUD is a brand badge rather than a themed surface, so it takes the brand accent (#2C7A4B light, #5FBF84 dark) the native candidate selection uses, not the retired forest #185C48 / #61B491.
-NSColor *MSIMEInputModeHUDForestColor(void) {
-    return [NSColor colorWithName:@"MSIMEInputModeHUDForest" dynamicProvider:^NSColor *(NSAppearance *appearance) {
-        const BOOL dark = [appearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] == NSAppearanceNameDarkAqua;
-        return dark ? [NSColor colorWithSRGBRed:0x5F / 255.0 green:0xBF / 255.0 blue:0x84 / 255.0 alpha:1.0]
-                    : [NSColor colorWithSRGBRed:0x2C / 255.0 green:0x7A / 255.0 blue:0x4B / 255.0 alpha:1.0];
-    }];
-}
-
-// White on the light accent; the dark accent is too light for white glyphs, so it keeps the dark ink, as the contract's readable_text(accent) would pick.
-NSColor *MSIMEInputModeHUDOnForestColor(void) {
-    return [NSColor colorWithName:@"MSIMEInputModeHUDOnForest" dynamicProvider:^NSColor *(NSAppearance *appearance) {
-        const BOOL dark = [appearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] == NSAppearanceNameDarkAqua;
-        return dark ? [NSColor colorWithSRGBRed:20.0 / 255.0 green:35.0 / 255.0 blue:29.0 / 255.0 alpha:1.0]
-                    : [NSColor whiteColor];
-    }];
 }
 
 NSString *MSIMEInputModeHUDText(BOOL englishInputMode) { return englishInputMode ? @"英" : @"中"; }
@@ -64,6 +47,9 @@ NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSize, NSRect visible
     NSTextField *_label;
     NSImageView *_logoView;
     NSTimer *_dismissTimer;
+    NSColor *_surfaceColor;
+    NSColor *_borderColor;
+    NSColor *_textColor;
 }
 
 + (instancetype)sharedPanel {
@@ -95,10 +81,12 @@ NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSize, NSRect visible
     background.layer.cornerRadius = kCornerRadius;
     background.layer.masksToBounds = YES;
     background.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    NSImage *logo = [[NSBundle bundleForClass:self.class] imageForResource:@"MSIMEClientInputMethodMenuIcon"];
-    [logo setTemplate:YES];
+    // The full-colour brand mark the floating toolbar leads with, not the monochrome menu bar template.
+    NSString *logoPath = [[NSBundle bundleForClass:self.class] pathForResource:@"MSIMEClientInputMethod" ofType:@"icns"];
+    NSImage *logo = logoPath ? [[NSImage alloc] initWithContentsOfFile:logoPath] : nil;
     _logoView = [NSImageView imageViewWithImage:logo ?: [[NSImage alloc] initWithSize:NSZeroSize]];
     _logoView.hidden = logo == nil;
+    _logoView.imageScaling = NSImageScaleProportionallyUpOrDown;
     _logoView.translatesAutoresizingMaskIntoConstraints = NO;
     _label = [NSTextField labelWithString:@""];
     _label.alignment = NSTextAlignmentCenter;
@@ -121,11 +109,24 @@ NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSize, NSRect visible
     return self;
 }
 
+- (void)setSurfaceColor:(NSColor *)surface borderColor:(NSColor *)border textColor:(NSColor *)text {
+    _surfaceColor = [surface copy];
+    _borderColor = [border copy];
+    _textColor = [text copy];
+    [self applyThemeColors];
+}
+
+- (NSColor *)surfaceColor { return _surfaceColor ?: NSColor.windowBackgroundColor; }
+- (NSColor *)borderColor { return _borderColor ?: NSColor.separatorColor; }
+- (NSColor *)textColor { return _textColor ?: NSColor.labelColor; }
+
+// Layer colours are resolved once, so they are taken again in the panel's current appearance each time it is shown.
 - (void)applyThemeColors {
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
-        self.contentView.layer.backgroundColor = MSIMEInputModeHUDForestColor().CGColor;
-        self->_label.textColor = MSIMEInputModeHUDOnForestColor();
-        self->_logoView.contentTintColor = MSIMEInputModeHUDOnForestColor();
+        self.contentView.layer.backgroundColor = self.surfaceColor.CGColor;
+        self.contentView.layer.borderColor = self.borderColor.CGColor;
+        self.contentView.layer.borderWidth = kBorderWidth;
+        self->_label.textColor = self.textColor;
     }];
 }
 
