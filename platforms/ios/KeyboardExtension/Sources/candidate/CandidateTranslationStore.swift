@@ -75,6 +75,7 @@ final class CandidateTranslationStore {
     debounce?.invalidate(); debounce = nil
     for task in tasks.values { task.cancel() }
     tasks.removeAll()
+    signature = nil
   }
   private static func signature(_ values: [String]) -> String {
      values.reduce(into: "\(values.count):") { result, value in
