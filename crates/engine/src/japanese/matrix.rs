@@ -1,7 +1,5 @@
 //! The matrix search the provider uses for sentence conversion (schemes-lang.md §5.6, `japanese_matrix_search.cpp`), modelled on Google Pinyin's MatrixSearch: one row per mora of the converted reading, k-best nodes per row extended by lemmas whose reading covers the next morae, plus a single unknown-kana backoff so every reading has a path.
 
-use std::collections::HashSet;
-
 use super::decoder::JapaneseDictionary;
 use super::romaji::{kana_for_romaji_prefix, RomajiConversion};
 
@@ -26,16 +24,14 @@ struct Node {
 /// Unique by text, never empty, at most `limit`.
 struct Output {
     items: Vec<JapaneseConversion>,
-    seen: HashSet<String>,
     limit: usize,
 }
 
 impl Output {
     fn push(&mut self, text: &str, cost: i64) {
-        if text.is_empty() || self.full() || self.seen.contains(text) {
+        if text.is_empty() || self.full() || self.items.iter().any(|item| item.text == text) {
             return;
         }
-        self.seen.insert(text.to_owned());
         self.items.push(JapaneseConversion {
             text: text.to_owned(),
             cost,
@@ -66,7 +62,6 @@ pub fn search_converted(
     let pending = conversion.pending.as_str();
     let mut output = Output {
         items: Vec::with_capacity(limit),
-        seen: HashSet::with_capacity(limit),
         limit,
     };
     if limit == 0 {
