@@ -744,12 +744,12 @@ impl QuanpinDictionary {
 
     /// The first correction-mode cut of the raw input, cached (QD:777-788).
     fn computed_segments(&mut self, raw: &str) -> Vec<String> {
-        if let Some(cached) = self.segmentation_cache.get(&raw.to_string()) {
+        let key = raw.to_owned();
+        if let Some(cached) = lookup_cached_segments(&self.segmentation_cache, &key) {
             return cached;
         }
         let segments = first_correction_cut(raw).unwrap_or_default();
-        self.segmentation_cache
-            .insert(raw.to_string(), segments.clone());
+        self.segmentation_cache.insert(key, segments.clone());
         segments
     }
 
@@ -823,6 +823,13 @@ impl QuanpinDictionary {
                 .retain(|key| series_cache.contains(key));
         }
     }
+}
+
+fn lookup_cached_segments(
+    cache: &FifoCache<String, Vec<String>>,
+    key: &String,
+) -> Option<Vec<String>> {
+    cache.get_ref(key).cloned()
 }
 
 /// The readings that compete with the primary one (QD:394-443): with a mask, the same-cost corrections and then every correction-mode cut; for a short all-complete input, every complete segmentation of the letters. Deduplicated against the primary and the costlier cuts, at most 32.
