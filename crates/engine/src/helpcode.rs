@@ -1,7 +1,6 @@
 //! Helpcode (auxiliary code) tables and matching (schemes-lang.md §2, `R/common/helpcode_utils.*`). A keymap maps one character to its 1-2 lowercase code letters. Quanpin and shuangpin filter or reorder with it, and the session and host facade annotate candidates with it.
 
 use std::collections::HashMap;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -91,11 +90,8 @@ pub fn load_helpcode_keymap(resources: &Path, schema: &str) -> Result<HelpcodeKe
     }
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
-        // The C++ reads a built-in table through an `ifstream` that is never checked, so a resource tree without the file gives an empty table rather than an error (helpcode_utils.cpp:66-68). Fixtures and hosts rely on that for the default `lantian` schema.
-        Err(error) if built_in && error.kind() == ErrorKind::NotFound => {
-            return Ok(HelpcodeKeymap::default())
-        }
-        Err(error) => return Err(error.into()),
+        // The C++ reads the table through an `ifstream` that is never checked (helpcode_utils.cpp:57-67), so any open or read failure (a resource tree without the built-in file, which fixtures and hosts rely on for the default `lantian` schema, a directory in its place, no permission, a Windows sharing violation on a custom table being edited, an I/O error) gives an empty table and the session is still created.
+        Err(_) => return Ok(HelpcodeKeymap::default()),
     };
     Ok(HelpcodeKeymap::from_codes(parse_helpcode_table(&bytes)))
 }
@@ -353,6 +349,39 @@ mod tests {
         .map(|(key, code)| (key.to_owned(), code.to_owned()))
         .collect();
         assert_eq!(parsed, expected);
+    }
+
+    /// helpcode_utils.cpp:57-67 reads through an `ifstream` it never checks, so a table that exists but cannot be read (a directory, no permission, a sharing violation) is an empty table and the session is still created.
+    #[test]
+    fn an_unreadable_table_is_an_empty_table() {
+        let resources = tempfile::tempdir().unwrap();
+        let built_in = helpcode_path(resources.path(), "lantian").unwrap();
+        std::fs::create_dir_all(&built_in).unwrap();
+        assert_eq!(
+            load_helpcode_keymap(resources.path(), "lantian")
+                .unwrap()
+                .len(),
+            0
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let custom = resources.path().join("helpcodes/custom");
+            std::fs::create_dir_all(&custom).unwrap();
+            let file = custom.join("locked.txt");
+            std::fs::write(&file, "你=aa\n").unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+            // A process that can read the file anyway (root) has nothing to prove here.
+            if std::fs::read(&file).is_err() {
+                assert_eq!(
+                    load_helpcode_keymap(resources.path(), "custom/locked")
+                        .unwrap()
+                        .len(),
+                    0
+                );
+            }
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
     }
 
     #[test]

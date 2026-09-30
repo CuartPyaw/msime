@@ -1017,7 +1017,12 @@ pub fn edit_personal_dictionary(
     replacement: Option<&msime_engine::host::DictionaryEntry>,
     request_id: &str,
 ) -> Result<(), String> {
-    for entry in previous.iter().chain(replacement.iter()) {
+    // The previous row is one the list returned, whose weight learning may have lifted past the ceiling a new entry is held to.
+    for entry in previous.iter() {
+        msime_engine::host::dictionary_validate_previous(entry)
+            .map_err(|error| invalid_dictionary_entry(&error.to_string()))?;
+    }
+    for entry in replacement.iter() {
         msime_engine::host::dictionary_validate(entry)
             .map_err(|error| invalid_dictionary_entry(&error.to_string()))?;
     }

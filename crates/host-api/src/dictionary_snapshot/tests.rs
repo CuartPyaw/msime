@@ -511,3 +511,130 @@ fn a_backup_that_still_holds_the_user_s_data_survives_the_cleanup() {
         "a backup with anything left in it is kept, whatever it costs in space"
     );
 }
+
+/// Activation replaces `msime_user.db` at the same path, as `reset_learned_data` does, and must close the process's cached journal and personal-context connections first, as reset does (reset.rs). Otherwise the personal-context store keeps writing into the replaced, deleted journal and serving its counts, so what a new session learns after the restore is lost.
+#[test]
+fn activation_reopens_the_personal_context_store_on_the_restored_journal() {
+    use super::*;
+    use msime_engine::host::{EngineOptions, Session};
+    use std::fs;
+    use std::path::Path;
+
+    let root = tempfile::tempdir().unwrap();
+    let active = root.path().join("active");
+    let staged = root.path().join("staged");
+    let fixture = "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+                   INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',200),('ni''hao','nh','拟好',100);
+                   CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
+                   CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);";
+    for base in [&active, &staged] {
+        for name in ["resources", "user", "cache", "dictionaries"] {
+            fs::create_dir_all(base.join(name)).unwrap();
+        }
+        for name in ["resources", "dictionaries"] {
+            rusqlite::Connection::open(base.join(name).join("msime.db"))
+                .unwrap()
+                .execute_batch(fixture)
+                .unwrap();
+        }
+    }
+    let make = |base: &Path| EngineOptions {
+        resources: base.join("resources").to_str().unwrap().into(),
+        user_data: base.join("user").to_str().unwrap().into(),
+        cache: base.join("cache").to_str().unwrap().into(),
+        dictionaries: base.join("dictionaries").to_str().unwrap().into(),
+        scheme: 0,
+        shuangpin_profile: 0,
+        shuangpin_preedit_uses_raw: true,
+        learning: true,
+        autocorrect_transposition: true,
+        autocorrect_neighbor: true,
+        fuzzy_pinyin_rules: 0,
+        wubi_mixed_pinyin: false,
+        helpcode: false,
+        show_helpcode: true,
+        helpcode_schema: "ziranma".into(),
+        chinese_punctuation: true,
+        paired_punctuation: true,
+        punctuation_lock: 0,
+        frequency_mode: "disabled".into(),
+        frequency_trigger_count: 1,
+        frequency_linear_step: 1,
+        mixed_english: false,
+        english_minimum_prefix: 2,
+        mixed_emoji: false,
+        mixed_kaomoji: false,
+        local_unicode: true,
+        local_date_time: true,
+        local_quick_phrase: true,
+        local_emoji: true,
+        local_kaomoji: true,
+        local_super_jianpin: true,
+        local_temporary_english: true,
+        local_temporary_japanese: true,
+        sentence_alternatives: true,
+        sentence_association: msime_engine::host::SentenceAssociationOptions {
+            word_lattice: true,
+            neural_keyboard: false,
+            show_next_on_duplicate: false,
+        },
+        rescoring_context: String::new(),
+    };
+    let active_options = make(&active);
+    let journal = active.join("user").join("msime_user.db");
+    let pick = |word: &str| {
+        let mut session = Session::new(&active_options).unwrap();
+        for byte in b"nihao" {
+            session.character(*byte, false).unwrap();
+        }
+        let snapshot = session.snapshot().unwrap();
+        let index = snapshot
+            .candidates
+            .iter()
+            .position(|candidate| candidate == word)
+            .unwrap_or_else(|| panic!("{word} is not offered: {:?}", snapshot.candidates));
+        assert!(session.select(index).unwrap().has_commit);
+        // Dropping the session writes its queued context.
+    };
+    let learned = |word: &str| -> i64 {
+        rusqlite::Connection::open(&journal)
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM personal_bigram WHERE previous=char(1) AND word=?1",
+                [word],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+    };
+    pick("拟好");
+    assert_eq!(learned("拟好"), 1);
+
+    let handle = 131;
+    let expected = super::version_without_access(&active_options).unwrap();
+    registry().lock().unwrap().insert(
+        handle,
+        Prepared {
+            directory: tempfile::tempdir_in(root.path()).unwrap(),
+            active_options: active_options.clone(),
+            options: make(&staged),
+            source_version: expected.clone(),
+        },
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match activate(handle, &expected) {
+            Err("snapshot access busy") if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            result => {
+                result.unwrap();
+                break;
+            }
+        }
+    }
+    assert!(!journal.exists(), "the restored state had no journal");
+
+    pick("你好");
+    assert_eq!(learned("你好"), 1, "learning after the restore was lost");
+    assert_eq!(learned("拟好"), 0, "the pre-restore context came back");
+}

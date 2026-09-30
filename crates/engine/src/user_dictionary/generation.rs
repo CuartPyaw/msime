@@ -136,6 +136,9 @@ fn copy_database(source: &Path, target: &Path) -> Result<()> {
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+        // runtime_paths.cpp:43-44 set no busy timeout on either side; rusqlite would otherwise add a 5 s wait the reference never had.
+        input.busy_timeout(std::time::Duration::ZERO)?;
+        output.busy_timeout(std::time::Duration::ZERO)?;
         let backup = Backup::new(&input, &mut output)?;
         backup.step(-1)
     })();

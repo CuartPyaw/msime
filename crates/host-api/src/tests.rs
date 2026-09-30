@@ -2495,6 +2495,31 @@ fn selection_statistics_reach_the_store_when_the_session_is_destroyed() {
     assert_eq!(selections.ranks[1], 1);
     assert_eq!(selections.total(), 2);
 }
+/// personal_ngram_store.cpp:254-255 wrote the queued personal context from `atexit`. A host that quits without a focus-out or destroy (macOS `[NSApp terminate:]`) calls `msime_client_flush_all` first, which writes the selection counts its sessions hold and every queued personal-context transition.
+#[test]
+fn flush_all_writes_what_live_sessions_still_hold() {
+    let dir = tempfile::tempdir().unwrap();
+    let (handle, store) = selection_statistics_host(dir.path(), true);
+    commit_candidate_by_position(handle, 1);
+    commit_candidate_by_position(handle, 0);
+    assert_eq!(store.load().unwrap().selections.total(), 0);
+    assert_eq!(read(msime_client_flush_all())["ok"], true);
+    assert_eq!(store.load().unwrap().selections.total(), 2);
+    let pairs: i64 = rusqlite::Connection::open(dir.path().join("user/msime_user.db"))
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM personal_bigram WHERE previous=char(1) AND word='拟好'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(pairs > 0, "the queued personal context was not written");
+    // The session is untouched and a second call has nothing left to count twice.
+    assert_eq!(read(msime_client_flush_all())["ok"], true);
+    assert_eq!(store.load().unwrap().selections.total(), 2);
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+    assert_eq!(store.load().unwrap().selections.total(), 2);
+}
 #[test]
 fn selection_statistics_are_written_once_a_batch_fills() {
     let dir = tempfile::tempdir().unwrap();
