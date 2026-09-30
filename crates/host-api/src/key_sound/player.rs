@@ -7,7 +7,7 @@ use kira::sound::streaming::{StreamingSoundData, StreamingSoundHandle};
 use kira::sound::PlaybackState;
 use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Semitones, Tween};
 use msime_client_core::plugins::sound_pack::{SequenceAdvance, SoundPack};
-use msime_client_core::plugins::{self, PluginContent, PluginKind, PluginSummary};
+use msime_client_core::plugins::{PluginContent, PluginKind, PluginSummary};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -190,8 +190,8 @@ impl Selection {
 
 /// A validated pack of `kind`, installed or (for sound packs) built in.
 fn resolve(roots: &PluginRoots, kind: PluginKind, id: &str) -> Result<PluginSummary, String> {
-    let installed = roots.installed.as_deref().unwrap_or(Path::new(""));
-    plugins::load_package(installed, roots.builtin_sounds.as_deref(), kind, id)
+    roots
+        .load(kind, id)
         .map_err(|reason| format!("{} pack {id}: {reason}", kind.as_str()))
 }
 

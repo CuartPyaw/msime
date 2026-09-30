@@ -7102,9 +7102,13 @@ fn key_sound_pack_boundary_resolves_validated_files() {
         call(relative.as_bytes())["error"],
         "sound pack paths must be absolute"
     );
+    // An installed pack is only ever under the state root, so without one it is not looked for against the working directory.
     let missing =
         json!({"state_root": null, "sound_packs": sound_packs, "pack": "nothing"}).to_string();
-    assert_eq!(call(missing.as_bytes())["ok"], false);
+    assert_eq!(
+        call(missing.as_bytes())["error"],
+        "sound packs need a state root"
+    );
     assert_eq!(
         call(br#"{"pack":"default","extra":1}"#)["error"],
         "invalid sound pack request"
@@ -7147,6 +7151,13 @@ fn music_pack_boundary_resolves_validated_tracks() {
         json!([pack.join("rain.wav").to_string_lossy()])
     );
     assert_eq!(music["value"]["max_track_seconds"], 15 * 60);
+
+    // Music packs are only ever installed under the state root: without one the pack is refused rather than read against the working directory with relative track paths.
+    let rootless = json!({"state_root": null, "sound_packs": null, "pack": "rain"}).to_string();
+    assert_eq!(
+        call(rootless.as_bytes())["error"],
+        "music packs need a state root"
+    );
 
     // A sound pack id is not a music pack, even a built-in one.
     let sound_packs =

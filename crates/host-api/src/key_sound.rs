@@ -14,7 +14,9 @@
     allow(dead_code)
 )]
 
-use msime_client_core::plugins::{self, music_pack, sound_pack, PluginContent, PluginKind};
+use msime_client_core::plugins::{
+    self, music_pack, sound_pack, PluginContent, PluginKind, PluginSummary,
+};
 use msime_client_core::preferences::{KeySoundMode, PluginPreferences};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -96,6 +98,17 @@ impl PluginRoots {
                 .map(|root| root.join("plugins")),
             builtin_sounds,
         }
+    }
+
+    /// A validated pack of `kind` by client-core's rules. Only a built-in sound pack resolves without a state root: every other pack is only ever installed under it, and looking one up without it would read `<kind>/<id>` against the working directory and hand back relative paths.
+    pub(crate) fn load(&self, kind: PluginKind, id: &str) -> Result<PluginSummary, String> {
+        let builtin = kind == PluginKind::Sound && plugins::BUILTIN_SOUND_PACKS.contains(&id);
+        let installed = match self.installed.as_deref() {
+            Some(installed) => installed,
+            None if builtin => Path::new(""),
+            None => return Err(format!("{} packs need a state root", kind.as_str())),
+        };
+        plugins::load_package(installed, self.builtin_sounds.as_deref(), kind, id)
     }
 }
 
@@ -289,13 +302,7 @@ pub(crate) fn decibels(volume: u8) -> f32 {
 
 /// The files of one validated sound pack as absolute paths, for a host that plays packs itself. Validation is client-core's, the same `scan` lists the pack by, so a host never opens a file the manifest does not name.
 pub(crate) fn pack_files(roots: &PluginRoots, id: &str) -> Result<Value, String> {
-    let installed = roots.installed.as_deref().unwrap_or(Path::new(""));
-    let package = plugins::load_package(
-        installed,
-        roots.builtin_sounds.as_deref(),
-        PluginKind::Sound,
-        id,
-    )?;
+    let package = roots.load(PluginKind::Sound, id)?;
     let PluginContent::Sound(pack) = &package.content else {
         return Err("not a sound pack".into());
     };
@@ -330,13 +337,7 @@ pub(crate) fn pack_files(roots: &PluginRoots, id: &str) -> Result<Value, String>
 
 /// The tracks of one validated music pack as absolute paths, in play order, for a host that streams music itself. The pack is checked by the same client-core rules `scan` lists it by; how long a track may play is `music_pack::MAX_TRACK_SECONDS`, which the host checks against each track's duration before playing it, as the desktop decoder checks its frame count.
 pub(crate) fn music_pack_files(roots: &PluginRoots, id: &str) -> Result<Value, String> {
-    let installed = roots.installed.as_deref().unwrap_or(Path::new(""));
-    let package = plugins::load_package(
-        installed,
-        roots.builtin_sounds.as_deref(),
-        PluginKind::Music,
-        id,
-    )?;
+    let package = roots.load(PluginKind::Music, id)?;
     let PluginContent::Music(pack) = &package.content else {
         return Err("not a music pack".into());
     };
