@@ -148,10 +148,12 @@ impl JapaneseProvider {
         if let Some(dynamic) = self.dynamic.get_ref(&request.raw_input) {
             let mut insertion = rows.items.len().min(if kana_first { 2 } else { 1 });
             for item in dynamic {
-                if rows.seen.insert(item.word.clone()) {
-                    rows.items.insert(insertion, item.clone());
-                    insertion += 1;
+                // Dynamic rows are bounded by the cache quota; scan the already-owned words to avoid cloning a second key into `seen`.
+                if rows.items.iter().any(|row| row.word == item.word) {
+                    continue;
                 }
+                rows.items.insert(insertion, item.clone());
+                insertion += 1;
             }
         }
         rows.items
