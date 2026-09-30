@@ -86,7 +86,15 @@ fn setup_program() -> Option<PathBuf> {
 }
 
 fn status_for(options: Option<&Path>, program: Option<&Path>) -> LinuxSetupStatus {
-    let prepared = options.is_some_and(Path::is_file);
+    let prepared = options.is_some_and(|path| {
+        crate::shared::atomic_file::check_directory_ancestors(
+            path.parent().unwrap_or_else(|| Path::new(".")),
+        )
+        .is_ok()
+            && fs::symlink_metadata(path)
+                .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+                .unwrap_or(false)
+    });
     let directory = options.and_then(Path::parent);
     LinuxSetupStatus {
         prepared,
@@ -311,6 +319,24 @@ mod tests {
             prepared.state_directory.as_deref(),
             Some(root.join("msime-client").to_str().unwrap())
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn status_does_not_treat_a_symlinked_locator_as_prepared() {
+        use std::os::unix::fs::symlink;
+
+        let root = scratch("symlink-status");
+        let options = root.join("msime-client/runtime-options.json");
+        std::fs::create_dir_all(options.parent().unwrap()).unwrap();
+        let outside = root.join("outside.json");
+        std::fs::write(&outside, b"{}").unwrap();
+        symlink(&outside, &options).unwrap();
+
+        let status = status_for(Some(&options), None);
+        assert!(!status.prepared);
+        assert!(status.directory_occupied);
         std::fs::remove_dir_all(root).unwrap();
     }
 
