@@ -966,6 +966,111 @@ fn global_theme_ids_round_trip_and_reject_unknown_ids() {
     }
 }
 
+/// A document an older build saved: the settings as they were then, with the skin fields #1187 retired.
+fn write_legacy_document(dir: &Path, legacy: serde_json::Value) {
+    let mut preferences = serde_json::to_value(Preferences::default()).unwrap();
+    for key in ["global_theme", "custom_theme"] {
+        preferences.as_object_mut().unwrap().remove(key);
+    }
+    for (key, value) in legacy.as_object().unwrap() {
+        preferences[key] = value.clone();
+    }
+    let document =
+        serde_json::json!({"format_version": 1, "revision": 7, "preferences": preferences});
+    fs::write(
+        dir.join("preferences.json"),
+        serde_json::to_vec(&document).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn documents_with_the_retired_skin_fields_still_load() {
+    use crate::skin::theme::GlobalTheme;
+    let design = serde_json::to_value(TouchKeyboardSkinDesign {
+        background: 0x123456,
+        ..TouchKeyboardSkinDesign::default()
+    })
+    .unwrap();
+
+    // An external package, the colour pickers and a custom keyboard design become the custom theme.
+    let dir = tempfile::tempdir().unwrap();
+    write_legacy_document(
+        dir.path(),
+        serde_json::json!({
+            "candidate_skin": "bigfish",
+            "candidate_text_color": "#101010",
+            "candidate_border_color": "#707070",
+            "touch_keyboard_skin": "custom",
+            "custom_touch_keyboard_skin": design,
+        }),
+    );
+    let loaded = PreferencesStore::new(dir.path()).load().unwrap();
+    assert_eq!(loaded.revision, 7);
+    assert_eq!(loaded.preferences.global_theme, GlobalTheme::Custom);
+    let custom = &loaded.preferences.custom_theme;
+    assert_eq!(custom.candidate_skin.as_deref(), Some("bigfish"));
+    assert_eq!(custom.candidate_colors.text.as_deref(), Some("#101010"));
+    assert_eq!(custom.candidate_colors.border.as_deref(), Some("#707070"));
+    assert_eq!(
+        custom.keyboard.as_ref().map(|design| design.background),
+        Some(0x123456)
+    );
+    // In memory only: the file keeps what the older build wrote.
+    let on_disk: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("preferences.json")).unwrap()).unwrap();
+    assert_eq!(on_disk["preferences"]["candidate_skin"], "bigfish");
+
+    // The retired built-in looks and keyboard presets have no counterpart: the defaults stand.
+    for skin in ["willow_green", "fluent", "wechat", "graphite"] {
+        let dir = tempfile::tempdir().unwrap();
+        write_legacy_document(
+            dir.path(),
+            serde_json::json!({"candidate_skin": skin, "touch_keyboard_skin": "candy", "custom_touch_keyboard_skin": design}),
+        );
+        let loaded = PreferencesStore::new(dir.path()).load().unwrap();
+        assert_eq!(
+            loaded.preferences.global_theme,
+            GlobalTheme::System,
+            "{skin}"
+        );
+        assert_eq!(
+            loaded.preferences.custom_theme,
+            CustomTheme::default(),
+            "{skin}"
+        );
+    }
+
+    // What the document already says in the new fields wins, and a colour the current checks refuse is dropped instead of failing the load.
+    let dir = tempfile::tempdir().unwrap();
+    write_legacy_document(
+        dir.path(),
+        serde_json::json!({
+            "global_theme": "paper",
+            "custom_theme": {"candidate_skin": "sakura"},
+            "candidate_skin": "bigfish",
+            "candidate_text_color": "red",
+            "candidate_number_color": "#202020",
+        }),
+    );
+    let loaded = PreferencesStore::new(dir.path()).load().unwrap();
+    assert_eq!(loaded.preferences.global_theme, GlobalTheme::Paper);
+    assert_eq!(
+        loaded.preferences.custom_theme.candidate_skin.as_deref(),
+        Some("sakura")
+    );
+    assert_eq!(loaded.preferences.custom_theme.candidate_colors.text, None);
+    assert_eq!(
+        loaded
+            .preferences
+            .custom_theme
+            .candidate_colors
+            .number
+            .as_deref(),
+        Some("#202020")
+    );
+}
+
 #[test]
 fn custom_theme_round_trips_every_part() {
     let dir = tempfile::tempdir().unwrap();
