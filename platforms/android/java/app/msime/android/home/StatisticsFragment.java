@@ -11,7 +11,7 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import app.msime.android.R;
-import app.msime.android.keyboard.KeyboardGeometry;
+import app.msime.android.KeyboardGeometry;
 import app.msime.android.TypingStatisticsModel;
 import app.msime.android.TypingStatisticsModel.Section;
 import com.google.android.material.button.MaterialButton;
