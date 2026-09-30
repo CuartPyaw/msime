@@ -173,7 +173,13 @@ pub fn merge_alternative_segmentations(
         >= primary_full.first().map_or(0, |item| item.weight);
     let best_word = best_alternative.word.clone();
 
-    let mut merged: Vec<WordItem> = primary_full.into_iter().chain(alternatives).collect();
+    let capacity = result
+        .len()
+        .saturating_add(primary_full.len())
+        .saturating_add(alternatives.len());
+    let mut merged = Vec::with_capacity(capacity);
+    merged.extend(primary_full);
+    merged.extend(alternatives);
     merged.sort_by_key(|item| std::cmp::Reverse(item.weight));
     let mut seen = HashSet::new();
     merged.retain(|item| seen.insert(item.word.clone()));
