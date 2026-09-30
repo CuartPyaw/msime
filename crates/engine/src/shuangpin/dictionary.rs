@@ -216,15 +216,29 @@ impl ShuangpinDictionary {
 
         let mut candidates = self.generate(pure, segmentation, rows_key);
         // Every shorter prefix group follows, longest first; phrase creation picks from them (SD:215-231). The reference appended each group whole, so a word several groups answer (a manual delimiter leaves empty pieces, and ni'''nn'i holds the ni group three times) was listed once per group; a word already listed keeps its first, longest-prefix seat instead.
-        let mut listed: HashSet<String> = candidates.iter().map(|item| item.word.clone()).collect();
+        let mut prefix_rows = Vec::new();
         let mut prefix = segmentation;
         while let Some(cut) = prefix.rfind('\'') {
             prefix = &prefix[..cut];
             let prefix_pure = remove_manual_delimiters(prefix);
-            let rows = self.generate(&prefix_pure, prefix, "");
+            prefix_rows.push(self.generate(&prefix_pure, prefix, ""));
+        }
+        // Borrow words while calculating each group's first occurrence, then release the set before moving rows into candidates.
+        let mut listed: HashSet<&str> = candidates.iter().map(|item| item.word.as_str()).collect();
+        let unique = prefix_rows
+            .iter()
+            .map(|rows| {
+                rows.iter()
+                    .map(|item| listed.insert(item.word.as_str()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        drop(listed);
+        for (rows, unique) in prefix_rows.into_iter().zip(unique) {
             candidates.extend(
                 rows.into_iter()
-                    .filter(|item| listed.insert(item.word.clone())),
+                    .zip(unique)
+                    .filter_map(|(item, unique)| unique.then_some(item)),
             );
         }
 
