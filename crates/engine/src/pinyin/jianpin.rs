@@ -41,11 +41,11 @@ pub fn extract_initial_token(syllable: &str) -> &str {
 
 /// Whether a dictionary key matches abbreviated segments position by position (QQ:321-364).
 pub fn matches_mixed_segments(key: &str, segments: &[String], source: QuerySource) -> bool {
-    let key_segments: Vec<&str> = key.split('\'').collect();
-    if key_segments.len() != segments.len() {
-        return false;
-    }
-    segments.iter().zip(key_segments).all(|(expected, actual)| {
+    let mut actual_segments = key.split('\'');
+    segments.iter().all(|expected| {
+        let Some(actual) = actual_segments.next() else {
+            return false;
+        };
         if expected.is_empty() || actual.is_empty() {
             return false;
         }
@@ -59,7 +59,7 @@ pub fn matches_mixed_segments(key: &str, segments: &[String], source: QuerySourc
         } else {
             actual == expected
         }
-    })
+    }) && actual_segments.next().is_none()
 }
 
 /// `max(limit * 16, 128)`, saturating (QQ:366-373).
