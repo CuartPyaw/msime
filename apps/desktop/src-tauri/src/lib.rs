@@ -2274,6 +2274,17 @@ fn emoji_category_icon(title: &str) -> &'static str {
 // catalog - 97 emoji, 18 kaomoji, 48 symbols - behind a permanent "catalog
 // failed to load" banner, and the symbol sub-tabs collapsed to one flat tab
 // because only this path fills in each group's parent category.
+fn reserve_emoji_group_page_capacity(
+    groups: &mut Vec<EmojiCatalogGroup>,
+    positions: &mut HashMap<String, usize>,
+    item_count: usize,
+) {
+    if groups.is_empty() {
+        groups.reserve(item_count);
+        positions.reserve(item_count);
+    }
+}
+
 fn read_local_emoji_groups(
     resources: &str,
     category: &str,
@@ -2315,6 +2326,7 @@ fn read_local_emoji_groups(
     for _ in 0..256 {
         let page =
             msime_host_api::local_emoji_catalog_slice(resources, category, offset, PAGE_SIZE)?;
+        reserve_emoji_group_page_capacity(&mut groups, &mut positions, page.items.len());
         for item in page.items {
             if item.text.is_empty() {
                 continue;
