@@ -68,12 +68,24 @@ fn add_variant(
 
 /// ST:56-99. The edits are made on the syllable as written while variants and the typed syllable are compared in their normalised spelling, so no variant is the typed syllable under its other spelling.
 fn compute_typos(syllable: &str) -> Vec<SyllableTypo> {
-    let mut variants = Vec::new();
     let typed = normalized_syllable(syllable);
     if typed.len() < 2 {
-        return variants;
+        return Vec::new();
     }
     let letters = syllable.as_bytes();
+    let neighbor_capacity = letters
+        .iter()
+        .map(|&letter| {
+            (b'a'..=b'z')
+                .filter(|&key| keys_adjacent(key, letter))
+                .count()
+        })
+        .sum::<usize>();
+    let capacity = letters.len().saturating_sub(1)
+        + neighbor_capacity
+        + letters.len()
+        + letters.len().saturating_add(1).saturating_mul(26);
+    let mut variants = Vec::with_capacity(capacity);
     for i in 0..letters.len() - 1 {
         if letters[i] == letters[i + 1] {
             continue;
