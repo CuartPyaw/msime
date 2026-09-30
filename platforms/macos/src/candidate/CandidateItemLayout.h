@@ -143,6 +143,21 @@ inline double CandidateItemNaturalWidth(const CandidateItemWidths &item, const C
     return content + metrics.chrome;
 }
 
+// The narrowest a horizontal page's columns can be on one line: each candidate's line (text and annotation) with its chrome, the glosses left to wrap under them. The card may grow past its usual cap to this width so a page of long candidates still stays on one line.
+inline double SingleLineMinimumWidth(const std::vector<CandidateItemWidths> &items, const CandidateLayoutMetrics &metrics)
+{
+    double total = 0.0;
+    for (const auto &item : items)
+    {
+        CandidateItemWidths line = item;
+        line.translation = 0.0;
+        const double wide = CandidateItemNaturalWidth(item, metrics, true);
+        if (wide > 0.0)
+            total += std::min(std::max(CandidateItemNaturalWidth(line, metrics, true), metrics.chrome), wide);
+    }
+    return total;
+}
+
 // The columns of a horizontal page on a single line `lineWidth` wide. Columns that fit keep their natural widths. Otherwise each column whose gloss is wider than its candidate line gives up room, never below that line and in proportion to how much it could give, so the glosses wrap under their text instead of the page starting a second line. None when the candidate lines alone do not fit.
 inline std::optional<std::vector<double>> SingleLineColumns(const std::vector<CandidateItemWidths> &items, double lineWidth,
                                                             const CandidateLayoutMetrics &metrics)

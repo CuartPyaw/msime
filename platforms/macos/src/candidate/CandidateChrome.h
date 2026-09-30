@@ -10,6 +10,8 @@ static const CGFloat MSIMECandidateTranslationOpacity = 0.62;
 static const CGFloat MSIMECandidateTranslationPointSize = 12.0;
 // The top row of the card: the reading on the left, then 「1 / 3」 and the two page arrows on the right.
 static const CGFloat MSIMECandidateHeaderHeight = 26.0;
+// Room kept between a horizontal card that grows past half the screen and each edge of the visible area.
+static const CGFloat MSIMECandidateScreenMargin = 16.0;
 // 「1 / 3」 is set at the design's 13pt in the secondary colour (dc.html L1324), a point above the translation run.
 static const CGFloat MSIMECandidatePageIndicatorPointSize = 13.0;
 static const CGFloat MSIMECandidatePageArrowWidth = 28.0;

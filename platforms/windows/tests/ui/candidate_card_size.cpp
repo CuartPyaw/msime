@@ -255,6 +255,30 @@ int main() {
             glossed_rows[0].item.translation.width < 200.0);
     // The candidate lines alone past the line leave no single line to keep.
     require(!candidate_single_line_columns({{400.0}, {400.0}}, 300.0, metrics));
+
+    // Candidates whose own lines pass half the work area widen the card past it, up to the single-line cap, rather than start a second line.
+    CandidateCardInput long_lines;
+    long_lines.horizontal = true;
+    long_lines.items = {{200.0, 0.0, 300.0}, {200.0}, {200.0}};
+    long_lines.max_width = 300.0;
+    long_lines.max_single_line_width = 2000.0;
+    const auto long_card = candidate_card_size(long_lines);
+    const double firm_width =
+        candidate_single_line_minimum_width(long_lines.items, metrics);
+    require(near(firm_width, 3.0 * (200.0 + metrics.number_and_bar +
+                                    metrics.column_gap)));
+    require(long_card.width > 300.0 && long_card.width < 2000.0);
+    const auto long_rows = candidate_page_layout(long_lines.items,
+                                                 long_card.width, metrics, true);
+    for (const auto &row : long_rows)
+      require(near(row.bounds.top, long_rows[0].bounds.top));
+    // The single-line cap still binds: past it the page breaks as before.
+    long_lines.max_single_line_width = 400.0;
+    const auto capped = candidate_card_size(long_lines);
+    require(near(capped.width, 400.0));
+    const auto capped_rows =
+        candidate_page_layout(long_lines.items, capped.width, metrics, true);
+    require(capped_rows[2].bounds.top > capped_rows[0].bounds.top);
   }
 
   // Untrusted measurements and font sizes are rejected before any arithmetic.

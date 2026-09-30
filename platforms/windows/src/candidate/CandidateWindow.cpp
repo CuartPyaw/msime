@@ -457,6 +457,9 @@ CandidateBounds CandidateWindow::card_bounds(const CandidatePresentation &value,
   input.font_size = font_size_;
   input.preedit_font_size = preedit_font_size_;
   input.max_width = static_cast<double>(available_width) / scale / 2.0;
+  // A horizontal page of long candidates may widen to the work area less 16 DIPs on each side rather than start a second line.
+  input.max_single_line_width =
+      static_cast<double>(available_width) / scale - 2.0 * 16.0;
   input.max_height = static_cast<double>(available_height) / scale / 2.0;
   input.skin_min_width = skin_min_width_;
   if (show_preedit_) {

@@ -150,6 +150,9 @@ int main()
         assert(fits && Near((*fits)[0], 230.0) && Near((*fits)[1], 180.0) && Near((*fits)[2], 70.0));
         // When the candidate lines alone pass the line's end there is no single line to keep.
         assert(!SingleLineColumns(items, 200.0, metrics));
+        // The narrowest single line is the candidates' own lines with their chrome; the card grows to it before a page breaks.
+        assert(Near(SingleLineMinimumWidth(items, metrics), 90.0 + 80.0 + 70.0));
+        assert(SingleLineColumns(items, SingleLineMinimumWidth(items, metrics), metrics));
     }
 
     // The card is at least 7em of the candidate font; a skin floor only raises it, and the 7em part never passes the screen cap.
