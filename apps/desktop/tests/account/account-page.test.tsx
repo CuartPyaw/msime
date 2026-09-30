@@ -335,6 +335,46 @@ test("a cancelled Google sign-in stays silent", async () => {
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
+test("a pending Google sign-in can be abandoned without waiting for the browser", async () => {
+  let rejectLogin: (reason: unknown) => void = () => undefined;
+  const googleLogin = vi.fn(
+    () =>
+      new Promise<{ user?: null }>((_, reject) => {
+        rejectLogin = reject;
+      }),
+  );
+  const googleCancel = vi.fn(async () => rejectLogin({ code: "account_cancelled" }));
+  const onCancelLogin = vi.fn();
+  const client = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false, google: true }),
+    googleLogin,
+    googleCancel,
+  });
+  render(<AccountPage client={client} onCancelLogin={onCancelLogin} />);
+  fireEvent.click(await screen.findByRole("button", { name: "使用 Google 登录" }));
+  const cancel = await screen.findByRole("button", { name: "取消 Google 登录" });
+  expect(
+    (screen.getByRole("button", { name: "正在等待浏览器完成 Google 登录…" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect((screen.getByRole("button", { name: "取消" }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(cancel);
+  expect(googleCancel).toHaveBeenCalledTimes(1);
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "使用 Google 登录" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  expect(screen.queryByRole("button", { name: "取消 Google 登录" })).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "使用 Google 登录" }));
+  await screen.findByRole("button", { name: "取消 Google 登录" });
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  expect(googleCancel).toHaveBeenCalledTimes(2);
+  expect(onCancelLogin).toHaveBeenCalledTimes(1);
+});
+
 test("mobile profile card opens a back-stack page with account actions", async () => {
   window.history.replaceState({ msimeSettings: true, page: "account" }, "");
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });

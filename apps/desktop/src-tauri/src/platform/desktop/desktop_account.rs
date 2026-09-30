@@ -1,6 +1,6 @@
 //! Desktop account commands shared by the macOS, Windows and Linux shells.
 //!
-//! The ten commands, their state and the blocking-call bridge are the same on all three desktop hosts; only where the session tokens are kept differs. Each platform module owns its [`AccountSessionStorage`](msime_client_core::account::AccountSessionStorage) implementation and a thin `setup` that builds it and hands it to [`manage`]: the macOS Keychain item written by the Swift backend, the per-user Windows Credential Manager, or an owner-only file in the Linux shared state directory. The React surface only receives the same redacted DTOs as the mobile hosts; the tokens never leave this process.
+//! The eleven commands, their state and the blocking-call bridge are the same on all three desktop hosts; only where the session tokens are kept differs. Each platform module owns its [`AccountSessionStorage`](msime_client_core::account::AccountSessionStorage) implementation and a thin `setup` that builds it and hands it to [`manage`]: the macOS Keychain item written by the Swift backend, the per-user Windows Credential Manager, or an owner-only file in the Linux shared state directory. The React surface only receives the same redacted DTOs as the mobile hosts; the tokens never leave this process.
 
 use crate::platform::account_helpers::call_session;
 use crate::platform::desktop::desktop_candidate_skin_community::CandidateSkinCommunityState;
@@ -92,7 +92,7 @@ pub async fn account_login(
     .await
 }
 
-/// Signs in with Google in the system browser. The session binds a loopback listener, the backend builds the authorization URL and later exchanges the code with its own PKCE verifier and client secret; this command only supplies the browser launch. It returns once the browser redirects back, the user denies access, or five minutes pass.
+/// Signs in with Google in the system browser. The session binds a loopback listener, the backend builds the authorization URL and later exchanges the code with its own PKCE verifier and client secret; this command only supplies the browser launch. It returns once the browser redirects back, the user denies access, [`account_google_cancel`] is called, or the wait runs out shortly before the backend challenge expires.
 #[tauri::command]
 pub async fn account_google_login(
     state: tauri::State<'_, AccountState>,
@@ -107,6 +107,12 @@ pub async fn account_google_login(
             })
     })
     .await
+}
+
+/// Ends a pending [`account_google_login`], which then fails with `account_cancelled`. The browser cannot tell the app that the user closed the Google tab, so the page calls this when the user gives up instead of waiting out the timeout.
+#[tauri::command]
+pub fn account_google_cancel(state: tauri::State<'_, AccountState>) {
+    state.session.cancel_google_sign_in();
 }
 
 #[tauri::command]

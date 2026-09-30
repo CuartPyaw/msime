@@ -69,6 +69,8 @@ export interface AccountClient {
   appleLogin?: () => Promise<{ user?: AccountUser | null }>;
   /** Desktop hosts run the Google browser and loopback redirect natively; the page never sees the authorization code. */
   googleLogin?: () => Promise<{ user?: AccountUser | null }>;
+  /** Ends a pending googleLogin, which then rejects as cancelled. The browser cannot report a closed Google tab, so this is how the user gives up without waiting for the timeout. */
+  googleCancel?: () => Promise<void>;
   profile(): Promise<AccountProfile>;
   rename(displayName: string): Promise<AccountProfile>;
   logout(all: boolean): Promise<void>;
@@ -824,6 +826,8 @@ function AccountDetailsPage({
   const [editingProfile, setEditingProfile] = useState(false);
   const [mobileProfilePage, setMobileProfilePage] = useState(false);
   const [copiedAccountId, setCopiedAccountId] = useState(false);
+  const [googleWaiting, setGoogleWaiting] = useState(false);
+  const googleWaitingRef = useRef(false);
   const mounted = useRef(true);
   const clientGeneration = useRef(0);
 
@@ -836,6 +840,15 @@ function AccountDetailsPage({
       if (generation === clientGeneration.current) clientGeneration.current++;
     };
   }, [client]);
+
+  const cancelGoogle = () => {
+    if (!googleWaitingRef.current || !client.googleCancel) return;
+    // The pending googleLogin reports the outcome; a failed cancel only means there was nothing left to cancel.
+    void client.googleCancel().catch(() => undefined);
+  };
+
+  // Leaving the page must not leave the loopback listener waiting for a browser the user abandoned.
+  useEffect(() => () => cancelGoogle(), [client]);
 
   useEffect(() => {
     if (!mobile || typeof window === "undefined") return;
@@ -912,6 +925,7 @@ function AccountDetailsPage({
   };
 
   const chooseChannel = (value: Channel) => {
+    cancelGoogle();
     setChannel(value);
     setTarget("");
     setCode("");
@@ -1070,7 +1084,15 @@ function AccountDetailsPage({
   const signInWithGoogle = () =>
     void perform(async () => {
       if (!client.googleLogin) throw { code: "account_unavailable" };
-      const result = await client.googleLogin();
+      googleWaitingRef.current = true;
+      setGoogleWaiting(true);
+      let result: { user?: AccountUser | null };
+      try {
+        result = await client.googleLogin();
+      } finally {
+        googleWaitingRef.current = false;
+        if (mounted.current) setGoogleWaiting(false);
+      }
       if (!result.user) throw { code: "account_unavailable" };
       setUser(result.user);
       await loadProfile();
@@ -1082,7 +1104,15 @@ function AccountDetailsPage({
     <div className={account.page}>
       {!user && onCancelLogin && (
         <div className={account.profilePageHeader}>
-          <button type="button" className="secondary" disabled={busy} onClick={onCancelLogin}>
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy && !(googleWaiting && client.googleCancel)}
+            onClick={() => {
+              cancelGoogle();
+              onCancelLogin();
+            }}
+          >
             取消
           </button>
           <h2 className={account.heading}>登录水杉</h2>
@@ -1440,7 +1470,12 @@ function AccountDetailsPage({
                     disabled={busy}
                     onClick={signInWithGoogle}
                   >
-                    使用 Google 登录
+                    {googleWaiting ? "正在等待浏览器完成 Google 登录…" : "使用 Google 登录"}
+                  </button>
+                )}
+                {googleWaiting && client.googleCancel && (
+                  <button type="button" className="secondary" onClick={cancelGoogle}>
+                    取消 Google 登录
                   </button>
                 )}
                 {providers.email && (

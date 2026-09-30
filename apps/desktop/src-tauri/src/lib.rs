@@ -4945,6 +4945,8 @@ pub fn run() {
             desktop_account::account_login,
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
             desktop_account::account_google_login,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            desktop_account::account_google_cancel,
             #[cfg(target_os = "android")]
             android_account::account_profile,
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]

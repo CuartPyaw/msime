@@ -1424,6 +1424,8 @@ fn google_sign_in_waits_for_the_matching_loopback_redirect() {
                 assert!(page.starts_with("HTTP/1.1 200 OK\r\n"));
                 assert!(page.contains("Content-Type: text/html; charset=utf-8"));
                 assert!(page.contains("请返回水杉输入法"));
+                // The code has not been exchanged yet, so the page must not claim success.
+                assert!(!page.contains("登录已完成"));
                 assert!(!page.contains("4/0Afixture-code"));
             });
             Ok(())
@@ -1469,6 +1471,84 @@ fn google_sign_in_treats_denial_and_timeout_as_cancellation() {
     let unopened = session.sign_in_google_with_browser(|_| Err(AccountError::Unavailable));
     assert_eq!(unopened, Err(AccountError::Unavailable));
     assert!(api.logins.lock().unwrap().is_empty());
+}
+
+#[test]
+fn google_sign_in_can_be_cancelled_while_waiting_for_the_browser() {
+    let api = FakeApi::new();
+    let session = BackendAccountSession::new(api.clone(), MemoryStorage::default());
+    let (opened, browser_opened) = mpsc::channel();
+    let started = std::time::Instant::now();
+    let result = thread::scope(|scope| {
+        let session = &session;
+        scope.spawn(move || {
+            browser_opened.recv().unwrap();
+            thread::sleep(Duration::from_millis(200));
+            session.cancel_google_sign_in();
+        });
+        session.sign_in_google_with_browser(|_| {
+            opened.send(()).unwrap();
+            Ok(())
+        })
+    });
+    assert_eq!(result, Err(AccountError::Cancelled));
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(api.logins.lock().unwrap().is_empty());
+    // Cancelling with nothing in progress is harmless and does not poison the next sign-in.
+    session.cancel_google_sign_in();
+    let timed_out = session.sign_in_google_with_timeout(|_| Ok(()), Duration::from_millis(200));
+    assert_eq!(timed_out, Err(AccountError::Cancelled));
+}
+
+#[test]
+fn google_wait_leaves_room_for_the_backend_before_the_challenge_expires() {
+    use google::google_callback_window;
+    assert_eq!(
+        google_callback_window(300, GOOGLE_SIGN_IN_TIMEOUT),
+        Some(Duration::from_secs(270))
+    );
+    assert_eq!(
+        google_callback_window(3600, GOOGLE_SIGN_IN_TIMEOUT),
+        Some(GOOGLE_SIGN_IN_TIMEOUT)
+    );
+    assert_eq!(
+        google_callback_window(300, Duration::from_millis(200)),
+        Some(Duration::from_millis(200))
+    );
+    assert_eq!(google_callback_window(30, GOOGLE_SIGN_IN_TIMEOUT), None);
+    assert_eq!(google_callback_window(1, GOOGLE_SIGN_IN_TIMEOUT), None);
+}
+
+#[test]
+fn a_trickling_loopback_client_cannot_hold_the_listener_past_its_budget() {
+    use google::receive_google_callback;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let trickle = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            let mut stream = std::net::TcpStream::connect(address).unwrap();
+            while !stop.load(Ordering::SeqCst) {
+                if std::io::Write::write_all(&mut stream, b"G").is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        })
+    };
+    let started = std::time::Instant::now();
+    let result = receive_google_callback(
+        &listener,
+        GOOGLE_FIXTURE_STATE,
+        started + Duration::from_millis(500),
+        &AtomicBool::new(false),
+    );
+    let elapsed = started.elapsed();
+    stop.store(true, Ordering::SeqCst);
+    trickle.join().unwrap();
+    assert_eq!(result, Err(AccountError::Cancelled));
+    assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
 }
 
 #[test]

@@ -5,17 +5,31 @@
 use super::validate::validate_google_login;
 use super::*;
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-/// How long the loopback listener waits for the browser to come back before the sign-in is abandoned.
+/// The longest the loopback listener waits for the browser to come back before the sign-in is abandoned. The actual wait is also cut short so the code reaches the backend before the challenge expires; see [`google_callback_window`].
 pub const GOOGLE_SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Time kept back from the challenge lifetime for posting the code and the backend's token exchange, so a code delivered at the end of the wait still finds the challenge alive.
+const GOOGLE_LOGIN_MARGIN: Duration = Duration::from_secs(30);
 
 const GOOGLE_AUTHORIZATION_PREFIX: &str = "https://accounts.google.com/";
 const GOOGLE_CALLBACK_PATH: &str = "/callback";
 const MAX_CALLBACK_REQUEST_BYTES: usize = 8 * 1024;
 const MAX_STATE_BYTES: usize = 512;
-const CALLBACK_IO_TIMEOUT: Duration = Duration::from_secs(5);
+/// Total time one loopback connection may take to send its request head, and to take the reply. It is short because a real browser sends the redirect at once; an idle preconnect or a slow local client must not hold the listener.
+const CALLBACK_IO_TIMEOUT: Duration = Duration::from_secs(2);
+/// How often the accept loop and a pending read look at the deadline and the cancel flag.
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// How long to wait for the redirect for a challenge that lives `expires_in` seconds: the challenge lifetime minus [`GOOGLE_LOGIN_MARGIN`], capped at `cap`. `None` when the challenge is too short-lived to be worth opening the browser for.
+pub(super) fn google_callback_window(expires_in: u64, cap: Duration) -> Option<Duration> {
+    let window = Duration::from_secs(expires_in)
+        .saturating_sub(GOOGLE_LOGIN_MARGIN)
+        .min(cap);
+    (!window.is_zero()).then_some(window)
+}
 
 pub(super) fn google_loopback_target(port: u16) -> String {
     format!("http://127.0.0.1:{port}{GOOGLE_CALLBACK_PATH}")
@@ -141,18 +155,18 @@ pub(super) fn parse_google_callback(head: &str, expected_state: &str) -> GoogleC
     }
 }
 
-/// Waits on `listener` for the browser redirect carrying `state`, answering every request with a small page, and returns the authorization code. The wait ends with [`AccountError::Cancelled`] when the user denies access or `timeout` passes.
+/// Waits on `listener` for the browser redirect carrying `state`, answering every request with a small page, and returns the authorization code. The wait ends with [`AccountError::Cancelled`] when the user denies access, `cancelled` is set, or `deadline` passes; a single slow connection cannot keep it waiting past the deadline.
 pub(super) fn receive_google_callback(
     listener: &TcpListener,
     state: &str,
-    timeout: Duration,
+    deadline: Instant,
+    cancelled: &AtomicBool,
 ) -> Result<String, AccountError> {
     listener
         .set_nonblocking(true)
         .map_err(|_| AccountError::Unavailable)?;
-    let deadline = Instant::now() + timeout;
     loop {
-        if Instant::now() >= deadline {
+        if cancelled.load(Ordering::SeqCst) || Instant::now() >= deadline {
             return Err(AccountError::Cancelled);
         }
         let stream = match listener.accept() {
@@ -164,7 +178,7 @@ pub(super) fn receive_google_callback(
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(_) => return Err(AccountError::Unavailable),
         };
-        match answer_callback(stream, state) {
+        match answer_callback(stream, state, deadline, cancelled) {
             GoogleCallback::Ignored => continue,
             GoogleCallback::Code(code) => return Ok(code),
             GoogleCallback::Failed(error) => return Err(error),
@@ -172,13 +186,19 @@ pub(super) fn receive_google_callback(
     }
 }
 
-fn answer_callback(mut stream: TcpStream, state: &str) -> GoogleCallback {
-    let head = read_request_head(&mut stream);
+fn answer_callback(
+    mut stream: TcpStream,
+    state: &str,
+    deadline: Instant,
+    cancelled: &AtomicBool,
+) -> GoogleCallback {
+    let head = read_request_head(&mut stream, deadline, cancelled);
     let outcome = head.as_deref().map_or(GoogleCallback::Ignored, |head| {
         parse_google_callback(head, state)
     });
     let (status, message) = match &outcome {
-        GoogleCallback::Code(_) => ("200 OK", "Google 登录已完成，请返回水杉输入法。"),
+        // The backend has not exchanged the code yet, so the page cannot claim the sign-in succeeded; the app reports the outcome.
+        GoogleCallback::Code(_) => ("200 OK", "已收到 Google 授权，请返回水杉输入法。"),
         GoogleCallback::Failed(AccountError::Cancelled) => {
             ("200 OK", "已取消 Google 登录，请返回水杉输入法。")
         }
@@ -198,17 +218,42 @@ fn answer_callback(mut stream: TcpStream, state: &str) -> GoogleCallback {
     outcome
 }
 
-fn read_request_head(stream: &mut TcpStream) -> Option<String> {
+/// Reads one request head within [`CALLBACK_IO_TIMEOUT`] in total (never past `deadline`), giving up early when `cancelled` is set. Reads wait in [`ACCEPT_POLL_INTERVAL`] slices so both limits are rechecked while a client trickles bytes.
+fn read_request_head(
+    stream: &mut TcpStream,
+    deadline: Instant,
+    cancelled: &AtomicBool,
+) -> Option<String> {
+    let budget_end = deadline.min(Instant::now() + CALLBACK_IO_TIMEOUT);
     stream.set_nonblocking(false).ok()?;
-    stream.set_read_timeout(Some(CALLBACK_IO_TIMEOUT)).ok()?;
     stream.set_write_timeout(Some(CALLBACK_IO_TIMEOUT)).ok()?;
     let mut head = Vec::with_capacity(1024);
     let mut buffer = [0u8; 1024];
     while !head.windows(4).any(|window| window == b"\r\n\r\n") {
-        if head.len() >= MAX_CALLBACK_REQUEST_BYTES {
+        if head.len() >= MAX_CALLBACK_REQUEST_BYTES || cancelled.load(Ordering::SeqCst) {
             return None;
         }
-        let read = stream.read(&mut buffer).ok()?;
+        let remaining = budget_end.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        stream
+            .set_read_timeout(Some(remaining.min(ACCEPT_POLL_INTERVAL)))
+            .ok()?;
+        let read = match stream.read(&mut buffer) {
+            Ok(read) => read,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                continue
+            }
+            Err(_) => return None,
+        };
         if read == 0 {
             break;
         }
