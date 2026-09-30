@@ -268,6 +268,12 @@ import {
   KeySoundSettings,
 } from "../entry/src/main/ets/keyboard/KeySoundPolicy";
 import {
+  MUSIC_OFF,
+  MusicChange,
+  MusicPolicy,
+  MusicSettings,
+} from "../entry/src/main/ets/keyboard/MusicPolicy";
+import {
   EmojiPanelKeyAction,
   EmojiPanelKeyPolicy,
 } from "../entry/src/main/ets/keyboard/emoji/EmojiPanelKeyPolicy";
@@ -10817,5 +10823,74 @@ group("key sounds follow the desktop player's settings and pack rules", () => {
   check(
     KeySoundPolicy.cueKey("/a.wav", -2) !== KeySoundPolicy.cueKey("/a.wav", 2),
     "each pitch of a file is its own sound",
+  );
+});
+
+group("background music follows the desktop player's rules", () => {
+  check(MusicPolicy.settings(undefined) === MUSIC_OFF, "no plugins record is music off");
+  check(MusicPolicy.settings({}) === MUSIC_OFF, "nor is a record without music");
+  check(
+    !MusicPolicy.settings({ music: { enabled: true } }).enabled,
+    "a switch without a chosen pack plays nothing, as on the desktop",
+  );
+  const on: MusicSettings = MusicPolicy.settings({
+    music: { enabled: true, pack: "rain", volume: 80 },
+  });
+  check(on.enabled && on.pack === "rain" && on.volume === 80, "the chosen pack at its volume");
+  check(
+    MusicPolicy.settings({ music: { enabled: true, pack: "rain", volume: 101 } }).volume === 30,
+    "a volume outside 0-100 is the default",
+  );
+  check(MusicPolicy.gain(on) === 0.8, "the volume scales amplitude");
+
+  check(
+    MusicPolicy.change(on, on, "/state", "/state") === MusicChange.NONE,
+    "the same settings change nothing",
+  );
+  check(
+    MusicPolicy.change(on, { ...on, volume: 20 }, "/state", "/state") === MusicChange.VOLUME,
+    "a new volume is applied to the playing track",
+  );
+  check(
+    MusicPolicy.change(on, { ...on, pack: "piano" }, "/state", "/state") === MusicChange.RELOAD &&
+      MusicPolicy.change(on, MUSIC_OFF, "/state", "/state") === MusicChange.RELOAD &&
+      MusicPolicy.change(on, on, "/state", "/other") === MusicChange.RELOAD,
+    "a new pack, the switch or a new state root starts afresh",
+  );
+
+  check(MusicPolicy.active(true, false, false), "a focused ordinary field hears music");
+  check(
+    !MusicPolicy.active(false, false, false),
+    "nothing plays before the field's attributes say it is not a password field",
+  );
+  check(!MusicPolicy.active(true, true, false), "a password field never hears music");
+  check(!MusicPolicy.active(true, false, true), "music pauses while recording");
+
+  check(
+    MusicPolicy.durationMillis("183000") === 183000,
+    "the extractor's duration is milliseconds",
+  );
+  check(
+    MusicPolicy.durationMillis(undefined) === null &&
+      MusicPolicy.durationMillis("") === null &&
+      MusicPolicy.durationMillis("-1") === null &&
+      MusicPolicy.durationMillis("1.5") === null,
+    "anything else is no duration",
+  );
+  check(
+    MusicPolicy.trackAllowed(900000, 900) && !MusicPolicy.trackAllowed(900001, 900),
+    "a track plays only within the pack bound",
+  );
+  check(
+    !MusicPolicy.trackAllowed(null, 900) && !MusicPolicy.trackAllowed(0, 900),
+    "a track whose length is unknown is not played",
+  );
+  check(
+    !MusicPolicy.overran(900000, 900) && MusicPolicy.overran(900001, 900),
+    "a track that runs past the bound is cut off",
+  );
+  check(
+    MusicPolicy.next(0, 3) === 1 && MusicPolicy.next(2, 3) === 0 && MusicPolicy.next(0, 1) === 0,
+    "tracks play in order and start over after the last",
   );
 });

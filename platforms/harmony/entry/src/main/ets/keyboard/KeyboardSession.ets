@@ -37,6 +37,8 @@ import { DEFAULT_VOICE_HOTKEY_BINDINGS, VoiceHotkeyAction, VoiceHotkeyBindings, 
 import { HarmonyVoiceRecordingBehaviour } from './input/HarmonyVoiceRecordingBehaviour';
 import { KeySoundPlayer } from './KeySoundPlayer';
 import { KEY_SOUNDS_OFF, KeySoundPolicy, PluginPreferenceDocument } from './KeySoundPolicy';
+import { MusicPlayer } from './MusicPlayer';
+import { MUSIC_OFF, MusicPolicy } from './MusicPolicy';
 import { EnglishCompletions, EnglishReplacement, EnglishSuggestionPolicy }
   from './input/EnglishSuggestionPolicy';
 import { ImeModeScopePolicy } from './input/ImeModeScopePolicy';
@@ -947,6 +949,9 @@ export class KeyboardSession implements HardwareKeyTarget {
   private voiceBehaviour: HarmonyVoiceRecordingBehaviour = new HarmonyVoiceRecordingBehaviour();
   // Key, melody, commit and achievement sounds. Configured off on a phone, which keeps its own key feedback.
   private readonly soundPlayer: KeySoundPlayer = new KeySoundPlayer();
+  private readonly musicPlayer: MusicPlayer = new MusicPlayer();
+  /** The focused editor's attributes have arrived, so whether it is a password field is known; background music waits for that. */
+  private editorAttributesKnown: boolean = false;
   private modeScope: ImeModeScopePolicy = new ImeModeScopePolicy();
   private modeScopeSetting: string = 'app';
   private defaultEnglish: boolean = false;
@@ -1413,6 +1418,8 @@ export class KeyboardSession implements HardwareKeyTarget {
         && preferences.scheme === 'quanpin';
       this.soundPlayer.configure(KeyboardFormFactor.isDesktop()
         ? KeySoundPolicy.settings(preferences.plugins) : KEY_SOUNDS_OFF, stateRoot);
+      this.musicPlayer.configure(KeyboardFormFactor.isDesktop()
+        ? MusicPolicy.settings(preferences.plugins) : MUSIC_OFF, stateRoot);
     } catch (error) {
       KeyboardLog.error(`host preparation unreadable: ${describeError(error)}`);
       return false;
@@ -2433,6 +2440,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.invalidateReplyContext();
     this.clearSmartPunctuationRepeat();
     this.inputClient = inputClient;
+    this.editorAttributesKnown = false;
+    this.updateMusic();
     inputClient.getEditorAttribute().then((attribute: inputMethodEngine.EditorAttribute): void => {
       if (attributeGeneration !== this.attributeGeneration || this.inputClient !== inputClient) {
         return;
@@ -2440,6 +2449,8 @@ export class KeyboardSession implements HardwareKeyTarget {
       this.enterKey = attribute.enterKeyType;
       this.previewSupported = attribute.isTextPreviewSupported === true;
       this.traits = KeyboardSession.traitsFor(attribute.inputPattern);
+      this.editorAttributesKnown = true;
+      this.updateMusic();
       this.capitalization = EditorPolicy.capitalizationMode(this.traits,
         KeyboardSession.capitalizationFor(attribute.capitalizeMode));
       // Says the keyboard reached a real editor, which nothing else in the log does. Verifying that
@@ -2499,6 +2510,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.previewSupported = false;
     this.previewText = '';
     this.inputClient = undefined;
+    this.editorAttributesKnown = false;
+    this.updateMusic();
   }
 
   stop(): void {
@@ -2531,6 +2544,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   shutdown(): void {
     this.stop();
     this.soundPlayer.shutdown();
+    this.musicPlayer.shutdown();
     this.attributeGeneration++;
     this.inputClient = undefined;
     this.previewSupported = false;
@@ -4812,6 +4826,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   setVoiceRecording(active: boolean, cancelled: boolean = false): void {
     const changed: boolean = this.voiceRecording !== active;
     this.voiceRecording = active;
+    this.updateMusic();
     if (!active) {
       this.voiceHotkeys.reset();
     }
@@ -4841,6 +4856,13 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** The extension's context, which says where the built-in sound packs are and where rendered notes may go. */
   useSoundContext(context: common.Context): void {
     this.soundPlayer.use(context);
+    this.musicPlayer.use(context);
+  }
+
+  /** Background music plays on a 2in1 while an editor whose attributes are known has focus, is not a password field, and nothing is being recorded; the desktop hosts tell their player the same with `msime_client_music_set_active`. */
+  private updateMusic(): void {
+    this.musicPlayer.setActive(
+      MusicPolicy.active(this.editorAttributesKnown, this.traits.password, this.voiceRecording));
   }
 
   /**

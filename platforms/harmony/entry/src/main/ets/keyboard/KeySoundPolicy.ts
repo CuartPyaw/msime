@@ -37,15 +37,24 @@ export interface MelodyPreferenceDocument {
   pack?: string;
 }
 
+/** `preferences.plugins.music`, which `MusicPolicy` reads. */
+export interface MusicPreferenceDocument {
+  enabled?: boolean;
+  pack?: string;
+  /** 0-100. */
+  volume?: number;
+}
+
 /** `preferences.plugins`. Absent while every part is at its default, which the shared store leaves out of the document. */
 export interface PluginPreferenceDocument {
   key_sound?: KeySoundPreferenceDocument;
   commit_sound?: SwitchPreferenceDocument;
   melody?: MelodyPreferenceDocument;
   achievements?: SwitchPreferenceDocument;
+  music?: MusicPreferenceDocument;
 }
 
-/** The effect settings of one preference document. Background music is not here: HarmonyOS does not play it yet. */
+/** The effect settings of one preference document. Background music is `MusicPolicy`'s. */
 export interface KeySoundSettings {
   readonly key: boolean;
   /** Keys play the melody pack's next note instead of their own sample. */
