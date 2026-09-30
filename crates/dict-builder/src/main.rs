@@ -4,8 +4,10 @@
 //! msime-dict-build --cache <dir> --out <dir>                 every stage, then the manifest
 //! msime-dict-build --cache <dir> --out <dir> --skip ngram    a quick local build without the corpus pass
 //! msime-dict-build --list
+//! msime-dict-build check-words --base <words.txt> --head <words.txt> [--msime-db <msime.db>] [--json <report.json>] [--markdown <summary.md>]
 //! ```
 
+mod check_words;
 mod english;
 mod japanese;
 mod licensing;
@@ -22,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
-use clap::{Parser, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::sources::{Lock, Sources};
 
@@ -77,9 +79,12 @@ fn repository_root() -> PathBuf {
 #[derive(Parser)]
 #[command(
     name = "msime-dict-build",
-    about = "Build msime's dictionary artifacts from pinned sources"
+    about = "Build msime's dictionary artifacts from pinned sources",
+    subcommand_negates_reqs = true
 )]
 struct Arguments {
+    #[command(subcommand)]
+    command: Option<Command>,
     /// Where the artifacts are written.
     #[arg(long, required_unless_present = "list")]
     out: Option<PathBuf>,
@@ -104,6 +109,59 @@ struct Arguments {
     /// The msime checkout the manifest's provenance is read from.
     #[arg(long, default_value_os_t = repository_root())]
     repository: PathBuf,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Check a change to the shared custom dictionary's words.txt. Exits 0 when every appended line is accepted, 1 when anything is rejected (the reports are still written), 2 when the check cannot run.
+    CheckWords(CheckWords),
+}
+
+#[derive(Args)]
+struct CheckWords {
+    /// words.txt before the change.
+    #[arg(long)]
+    base: PathBuf,
+    /// words.txt after the change.
+    #[arg(long)]
+    head: PathBuf,
+    /// A shipped msime.db; appended entries already in its quanpin tables are rejected.
+    #[arg(long)]
+    msime_db: Option<PathBuf>,
+    /// Where the JSON report is written.
+    #[arg(long)]
+    json: Option<PathBuf>,
+    /// Where the Markdown summary is written.
+    #[arg(long)]
+    markdown: Option<PathBuf>,
+}
+
+/// Runs `check-words` and writes its reports; `Ok(false)` when a line was rejected.
+fn check_words(arguments: &CheckWords) -> Result<bool> {
+    let shipped = arguments
+        .msime_db
+        .as_deref()
+        .map(|path| {
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .with_context(|| format!("opening {}", path.display()))
+        })
+        .transpose()?;
+    let report = check_words::check(
+        &text::read(&arguments.base)?,
+        &text::read(&arguments.head)?,
+        shipped.as_ref(),
+    )?;
+    if let Some(path) = &arguments.json {
+        let mut json = serde_json::to_string_pretty(&report)?;
+        json.push('\n');
+        std::fs::write(path, json).with_context(|| format!("writing {}", path.display()))?;
+    }
+    let summary = check_words::markdown(&report);
+    if let Some(path) = &arguments.markdown {
+        std::fs::write(path, &summary).with_context(|| format!("writing {}", path.display()))?;
+    }
+    eprint!("{summary}");
+    Ok(report.accepted)
 }
 
 struct Build {
@@ -322,6 +380,16 @@ fn stage_name(stage: Stage) -> String {
 
 fn main() -> Result<()> {
     let arguments = Arguments::parse();
+    if let Some(Command::CheckWords(check)) = &arguments.command {
+        match check_words(check) {
+            Ok(true) => return Ok(()),
+            Ok(false) => std::process::exit(1),
+            Err(error) => {
+                eprintln!("Error: {error:?}");
+                std::process::exit(2);
+            }
+        }
+    }
     if arguments.list {
         for stage in STAGES {
             let value = stage.to_possible_value().context("stage without a name")?;

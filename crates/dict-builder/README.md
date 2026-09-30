@@ -25,3 +25,14 @@ Inputs without a redistribution grant (`src/licensing.rs`) are left out unless `
 - To move a pinned input, change its URL, size and SHA-256 in the lock in the same commit, rebuild, and compare the result with the previous release before publishing.
 
 After a release is published, bump `resources/desktop-dictionary.lock.json` to the new files.
+
+## Checking contributed words
+
+msime-customdict's CI gates changes to `words.txt` with `check-words`:
+
+```sh
+msime-dict-build check-words --base <old words.txt> --head <new words.txt> \
+  [--msime-db <shipped msime.db>] [--json report.json] [--markdown summary.md]
+```
+
+A change may only append lines. Each appended entry goes through the parser the build uses (word, `'`-separated quanpin that maps to a table, integer weight), its weight must lie within the range the existing entries use, and it must not repeat another appended line, an entry already in `words.txt`, or (with `--msime-db`) a row with the same word and pinyin in the shipped quanpin tables. Appended blank and `#` lines are skipped. The JSON report lists `added` and `rejected` lines (1-based line number, text, reason) with `accepted`, the line counts and `weight_range`; the Markdown summary is the same in table form and is also printed to stderr. The exit status is 0 when nothing is rejected, 1 when anything is (the reports are still written), and 2 when the check cannot run: an unreadable file, a base `words.txt` the build itself would reject, or a database without the expected table.
