@@ -169,7 +169,7 @@ impl JapaneseProvider {
         if code.is_empty() || word.is_empty() || source != CandidateSource::CloudSuggestion {
             return false;
         }
-        let mut items = self.dynamic.get(&code.to_owned()).unwrap_or_default();
+        let mut items = self.dynamic.get_ref_by(code).cloned().unwrap_or_default();
         items.retain(|item| item.source != source);
         items.push(WordItem::new(code, word, 1, source, code));
         self.dynamic.insert(code.to_owned(), items);
