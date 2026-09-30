@@ -433,15 +433,15 @@ impl InputSession {
         }
     }
 
-    /// Four native letters answered by exactly one wubi row.
+    /// Four native letters whose whole list is one wubi row, the rule the shipped engine applied (input_session_composition.cpp:483-490).
     pub(super) fn wubi_unique_four_code(&self) -> bool {
         if self.dedicated_english || self.local_mode != LocalInputMode::None {
             return false;
         }
-        // Only the wubi rows count: quanpin rows beside them do not make the code ambiguous (overlays.md §3.3).
+        // The whole list counts, not only the wubi rows. In mixed Wubi four letters are often pinyin as well — `jixu` is the wubi code of 曳光弹 and the pinyin of 继续 — and committing the one wubi row on the fourth key takes the pinyin away from someone typing it. The wubi_mixed_routing overlay counted wubi rows only; it never applied to the shipped engine, and that rule is what auto-committed 曳光弹 for jixu.
         self.wubi_candidates_are_native()
             && self.engine.wubi_has_complete_code()
-            && self.wubi_native_candidate_count() == 1
+            && self.candidates().len() == 1
     }
 
     pub(super) fn has_active_helpcode(&self) -> bool {
@@ -528,13 +528,6 @@ impl InputSession {
         self.is_wubi() && self.candidates().iter().any(Self::is_wubi_native_candidate)
     }
 
-    pub(super) fn wubi_native_candidate_count(&self) -> usize {
-        self.candidates()
-            .iter()
-            .filter(|item| Self::is_wubi_native_candidate(item))
-            .count()
-    }
-
     /// Whether the list reads the composition as pinyin, so selections advance and learn as pinyin.
     pub(super) fn candidates_follow_pinyin(&self) -> bool {
         self.engine.current_scheme_type().is_pinyin() || !self.wubi_candidates_are_native()
@@ -562,6 +555,29 @@ mod tests {
         assert_eq!(append_canonical_pinyin("ni", "hao"), "ni'hao");
         assert_eq!(append_canonical_pinyin("ni", ""), "");
         assert_eq!(append_canonical_pinyin("shan", "shui"), "shan'shui");
+    }
+
+    /// test_input_session.cpp:600-609: a phrase is storable only when every picked piece had a canonical reading.
+    #[test]
+    fn an_unknown_earlier_reading_makes_the_phrase_unstorable() {
+        let last = SelectionTransition {
+            selected_canonical_pinyin: "te'le".into(),
+            ..SelectionTransition::default()
+        };
+        let known = InputSession::update_creating_word_progress("xi", "西", "特乐", &last);
+        assert!(known.completed && known.can_store);
+        assert_eq!(known.pinyin, "xi'te'le");
+        assert_eq!(known.word, "西特乐");
+
+        let unknown = InputSession::update_creating_word_progress("", "西", "特乐", &last);
+        assert!(unknown.completed);
+        assert!(!unknown.can_store);
+        assert!(unknown.pinyin.is_empty());
+        assert_eq!(unknown.word, "西特乐");
+        // Without the guard a piece with no Han character and no reading would pass the one-syllable-per-character check.
+        let unknown = InputSession::update_creating_word_progress("", "abc", "特乐", &last);
+        assert!(!unknown.can_store);
+        assert!(unknown.pinyin.is_empty());
     }
 
     #[test]

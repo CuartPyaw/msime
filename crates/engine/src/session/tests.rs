@@ -208,9 +208,9 @@ impl TestClock {
                 month: 8,
                 day: 9,
                 weekday: 0,
-                hour: 0,
-                minute: 14,
-                second: 30,
+                hour: 14,
+                minute: 30,
+                second: 0,
             }),
         });
         clock
@@ -412,6 +412,202 @@ fn caret_prefix_follows_the_personal_context_order_and_its_pins() {
     );
 }
 
+/// Thirty `ni` characters, more than the 24 a lone initial lists before expansion, plus the `ni'hao` rows.
+fn initial_fixture() -> Fixture {
+    let rows: Vec<String> = (0..30)
+        .map(|i| {
+            format!(
+                "('ni','n','{}',{})",
+                char::from_u32(0x4e00 + i).unwrap(),
+                1000 - i
+            )
+        })
+        .collect();
+    Fixture::new(&format!(
+        "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_n VALUES{};\
+CREATE TABLE tbl_1_h(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_h VALUES('hao','h','好',100);\
+CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',5000);",
+        rows.join(",")
+    ))
+}
+
+/// Paging past a lone initial's capped prefix list widens that list, the one on screen, not the hidden whole-input list.
+#[test]
+fn caret_prefix_expands_its_own_initial_list() {
+    let fixture = initial_fixture();
+    let mut session = fixture.session();
+    type_text(&mut session, "nhao");
+    let full = words(&session);
+    session.set_caret(Some(1));
+    assert_eq!(session.prefix_end(), 1);
+    let capped = session.snapshot().candidates;
+    assert_eq!(capped.len(), 24);
+    assert!(capped.iter().all(|item| item.pinyin == "n"));
+
+    assert!(session.expand_initial_candidates());
+    let widened = words(&session);
+    assert_eq!(widened.len(), 30);
+    assert!(widened.contains(&"丝".to_owned()), "{widened:?}");
+    assert_eq!(session.prefix_end(), 1);
+    assert!(
+        !session.expand_initial_candidates(),
+        "the widened list is not capped any more"
+    );
+
+    session.command(Command::MoveEnd);
+    assert_eq!(words(&session), full);
+    assert_eq!(full.first().map(String::as_str), Some("你好"));
+}
+
+/// Expanding the whole input's list writes the whole input's series slot, not the slot of the caret prefix decoded just before it on the same dictionary.
+#[test]
+fn a_whole_input_expansion_leaves_the_prefix_slot_alone() {
+    let fixture = initial_fixture();
+    let mut session = fixture.session();
+    type_text(&mut session, "nhao");
+    session.set_caret(Some(1));
+    let prefix = words(&session);
+    assert_eq!(prefix.len(), 24);
+    session.command(Command::MoveEnd);
+    assert!(session.expand_initial_candidates());
+    assert!(words(&session).len() > prefix.len() + 1);
+
+    session.set_caret(Some(1));
+    assert_eq!(words(&session), prefix);
+    session.command(Command::Cancel);
+    type_text(&mut session, "n");
+    assert_eq!(words(&session), prefix);
+}
+
+/// A removal or pin made while the prefix is decoded re-queries the prefix instead of showing the list from before the edit.
+#[test]
+fn caret_prefix_requeries_after_a_removal_a_pin_and_a_fixed_position() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',100),('ni''hao','nh','拟好',90),('ni''hao','nh','泥好',80),('ni''hao','nh','妮好',70);\
+CREATE TABLE tbl_2_s(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_2_s VALUES('shi''jie','sj','世界',100);",
+    );
+    let mut session = fixture.session();
+    type_text(&mut session, "nihaoshijie");
+    session.set_caret(Some(5));
+    assert_eq!(session.prefix_end(), 5);
+    assert_eq!(words(&session)[..4], ["你好", "拟好", "泥好", "妮好"]);
+
+    let result = session.remove(index_of(&session, "你好"));
+    assert!(result.handled && result.diagnostic.is_none(), "{result:?}");
+    assert_eq!(session.prefix_end(), 5);
+    assert!(
+        !words(&session).contains(&"你好".to_owned()),
+        "{:?}",
+        words(&session)
+    );
+
+    // With no previous commit the personal context cannot reorder the list, so only a re-query shows the new weight.
+    let result = session.pin(index_of(&session, "泥好"));
+    assert!(result.handled && result.diagnostic.is_none(), "{result:?}");
+    assert_eq!(session.prefix_end(), 5);
+    assert_eq!(words(&session).first().map(String::as_str), Some("泥好"));
+
+    let result = session.fix_position(index_of(&session, "妮好"), 1);
+    assert!(result.handled && result.diagnostic.is_none(), "{result:?}");
+    assert_eq!(session.prefix_end(), 5);
+    assert_eq!(words(&session).first().map(String::as_str), Some("妮好"));
+}
+
+/// Mixed English rows are looked up for the decoded prefix, not for the whole raw input.
+#[test]
+fn caret_prefix_mixes_english_for_the_prefix_only() {
+    let fixture = Fixture::new(CARET_PREFIX_FIXTURE)
+        .with_english("INSERT INTO english_words VALUES('nice','nice',100);");
+    let mut session = fixture.session_with(|options| options.english.mixed_candidates = true);
+    type_text(&mut session, "nihao");
+    assert!(!words(&session).contains(&"nice".to_owned()));
+    session.set_caret(Some(2));
+    assert_eq!(session.prefix_end(), 2);
+    assert!(
+        words(&session).contains(&"nice".to_owned()),
+        "{:?}",
+        words(&session)
+    );
+    session.command(Command::MoveEnd);
+    assert!(!words(&session).contains(&"nice".to_owned()));
+}
+
+/// The prefix request carries the session's fuzzy rules.
+#[test]
+fn caret_prefix_applies_fuzzy_pinyin() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_z(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_z VALUES('zhi','z','之',100);\
+CREATE TABLE tbl_1_h(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_h VALUES('hao','h','好',100);",
+    );
+    for (rules, expected) in [(crate::types::fuzzy_rule::Z_ZH, true), (0, false)] {
+        let mut session = fixture.session_with(|options| options.fuzzy_pinyin.rules = rules);
+        type_text(&mut session, "zihao");
+        session.set_caret(Some(2));
+        assert_eq!(session.prefix_end(), 2, "rules {rules}");
+        assert_eq!(
+            words(&session).contains(&"之".to_owned()),
+            expected,
+            "rules {rules}: {:?}",
+            words(&session)
+        );
+    }
+}
+
+/// The prefix request carries the autocorrect switches, and the suppression a raw commit of the prefix recorded.
+#[test]
+fn caret_prefix_applies_autocorrect_and_its_suppression() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_n VALUES('ni','n','你',100);\
+CREATE TABLE tbl_1_h(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_h VALUES('hao','h','好',100);",
+    );
+    let transposition = |options: &mut SessionOptions| {
+        options.autocorrect_types = crate::types::autocorrect_type::TRANSPOSITION;
+    };
+    let mut session = fixture.session_with(transposition);
+    type_text(&mut session, "hoani");
+    session.set_caret(Some(3));
+    assert_eq!(session.prefix_end(), 3);
+    assert!(
+        words(&session).contains(&"好".to_owned()),
+        "{:?}",
+        words(&session)
+    );
+    session.command(Command::Cancel);
+
+    let mut plain = fixture.session();
+    type_text(&mut plain, "hoani");
+    plain.set_caret(Some(3));
+    assert!(
+        !words(&plain).contains(&"好".to_owned()),
+        "{:?}",
+        words(&plain)
+    );
+
+    type_text(&mut session, "hoa");
+    assert!(words(&session).contains(&"好".to_owned()));
+    assert_eq!(
+        session.command(Command::CommitRaw).commit.as_deref(),
+        Some("hoa")
+    );
+    type_text(&mut session, "hoani");
+    session.set_caret(Some(3));
+    assert_eq!(session.prefix_end(), 3);
+    assert!(
+        !words(&session).contains(&"好".to_owned()),
+        "{:?}",
+        words(&session)
+    );
+}
+
 // ---- shuangpin candidate assembly ----
 
 /// Microsoft `ni'nni` (golden ri_microsoft_semicolon_editing step 18): every shorter prefix group answers 你 and 拟, and the trailing `i` is also a single helpcode whose answer appends the whole-input series again, so the reference listed each word four times. A word keeps its first seat (decision 2026-09-30).
@@ -453,8 +649,35 @@ fn a_mixed_list_holds_both_producers_wubi_first() {
     assert!(schemes.contains(&("哥哥".to_owned(), SchemeType::Quanpin)));
     assert!(schemes.contains(&("个".to_owned(), SchemeType::Quanpin)));
     assert!(!snapshot.answered_by_pinyin_fallback);
-    // Only the wubi rows make the code ambiguous or not.
-    assert!(snapshot.wubi_unique_four_code);
+    // The quanpin rows beside the one wubi row keep the code open: the fourth key must not commit 工 over 哥哥 for someone typing pinyin.
+    assert!(!snapshot.wubi_unique_four_code);
+}
+
+/// The reported case: in mixed Wubi `jixu` is the wubi code of 曳光弹 and the pinyin of 继续. The fourth key must leave both on offer; without pinyin rows the same code still commits its one wubi row.
+#[test]
+fn a_four_letter_code_that_is_also_pinyin_stays_open_in_mixed_wubi() {
+    let fixture = Fixture::new(
+        "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);\
+INSERT INTO wubi86 VALUES('jixu','曳光弹',100);\
+CREATE TABLE tbl_2_j(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_2_j VALUES('ji''xu','jx','继续',1000);",
+    );
+    let mut mixed = fixture.session_with(|options| {
+        options.scheme = SchemeType::Wubi;
+        options.wubi.mixed_pinyin = true;
+    });
+    type_text(&mut mixed, "jixu");
+    assert!(words(&mixed).contains(&"曳光弹".to_owned()));
+    assert!(words(&mixed).contains(&"继续".to_owned()));
+    assert!(!mixed.snapshot().wubi_unique_four_code);
+
+    let mut plain = fixture.session_with(|options| {
+        options.scheme = SchemeType::Wubi;
+        options.wubi.mixed_pinyin = false;
+    });
+    type_text(&mut plain, "jixu");
+    assert_eq!(words(&plain), vec!["曳光弹".to_owned()]);
+    assert!(plain.snapshot().wubi_unique_four_code);
 }
 
 #[test]
@@ -574,6 +797,165 @@ fn fixed_positions_apply_within_each_producer_group() {
     assert_eq!(stored, 1);
 }
 
+/// Phrase progress follows the selected row (`transition.wubi_native`), not the list: two quanpin picks out of a list that still holds 工 compose a storable pinyin phrase.
+#[test]
+fn quanpin_picks_beside_a_wubi_row_learn_a_pinyin_phrase() {
+    let fixture = Fixture::new(
+        &WUBI_ROUTING_FIXTURE.replace("INSERT INTO tbl_2_g VALUES('ge''ge','gg','哥哥',1000);", ""),
+    );
+    let mut session = wubi_mixed(&fixture);
+    assert!(words(&session).contains(&"工".to_owned()));
+    assert_eq!(
+        select_word(&mut session, "个").commit.as_deref(),
+        Some("个")
+    );
+    assert_eq!(
+        select_word(&mut session, "各").commit.as_deref(),
+        Some("各")
+    );
+    assert!(session.snapshot().preedit.is_empty());
+    assert_eq!(
+        count(
+            &fixture.main_db(),
+            "SELECT count(*) FROM tbl_2_g WHERE key='ge''ge' AND value='个各'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &fixture.journal(),
+            "SELECT count(*) FROM user_dictionary_operations WHERE dictionary='pinyin' AND operation<>'delete' AND value='个各'"
+        ),
+        1
+    );
+}
+
+/// A generated quanpin sentence selected beside a native wubi row is learned as a pinyin phrase (the per-row guards of `learn_sentence_candidate` and `follows_pinyin`); the wubi row itself writes nothing to the pinyin side.
+#[test]
+fn a_quanpin_sentence_beside_a_wubi_row_is_learned_and_the_wubi_row_is_not() {
+    let fixture = Fixture::new(
+        &WUBI_ROUTING_FIXTURE.replace("INSERT INTO tbl_2_g VALUES('ge''ge','gg','哥哥',1000);", ""),
+    );
+    let pinyin_rows = "SELECT count(*) FROM tbl_2_g";
+    let pinyin_journal =
+        "SELECT count(*) FROM user_dictionary_operations WHERE dictionary='pinyin'";
+
+    let mut session = wubi_mixed(&fixture);
+    assert_eq!(
+        select_word(&mut session, "工").commit.as_deref(),
+        Some("工")
+    );
+    assert_eq!(count(&fixture.main_db(), pinyin_rows), 0);
+    assert_eq!(count(&fixture.journal(), pinyin_journal), 0);
+
+    let mut session = wubi_mixed(&fixture);
+    let snapshot = session.snapshot();
+    assert!(snapshot
+        .candidates
+        .iter()
+        .any(|item| item.scheme == SchemeType::Wubi));
+    let index = snapshot
+        .candidates
+        .iter()
+        .position(|item| {
+            item.scheme == SchemeType::Quanpin
+                && item.source.is_generated_or_fallback()
+                && item.word.chars().count() == 2
+        })
+        .unwrap_or_else(|| panic!("no generated sentence in {:?}", words(&session)));
+    let sentence = snapshot.candidates[index].word.clone();
+    assert_eq!(
+        session.select(index).commit.as_deref(),
+        Some(sentence.as_str())
+    );
+    assert_eq!(
+        count(
+            &fixture.main_db(),
+            &format!("SELECT count(*) FROM tbl_2_g WHERE key='ge''ge' AND value='{sentence}'")
+        ),
+        1
+    );
+    assert!(count(&fixture.journal(), pinyin_journal) > 0);
+}
+
+/// A native wubi row's fixed slot is stored under the wubi raw code and applied within the wubi group only.
+#[test]
+fn a_native_wubi_row_is_fixed_under_the_wubi_context_in_a_mixed_list() {
+    let fixture = Fixture::new(&format!(
+        "{WUBI_ROUTING_FIXTURE}INSERT INTO wubi86 VALUES('gege','或',50);"
+    ));
+    let mut session = wubi_mixed(&fixture);
+    assert_eq!(words(&session)[..2], ["工", "或"]);
+    let result = session.fix_position(index_of(&session, "或"), 1);
+    assert!(result.handled && result.diagnostic.is_none(), "{result:?}");
+    let listed = words(&session);
+    assert_eq!(listed[..2], ["或", "工"]);
+    assert!(listed[2..].contains(&"哥哥".to_owned()));
+    assert_eq!(
+        count(
+            &fixture.journal(),
+            "SELECT count(*) FROM fixed_candidate_positions WHERE value='或' AND context_key='gege'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &fixture.journal(),
+            "SELECT count(*) FROM fixed_candidate_positions WHERE value='或' AND context_key='ge''ge'"
+        ),
+        0
+    );
+    let result = session.clear_position(index_of(&session, "或"));
+    assert!(result.handled && result.diagnostic.is_none(), "{result:?}");
+    assert_eq!(words(&session)[..2], ["工", "或"]);
+}
+
+/// On a one-letter code the fixed rows the capped list left out are put back through each producer's own lookup: a quanpin row fixed past the 24-row cap returns to its slot of the pinyin group, behind the wubi group.
+#[test]
+fn a_one_letter_mixed_code_reinserts_a_fixed_quanpin_row_through_the_pinyin_lookup() {
+    let rows: Vec<String> = (0..30)
+        .map(|i| {
+            format!(
+                "('ge','g','{}',{})",
+                char::from_u32(0x4e00 + i).unwrap(),
+                1000 - i
+            )
+        })
+        .collect();
+    let fixture = Fixture::new(&format!(
+        "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);\
+INSERT INTO wubi86 VALUES('g','王',100);\
+CREATE TABLE tbl_1_g(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_g VALUES{};",
+        rows.join(",")
+    ));
+    let late = char::from_u32(0x4e00 + 29).unwrap().to_string();
+
+    let mut quanpin = fixture.session();
+    type_text(&mut quanpin, "g");
+    assert!(!words(&quanpin).contains(&late));
+    assert!(quanpin.expand_initial_candidates());
+    let result = quanpin.fix_position(index_of(&quanpin, &late), 2);
+    assert!(result.handled && result.diagnostic.is_none(), "{result:?}");
+    drop(quanpin);
+
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Wubi;
+        options.wubi.mixed_pinyin = true;
+    });
+    type_text(&mut session, "g");
+    let snapshot = session.snapshot();
+    let listed: Vec<(String, SchemeType)> = snapshot
+        .candidates
+        .iter()
+        .map(|item| (item.word.clone(), item.scheme))
+        .collect();
+    assert_eq!(listed[0], ("王".to_owned(), SchemeType::Wubi));
+    // Slot 2 of the pinyin group, which starts after the one wubi row.
+    assert_eq!(listed[2], (late.clone(), SchemeType::Quanpin), "{listed:?}");
+    assert!(snapshot.candidate_answers_key[0]);
+}
+
 /// test_runtime_isolation.cpp:500-507: a fixed-slot write the journal refuses is reported, and the list keeps the slots it had.
 #[test]
 fn a_rejected_fixed_slot_write_reports_and_keeps_the_snapshot() {
@@ -602,6 +984,62 @@ fn a_rejected_fixed_slot_write_reports_and_keeps_the_snapshot() {
             "SELECT count(*) FROM fixed_candidate_positions WHERE value='你好'"
         ),
         0
+    );
+}
+
+/// test_candidate_removal.cpp:166-194: a removal the journal refuses is reported, commits nothing, and leaves the composition and the row where they were, for pinyin and English rows alike.
+#[test]
+fn a_removal_the_journal_refuses_reports_and_keeps_the_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE).with_english(ENGLISH_FIXTURE);
+    let mut session = fixture.session();
+    type_text(&mut session, "nihao");
+    let before = session.snapshot();
+    crate::user_dictionary::journal::ensure_user_database(&fixture.journal()).expect("journal");
+    Connection::open(fixture.journal())
+        .and_then(|journal| journal.execute_batch("CREATE TRIGGER reject_removal BEFORE INSERT ON user_dictionary_operations BEGIN SELECT RAISE(ABORT,'fixture rejection'); END;"))
+        .expect("trigger");
+    let result = session.remove(index_of(&session, "拟好"));
+    assert!(result.handled);
+    assert_eq!(result.commit, None);
+    assert_eq!(
+        result.diagnostic.as_deref(),
+        Some(crate::diagnostics::REMOVAL_NOT_PERSISTED)
+    );
+    assert_eq!(session.snapshot(), before);
+    assert_eq!(
+        count(
+            &fixture.main_db(),
+            "SELECT count(*) FROM tbl_2_n WHERE value='拟好'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &fixture.journal(),
+            "SELECT count(*) FROM user_dictionary_operations"
+        ),
+        0
+    );
+    session.command(Command::Cancel);
+
+    session.set_dedicated_english(true);
+    type_text(&mut session, "help");
+    let before = session.snapshot();
+    let result = session.remove(index_of(&session, "Help"));
+    assert!(result.handled);
+    assert_eq!(result.commit, None);
+    assert_eq!(
+        result.diagnostic.as_deref(),
+        Some(crate::diagnostics::REMOVAL_NOT_PERSISTED)
+    );
+    assert_eq!(session.snapshot(), before);
+    let english = fixture.path().join(assets::ENGLISH_DICTIONARY);
+    assert_eq!(
+        count(
+            &english,
+            "SELECT count(*) FROM english_words WHERE word='help'"
+        ),
+        1
     );
 }
 
@@ -1034,6 +1472,99 @@ fn an_edit_rejects_the_answer_to_the_old_composition() {
     assert!(words(&session).contains(&"妮".to_owned()));
 }
 
+/// test_runtime_isolation.cpp:257-268: moving the caret changes no query field, so an answer to the unchanged composition is still accepted.
+#[test]
+fn caret_only_movement_keeps_the_online_generation() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    type_text(&mut session, "ni");
+    let query = session.online_query().expect("a quanpin query");
+    for command in [
+        Command::MoveHome,
+        Command::MoveRight,
+        Command::MoveLeft,
+        Command::MoveEnd,
+    ] {
+        session.command(command);
+        assert_eq!(
+            session.online_query().map(|live| live.generation),
+            Some(query.generation),
+            "{command:?}"
+        );
+    }
+    session.command(Command::MoveHome);
+    // Nothing precedes the caret, so Backspace edits nothing (C++ :265-266).
+    session.command(Command::Backspace);
+    assert_eq!(session.snapshot().editing_text, "ni");
+    assert_eq!(
+        session.online_query().map(|live| live.generation),
+        Some(query.generation)
+    );
+    session.command(Command::MoveEnd);
+    assert!(session.apply_online_candidate(&query, "妮", CandidateSource::CloudSuggestion));
+    assert!(words(&session).contains(&"妮".to_owned()));
+}
+
+/// While a caret prefix is decoded, an answer to the whole input goes into the whole input's list, which is not on screen: the call reports false, and the row shows once the caret returns to the end.
+#[test]
+fn caret_prefix_defers_a_whole_input_answer_until_move_end() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    type_text(&mut session, "nihao");
+    let query = session.online_query().expect("a quanpin query");
+    session.set_caret(Some(2));
+    assert_eq!(session.prefix_end(), 2);
+    assert!(!session.apply_online_candidate(&query, "妮好", CandidateSource::CloudSuggestion));
+    assert!(!words(&session).contains(&"妮好".to_owned()));
+    session.command(Command::MoveEnd);
+    let snapshot = session.snapshot();
+    let row = snapshot
+        .candidates
+        .iter()
+        .find(|item| item.word == "妮好")
+        .expect("the answer shows at the end");
+    assert_eq!(row.source, CandidateSource::CloudSuggestion);
+}
+
+/// test_online_input_session.cpp:149-176 through the singular entry every cloud response takes: cloud at the second seat, AI at the third, a new cloud answer replaces the old one, and a word the list already holds or a non-online source is refused without touching the list.
+#[test]
+fn a_single_online_answer_takes_its_slot_and_refuses_duplicates() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_n VALUES('ni','n','你',100),('ni','n','拟',90),('ni','n','妮',80),('ni','n','倪',70);",
+    );
+    let mut session = fixture.session();
+    type_text(&mut session, "ni");
+    let query = session.online_query().expect("a quanpin query");
+    let at = |session: &Session, slot: usize| {
+        let item = session.snapshot().candidates[slot].clone();
+        (item.word, item.source)
+    };
+
+    assert!(session.apply_online_candidate(&query, "泥", CandidateSource::CloudSuggestion));
+    assert_eq!(
+        at(&session, 1),
+        ("泥".to_owned(), CandidateSource::CloudSuggestion)
+    );
+    assert!(session.apply_online_candidate(&query, "逆", CandidateSource::AiSuggestion));
+    assert_eq!(
+        at(&session, 2),
+        ("逆".to_owned(), CandidateSource::AiSuggestion)
+    );
+    assert!(session.apply_online_candidate(&query, "呢", CandidateSource::CloudSuggestion));
+    assert_eq!(
+        at(&session, 1),
+        ("呢".to_owned(), CandidateSource::CloudSuggestion)
+    );
+    assert!(!words(&session).contains(&"泥".to_owned()));
+
+    let before = session.snapshot().candidates;
+    assert!(!session.apply_online_candidate(&query, "你", CandidateSource::CloudSuggestion));
+    assert_eq!(session.snapshot().candidates, before);
+    assert!(!session.apply_online_candidate(&query, "腻", CandidateSource::Database));
+    assert_eq!(session.snapshot().candidates, before);
+}
+
 /// Loading a helpcode table drops the cached pinyin answers, online rows included, as the reference's keymap setters did (quanpin/engine.h:37-41); the golden ri_session_a_resources records the same sequence.
 #[test]
 fn a_new_helpcode_table_drops_the_online_rows_of_an_earlier_composition() {
@@ -1287,6 +1818,40 @@ fn an_unmatched_date_keyword_commits_as_typed() {
     assert_eq!(dates.first().map(String::as_str), Some("2026年8月9日"));
 }
 
+/// test_input_session.cpp:1388-1401: the whole date list on the pinned clock, lunar date last, and a selected row commits and leaves the mode.
+#[test]
+fn a_date_row_commits_and_leaves_date_time_mode() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    TestClock::install(&mut session);
+    assert!(session.character(b'T', true).handled);
+    assert_eq!(session.snapshot().local_mode, LocalInputMode::DateTime);
+    type_text(&mut session, "rq");
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.preedit, "Trq");
+    assert_eq!(snapshot.candidates.len(), 17);
+    assert_eq!(snapshot.candidates[0].word, "2026年8月9日");
+    assert_eq!(snapshot.candidates[16].word, "丙午年六月二十七日");
+    assert!(snapshot
+        .candidates
+        .iter()
+        .all(|item| item.source == CandidateSource::Generated));
+    let result = session.select(0);
+    assert_eq!(result.commit.as_deref(), Some("2026年8月9日"));
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.local_mode, LocalInputMode::None);
+    assert!(snapshot.preedit.is_empty());
+
+    // The pinned clock reads 14:30:00, as the reference fixture's did.
+    session.character(b'T', true);
+    type_text(&mut session, "sj");
+    assert!(
+        words(&session).contains(&"2026-08-09 14:30:00".to_owned()),
+        "{:?}",
+        words(&session)
+    );
+}
+
 #[test]
 fn disabled_local_modes_leave_the_key_to_the_host() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
@@ -1334,6 +1899,38 @@ fn invalid_options_are_refused() {
     let mut options = fixture.options();
     options.english.minimum_prefix = 9;
     assert!(Session::new(options).is_err());
+    // Both ends of each range (input_session.cpp:526-536).
+    let refused = |configure: &dyn Fn(&mut SessionOptions)| {
+        let mut options = fixture.options();
+        configure(&mut options);
+        Session::new(options).err().map(|error| error.to_string())
+    };
+    let invalid = Some(crate::diagnostics::INVALID_SESSION_OPTIONS.to_owned());
+    assert_eq!(
+        refused(&|options| options.frequency.linear_step = 0),
+        invalid
+    );
+    assert_eq!(
+        refused(&|options| options.frequency.linear_step = 11),
+        invalid
+    );
+    assert_eq!(
+        refused(&|options| options.frequency.trigger_count = 11),
+        invalid
+    );
+    assert_eq!(
+        refused(&|options| options.english.minimum_prefix = 0),
+        invalid
+    );
+    assert_eq!(
+        refused(&|options| {
+            options.frequency.linear_step = 10;
+            options.frequency.trigger_count = 10;
+            options.english.minimum_prefix = 8;
+        }),
+        None
+    );
+    assert_eq!(refused(&|options| options.english.minimum_prefix = 1), None);
     let mut options = fixture.options();
     options.helpcode_schema = "nonsense".to_owned();
     assert!(Session::new(options).is_err());

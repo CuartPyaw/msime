@@ -197,6 +197,19 @@ pub fn discounted(base: f64, accepted: i32) -> f64 {
 mod tests {
     use super::*;
 
+    /// test_typo_correction_input_session.cpp:338-347: the discount never rises with more accepted typos and settles on its 8.0 floor.
+    #[test]
+    fn discount_is_monotonic_down_to_its_floor() {
+        let mut previous = discounted(20.0, 0);
+        assert_eq!(previous, 20.0);
+        for accepted in 1..=2000 {
+            let current = discounted(20.0, accepted);
+            assert!(current <= previous && current >= 8.0 - 1e-9, "{accepted}");
+            previous = current;
+        }
+        assert!(previous < 8.0 + 1e-9);
+    }
+
     #[test]
     fn keyboard_adjacency_includes_the_staggered_diagonals() {
         assert!(keys_adjacent(b'q', b'w'));

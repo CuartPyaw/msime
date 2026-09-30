@@ -462,6 +462,32 @@ mod tests {
     use super::*;
     use crate::types::autocorrect_type::{DELETION, INSERTION, NEIGHBOR, TRANSPOSITION};
 
+    /// test_typo_correction_input_session.cpp:237-253: every neighbour row is one substitution of an adjacent key, by the same adjacency the typo learning uses (`typos::keys_adjacent`), and the two keyboard tables agree in both directions.
+    #[test]
+    fn neighbor_rows_agree_with_keys_adjacent() {
+        for (wrong, correct) in correction_table(NEIGHBOR) {
+            let (w, c) = (wrong.as_bytes(), correct.as_bytes());
+            assert_eq!(w.len(), c.len(), "{wrong} -> {correct}");
+            let diffs: Vec<usize> = (0..w.len()).filter(|&i| w[i] != c[i]).collect();
+            assert_eq!(diffs.len(), 1, "{wrong} -> {correct}");
+            assert!(
+                crate::pinyin::typos::keys_adjacent(w[diffs[0]], c[diffs[0]]),
+                "{wrong} -> {correct}"
+            );
+        }
+        for a in b'a'..=b'z' {
+            for b in b'a'..=b'z' {
+                assert_eq!(
+                    neighbors(a).contains(&b),
+                    crate::pinyin::typos::keys_adjacent(a, b),
+                    "{} {}",
+                    a as char,
+                    b as char
+                );
+            }
+        }
+    }
+
     const BOTH: u32 = TRANSPOSITION | NEIGHBOR;
     const ALL: u32 = BOTH | DELETION;
     const ALL_FOUR: u32 = ALL | INSERTION;

@@ -113,6 +113,8 @@ impl ShuangpinDictionary {
 
     /// Series answers scored with an older personal model are stale (SD:89-99).
     fn drop_personal_scored_results(&mut self) {
+        // Reading the model reloads it when another store or process changed the tables (SD:89-99 refreshes before comparing versions); a bare version read would keep answers scored against a stale model.
+        drop(self.personal.model());
         let version = self.personal.version();
         if version == self.personal_version {
             return;
