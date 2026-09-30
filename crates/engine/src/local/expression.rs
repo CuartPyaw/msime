@@ -1,4 +1,6 @@
 //! `V` mode: an arithmetic expression evaluated by `exmex`, a number written out in Chinese numerals by `chinese-number`, or a `YYYY.M.D` date. Rows are computed on the key that changed the input and read nothing from disk; an input that is none of these (an operator still waiting for its operand) has no rows, so the session shows the raw text instead.
+//!
+//! Arithmetic follows the usual precedence: `^` first, then `*`, `/` and `%` left to right, then `+` and `-` left to right. exmex only has left-associative binary operators and signs that bind tighter than any of them, so the two inputs where that disagrees with written mathematics, a chained power (`2^3^2`) and a sign in front of a power (`-2^2`), get no rows rather than a disputed number; brackets make either one unambiguous.
 
 use chinese_number::{ChineseCase, ChineseCountMethod, ChineseVariant, NumberToChinese};
 use exmex::{ops_factory, BinOp, Express, FlatEx, MakeOperators, Operator};
@@ -13,10 +15,12 @@ pub const SPELLING_SYMBOLS: &str = "0123456789+-*/.()%^";
 pub const RESULT_LIMIT: usize = 9;
 /// Numbers from here on are not written out in Chinese numerals: past 万亿 the readings stop being something people write.
 const CHINESE_NUMERAL_LIMIT: u64 = 1_000_000_000_000_000;
-/// Results are shown to this many significant digits, which hides binary rounding: 0.1+0.2 reads 0.3.
-const SIGNIFICANT_DIGITS: usize = 12;
+/// Fractional results are shown to this many significant digits, the most an f64 always carries, which hides binary rounding: 0.1+0.2 reads 0.3.
+const SIGNIFICANT_DIGITS: usize = 15;
+/// 2^53: integers below it are exact in an f64 and are shown in full.
+const EXACT_INTEGER_LIMIT: f64 = 9_007_199_254_740_992.0;
 
-// The default float operators minus the named functions and constants, which the mode cannot spell, plus `%` as the remainder. The priorities are exmex's own: `/` and `%` bind tighter than `*`, `-` tighter than `+`.
+// The default float operators minus the named functions and constants, which the mode cannot spell, plus `%` as the remainder. `*`, `/` and `%` share a priority, as do `+` and `-`, so each group evaluates left to right. None is marked commutative: exmex ranks a commutative operator between two literals above its own priority, which would compute `2*6%4` as `2*(6%4)`.
 ops_factory!(
     ArithmeticOps,
     f64,
@@ -32,8 +36,8 @@ ops_factory!(
         "*",
         BinOp {
             apply: |a, b| a * b,
-            prio: 2,
-            is_commutative: true,
+            prio: 3,
+            is_commutative: false,
         }
     ),
     Operator::make_bin(
@@ -56,8 +60,8 @@ ops_factory!(
         "+",
         BinOp {
             apply: |a, b| a + b,
-            prio: 0,
-            is_commutative: true,
+            prio: 1,
+            is_commutative: false,
         },
         |a| a
     ),
@@ -110,6 +114,9 @@ pub fn query_expression(code: &str) -> Vec<WordItem> {
 
 /// The result, the equation, and the amount in capitals when the result is one.
 fn expression_rows(code: &str) -> Vec<String> {
+    if power_is_disputed(code) {
+        return Vec::new();
+    }
     let Some(value) = evaluate(code) else {
         return Vec::new();
     };
@@ -119,6 +126,50 @@ fn expression_rows(code: &str) -> Vec<String> {
     let mut rows = vec![result.clone(), format!("{code}={result}")];
     rows.extend(amount_in_capitals(&result));
     rows
+}
+
+/// A chained power (`2^3^2`, which exmex reads left to right and mathematics right to left) or a sign in front of a power (`-2^2`, where exmex applies the sign first).
+fn power_is_disputed(code: &str) -> bool {
+    let bytes = code.as_bytes();
+    // The end of the operand starting at `index` after any signs: a number or a bracketed group.
+    let operand_end = |mut index: usize| {
+        while matches!(bytes.get(index), Some(b'+' | b'-')) {
+            index += 1;
+        }
+        if bytes.get(index) == Some(&b'(') {
+            let mut depth = 0usize;
+            while let Some(&byte) = bytes.get(index) {
+                index += 1;
+                match byte {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            while bytes
+                .get(index)
+                .is_some_and(|byte| byte.is_ascii_digit() || *byte == b'.')
+            {
+                index += 1;
+            }
+        }
+        index
+    };
+    bytes.iter().enumerate().any(|(index, &byte)| {
+        let sign = byte == b'-'
+            && (index == 0
+                || matches!(
+                    bytes[index - 1],
+                    b'+' | b'-' | b'*' | b'/' | b'%' | b'^' | b'('
+                ));
+        (byte == b'^' || sign) && bytes.get(operand_end(index + 1)) == Some(&b'^')
+    })
 }
 
 fn evaluate(code: &str) -> Option<f64> {
@@ -133,14 +184,18 @@ fn evaluate(code: &str) -> Option<f64> {
         .filter(|value: &f64| value.is_finite())
 }
 
-/// `SIGNIFICANT_DIGITS` significant digits, positional between one millionth and 10^16 and in exponent form outside it; `None` for infinity and NaN.
+/// An exact integer in full and anything else to `SIGNIFICANT_DIGITS` significant digits, positional between one millionth and 10^16 and in exponent form outside it; `None` for infinity and NaN.
 fn format_number(value: f64) -> Option<String> {
     if !value.is_finite() {
         return None;
     }
-    let rounded: f64 = format!("{value:.precision$e}", precision = SIGNIFICANT_DIGITS - 1)
-        .parse()
-        .ok()?;
+    let rounded: f64 = if value.fract() == 0.0 && value.abs() < EXACT_INTEGER_LIMIT {
+        value
+    } else {
+        format!("{value:.precision$e}", precision = SIGNIFICANT_DIGITS - 1)
+            .parse()
+            .ok()?
+    };
     // Adding zero turns -0 into 0, so 1-1 and -0 both read 0.
     let rounded = rounded + 0.0;
     let magnitude = rounded.abs();
@@ -229,14 +284,10 @@ fn amount_in_capitals(number: &str) -> Option<String> {
     Some(text)
 }
 
-/// Capitals spell out the leading one of 10-19 (壹拾肆, not 拾肆), as amounts are written so that nothing can be added in front; everyday numerals drop it (十四).
+/// Capitals spell out the leading one of 10-19 (壹拾肆, not 拾肆), as amounts are written so that nothing can be added in front; everyday numerals drop it (十四). Counting is 中數, where 兆 is 10^16, so everything below `CHINESE_NUMERAL_LIMIT` reads in 万 and 亿 (一万亿, not 一兆) as amounts are written.
 fn chinese_integer(value: u64, case: ChineseCase) -> Option<String> {
     let text = value
-        .to_chinese(
-            ChineseVariant::Simple,
-            case,
-            ChineseCountMethod::TenThousand,
-        )
+        .to_chinese(ChineseVariant::Simple, case, ChineseCountMethod::Middle)
         .ok()?;
     Some(if case == ChineseCase::Upper && text.starts_with('拾') {
         format!("壹{text}")
@@ -312,7 +363,7 @@ mod tests {
         assert_eq!(words("2*(3+4)"), ["14", "2*(3+4)=14", "壹拾肆元整"]);
         assert_eq!(words("2^10"), ["1024", "2^10=1024", "壹仟零贰拾肆元整"]);
         assert_eq!(words("7%3"), ["1", "7%3=1", "壹元整"]);
-        assert_eq!(words("1/3"), ["0.333333333333", "1/3=0.333333333333"]);
+        assert_eq!(words("1/3"), ["0.333333333333333", "1/3=0.333333333333333"]);
         assert_eq!(words("10-12"), ["-2", "10-12=-2"]);
         assert_eq!(words("-(1-1)"), ["0", "-(1-1)=0", "零元整"]);
         assert_eq!(words("10^20"), ["1e20", "10^20=1e20"]);
@@ -351,6 +402,7 @@ mod tests {
             ["一千零一十", "壹仟零壹拾", "壹仟零壹拾元整"]
         );
         assert_eq!(words("0"), ["零", "零", "零元整"]);
+        assert_eq!(words("1000000000000")[..2], ["一万亿", "壹万亿"]);
         assert_eq!(words("999999999999999").len(), 3);
         assert!(words("1000000000000000").is_empty());
     }
@@ -390,13 +442,65 @@ mod tests {
     }
 
     #[test]
-    fn numbers_format_to_twelve_significant_digits() {
+    fn exact_results_keep_every_digit() {
+        assert_eq!(
+            words("1234567890123+1"),
+            [
+                "1234567890124",
+                "1234567890123+1=1234567890124",
+                "壹万贰仟叁佰肆拾伍亿陆仟柒佰捌拾玖万零壹佰贰拾肆元整"
+            ]
+        );
+        assert_eq!(
+            words("98765432101.55+1"),
+            [
+                "98765432102.55",
+                "98765432101.55+1=98765432102.55",
+                "玖佰捌拾柒亿陆仟伍佰肆拾叁万贰仟壹佰零贰元伍角伍分"
+            ]
+        );
+    }
+
+    #[test]
+    fn operators_of_one_priority_evaluate_left_to_right() {
+        assert_eq!(words("2*6%4")[0], "0");
+        assert_eq!(words("3*10%7")[0], "2");
+        assert_eq!(words("6%4*2")[0], "4");
+        assert_eq!(words("12/4*3")[0], "9");
+        assert_eq!(words("1-2+3")[0], "2");
+        assert_eq!(words("2+3*4^2")[0], "50");
+    }
+
+    #[test]
+    fn disputed_powers_have_no_rows() {
+        for code in ["2^3^2", "-2^2", "3*-2^2", "-(1+1)^2", "2^-3^2"] {
+            assert!(words(code).is_empty(), "{code:?}");
+        }
+        assert_eq!(words("2^(3^2)")[0], "512");
+        assert_eq!(words("(2^3)^2")[0], "64");
+        assert_eq!(words("(-2)^2")[0], "4");
+        assert_eq!(words("-(2^2)")[0], "-4");
+        assert_eq!(words("2^-2")[0], "0.25");
+        assert_eq!(words("-2*3")[0], "-6");
+    }
+
+    #[test]
+    fn numbers_format_to_fifteen_significant_digits() {
         assert_eq!(format_number(0.1 + 0.2).as_deref(), Some("0.3"));
+        assert_eq!(format_number(0.1 * 3.0).as_deref(), Some("0.3"));
         assert_eq!(format_number(-0.0).as_deref(), Some("0"));
         assert_eq!(format_number(1e-7).as_deref(), Some("1e-7"));
         assert_eq!(
             format_number(123456789012.6).as_deref(),
-            Some("123456789013")
+            Some("123456789012.6")
+        );
+        assert_eq!(
+            format_number(1.2345678901234).as_deref(),
+            Some("1.2345678901234")
+        );
+        assert_eq!(
+            format_number(9_007_199_254_740_991.0).as_deref(),
+            Some("9007199254740991")
         );
         assert_eq!(format_number(f64::INFINITY), None);
         assert_eq!(format_number(f64::NAN), None);
