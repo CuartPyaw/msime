@@ -114,6 +114,8 @@ export interface LocalModesSectionProps {
   ios: boolean;
   /** The host routes the V, / and @ modes, so their switches have an effect. */
   triggers?: boolean;
+  /** The host can also edit the @ name list (a plugin store), without which the @ mode could never produce a candidate; its switch is shown only then. */
+  mentions?: boolean;
   onChange: (preferences: LocalModePreferences) => void;
 }
 
@@ -122,9 +124,12 @@ export function LocalModesSection({
   preferences,
   ios,
   triggers = false,
+  mentions = false,
   onChange,
 }: LocalModesSectionProps) {
-  const rows = triggers ? [...localModeRows, ...triggerModeRows] : localModeRows;
+  const rows = triggers
+    ? [...localModeRows, ...triggerModeRows.filter(([key]) => key !== "mention" || mentions)]
+    : localModeRows;
   return (
     <GroupList title="实用功能">
       {rows.map(([key, label, description]) => (

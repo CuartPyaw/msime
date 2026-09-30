@@ -382,7 +382,7 @@ export function PluginsSection({
         <GroupList title="背景音乐">
           <Row
             title="背景音乐"
-            description="默认关闭。只在输入法处于活动状态时播放；切换到其他输入法或进入密码框时暂停。"
+            description="默认关闭。只在输入法处于活动状态时播放，切换到其他输入法时暂停。"
           >
             <Switch
               checked={preferences.music.enabled}
@@ -433,7 +433,11 @@ export function PluginsSection({
             {MAX_COMMAND_TABLES} 个。
           </p>
           {commandPacks.length === 0 && missingTables.length === 0 && (
-            <p className={settings.groupNote}>还没有导入指令表。</p>
+            <p className={settings.groupNote}>
+              {client
+                ? "还没有导入指令表。"
+                : "这台设备还不能导入指令表，内置的 rq、sj、xq 指令照常可用。"}
+            </p>
           )}
           {commandPacks.map((pack) => {
             const position = command_tables.indexOf(pack.id);

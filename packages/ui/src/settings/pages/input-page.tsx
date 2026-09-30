@@ -125,6 +125,7 @@ export function InputSettingsPage() {
               preferences={localModes}
               ios={iosPlatform}
               triggers={showPluginTriggers}
+              mentions={showPluginTriggers && Boolean(client.plugins)}
               onChange={onLocalModesChange}
             />
           }

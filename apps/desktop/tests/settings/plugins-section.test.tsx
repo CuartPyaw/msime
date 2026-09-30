@@ -192,6 +192,22 @@ test("chooses a music pack, which starts unselected", async () => {
   });
 });
 
+test("says built-in commands still work where command tables cannot be imported", () => {
+  renderSection({ client: undefined });
+  expect(
+    screen.getByText("这台设备还不能导入指令表，内置的 rq、sj、xq 指令照常可用。"),
+  ).toBeTruthy();
+  expect(screen.queryByText("还没有导入指令表。")).toBeNull();
+  expect(screen.queryByText("@ 名单")).toBeNull();
+});
+
+test("does not promise a password-field pause the Windows host cannot make", () => {
+  renderSection();
+  expect(
+    screen.getByText("默认关闭。只在输入法处于活动状态时播放，切换到其他输入法时暂停。"),
+  ).toBeTruthy();
+});
+
 test("hides the groups a host does not back", () => {
   renderSection({ client: undefined, keySound: false, music: false, triggers: false });
   expect(screen.queryByRole("switch", { name: "按键音" })).toBeNull();
@@ -405,7 +421,13 @@ test("shows the V, / and @ switches only where the host routes them", () => {
   const expression = screen.getByRole("switch", { name: /V 模式/ }) as HTMLInputElement;
   expect(expression.checked).toBe(false);
   expect(screen.getByRole("switch", { name: /\/ 模式/ })).toBeTruthy();
-  expect(screen.getByRole("switch", { name: /@ 模式/ })).toBeTruthy();
+  // Without a way to edit the @ list (HarmonyOS has no plugin store), the @ mode could never produce a candidate, so its switch is not offered.
+  expect(screen.queryByRole("switch", { name: /@ 模式/ })).toBeNull();
+
+  cleanup();
+  render(
+    <LocalModesSection preferences={stored} ios={false} triggers mentions onChange={onChange} />,
+  );
 
   fireEvent.click(screen.getByRole("switch", { name: /@ 模式/ }));
   expect(onChange).toHaveBeenCalledWith({ ...stored, mention: true });
@@ -448,6 +470,23 @@ test("the 扩展 page saves plugin settings into the preferences document", asyn
   saveSettingsNow();
   await waitFor(() => expect(save).toHaveBeenCalled());
   expect(save.mock.calls.at(-1)?.[1].plugins?.key_sound.enabled).toBe(true);
+});
+
+test("the @ switch is offered only where the host can edit the name list", async () => {
+  render(
+    <SettingsPage
+      client={{
+        load: async () => snapshot,
+        save: vi.fn(),
+        host: { platform: "macos", plugin_triggers: true } as never,
+      }}
+    />,
+  );
+  await settingsFormReady();
+  fireEvent.click(screen.getByRole("button", { name: "输入" }));
+  const form = screen.getByRole("group", { name: "输入" });
+  expect(within(form).getByRole("switch", { name: /\/ 模式/ })).toBeTruthy();
+  expect(within(form).queryByRole("switch", { name: /@ 模式/ })).toBeNull();
 });
 
 test("the 扩展 page is not offered on a phone or a host that backs none of it", async () => {
