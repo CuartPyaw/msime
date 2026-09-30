@@ -1053,3 +1053,63 @@ fn kinds_are_a_closed_set() {
         assert_eq!(PluginKind::parse(other), None);
     }
 }
+
+#[test]
+fn failures_carry_the_code_and_the_rule_that_was_broken() {
+    let failure = PluginFailure::from(PluginError::Invalid("缺少 plugin.toml".into()));
+    assert_eq!(failure.code, "plugin_invalid");
+    assert_eq!(failure.detail.as_deref(), Some("缺少 plugin.toml"));
+    assert_eq!(
+        PluginFailure::from(PluginError::Archive("压缩包太大".into())).code,
+        "plugin_archive"
+    );
+    assert_eq!(
+        PluginFailure::from(PluginError::UnsupportedSource),
+        PluginFailure::code("plugin_unsupported_source")
+    );
+    assert_eq!(
+        PluginFailure::from(PluginError::Reserved),
+        PluginFailure::code("plugin_reserved")
+    );
+    assert_eq!(
+        PluginFailure::from(PluginError::Storage),
+        PluginFailure::code("plugin_storage")
+    );
+    assert_eq!(
+        PluginFailure::from(PluginError::Io(std::io::Error::other("disk"))),
+        PluginFailure::code("storage")
+    );
+    let failure = PluginFailure::from(mentions::MentionError::Invalid("「张三」为空或太长".into()));
+    assert_eq!(failure.code, "mention_invalid");
+    assert_eq!(failure.detail.as_deref(), Some("「张三」为空或太长"));
+    assert_eq!(
+        PluginFailure::from(mentions::MentionError::Format),
+        PluginFailure::code("mention_format")
+    );
+    assert_eq!(
+        PluginFailure::from(mentions::MentionError::Storage),
+        PluginFailure::code("mention_storage")
+    );
+    assert_eq!(
+        serde_json::to_value(PluginFailure::code("plugin_reserved")).unwrap(),
+        serde_json::json!({"code": "plugin_reserved", "detail": null})
+    );
+}
+
+#[test]
+fn remove_named_refuses_unknown_kinds_and_built_in_sound_packs() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    import(&picked_folder(files.path(), SOUND), &root).unwrap();
+    assert_eq!(
+        remove_named(&root, "script", "typewriter"),
+        Err(PluginFailure::code("invalid"))
+    );
+    assert_eq!(
+        remove_named(&root, "sound", "default"),
+        Err(PluginFailure::code("plugin_reserved"))
+    );
+    remove_named(&root, "sound", "typewriter").unwrap();
+    assert!(scan(&root, None).packages.is_empty());
+}

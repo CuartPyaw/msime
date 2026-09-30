@@ -7,11 +7,13 @@
 //! `mentions.json` beside the kind directories is the @ mode's name list, kept by `mentions`. It lives here rather than in the preferences document because that document is the one hosts copy and account sync reads from, and a contact list belongs to neither.
 
 pub mod command_table;
+mod failure;
 mod import;
 pub mod mentions;
 pub mod music_pack;
 pub mod sound_pack;
 
+pub use failure::{remove_named, PluginFailure};
 pub use import::import;
 
 use serde::Serialize;

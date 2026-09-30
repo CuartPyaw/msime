@@ -3,8 +3,8 @@
 //! Every rule lives in `msime_client_core::plugins`; these are shims that resolve the roots host-side and hand them over. The page never names a path: it asks for the catalog, asks the host to show its own picker for an import, and names a pack to remove by kind and id. The input processes read the same `<state>/plugins` directory (`preferences_directory/plugins` in host-api), so an import or a name-list save reaches them without any notification of its own: sound and music settings travel through the preferences document, and the command tables and the name list are reread when a field gains focus after their files changed.
 
 use crate::DictionaryHostOptions;
-use msime_client_core::plugins::mentions::{MentionEntry, MentionError, MentionStore};
-use msime_client_core::plugins::{self, PluginCatalog, PluginError, PluginKind, PluginSummary};
+use msime_client_core::plugins::mentions::{MentionEntry, MentionStore};
+use msime_client_core::plugins::{self, PluginCatalog, PluginFailure, PluginSummary};
 use std::path::{Path, PathBuf};
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
@@ -15,52 +15,6 @@ pub(crate) struct PluginsState(PathBuf);
 impl PluginsState {
     pub(crate) fn new(state_directory: &Path) -> Self {
         Self(state_directory.join("plugins"))
-    }
-}
-
-/// A failure the page can name: `code` picks the sentence, `detail` is the rule client-core reports for a refused pack or name, so the user learns which file or entry to fix.
-#[derive(Debug, PartialEq, Eq, serde::Serialize)]
-pub struct PluginCommandError {
-    code: &'static str,
-    detail: Option<String>,
-}
-
-impl PluginCommandError {
-    fn code(code: &'static str) -> Self {
-        Self { code, detail: None }
-    }
-}
-
-impl From<PluginError> for PluginCommandError {
-    fn from(value: PluginError) -> Self {
-        match value {
-            PluginError::Invalid(reason) => Self {
-                code: "plugin_invalid",
-                detail: Some(reason),
-            },
-            PluginError::UnsupportedSource => Self::code("plugin_unsupported_source"),
-            PluginError::Archive(reason) => Self {
-                code: "plugin_archive",
-                detail: Some(reason),
-            },
-            PluginError::Reserved => Self::code("plugin_reserved"),
-            PluginError::Storage => Self::code("plugin_storage"),
-            PluginError::Io(_) => Self::code("storage"),
-        }
-    }
-}
-
-impl From<MentionError> for PluginCommandError {
-    fn from(value: MentionError) -> Self {
-        match value {
-            MentionError::Invalid(reason) => Self {
-                code: "mention_invalid",
-                detail: Some(reason),
-            },
-            MentionError::Format => Self::code("mention_format"),
-            MentionError::Storage => Self::code("mention_storage"),
-            MentionError::Io(_) => Self::code("storage"),
-        }
     }
 }
 
@@ -130,11 +84,11 @@ fn linux_builtin_sound_packs(resources: &str) -> Option<PathBuf> {
 }
 
 async fn blocking<T: Send + 'static>(
-    work: impl FnOnce() -> Result<T, PluginCommandError> + Send + 'static,
-) -> Result<T, PluginCommandError> {
+    work: impl FnOnce() -> Result<T, PluginFailure> + Send + 'static,
+) -> Result<T, PluginFailure> {
     tauri::async_runtime::spawn_blocking(work)
         .await
-        .map_err(|_| PluginCommandError::code("storage"))?
+        .map_err(|_| PluginFailure::code("storage"))?
 }
 
 /// Every installed and built-in pack, with what is wrong with each folder that is not one.
@@ -143,7 +97,7 @@ pub async fn plugin_catalog(
     app: tauri::AppHandle,
     state: State<'_, PluginsState>,
     options: State<'_, DictionaryHostOptions>,
-) -> Result<PluginCatalog, PluginCommandError> {
+) -> Result<PluginCatalog, PluginFailure> {
     let root = state.0.clone();
     let options = options.inner().clone();
     blocking(move || {
@@ -162,7 +116,7 @@ pub async fn import_plugin_pack(
     window: tauri::WebviewWindow,
     state: State<'_, PluginsState>,
     source: PluginImportSource,
-) -> Result<Option<PluginSummary>, PluginCommandError> {
+) -> Result<Option<PluginSummary>, PluginFailure> {
     let root = state.0.clone();
     blocking(move || {
         let dialog = app.dialog().file().set_parent(&window);
@@ -181,13 +135,13 @@ pub async fn import_plugin_pack(
         };
         let path = picked
             .into_path()
-            .map_err(|_| PluginCommandError::code("plugin_unsupported_source"))?;
+            .map_err(|_| PluginFailure::code("plugin_unsupported_source"))?;
         import_pack_at(&path, &root).map(Some)
     })
     .await
 }
 
-fn import_pack_at(source: &Path, root: &Path) -> Result<PluginSummary, PluginCommandError> {
+fn import_pack_at(source: &Path, root: &Path) -> Result<PluginSummary, PluginFailure> {
     Ok(plugins::import(source, root)?)
 }
 
@@ -197,21 +151,16 @@ pub async fn remove_plugin_pack(
     state: State<'_, PluginsState>,
     kind: String,
     id: String,
-) -> Result<(), PluginCommandError> {
+) -> Result<(), PluginFailure> {
     let root = state.0.clone();
-    blocking(move || remove_pack_at(&root, &kind, &id)).await
-}
-
-fn remove_pack_at(root: &Path, kind: &str, id: &str) -> Result<(), PluginCommandError> {
-    let kind = PluginKind::parse(kind).ok_or(PluginCommandError::code("invalid"))?;
-    Ok(plugins::remove(root, kind, id)?)
+    blocking(move || plugins::remove_named(&root, &kind, &id)).await
 }
 
 /// The @ mode's name list, empty before one was saved.
 #[tauri::command]
 pub async fn load_plugin_mentions(
     state: State<'_, PluginsState>,
-) -> Result<Vec<MentionEntry>, PluginCommandError> {
+) -> Result<Vec<MentionEntry>, PluginFailure> {
     let root = state.0.clone();
     blocking(move || Ok(MentionStore::new(root).load()?)).await
 }
@@ -221,7 +170,7 @@ pub async fn load_plugin_mentions(
 pub async fn save_plugin_mentions(
     state: State<'_, PluginsState>,
     entries: Vec<MentionEntry>,
-) -> Result<(), PluginCommandError> {
+) -> Result<(), PluginFailure> {
     let root = state.0.clone();
     blocking(move || Ok(MentionStore::new(root).save(&entries)?)).await
 }
@@ -229,6 +178,7 @@ pub async fn save_plugin_mentions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use msime_client_core::plugins::PluginKind;
     use std::fs;
 
     fn write_command_table(directory: &Path, id: &str) {
@@ -257,7 +207,7 @@ mod tests {
         let catalog = plugins::scan(&root, None);
         assert_eq!(catalog.packages.len(), 1);
 
-        remove_pack_at(&root, "command_table", "signature").unwrap();
+        plugins::remove_named(&root, "command_table", "signature").unwrap();
         assert!(plugins::scan(&root, None).packages.is_empty());
     }
 
@@ -278,32 +228,7 @@ mod tests {
             .is_some_and(|detail| !detail.is_empty()));
         assert_eq!(
             import_pack_at(&source.path().join("missing.txt"), &root).unwrap_err(),
-            PluginCommandError::code("plugin_unsupported_source")
-        );
-    }
-
-    #[test]
-    fn remove_refuses_unknown_kinds_and_built_in_sound_packs() {
-        let state = tempfile::tempdir().unwrap();
-        let root = PluginsState::new(state.path()).0;
-        assert_eq!(
-            remove_pack_at(&root, "script", "anything").unwrap_err(),
-            PluginCommandError::code("invalid")
-        );
-        assert_eq!(
-            remove_pack_at(&root, "sound", "default").unwrap_err(),
-            PluginCommandError::code("plugin_reserved")
-        );
-    }
-
-    #[test]
-    fn mention_errors_name_the_entry() {
-        let error = PluginCommandError::from(MentionError::Invalid("「张三」为空或太长".into()));
-        assert_eq!(error.code, "mention_invalid");
-        assert_eq!(error.detail.as_deref(), Some("「张三」为空或太长"));
-        assert_eq!(
-            PluginCommandError::from(MentionError::Format),
-            PluginCommandError::code("mention_format")
+            PluginFailure::code("plugin_unsupported_source")
         );
     }
 
