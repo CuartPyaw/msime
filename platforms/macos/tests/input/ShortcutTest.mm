@@ -6570,7 +6570,37 @@ struct IsolatedDefaultSkinsRoot {
     }
 };
 
+// The controllers here read runtime-options.json from Application Support and save preferences into the directory it names. CTest points CFFIXED_USER_HOME at an empty home, but a direct run of this binary had none, and one of these cases once switched the developer's own input method to full width by saving into their real preferences. HOME does not move Application Support; CFFIXED_USER_HOME does, and Foundation reads it on first use, so it is set before anything touches Foundation, and the run stops if Application Support is still outside it.
+struct IsolatedUserHome {
+    std::filesystem::path path;
+    bool created = false;
+    IsolatedUserHome() {
+        const char *given = std::getenv("CFFIXED_USER_HOME");
+        if (given != nullptr && given[0] != '\0') {
+            path = given;
+        } else {
+            std::string pattern = (std::filesystem::temp_directory_path() / "msime-shortcut-home.XXXXXX").string();
+            assert(mkdtemp(pattern.data()) != nullptr);
+            path = pattern;
+            created = true;
+            assert(setenv("CFFIXED_USER_HOME", path.c_str(), 1) == 0);
+        }
+        NSString *support = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject.path;
+        const std::filesystem::path home = std::filesystem::weakly_canonical(path);
+        if (support == nil || std::filesystem::weakly_canonical(support.fileSystemRepresentation).string().rfind(home.string(), 0) != 0) {
+            std::fprintf(stderr, "refusing to run: Application Support (%s) is not inside the isolated home %s\n", support.UTF8String ?: "none", home.c_str());
+            std::abort();
+        }
+    }
+    ~IsolatedUserHome() {
+        if (!created) return;
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+    }
+};
+
 int main(int argc, char **argv) {
+    const IsolatedUserHome userHome;
     const IsolatedDefaultSkinsRoot skinsRoot;
     assert(msime::mac::DefaultSkinsRoot() == skinsRoot.path);
     assert(!MSIMEShouldRegisterInputSource(1, nullptr));
