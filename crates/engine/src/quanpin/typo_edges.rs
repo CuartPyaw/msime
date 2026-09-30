@@ -108,11 +108,14 @@ fn plan_keys(
             break;
         }
         let typed = &segments[position];
-        let mut variants: Vec<_> = syllable_typos(typed)
-            .iter()
-            .filter(|typo| autocorrect_types & autocorrect_bit(typo.kind) != 0)
-            .map(|typo| (typo, profile.accepted(typed, &typo.syllable)))
-            .collect();
+        let typos = syllable_typos(typed);
+        let mut variants = Vec::with_capacity(typos.len());
+        variants.extend(
+            typos
+                .iter()
+                .filter(|typo| autocorrect_types & autocorrect_bit(typo.kind) != 0)
+                .map(|typo| (typo, profile.accepted(typed, &typo.syllable))),
+        );
         // Kinds are already cheapest first, so a stable sort on the personal count keeps that as the tie-break.
         variants.sort_by_key(|variant| std::cmp::Reverse(variant.1));
         for (typo, accepted) in variants {
