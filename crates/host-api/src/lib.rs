@@ -448,10 +448,11 @@ impl HostSession {
                     .to_owned(),
             );
         }
-        // A replacement changes the view generation, never the completed commit. Korean writes half-width ASCII punctuation and digits whatever the width switch says.
-        if result.view.character_width == CharacterWidth::Fullwidth
-            && result.view.scheme != KOREAN_SCHEME
-        {
+        // A replacement changes the view generation, never the completed commit. Korean writes half-width ASCII punctuation and digits whatever the width switch says; the dedicated English mode keeps its own rules in every scheme, so its commits are widened as they are under a Chinese scheme.
+        let korean_text = result.view.scheme == KOREAN_SCHEME
+            && !result.view.dedicated_english
+            && result.view.local_mode == "none";
+        if result.view.character_width == CharacterWidth::Fullwidth && !korean_text {
             if let Some(c) = result.commit.as_mut() {
                 *c = c
                     .chars()

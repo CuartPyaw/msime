@@ -1462,10 +1462,9 @@ void CCompositionProcessorEngine::InitializeMetasequoiaIMECompartment(_In_ ITfTh
 {
     // Default CN/EN on IME activate / switch-in (input.default_ime_mode).
     const BOOL openChinese = FanyUtils::ReadConfiguredDefaultImeModeChinese();
-    Global::JapaneseInputModeEnabled.store(FanyUtils::ReadConfiguredJapaneseInputMode() != FALSE,
-                                           std::memory_order_relaxed);
-    Global::KoreanInputModeEnabled.store(FanyUtils::ReadConfiguredKoreanInputMode() != FALSE,
-                                         std::memory_order_relaxed);
+    const std::string configuredScheme = FanyUtils::ReadConfiguredInputScheme();
+    Global::JapaneseInputModeEnabled.store(configuredScheme == "japanese", std::memory_order_relaxed);
+    Global::KoreanInputModeEnabled.store(configuredScheme == "korean", std::memory_order_relaxed);
     // Use the suppressing writer so the OPENCLOSE sink does not treat this as
     // a user choice and drop the defense we are about to arm.
     SetKeyboardOpenCompartment(pThreadMgr, tfClientId, openChinese);

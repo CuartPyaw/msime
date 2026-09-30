@@ -5220,9 +5220,13 @@ public:
           auto *state = ic->propertyFor(&factory_);
           if (!state->session_) return;
           // Leaving the client commits an open Korean syllable. Fcitx5 commits a client preedit on focus out itself (or the client does, with ClientUnfocusCommit), so only a syllable drawn in the panel, for a client without preedit support, is committed here.
-          if (state->korean() && !state->view_.value("editing_text", std::string{}).empty() &&
-              !ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit)) {
-            try { state->apply(msime_client_focus(state->session_, false)); } catch (...) {}
+          if (state->korean() && !state->view_.value("editing_text", std::string{}).empty()) {
+            if (!ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit)) {
+              try { state->apply(msime_client_focus(state->session_, false)); } catch (...) {}
+            } else {
+              // The syllable reaches the document through the preedit rather than through commitText, so it is counted here as typed text.
+              state->recordTypingStatistics(state->view_.value("preedit", std::string{}), state->typingSource());
+            }
           }
           state->rememberInputMode();
           state->ime_mode_chosen_ = false;
@@ -5420,7 +5424,13 @@ public:
     auto *state = event.inputContext()->propertyFor(&factory_);
     state->backspace_hold_.reset();
     state->toggle_chord_held_ = FcitxKey_None;
-    try { if (state->session_) state->command(MSIME_CANCEL); } catch (...) { state->close(); }
+    // An open Korean syllable drawn in the panel, for a client without preedit support, exists nowhere but here, so a reset writes it out instead of dropping text the user already typed (see focus_watch_ for the same rule on focus out).
+    const bool koreanPanelSyllable =
+        state->session_ && state->korean() && !state->view_.value("editing_text", std::string{}).empty() &&
+        !event.inputContext()->capabilityFlags().test(fcitx::CapabilityFlag::Preedit);
+    try {
+      if (state->session_) state->command(koreanPanelSyllable ? MSIME_FINISH_COMPOSITION : MSIME_CANCEL);
+    } catch (...) { state->close(); }
     state->clearPanel();
   }
   void keyEvent(const fcitx::InputMethodEntry &, fcitx::KeyEvent &event) override {

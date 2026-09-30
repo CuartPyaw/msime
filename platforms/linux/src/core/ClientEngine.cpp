@@ -3690,11 +3690,12 @@ bool apply(IBusEngine *engine, char *raw, PunctuationPairMode pair_mode,
       s.last_smart_punctuation = 0;
       s.last_smart_punctuation_time = 0;
     }
-    // Korean commits are half-width ASCII punctuation beside Hangul, which the runtime already leaves unconverted; the host must not widen them either.
+    // Korean commits are half-width ASCII punctuation beside Hangul, which the runtime already leaves unconverted; the host must not widen them either. The dedicated English mode keeps its own rules in every scheme, so its commits are widened as usual.
     const auto &commit_context = result.contains("commit_context") ? result.at("commit_context") : Json(nullptr);
     const bool korean_commit =
-        (commit_context.is_object() && commit_context.value("scheme", 0) == 4) ||
-        result.at("view").value("scheme", 0) == 4;
+        ((commit_context.is_object() && commit_context.value("scheme", 0) == 4) ||
+         result.at("view").value("scheme", 0) == 4) &&
+        !result.at("view").value("dedicated_english", false);
     if (state(engine).fullwidth && !korean_commit)
       text = fullwidth_text(text);
     if (!text.empty()) {
@@ -4423,9 +4424,15 @@ void focus_out(IBusEngine *engine) {
         !s.view.value("dedicated_english", false) &&
         s.view.value("local_mode", std::string("none")) == "none" &&
         !s.view.value("editing_text", std::string{}).empty();
-    if (korean_composition)
-      s.view = response(msime_client_focus(s.session, false)).at("view");
-    else if (s.session)
+    if (korean_composition) {
+      // The source is read from the view the syllable was typed under, before the focus result replaces it.
+      const auto source = typing_source(s);
+      const auto left = response(msime_client_focus(s.session, false));
+      // IBus writes the syllable as the preedit, not through commit_text, so it is counted here as typed text.
+      if (left.contains("commit") && left.at("commit").is_string())
+        record_typing_statistics(engine, left.at("commit").get<std::string>(), source);
+      s.view = left.at("view");
+    } else if (s.session)
       apply(engine, msime_client_focus(s.session, false));
     clear(engine);
     publish_mode(engine);

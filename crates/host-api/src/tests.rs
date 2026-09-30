@@ -1083,6 +1083,15 @@ fn korean_scheme_crosses_the_host_boundary() {
     let left = read(msime_client_focus(handle, false));
     assert_eq!(left["value"]["commit"], "가");
     assert_eq!(left["value"]["view"]["editing_text"], "");
+
+    // The dedicated English mode keeps its own rules under the Korean scheme: full-width output widens its commits.
+    read(msime_client_focus(handle, true));
+    read(msime_client_set_english_mode(handle, true));
+    for character in b"ab" {
+        read(msime_client_character(handle, *character, false));
+    }
+    let english = read(msime_client_command(handle, 2));
+    assert_eq!(english["value"]["commit"], "ａｂ");
     read(msime_client_destroy(handle));
 }
 

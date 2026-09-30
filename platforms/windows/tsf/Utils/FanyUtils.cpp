@@ -301,22 +301,18 @@ std::string ReadLegacyConfiguredInputMode()
 }
 } // namespace
 
-BOOL ReadConfiguredJapaneseInputMode()
+std::string ReadConfiguredInputScheme()
 {
     if (const auto preferences = ReadSharedPreferences())
     {
-        return preferences->value("scheme", std::string{"quanpin"}) == "japanese";
+        return preferences->value("scheme", std::string{"quanpin"});
     }
-    return ReadLegacyConfiguredInputMode() == "japanese";
+    return ReadLegacyConfiguredInputMode();
 }
 
-BOOL ReadConfiguredKoreanInputMode()
+BOOL ReadConfiguredJapaneseInputMode()
 {
-    if (const auto preferences = ReadSharedPreferences())
-    {
-        return preferences->value("scheme", std::string{"quanpin"}) == "korean";
-    }
-    return ReadLegacyConfiguredInputMode() == "korean";
+    return ReadConfiguredInputScheme() == "japanese";
 }
 
 SwitchLanguageHotkeys ReadConfiguredSwitchLanguageHotkeys()
