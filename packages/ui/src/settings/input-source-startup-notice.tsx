@@ -5,6 +5,8 @@ export type InputSourceStartupStatus = {
   enabled: boolean | null;
   bundled_version: string | null;
   installed_version: string | null;
+  /** Copies of the input method in `/Library/Input Methods`, which compete with the user's copy and need an administrator to remove; read afresh on every request. */
+  system_bundles?: string[];
 };
 
 export interface InputSourceStartupNoticeProps {
@@ -36,7 +38,7 @@ export function InputSourceStartupNotice({
       {status.action === "login_required" && (
         <p>
           水杉输入法已安装到本机，但本次登录的输入法列表还看不到它。请注销并重新登录，然后在
-          系统设置 &gt; 键盘 &gt; 输入法 中添加水杉输入法。
+          系统设置 &gt; 键盘 &gt; 文字输入 &gt; 输入法 中点「编辑…」添加水杉输入法。
         </p>
       )}
       {status.action === "failed" && (
@@ -46,13 +48,13 @@ export function InputSourceStartupNotice({
       )}
       {status.enabled === false && status.action !== "login_required" && (
         <p>
-          请在 系统设置 &gt; 键盘 &gt; 输入法 中添加并启用水杉输入法。
+          请在 系统设置 &gt; 键盘 &gt; 文字输入 &gt; 输入法 中点「编辑…」添加水杉输入法。
           <button
             type="button"
             className="secondary"
             onClick={() => {
               void Promise.resolve(onOpenSettings()).catch(() =>
-                onError("无法打开系统设置，请手动前往 系统设置 > 键盘 > 输入法。"),
+                onError("无法打开系统设置，请手动前往 系统设置 > 键盘 > 文字输入 > 输入法。"),
               );
             }}
           >

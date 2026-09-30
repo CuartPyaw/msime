@@ -2095,3 +2095,53 @@ fn preferences_recovery_serializes_the_fields_the_settings_page_reads() {
     .unwrap();
     assert!(untouched["backupPath"].is_null());
 }
+
+/// A re-check from the setup guide reads the input source list and the system-wide input method directory again and reports the rest of the start-time result unchanged, without running the install a second time.
+#[cfg(target_os = "macos")]
+#[test]
+fn input_source_status_rereads_only_what_the_user_can_change() {
+    let state = super::InputSourceStartupState::default();
+    state.finish(Some(super::InputSourceStartupStatus {
+        action: "installed",
+        enabled: Some(false),
+        bundled_version: Some("0.50.0 (1)".into()),
+        installed_version: Some("0.50.0 (1)".into()),
+        system_bundles: Vec::new(),
+    }));
+    let timeout = std::time::Duration::ZERO;
+    let system_copy = || {
+        vec![std::path::PathBuf::from(
+            "/Library/Input Methods/MetasequoiaIME.app",
+        )]
+    };
+
+    let before =
+        super::input_source_status_now(&state, timeout, || Some(false), system_copy).unwrap();
+    assert_eq!(before.enabled, Some(false));
+    assert_eq!(
+        before.system_bundles,
+        vec!["/Library/Input Methods/MetasequoiaIME.app".to_string()]
+    );
+    let after = super::input_source_status_now(&state, timeout, || Some(true), Vec::new).unwrap();
+    assert_eq!(after.action, "installed");
+    assert_eq!(after.enabled, Some(true));
+    assert!(after.system_bundles.is_empty());
+    assert_eq!(after.installed_version.as_deref(), Some("0.50.0 (1)"));
+    let unreadable = super::input_source_status_now(&state, timeout, || None, Vec::new).unwrap();
+    assert_eq!(unreadable.enabled, None);
+}
+
+/// A launch that ran no start-time check (a development run, a panel launch) has nothing to re-check, and reads neither the input source list nor the system directory for it.
+#[cfg(target_os = "macos")]
+#[test]
+fn input_source_status_is_absent_when_no_start_time_check_ran() {
+    let state = super::InputSourceStartupState::default();
+    state.finish(None);
+    let status = super::input_source_status_now(
+        &state,
+        std::time::Duration::ZERO,
+        || panic!("the input source list is not read without a start-time result"),
+        || panic!("the system directory is not read without a start-time result"),
+    );
+    assert!(status.is_none());
+}

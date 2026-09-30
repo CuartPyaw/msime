@@ -1806,7 +1806,7 @@ test("macOS reports the start-time input method refresh and a source that still 
   const banner = await screen.findByRole("status", { name: "水杉输入法安装状态" });
   expect(within(banner).getByText("水杉输入法已更新到 0.51.0 (7300)。")).toBeDefined();
   expect(
-    within(banner).getByText(/请在 系统设置 > 键盘 > 输入法 中添加并启用水杉输入法/),
+    within(banner).getByText(/系统设置 > 键盘 > 文字输入 > 输入法 中点「编辑…」添加水杉输入法/),
   ).toBeDefined();
   fireEvent.click(within(banner).getByRole("button", { name: "打开键盘设置" }));
   await waitFor(() => expect(openSettings).toHaveBeenCalledOnce());

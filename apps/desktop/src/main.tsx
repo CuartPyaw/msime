@@ -27,6 +27,8 @@ import {
   SettingsStartupPage,
   WelcomeFlowPage,
   LinuxSetupPage,
+  MacosInputSourceGuide,
+  macosInputSourceGuideNeeded,
   useCandidatePreviewTheme,
   type AccountClient,
   type ApiCredentialTestResult,
@@ -63,6 +65,7 @@ import {
   type LinuxSetupClient,
   type LinuxSetupLine,
   type LinuxSetupStatus,
+  type InputSourceStartupStatus,
   type McpClientId,
   type McpInstallOutcome,
   type McpServerStatus,
@@ -188,6 +191,12 @@ const vocabularyReview: VocabularyReviewClient = {
   removeWordbook: (wordbook) => invoke("remove_vocabulary_wordbook", { wordbook }),
   reset: () => invoke("reset_vocabulary_review"),
 };
+/** How long the first window waits for the macOS start-time install before opening without the input source guide. */
+const MACOS_INPUT_GUIDE_WAIT_MS = 15_000;
+const inputSourceStartup: NonNullable<SettingsClient["inputSourceStartup"]> = {
+  status: () => invoke("input_source_startup_status"),
+  openSettings: () => invoke("open_input_source_settings"),
+};
 const client: SettingsClient = {
   readAppVersion: getVersion,
   resolveFontFamilies: (names) => invoke("resolve_font_families", { names }),
@@ -233,10 +242,7 @@ const client: SettingsClient = {
   openCloudDictionary: () => invoke("open_cloud_dictionary_panel"),
   restartInputMethod: () => invoke("restart_input_method"),
   installInputSource: () => invoke("install_input_source"),
-  inputSourceStartup: {
-    status: () => invoke("input_source_startup_status"),
-    openSettings: () => invoke("open_input_source_settings"),
-  },
+  inputSourceStartup,
   onDeviceTranslation: {
     downloadableLanguages: () => invoke<string[]>("on_device_translation_downloadable_languages"),
     openSettings: () => invoke("open_translation_language_settings"),
@@ -474,6 +480,7 @@ function DesktopSettings() {
   const [settingsClient, setSettingsClient] = useState<SettingsClient | null>(null);
   const [bootstrapRequired, setBootstrapRequired] = useState<boolean | null>(null);
   const [linuxSetup, setLinuxSetup] = useState<LinuxSetupStatus | null>(null);
+  const [macosInputGuide, setMacosInputGuide] = useState<InputSourceStartupStatus | null>(null);
   const [replayOnboarding, setReplayOnboarding] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<
     | "voice"
@@ -635,8 +642,19 @@ function DesktopSettings() {
         host?.platform === "linux"
           ? await invoke<LinuxSetupStatus>("linux_setup_status").catch(() => null)
           : null;
+      // macOS installs the input method when the app starts but cannot add it to the user's input sources, so a launch that leaves it unusable opens on the guide for that step. The status waits for the start-time install, which takes seconds on a first run or an update and is immediate otherwise; a registration that hangs longer would keep the window blank, so past the bound the app opens on the settings page, whose notice shows the result once it arrives.
+      const macosInputSource =
+        host?.platform === "macos"
+          ? await Promise.race([
+              inputSourceStartup.status().catch(() => null),
+              new Promise<null>((resolve) =>
+                window.setTimeout(() => resolve(null), MACOS_INPUT_GUIDE_WAIT_MS),
+              ),
+            ])
+          : null;
       if (!active) return;
       if (linuxSetupStatus && !linuxSetupStatus.prepared) setLinuxSetup(linuxSetupStatus);
+      if (macosInputSourceGuideNeeded(macosInputSource)) setMacosInputGuide(macosInputSource);
       setBootstrapRequired((android || ios) && !ready);
       setInitialPage(page ?? undefined);
       const hosted: SettingsClient = host
@@ -899,6 +917,14 @@ function DesktopSettings() {
         onComplete={() => setLinuxSetup(null)}
       />
     );
+  if (macosInputGuide)
+    return (
+      <MacosInputSourceGuide
+        status={macosInputGuide}
+        client={{ ...inputSourceStartup, openExternalUrl: client.openExternalUrl }}
+        onComplete={() => setMacosInputGuide(null)}
+      />
+    );
   // Mount once after discovery: replacing the client later would reload draft preferences.
   if (bootstrapRequired || replayOnboarding)
     return (
@@ -1025,7 +1051,26 @@ function DesktopSettings() {
       client={settingsClient}
       initialPage={initialPage}
       route={settingsRoute}
-      onReplayOnboarding={() => setReplayOnboarding(true)}
+      onReplayOnboarding={
+        settingsClient.host?.platform === "macos"
+          ? () => {
+              // A launch that ran no start-time check (a development run) still shows the steps, just without a result to follow.
+              void inputSourceStartup
+                .status()
+                .catch(() => null)
+                .then((status) =>
+                  setMacosInputGuide(
+                    status ?? {
+                      action: "up_to_date",
+                      enabled: null,
+                      bundled_version: null,
+                      installed_version: null,
+                    },
+                  ),
+                );
+            }
+          : () => setReplayOnboarding(true)
+      }
     />
   );
 }

@@ -29,6 +29,16 @@ const MAX_INPUT_SOURCE_PREFERENCES_BYTES: usize = 1024 * 1024;
 /// one is removed. Same bundle identifier on both, so leaving two behind would give the input menu
 /// two entries for one source.
 const LEGACY_BUNDLE_NAMES: [&str; 1] = ["水杉输入法（预览）.app"];
+/// The bundle the `.pkg` releases put in `~/Library/Input Methods` (pkgbuild `--install-location "Library/Input Methods"` with only the current-user domain enabled), and `scripts/install.sh` before the rename to 水杉输入法.
+///
+/// Unlike the preview name it is also the name of the upstream project's input method, so it is only removed when its Info.plist carries one of this product's identifiers: `app.msime.inputmethod.MetasequoiaIME` since 2026-09-14, which is the same input source as the current bundle, and `com.houko.inputmethod.MetasequoiaIME` before, which shows up as a second, outdated 水杉 in the input menu.
+const PKG_ERA_BUNDLE_NAME: &str = "MetasequoiaIME.app";
+const PKG_ERA_BUNDLE_IDS: [&str; 2] = [
+    INPUT_SOURCE_BUNDLE_ID,
+    "com.houko.inputmethod.MetasequoiaIME",
+];
+/// The system-wide input method directory. Nothing this product shipped installed there, but a copy placed by hand competes with the user's; removing it needs an administrator, so it is only reported.
+const SYSTEM_INPUT_METHODS: &str = "/Library/Input Methods";
 
 #[derive(Debug)]
 pub(crate) enum InstallError {
@@ -242,6 +252,51 @@ fn remove_legacy_bundles(input_methods: &Path) {
         }
         let _ = fs::remove_dir_all(&legacy);
     }
+    let pkg_era = input_methods.join(PKG_ERA_BUNDLE_NAME);
+    if carries_product_identifier(&pkg_era) {
+        let _ = fs::remove_dir_all(&pkg_era);
+    }
+}
+
+/// Whether `bundle` is a real directory (not a symlink) whose Info.plist names one of this product's identifiers. The identifiers are plain ASCII, which both XML and binary property lists store verbatim.
+fn carries_product_identifier(bundle: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(bundle) else {
+        return false;
+    };
+    if !metadata.is_dir() {
+        return false;
+    }
+    let info = bundle.join("Contents/Info.plist");
+    if is_symlink(&info).unwrap_or(true) {
+        return false;
+    }
+    let Ok(file) = fs::File::open(&info) else {
+        return false;
+    };
+    let Ok(plist) = crate::shared::bounded_body::read_bounded(file, MAX_INFO_PLIST_BYTES as usize)
+    else {
+        return false;
+    };
+    let plist = String::from_utf8_lossy(&plist);
+    PKG_ERA_BUNDLE_IDS.iter().any(|id| plist.contains(id))
+}
+
+/// Copies of this input method in `input_methods` under any name it has shipped with.
+fn product_bundles_in(input_methods: &Path) -> Vec<PathBuf> {
+    [
+        INPUT_SOURCE_BUNDLE_NAME,
+        LEGACY_BUNDLE_NAMES[0],
+        PKG_ERA_BUNDLE_NAME,
+    ]
+    .into_iter()
+    .map(|name| input_methods.join(name))
+    .filter(|bundle| carries_product_identifier(bundle))
+    .collect()
+}
+
+/// Copies of this input method in `/Library/Input Methods`, which the user has to remove with an administrator password: the settings app does not ask for one. Cheap enough to call on every status request, so the setup guide notices when they are gone.
+pub(crate) fn system_bundles() -> Vec<PathBuf> {
+    product_bundles_in(Path::new(SYSTEM_INPUT_METHODS))
 }
 
 /// Install a validated bundle below `input_methods`, replacing an existing
@@ -534,6 +589,12 @@ where
     let installed = bundle_version(target);
     let refresh = refresh_decision(bundled.as_ref(), installed.as_ref(), target.exists());
     if refresh == Refresh::UpToDate {
+        // An install that ran before the pkg-era or preview copy was cleaned up, or one made by `scripts/install.sh`, leaves it in place; the current bundle being valid is what makes the old one redundant.
+        if validate_bundle(target).is_ok() {
+            if let Some(input_methods) = target.parent() {
+                remove_legacy_bundles(input_methods);
+            }
+        }
         return Ok(RefreshOutcome {
             refresh,
             bundled,
@@ -853,6 +914,102 @@ mod tests {
             .file_type()
             .is_symlink());
         assert!(elsewhere.exists());
+    }
+
+    fn pkg_era_bundle(input_methods: &Path, name: &str, id: &str) -> PathBuf {
+        let bundle = input_methods.join(name);
+        fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
+        fs::write(
+            bundle.join("Contents/Info.plist"),
+            format!("<key>CFBundleIdentifier</key><string>{id}</string>"),
+        )
+        .unwrap();
+        bundle
+    }
+
+    // The .pkg releases installed MetasequoiaIME.app into ~/Library/Input Methods under the same identifier (and, before 2026-09-14, com.houko's), so an upgraded machine would keep two bundles for one input source.
+    #[test]
+    fn installing_removes_the_pkg_era_bundle_but_not_someone_elses() {
+        let root = tempdir().unwrap();
+        let destination = root.path().join("Library/Input Methods");
+        fs::create_dir_all(&destination).unwrap();
+        let pkg_era = pkg_era_bundle(&destination, PKG_ERA_BUNDLE_NAME, INPUT_SOURCE_BUNDLE_ID);
+        let source = fixture(root.path(), INPUT_SOURCE_BUNDLE_ID, b"new");
+        install_bundle_at(&source, &destination).unwrap();
+        assert!(!pkg_era.exists(), "the pkg-era bundle is gone");
+
+        let older = pkg_era_bundle(
+            &destination,
+            PKG_ERA_BUNDLE_NAME,
+            "com.houko.inputmethod.MetasequoiaIME",
+        );
+        install_bundle_at(&source, &destination).unwrap();
+        assert!(!older.exists(), "the pre-rename identifier is ours too");
+
+        let upstream = pkg_era_bundle(
+            &destination,
+            PKG_ERA_BUNDLE_NAME,
+            "com.example.inputmethod.MetasequoiaIME",
+        );
+        install_bundle_at(&source, &destination).unwrap();
+        assert!(upstream.exists(), "a bundle with another identifier stays");
+        fs::remove_dir_all(&upstream).unwrap();
+
+        let elsewhere = pkg_era_bundle(root.path(), "elsewhere.app", INPUT_SOURCE_BUNDLE_ID);
+        let link = destination.join(PKG_ERA_BUNDLE_NAME);
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        install_bundle_at(&source, &destination).unwrap();
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(elsewhere.exists());
+    }
+
+    // A machine whose current bundle is already up to date never reaches the install path, so the start-time check cleans up there too - but only once a valid current bundle is installed, since until then the old copy is the only working one.
+    #[test]
+    fn an_up_to_date_check_removes_the_pkg_era_bundle_only_beside_a_valid_install() {
+        let root = tempdir().unwrap();
+        let destination = root.path().join("Library/Input Methods");
+        fs::create_dir_all(&destination).unwrap();
+        let target = destination.join(INPUT_SOURCE_BUNDLE_NAME);
+        let pkg_era = pkg_era_bundle(&destination, PKG_ERA_BUNDLE_NAME, INPUT_SOURCE_BUNDLE_ID);
+
+        // Not installed: the refresh is an install, which the injected step declines here.
+        let source = fixture(root.path(), INPUT_SOURCE_BUNDLE_ID, b"bundled");
+        let result = ensure_current_with(&source, &target, || Err(InstallError::Io));
+        assert!(result.is_err());
+        assert!(pkg_era.exists(), "kept while nothing replaces it");
+
+        // Installed and not older than the bundled copy (neither version is readable): up to date.
+        install_bundle_at(&source, &destination).unwrap();
+        let pkg_era = pkg_era_bundle(&destination, PKG_ERA_BUNDLE_NAME, INPUT_SOURCE_BUNDLE_ID);
+        let outcome = ensure_current_with(&source, &target, || {
+            panic!("an up-to-date install must not reinstall")
+        })
+        .unwrap();
+        assert_eq!(outcome.refresh, Refresh::UpToDate);
+        assert!(!pkg_era.exists());
+    }
+
+    #[test]
+    fn finds_copies_of_this_input_method_under_every_name_it_shipped_with() {
+        let root = tempdir().unwrap();
+        let system = root.path().join("Library/Input Methods");
+        assert!(
+            product_bundles_in(&system).is_empty(),
+            "a missing directory has none"
+        );
+        fs::create_dir_all(&system).unwrap();
+        let current = pkg_era_bundle(&system, INPUT_SOURCE_BUNDLE_NAME, INPUT_SOURCE_BUNDLE_ID);
+        let pkg_era = pkg_era_bundle(
+            &system,
+            PKG_ERA_BUNDLE_NAME,
+            "com.houko.inputmethod.MetasequoiaIME",
+        );
+        pkg_era_bundle(&system, LEGACY_BUNDLE_NAMES[0], "com.example.other");
+        pkg_era_bundle(&system, "Other.app", INPUT_SOURCE_BUNDLE_ID);
+        assert_eq!(product_bundles_in(&system), vec![current, pkg_era]);
     }
 
     #[test]

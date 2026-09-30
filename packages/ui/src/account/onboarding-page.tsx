@@ -37,7 +37,7 @@ const stepTitles = [
   "登录后多端同步",
 ] as const;
 
-function SetupStep({
+export function SetupStep({
   number,
   title,
   children,
