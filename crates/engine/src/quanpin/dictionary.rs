@@ -710,24 +710,35 @@ impl QuanpinDictionary {
             return rows;
         }
         // The segments were normalised once in `resolve_segments`, so the lookup uses the standard keys directly.
-        let code = if segmentation.is_empty() {
-            join_segments(segments)
+        let rows =
+            self.database
+                .query_segments_keyed_flat(segments, UNLIMITED_ROWS, QuerySource::Quanpin);
+        if segmentation.is_empty() {
+            let code = join_segments(segments);
+            rows.into_iter()
+                .map(|row| {
+                    WordItem::new(
+                        &code,
+                        row.value,
+                        row.weight,
+                        CandidateSource::Database,
+                        row.key,
+                    )
+                })
+                .collect()
         } else {
-            segmentation.to_string()
-        };
-        self.database
-            .query_segments_keyed_flat(segments, UNLIMITED_ROWS, QuerySource::Quanpin)
-            .into_iter()
-            .map(|row| {
-                WordItem::new(
-                    code.clone(),
-                    row.value,
-                    row.weight,
-                    CandidateSource::Database,
-                    row.key,
-                )
-            })
-            .collect()
+            rows.into_iter()
+                .map(|row| {
+                    WordItem::new(
+                        segmentation,
+                        row.value,
+                        row.weight,
+                        CandidateSource::Database,
+                        row.key,
+                    )
+                })
+                .collect()
+        }
     }
 
     /// The single normalisation choke point (QD:767-775): an explicit segmentation and the automatic cut both pass here, so the segments entering the pipeline are alias-normalised exactly once.
