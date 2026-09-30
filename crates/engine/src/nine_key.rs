@@ -421,12 +421,11 @@ impl NineKeySession {
         let prefixes = letter_prefixes(&digits, ENGLISH_PREFIX_BUDGET);
         let capacity = prefixes.len().saturating_mul(ENGLISH_LIMIT);
         let mut words = Vec::with_capacity(capacity);
-        let mut seen = HashSet::with_capacity(capacity);
         for prefix in prefixes {
             for word in english.query_prefix(&prefix, ENGLISH_LIMIT) {
                 // Only a whole code that starts with the digits counts; otherwise letters beyond the expanded prefix leak in.
                 if !digits_for_word(&word.word).starts_with(&digits)
-                    || !seen.insert(word.word.clone())
+                    || has_candidate_word(&words, &word.word)
                 {
                     continue;
                 }
@@ -527,6 +526,10 @@ fn agrees_with_locked(matched: &str, locked_key: &str) -> bool {
         .strip_prefix(matched)
         .is_some_and(|rest| rest.starts_with('\''));
     under || over
+}
+
+fn has_candidate_word(candidates: &[WordItem], word: &str) -> bool {
+    candidates.iter().any(|candidate| candidate.word == word)
 }
 
 /// More digits covered first. Synthesised rows (whole-sentence Generated, Fallback) score on a different scale from dictionary weights, so within one coverage bucket dictionary rows lead; then exact before fuzzy, then weight. Dedup by word, capped (NK:283-307).
@@ -795,6 +798,13 @@ mod tests {
 
     fn item(word: &str, digits: &str, weight: i64, source: CandidateSource) -> WordItem {
         WordItem::new(digits, word, weight, source, "")
+    }
+
+    #[test]
+    fn candidate_word_lookup_scans_existing_rows() {
+        let candidates = vec![item("old", "653", 1, CandidateSource::EnglishDictionary)];
+        assert!(has_candidate_word(&candidates, "old"));
+        assert!(!has_candidate_word(&candidates, "older"));
     }
 
     #[test]
