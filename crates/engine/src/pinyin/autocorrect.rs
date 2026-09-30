@@ -409,7 +409,7 @@ pub fn autocorrect_cut_kbest(
     search.best[length]
         .iter()
         .map(|hypothesis| {
-            let mut segments = Vec::new();
+            let mut segments = Vec::with_capacity(length);
             let mut position = length;
             let mut current = *hypothesis;
             while current.prev_index != NO_PREDECESSOR {
