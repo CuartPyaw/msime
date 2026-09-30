@@ -213,7 +213,10 @@ pub(super) fn build_graph(
     let max_len = options.max_phrase_syllables.max(1);
     let mut graph: Graph = (0..n).map(|_| Vec::new()).collect();
     // A key repeated in the input (ma'ma'ma) is looked up once.
-    let mut span_cache: HashMap<String, Vec<LatticeLexeme>> = HashMap::new();
+    let span_capacity = (0..n)
+        .map(|start| n.min(start.saturating_add(max_len)) - start)
+        .sum();
+    let mut span_cache: HashMap<String, Vec<LatticeLexeme>> = HashMap::with_capacity(span_capacity);
     for (start, edges) in graph.iter_mut().enumerate() {
         for end in start + 1..=n.min(start + max_len) {
             let span = &syllables[start..end];
