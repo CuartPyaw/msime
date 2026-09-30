@@ -209,15 +209,14 @@ pub fn prepare_translation_sidecar(options: &EngineOptions) -> Result<()> {
     }
     let source_file = File::open(&source)
         .map_err(|_| EngineError::failed(diagnostics::TRANSLATION_SIDECAR_FAILED))?;
-    if source_file
+    let source_size = source_file
         .metadata()
         .map_err(|_| EngineError::failed(diagnostics::TRANSLATION_SIDECAR_FAILED))?
-        .len()
-        > MAX_TRANSLATION_SIDECAR_BYTES
-    {
+        .len();
+    if source_size > MAX_TRANSLATION_SIDECAR_BYTES {
         return Err(EngineError::failed(diagnostics::TRANSLATION_SIDECAR_FAILED));
     }
-    let mut contents = Vec::new();
+    let mut contents = Vec::with_capacity(source_size as usize);
     if source_file
         .take(MAX_TRANSLATION_SIDECAR_BYTES + 1)
         .read_to_end(&mut contents)
