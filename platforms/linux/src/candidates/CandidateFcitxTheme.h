@@ -41,7 +41,7 @@ inline std::string fcitx_theme_color(std::uint32_t rgb, bool transparent = false
   return buffer;
 }
 
-// An installed skin's decoration as the theme draws it (see stage_fcitx_overlay): the name of its copy in the theme directory, the band reserved for it above the candidates, and the image's own height where this host can read it.
+// An installed skin's decoration as the theme draws it (see stage_fcitx_overlay): the name of its copy in the theme directory, the transparent band reserved for it above the card, and the image's own height where this host can read it.
 struct FcitxThemeOverlay {
   std::string file;
   int band = 0;
@@ -160,7 +160,7 @@ inline std::string fcitx_margin(int left, int right, int top, int bottom) {
 //
 // The card, its rounded highlight and the menu are nine-slice images drawn by fcitx_add_shape; each section also keeps its flat colour, which the classic UI draws instead when it cannot load the image. Where no compositor runs on X11 the classic UI has no alpha channel, so the transparent corners and shadow show black there, as they do for any Fcitx5 theme with rounded images.
 //
-// A decoration is drawn as the background's overlay. Windows draws it above the card, trailing-aligned, in a band top_inset_dip tall that pushes the card down; the classic UI draws an overlay only inside the panel, so here the band is the top of the card itself, just inside the outline: the content margin grows by it and the image sits at the top right. The classic UI draws an overlay at its own pixel size and cannot scale it into the width_dip x top_inset_dip box the way Windows does, so an image of known height is centred in the band like Windows' contain, and one taller than the band is anchored to its bottom so that what does not fit is cut at the card's top edge instead of being drawn over the candidates.
+// A decoration is drawn as the background's overlay, with the geometry every host shares: the panel is top_inset_dip (the band) taller than the card, the band is transparent, and the image sits in it with its bottom one card padding below the card's top edge, over the card, aligned left, centre or right with the same padding in from the card's side. The panel image carries the band as fully transparent rows above the card (the shadow keeps the margin above the card it has without a decoration) and counts them in the nine-slice top margin, so they are never stretched; the shadow margin and the content margin both grow by the band, so X11 places the card, not the band, at the cursor and the candidates start below the card's top edge as they do without a decoration. The classic UI paints the overlay while it paints the background, before the candidates, so the part over the card is under the preedit and the highlight; it ends where the content starts, so nothing is covered. The classic UI draws an overlay at its own pixel size and cannot scale it to width_dip the way Windows does: an image whose height is known is placed by its bottom edge, and one taller than the band is cut at the band's top; an image of unknown height starts at the band's top and is drawn at full length.
 inline FcitxThemeFiles fcitx_candidate_theme_files(const CandidateColors &colors, bool dark,
                                                    const std::optional<FcitxThemeOverlay> &overlay = std::nullopt,
                                                    const std::optional<double> &corner_radius = std::nullopt) {
@@ -179,20 +179,22 @@ inline FcitxThemeFiles fcitx_candidate_theme_files(const CandidateColors &colors
   // A skin's own radius (0-32) replaces the design's; the corner slices grow and shrink with it.
   const int radius = corner_radius ? std::clamp(static_cast<int>(std::lround(*corner_radius)), 0, 32) : G::radius;
 
-  // The card: the corner slices hold the rounded corners and the part of the shadow that varies along the edge, so the stretched middle slices are exact.
+  // The card: the corner slices hold the rounded corners and the part of the shadow that varies along the edge, so the stretched middle slices are exact. A decoration's band is the transparent top of the top slices.
   const int slice_left = G::shadow_left + radius;
   const int slice_right = G::shadow_right + radius;
-  const int slice_top = G::shadow_top + G::shadow_offset + radius;
+  const int shadow_top = G::shadow_top + band;
+  const int slice_top = shadow_top + G::shadow_offset + radius;
   const int slice_bottom = G::shadow_bottom + radius;
   const int panel_width = slice_left + 2 + slice_right;
   const int panel_height = slice_top + 2 + slice_bottom;
-  const FcitxRect card{G::shadow_left, G::shadow_top, static_cast<double>(panel_width - G::shadow_right),
+  const FcitxRect card{G::shadow_left, static_cast<double>(shadow_top), static_cast<double>(panel_width - G::shadow_right),
                        static_cast<double>(panel_height - G::shadow_bottom)};
   const auto panel = fcitx_add_shape(files.images, panel_width, panel_height, [&](FcitxCanvas &canvas) {
     const FcitxRect shadow{card.left, card.top + G::shadow_offset, card.right, card.bottom + G::shadow_offset};
     fcitx_drop_shadow(canvas, shadow, radius, G::shadow_sigma, G::shadow_alpha);
     fcitx_fill_rounded(canvas, card, radius, surface);
     if (border_width > 0) fcitx_stroke_rounded(canvas, card, radius, border_width, *colors.border);
+    canvas.clear_above(band);
   });
   std::string highlight_image;
   if (colors.selected)
@@ -241,20 +243,22 @@ inline FcitxThemeFiles fcitx_candidate_theme_files(const CandidateColors &colors
 
   std::string decoration;
   if (overlay) {
-    int offset = G::shadow_top + inset;
-    if (overlay->height) offset += *overlay->height <= band ? (band - *overlay->height) / 2 : band - *overlay->height;
-    // The offset is measured from the gravity's edge: inside the outline on the side the skin aligns to, none when centred.
+    // The card's padding, where the content starts inside the outline: the image's bottom edge is this far below the card's top edge, and its side this far in from the card's side, as Windows places it with pad_y and pad_x.
+    const int pad = inset + G::padding;
+    // With Top gravity the classic UI measures the offset down from the panel's top edge. An image of known height ends `pad` below the card's top (a negative offset is cut by the clip margin below); one of unknown height starts at the band's top.
+    const int offset = overlay->height ? shadow_top + pad - *overlay->height : G::shadow_top;
+    // Measured from the gravity's edge: `pad` inside the card on the side the skin aligns to, none when centred (the card is centred in the panel, its shadow margins being equal).
     const char *gravity = overlay->align == CandidateSkinAlign::left     ? "Top Left"
                           : overlay->align == CandidateSkinAlign::center ? "Top Center"
                                                                          : "Top Right";
-    const int offset_x = overlay->align == CandidateSkinAlign::left     ? G::shadow_left + inset
+    const int offset_x = overlay->align == CandidateSkinAlign::left     ? G::shadow_left + pad
                          : overlay->align == CandidateSkinAlign::center ? 0
-                                                                        : G::shadow_right + inset;
+                                                                        : G::shadow_right + pad;
+    // The image may cover the band and the card down to just inside its outline, never the shadow around them.
     decoration = "Overlay=" + overlay->file + "\nGravity=" + gravity + "\nOverlayOffsetX=" +
                  std::to_string(offset_x) + "\nOverlayOffsetY=" + std::to_string(offset) +
                  "\nHideOverlayIfOversize=False\n\n[InputPanel/Background/OverlayClipMargin]\n" +
-                 fcitx_margin(G::shadow_left + inset, G::shadow_right + inset, G::shadow_top + inset,
-                              G::shadow_bottom + inset);
+                 fcitx_margin(G::shadow_left + inset, G::shadow_right + inset, G::shadow_top, G::shadow_bottom + inset);
     decoration.pop_back();
   }
   std::ostringstream conf;
@@ -283,10 +287,10 @@ inline FcitxThemeFiles fcitx_candidate_theme_files(const CandidateColors &colors
        << "BorderWidth=" << border_width << "\n" << decoration << "\n"
        << "[InputPanel/Background/Margin]\n" << fcitx_margin(slice_left, slice_right, slice_top, slice_bottom)
        << "[InputPanel/ShadowMargin]\n"
-       << fcitx_margin(G::shadow_left, G::shadow_right, G::shadow_top, G::shadow_bottom)
+       << fcitx_margin(G::shadow_left, G::shadow_right, shadow_top, G::shadow_bottom)
        << "[InputPanel/ContentMargin]\n"
        << fcitx_margin(G::shadow_left + inset + G::padding, G::shadow_right + inset + G::padding,
-                       G::shadow_top + inset + band + G::padding, G::shadow_bottom + inset + G::padding)
+                       shadow_top + inset + G::padding, G::shadow_bottom + inset + G::padding)
        << "[InputPanel/TextMargin]\n" << fcitx_margin(G::item_left, G::item_right, G::item_vertical, G::item_vertical)
        << "[InputPanel/Highlight]\n";
   if (!highlight_image.empty()) conf << "Image=" << highlight_image << "\n";

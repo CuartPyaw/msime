@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -32,6 +33,12 @@ public:
                              static_cast<float>(rgb & 0xffu) / 255.0f};
     for (int channel = 0; channel < 3; ++channel) pixel[channel] = source[channel] * alpha + pixel[channel] * (1.0f - alpha);
     pixel[3] = alpha + pixel[3] * (1.0f - alpha);
+  }
+
+  // Make every pixel above `top` (logical pixels) fully transparent, whatever was drawn there.
+  void clear_above(int top) {
+    const auto rows = static_cast<std::size_t>(std::clamp(top * scale_, 0, height_));
+    std::fill(pixels_.begin(), pixels_.begin() + static_cast<std::ptrdiff_t>(rows * static_cast<std::size_t>(width_) * 4u), 0.0f);
   }
 
   // Straight (non-premultiplied) 8-bit RGBA rows, as PNG colour type 6 stores them.

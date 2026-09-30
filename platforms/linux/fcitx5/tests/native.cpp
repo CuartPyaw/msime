@@ -93,11 +93,13 @@ void candidateThemeDecoration() {
   const auto copy = decorated.substr(named + 9, decorated.find('\n', named + 1) - named - 9);
   require(copies() == std::vector<std::string>{copy}, "overlay image staged beside theme.conf");
   require(std::filesystem::file_size(themeDirectory / copy) == std::filesystem::file_size(image), "overlay is the skin's image");
-  require(decorated.find("Gravity=Top Right\nOverlayOffsetX=13\nOverlayOffsetY=15\nHideOverlayIfOversize=False\n") !=
+  require(decorated.find("Gravity=Top Right\nOverlayOffsetX=19\nOverlayOffsetY=28\nHideOverlayIfOversize=False\n") !=
               std::string::npos,
-          "overlay pinned top right inside the card and centred in the band");
+          "overlay pinned top right, its bottom one padding below the card top (8 + 25 + 7 - 12)");
   require(decorated.find("[InputPanel/ContentMargin]\nLeft=19\nRight=19\nTop=40\n") != std::string::npos,
           "band reserved above the candidates");
+  require(decorated.find("[InputPanel/ShadowMargin]\nLeft=12\nRight=12\nTop=33\n") != std::string::npos,
+          "band counted in the shadow margin, so X11 places the card at the cursor");
   // The rounded card is an image generated beside theme.conf.
   const auto card = decorated.find("[InputPanel/Background]\nImage=shape-");
   require(card != std::string::npos, "card drawn from a generated image");
