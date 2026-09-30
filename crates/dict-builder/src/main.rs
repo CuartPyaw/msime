@@ -38,7 +38,7 @@ enum Stage {
     Wubi,
     /// Quick phrase table in msime.db, then msime.db's planner statistics
     QuickPhrases,
-    /// english_words table in english.db
+    /// english_words table in english.db, plus custom/english.txt (pinned from msime-dictionary)
     English,
     /// Bidirectional gloss tables in english.db, derived from ECDICT (reads msime.db)
     EnglishGlosses,
@@ -251,13 +251,23 @@ impl Build {
                 let counts = english::parse_google_counts(&text::read(
                     &self.sources.pinned("en/google_count_1_w.txt")?,
                 )?);
+                let custom = english::parse_custom_english(&text::read(
+                    &self.sources.pinned(english::CUSTOM_ENGLISH)?,
+                )?)?;
                 let rows = english::build_english_words(
                     &mut self.database("english.db")?,
                     &oaldpe,
                     &base,
                     &counts,
+                    &custom,
                 )?;
-                Ok(format!("{rows} words"))
+                Ok(format!(
+                    "{} words, {} custom rows: {} added, {} replacing a base row",
+                    rows.base,
+                    custom.len(),
+                    rows.custom_added,
+                    rows.custom_replaced
+                ))
             }
             Stage::EnglishGlosses => {
                 let msime_path = self.out.join("msime.db");
