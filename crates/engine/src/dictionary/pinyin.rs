@@ -176,7 +176,7 @@ impl PinyinDatabase {
             }
             keys_by_table.entry(table).or_default().push(key);
         }
-        let mut rows = Vec::new();
+        let mut rows = Vec::with_capacity(segmentations.len().saturating_mul(limit));
         for (table, keys) in &keys_by_table {
             rows.extend(self.batch_rows(table, keys, limit));
         }
