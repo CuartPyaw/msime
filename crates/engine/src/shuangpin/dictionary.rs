@@ -204,12 +204,20 @@ impl ShuangpinDictionary {
             _ => {}
         }
         let rows_key = if raw.is_empty() { pure } else { raw };
-        let key = self.sentence_cache_key(rows_key);
+        let mut key = (!self.rerankers.is_empty()).then(|| self.sentence_cache_key(rows_key));
         self.drop_personal_scored_results();
-        if self.series_cache.contains(&key) {
+        let cache_hit = match key.as_ref() {
+            Some(key) => self.series_cache.get_ref(key).is_some(),
+            None => self.series_cache.get_ref_by(rows_key).is_some(),
+        };
+        if cache_hit {
             self.reset_cache_if_database_changed();
-            if let Some(cached) = self.series_cache.get(&key) {
-                return cached;
+            let cached = match key.as_ref() {
+                Some(key) => self.series_cache.get_ref(key),
+                None => self.series_cache.get_ref_by(rows_key),
+            };
+            if let Some(cached) = cached {
+                return cached.clone();
             }
         }
 
@@ -247,6 +255,7 @@ impl ShuangpinDictionary {
         ));
         self.merge_sentences(&mut candidates, &segments, pure);
 
+        let key = key.take().unwrap_or_else(|| rows_key.to_owned());
         self.series_cache.insert(key.clone(), candidates.clone());
         // Only keys long enough for the lattice carry personal scores.
         if segments.len() >= 2 {
