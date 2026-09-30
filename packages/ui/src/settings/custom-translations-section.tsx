@@ -1,5 +1,7 @@
 import { Row } from "../core/platform-controls";
+import { SettingsActionsFooter } from "./settings-actions-footer";
 import * as settings from "./settings-style";
+import type { SettingsSaveState } from "./use-settings-persistence";
 
 export interface CustomTranslationsSectionProps {
   mobile: boolean;
@@ -7,27 +9,32 @@ export interface CustomTranslationsSectionProps {
   placeholder: string;
   notice: string;
   summary: string;
-  busy: boolean;
+  /** Where the automatic save of the overlay stands. */
+  saveState: SettingsSaveState;
+  /** Why the last save failed, shown while `saveState` is `failed`. */
+  saveError: string;
   onChange: (value: string) => void;
-  onSave: () => void;
+  /** Writes the pending edit now instead of waiting out the countdown; also the 重试 after a failure. */
+  onFlush: () => void;
 }
 
-/** Editor for user supplied candidate translation overrides. */
+/** Editor for user supplied candidate translation overrides; edits are saved automatically. */
 export function CustomTranslationsSection({
   mobile,
   value,
   placeholder,
   notice,
   summary,
-  busy,
+  saveState,
+  saveError,
   onChange,
-  onSave,
+  onFlush,
 }: CustomTranslationsSectionProps) {
   return (
     <div role="group" aria-label="自定义候选释义设置" className={settings.rowStack}>
       <Row
         title="自定义候选释义"
-        description={`${mobile ? "候选栏" : "候选窗"}的中英互译来自内置词库；覆盖不全或译得不准时，可以自己加一层，不改内置词库。每行一条，用 Tab 分隔源词和译文；以 # 开头的行是注释。源词含汉字即为中译英，全是英文则为英译中。同一个源词写多次时以最后一次为准。保存后重新启动输入法生效。`}
+        description={`${mobile ? "候选栏" : "候选窗"}的中英互译来自内置词库；覆盖不全或译得不准时，可以自己加一层，不改内置词库。每行一条，用 Tab 分隔源词和译文；以 # 开头的行是注释。源词含汉字即为中译英，全是英文则为英译中。同一个源词写多次时以最后一次为准。修改会自动保存，重新启动输入法后生效。`}
       />
       <div className={settings.groupBlock}>
         <textarea
@@ -36,11 +43,17 @@ export function CustomTranslationsSection({
           value={value}
           placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
+          onBlur={onFlush}
         />
         <p role="status">{notice || summary}</p>
-        <button type="button" className="secondary" disabled={busy} onClick={onSave}>
-          {busy ? "保存中…" : "保存自定义释义"}
-        </button>
+        <SettingsActionsFooter
+          busy={false}
+          saveState={saveState}
+          saveError={saveError}
+          showRestoreDefaults={false}
+          onRestoreDefaults={() => undefined}
+          onRetry={onFlush}
+        />
       </div>
     </div>
   );

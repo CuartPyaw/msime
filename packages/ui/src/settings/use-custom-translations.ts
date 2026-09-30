@@ -1,10 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "../core/error-message";
 import {
   customTranslationsExample,
   customTranslationsWithinBounds,
   parseCustomTranslations,
 } from "../dictionary/custom-translations";
+import {
+  SETTINGS_AUTOSAVE_DELAY_MS,
+  SETTINGS_SAVED_STATUS_MS,
+  type SettingsSaveState,
+} from "./use-settings-persistence";
 
 export interface CustomTranslationsClient {
   load(): Promise<string>;
@@ -15,15 +20,35 @@ export interface UseCustomTranslationsOptions {
   client?: CustomTranslationsClient;
 }
 
-/** Owns loading, validation, saving, and summary text for user translation overlays. */
+const oversizedNotice = "自定义释义过大，请精简后再保存。";
+
+/** Owns loading, validation, automatic saving, and summary text for user translation overlays. */
 export function useCustomTranslations({ client }: UseCustomTranslationsOptions) {
-  const [text, setText] = useState("");
+  const [text, setTextState] = useState("");
   const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [saveState, setSaveState] = useState<SettingsSaveState>("idle");
+  const [saveError, setSaveError] = useState("");
   const report = useMemo(() => parseCustomTranslations(text), [text]);
   const summary = text.trim()
     ? `${report.entries.length} 条释义` + (report.skipped ? `，${report.skipped} 行无法识别` : "")
     : "还没有自定义释义。";
+
+  const mounted = useRef(true);
+  const clientRef = useRef(client);
+  clientRef.current = client;
+  // The text as last edited, and whether it differs from what was last written; the save loop reads these so edits made while a save is in flight are not lost.
+  const textRef = useRef("");
+  const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const savedStatusTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!client) return;
@@ -31,7 +56,10 @@ export function useCustomTranslations({ client }: UseCustomTranslationsOptions) 
     void client
       .load()
       .then((value) => {
-        if (active) setText(value);
+        // An edit made before the file arrived wins over it rather than being overwritten.
+        if (!active || dirtyRef.current) return;
+        textRef.current = value;
+        setTextState(value);
       })
       .catch(() => {
         // An unreadable overlay stays empty; saving it creates a fresh valid file.
@@ -41,33 +69,124 @@ export function useCustomTranslations({ client }: UseCustomTranslationsOptions) 
     };
   }, [client]);
 
-  async function save() {
-    if (!client || busy) return;
-    if (!customTranslationsWithinBounds(text)) {
-      setNotice("自定义释义过大，请精简后再保存。");
+  function clearAutosave() {
+    if (autosaveTimer.current === undefined) return;
+    clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = undefined;
+  }
+
+  /** Writes the latest text if it has not been written yet, then keeps writing while edits made during the save are still unsaved. Only one save runs at a time. */
+  async function flush() {
+    clearAutosave();
+    const current = clientRef.current;
+    if (!current || !mounted.current || savingRef.current || !dirtyRef.current) return;
+    if (!customTranslationsWithinBounds(textRef.current)) {
+      // Nothing is written until the text fits again; the next edit schedules another attempt.
+      setNotice(oversizedNotice);
+      setSaveState("idle");
       return;
     }
-    setBusy(true);
+    savingRef.current = true;
+    clearTimeout(savedStatusTimer.current);
+    setSaveState("saving");
+    setSaveError("");
+    let failed = false;
     try {
-      await client.save(text);
-      setNotice(`已保存 ${report.entries.length} 条释义，重新启动输入法后生效。`);
+      while (mounted.current && dirtyRef.current) {
+        const sent = textRef.current;
+        if (!customTranslationsWithinBounds(sent)) break;
+        dirtyRef.current = false;
+        try {
+          await current.save(sent);
+        } catch (reason) {
+          // The edit is still unsaved; 重试 or the next edit writes it again.
+          dirtyRef.current = true;
+          throw reason;
+        }
+      }
     } catch (reason) {
-      setNotice(errorMessage(reason));
+      failed = true;
+      if (mounted.current) {
+        setSaveState("failed");
+        setSaveError(errorMessage(reason));
+      }
     } finally {
-      setBusy(false);
+      savingRef.current = false;
     }
+    if (!mounted.current || failed) return;
+    if (dirtyRef.current) {
+      // Only an oversized edit made during the save stops the loop early; say so instead of claiming it was saved.
+      setNotice(oversizedNotice);
+      setSaveState("idle");
+      return;
+    }
+    setSaveState("saved");
+    savedStatusTimer.current = setTimeout(
+      () => setSaveState((state) => (state === "saved" ? "idle" : state)),
+      SETTINGS_SAVED_STATUS_MS,
+    );
   }
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+
+  function setText(value: string) {
+    textRef.current = value;
+    dirtyRef.current = true;
+    setTextState(value);
+    setNotice("");
+    setSaveState((state) => (state === "saved" ? "idle" : state));
+    // A save in flight picks the new text up when it finishes; otherwise the countdown restarts.
+    if (savingRef.current) return;
+    clearAutosave();
+    autosaveTimer.current = setTimeout(() => {
+      autosaveTimer.current = undefined;
+      void flushRef.current();
+    }, SETTINGS_AUTOSAVE_DELAY_MS);
+  }
+
+  // Leaving the window or page saves at once rather than waiting out the countdown.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    const flushNow = () => void flushRef.current();
+    const onVisibilityChange = () => {
+      if (document.hidden) flushNow();
+    };
+    window.addEventListener("blur", flushNow);
+    window.addEventListener("pagehide", flushNow);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("blur", flushNow);
+      window.removeEventListener("pagehide", flushNow);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  // Unmounting with an edit still counting down writes it without waiting for an answer: nothing is left on screen to show the result.
+  useEffect(
+    () => () => {
+      clearTimeout(savedStatusTimer.current);
+      if (autosaveTimer.current === undefined) return;
+      clearAutosave();
+      const current = clientRef.current;
+      const pending = textRef.current;
+      if (!current || savingRef.current || !dirtyRef.current) return;
+      if (!customTranslationsWithinBounds(pending)) return;
+      dirtyRef.current = false;
+      void Promise.resolve()
+        .then(() => current.save(pending))
+        .catch(() => undefined);
+    },
+    [],
+  );
 
   return {
     text,
-    setText: (value: string) => {
-      setText(value);
-      setNotice("");
-    },
+    setText,
     notice,
     summary,
-    busy,
+    saveState,
+    saveError,
     placeholder: customTranslationsExample,
-    save,
+    flush,
   } as const;
 }

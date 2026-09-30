@@ -23,7 +23,7 @@ export type SettingsSaveState = "idle" | "saving" | "saved" | "failed";
 /** How long the draft must stay unchanged before it is saved: a toggle applies almost at once, typing saves once it pauses. */
 export const SETTINGS_AUTOSAVE_DELAY_MS = 400;
 /** How long 已保存 stays in the action row after a save. */
-const SAVED_STATUS_MS = 2000;
+export const SETTINGS_SAVED_STATUS_MS = 2000;
 /** How many times one save rebases onto another window's newer revision before it reports the conflict. */
 const CONFLICT_RETRIES = 3;
 
@@ -343,7 +343,7 @@ export function useSettingsPersistence({
         setSaveState("saved");
         savedStatusTimer.current = setTimeout(
           () => setSaveState((state) => (state === "saved" ? "idle" : state)),
-          SAVED_STATUS_MS,
+          SETTINGS_SAVED_STATUS_MS,
         );
       }
     }

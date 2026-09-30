@@ -3,6 +3,7 @@ import type { Preferences, ProviderCredentialStatus, SettingsClient } from "../i
 import type { useProviderCredentials } from "./use-provider-credentials";
 import type { useTranslationSettings } from "./use-translation-settings";
 import type { useCustomTranslations } from "./use-custom-translations";
+import type { SettingsSaveState } from "./use-settings-persistence";
 import { HandwritingPlatformNotice } from "./handwriting-platform-notice";
 import { MobileInputAiNotice } from "./mobile-input-ai-notice";
 import { InputModeSection } from "./input-mode-section";
@@ -126,9 +127,10 @@ export interface InputSettingsPanelProps {
   setCustomTranslationsText: (value: string) => void;
   customTranslationsNotice: string;
   customTranslationsSummary: string;
-  customTranslationsBusy: boolean;
+  customTranslationsSaveState: SettingsSaveState;
+  customTranslationsSaveError: string;
   customTranslationsPlaceholder: string;
-  saveCustomTranslations: () => Promise<void>;
+  flushCustomTranslations: () => Promise<void>;
   fuzzyPinyin: FuzzyPinyinPreferences;
   mixedInput: MixedInputPreferences;
   frequency: FrequencyPreferences;
@@ -192,9 +194,10 @@ export function InputSettingsPanel({
   setCustomTranslationsText,
   customTranslationsNotice,
   customTranslationsSummary,
-  customTranslationsBusy,
+  customTranslationsSaveState,
+  customTranslationsSaveError,
   customTranslationsPlaceholder,
-  saveCustomTranslations,
+  flushCustomTranslations,
   fuzzyPinyin,
   mixedInput,
   frequency,
@@ -447,11 +450,12 @@ export function InputSettingsPanel({
               placeholder={customTranslationsPlaceholder}
               notice={customTranslationsNotice}
               summary={customTranslationsSummary}
-              busy={customTranslationsBusy}
+              saveState={customTranslationsSaveState}
+              saveError={customTranslationsSaveError}
               onChange={(value) => {
                 setCustomTranslationsText(value);
               }}
-              onSave={() => void saveCustomTranslations()}
+              onFlush={() => void flushCustomTranslations()}
             />
           )}
           <CustomTranslationSection
