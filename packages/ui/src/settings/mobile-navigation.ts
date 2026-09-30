@@ -78,6 +78,11 @@ export const pages = [
     title: "实用功能",
     icon: new URL("../assets/utilities.svg", import.meta.url).href,
   },
+  {
+    id: "plugins",
+    title: "扩展",
+    icon: new URL("../assets/plugins.svg", import.meta.url).href,
+  },
   { id: "ai", title: "AI 辅助", icon: new URL("../assets/ai.svg", import.meta.url).href },
   {
     id: "floating-toolbar",

@@ -9,6 +9,7 @@ const capabilities: AvailablePageCapabilities = {
   chat: false,
   community: false,
   floatingToolbar: false,
+  plugins: false,
   mobile: false,
 };
 
@@ -21,7 +22,11 @@ test("keeps common settings pages while hiding unavailable host entries", () => 
   expect(ids).not.toContain("vocabulary");
   expect(ids).not.toContain("community");
   expect(ids).not.toContain("floating-toolbar");
+  expect(ids).not.toContain("plugins");
   expect(ids).not.toContain("more");
+  expect(
+    availableSettingsPages({ ...capabilities, plugins: true }).map((page) => page.id),
+  ).toContain("plugins");
 });
 
 test("exposes only the host-backed and mobile entries that are available", () => {

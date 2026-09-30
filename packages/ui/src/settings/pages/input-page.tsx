@@ -19,6 +19,7 @@ export function InputSettingsPage() {
     showModeScope,
     showCharacterWidth,
     showInputModeHUD,
+    showPluginTriggers,
     draft,
     setDraft,
     busy,
@@ -123,6 +124,7 @@ export function InputSettingsPage() {
             <LocalModesSection
               preferences={localModes}
               ios={iosPlatform}
+              triggers={showPluginTriggers}
               onChange={onLocalModesChange}
             />
           }

@@ -33,14 +33,6 @@ RUST_ONLY = {
         # key of the source's, even though this client renders candidates with
         # Direct2D only and offers no choice to make.
         "ui_backend",
-        # Sound packs, music, achievements and command tables are read and validated by client-core first; the 扩展 page that edits them lands with the host players, and this entry leaves with it.
-        "plugins",
-    },
-    "LocalModePreferences": {
-        # The V, / and @ modes are wired through the Engine, the runtime and host-api first; their switches join the 实用功能 group together with the host digit routing that makes them usable, and these three entries leave with that change.
-        "expression",
-        "command",
-        "mention",
     },
 }
 

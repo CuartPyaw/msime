@@ -67,6 +67,10 @@ export function settingsCapabilities({
     windows || linux || android || macos || harmony || host?.platform === "ios";
   const desktopPanels = host ? (host.panel_windows ?? !mobile) : true;
   const showVoiceHotkeys = desktopPanels || host?.voice_hotkeys === true;
+  // A host older than these fields sends none of them, and nothing there plays a pack or routes / and @: the switches stay hidden rather than doing nothing.
+  const showKeySound = host?.key_sound === true;
+  const showMusic = host?.music === true;
+  const showPluginTriggers = host?.plugin_triggers === true;
   return {
     nativeVoicePlatform,
     showModeScope,
@@ -100,5 +104,8 @@ export function settingsCapabilities({
     clientHostedPlatform,
     desktopPanels,
     showVoiceHotkeys,
+    showKeySound,
+    showMusic,
+    showPluginTriggers,
   } as const;
 }

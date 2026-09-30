@@ -11,6 +11,8 @@ export interface SettingsPageProjectionOptions {
   hasCommunity: boolean;
   showFloatingToolbar: boolean;
   showDeveloperPage: boolean;
+  /** The 扩展 page: a host with a pack store, or one that plays or routes something it switches. */
+  hasPlugins: boolean;
   mobileHiddenPageIds: readonly SettingsPageId[];
   mobilePageTitle: (id: SettingsPageId, title: string) => string;
 }
@@ -39,6 +41,7 @@ export function settingsPageProjections({
   hasCommunity,
   showFloatingToolbar,
   showDeveloperPage,
+  hasPlugins,
   mobileHiddenPageIds,
   mobilePageTitle,
 }: SettingsPageProjectionOptions): SettingsPageProjections {
@@ -54,6 +57,7 @@ export function settingsPageProjections({
         (item.id !== "floating-toolbar" || showFloatingToolbar) &&
         (item.id !== "download" || !mobilePlatform) &&
         (item.id !== "developer" || showDeveloperPage) &&
+        (item.id !== "plugins" || hasPlugins) &&
         (item.id !== "more" || mobilePlatform),
     )
     .map((item) => ({

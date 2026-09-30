@@ -9,7 +9,10 @@ export type LocalModeKey =
   | "kaomoji"
   | "super_jianpin"
   | "temporary_english"
-  | "temporary_japanese";
+  | "temporary_japanese"
+  | "expression"
+  | "command"
+  | "mention";
 
 export type LocalModePreferences = {
   unicode: boolean;
@@ -20,6 +23,10 @@ export type LocalModePreferences = {
   super_jianpin: boolean;
   temporary_english: boolean;
   temporary_japanese: boolean;
+  /** The V, / and @ modes. Off in a fresh profile and absent from the document while off, so an absent key reads as off. */
+  expression?: boolean;
+  command?: boolean;
+  mention?: boolean;
 };
 
 export const defaultLocalModes: LocalModePreferences = {
@@ -72,7 +79,26 @@ const localModeRows: readonly [LocalModeKey, string, string][] = [
   ],
 ];
 
-const iosLocalModeDescriptions: Record<LocalModeKey, string> = {
+/** The modes a host has to route itself: digits that stay input in V, and the / and @ keys. Shown only where the host does (`HostCapabilities.plugin_triggers`). */
+const triggerModeRows: readonly [LocalModeKey, string, string][] = [
+  [
+    "expression",
+    "计算与数字(V 模式)",
+    "中文模式下按 Shift+V，再输入算式（如 1+2*3）、数字（123 可转为一百二十三、壹佰贰拾叁或金额）或日期（2026.10.1）。空格上屏；Shift+数字选词；上屏内容不参与学习和打字统计",
+  ],
+  [
+    "command",
+    "指令(/ 模式)",
+    "中文标点下没有输入时按 /，再输入指令字母：rq 日期、sj 时间、xq 星期，以及「扩展」页启用的指令表。空格上屏；数字选词",
+  ],
+  [
+    "mention",
+    "@ 名字与地点(@ 模式)",
+    "中文标点下没有输入时按 @，再输入拼音或首字母，从「扩展」页的 @ 名单中选择。空格上屏；数字选词",
+  ],
+];
+
+const iosLocalModeDescriptions: Partial<Record<LocalModeKey, string>> = {
   quick_phrase: `${iosLocalModeEntry("快捷短语")}再输入编码即可调用快捷短语`,
   date_time: `${iosLocalModeEntry("日期时间")}再输入 rq / riqi / date 输入日期，sj / shijian / time 输入时间，xq / xingqi / week 输入星期`,
   unicode: `${iosLocalModeEntry("Unicode 码点")}再输入十六进制码位（如 4e00 / +1f600）。空格或点候选上屏`,
@@ -86,21 +112,29 @@ const iosLocalModeDescriptions: Record<LocalModeKey, string> = {
 export interface LocalModesSectionProps {
   preferences: LocalModePreferences;
   ios: boolean;
+  /** The host routes the V, / and @ modes, so their switches have an effect. */
+  triggers?: boolean;
   onChange: (preferences: LocalModePreferences) => void;
 }
 
 /** Shared local input mode switches for desktop and touch settings hosts: the 实用功能 group. */
-export function LocalModesSection({ preferences, ios, onChange }: LocalModesSectionProps) {
+export function LocalModesSection({
+  preferences,
+  ios,
+  triggers = false,
+  onChange,
+}: LocalModesSectionProps) {
+  const rows = triggers ? [...localModeRows, ...triggerModeRows] : localModeRows;
   return (
     <GroupList title="实用功能">
-      {localModeRows.map(([key, label, description]) => (
+      {rows.map(([key, label, description]) => (
         <Row
           key={key}
           title={label}
-          description={ios ? iosLocalModeDescriptions[key] : description}
+          description={ios ? (iosLocalModeDescriptions[key] ?? description) : description}
         >
           <Switch
-            checked={preferences[key]}
+            checked={preferences[key] ?? false}
             onChange={(checked) => onChange({ ...preferences, [key]: checked })}
           />
         </Row>

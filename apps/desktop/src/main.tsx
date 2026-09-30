@@ -71,6 +71,10 @@ import {
   type McpServerStatus,
   type LocalVoiceModelList,
   type LocalVoiceModelProgress,
+  type MentionEntry,
+  type PluginCatalogResult,
+  type PluginClient,
+  type PluginPackage,
   UNBATCHED_DICTIONARY_FILE_BYTES,
 } from "@msime/ui";
 import "@msime/ui/styles.css";
@@ -168,6 +172,14 @@ const linuxSetupClient: LinuxSetupClient = {
       unlisten();
     }
   },
+};
+// The host resolves the plugins directory and the built-in sound packs, and shows its own picker for an import; the page never names a path.
+const plugins: PluginClient = {
+  catalog: () => invoke<PluginCatalogResult>("plugin_catalog"),
+  importPack: (source) => invoke<PluginPackage | null>("import_plugin_pack", { source }),
+  remove: (kind, id) => invoke<void>("remove_plugin_pack", { kind, id }),
+  loadMentions: () => invoke<MentionEntry[]>("load_plugin_mentions"),
+  saveMentions: (entries) => invoke<void>("save_plugin_mentions", { entries }),
 };
 const typingStatistics: TypingStatisticsClient = {
   load: () => invoke("load_typing_statistics"),
@@ -695,6 +707,12 @@ function DesktopSettings() {
                   saveExport: (name: string, contents: string) =>
                     invoke<string>("save_export", { name, contents }),
                 }
+              : {}),
+            // The pack store and its import picker are the desktop shells' own; the mobile hosts keep their keyboard feedback settings instead.
+            ...(host.platform === "macos" ||
+            host.platform === "linux" ||
+            host.platform === "windows"
+              ? { plugins }
               : {}),
             // msime-mcp is packaged beside the settings app on the three desktop hosts only.
             ...(host.platform === "macos" ||
