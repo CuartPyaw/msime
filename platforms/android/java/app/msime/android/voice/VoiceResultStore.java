@@ -147,6 +147,10 @@ public final class VoiceResultStore {
             if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS))
                 throw new Failure(Reason.UNAVAILABLE);
             Path lockPath = directory.resolve(LOCK_NAME);
+            if (Files.isSymbolicLink(lockPath)
+                    || (Files.exists(lockPath, LinkOption.NOFOLLOW_LINKS)
+                        && !Files.isRegularFile(lockPath, LinkOption.NOFOLLOW_LINKS)))
+                throw new Failure(Reason.UNAVAILABLE);
             try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE,
                     StandardOpenOption.READ, StandardOpenOption.WRITE)) {
                 FileLock lock;
