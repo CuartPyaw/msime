@@ -832,7 +832,7 @@ fn alternative_segmentations(
     resolution: &SeriesResolution,
     types: u32,
 ) -> Vec<Vec<String>> {
-    let mut alternatives: Vec<Vec<String>> = Vec::new();
+    let mut alternatives: Vec<Vec<String>> = Vec::with_capacity(SYLLABLE_GRAPH_PATH_LIMIT);
     // Seeding the costlier cuts keeps them out of the frequency-competing tier; they are appended after it.
     let mut seen: HashSet<String> = std::iter::once(resolution.segmentation.clone())
         .chain(
