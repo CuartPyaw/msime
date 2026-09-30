@@ -190,7 +190,7 @@ impl PinyinDatabase {
         keys: &[String],
         per_key_limit: usize,
     ) -> HashMap<String, Vec<DictRow>> {
-        let mut result: HashMap<String, Vec<DictRow>> = HashMap::new();
+        let mut result: HashMap<String, Vec<DictRow>> = HashMap::with_capacity(keys.len());
         if self.connection.is_none() || keys.is_empty() || per_key_limit == 0 {
             return result;
         }
