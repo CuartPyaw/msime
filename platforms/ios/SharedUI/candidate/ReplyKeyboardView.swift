@@ -19,7 +19,11 @@ final class ReplyKeyboardModel: ObservableObject {
 
   func setText(_ value: String) {
     resetResults()
-    guard value.count <= 10_000 else { status = "每次最多粘贴一万字"; return }
+    guard value.count <= 10_000 else {
+      text = ""
+      status = "每次最多粘贴一万字"
+      return
+    }
     text = value
     status = value.isEmpty ? "剪贴板里没有文字" : "选择下方风格生成，内容仅在点击风格时发送"
   }
