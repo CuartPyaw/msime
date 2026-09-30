@@ -7,6 +7,15 @@ mod credential_command_tests;
 mod local_model_tests;
 
 #[test]
+fn emoji_group_page_capacity_reserves_the_first_page_size() {
+    let mut groups = Vec::<super::EmojiCatalogGroup>::new();
+    let mut positions = std::collections::HashMap::new();
+    super::reserve_emoji_group_page_capacity(&mut groups, &mut positions, 7);
+    assert!(groups.capacity() >= 7);
+    assert!(positions.capacity() >= 7);
+}
+
+#[test]
 fn runtime_options_fallback_reserves_all_candidate_slots() {
     let candidates: Vec<std::path::PathBuf> =
         Vec::with_capacity(super::MAX_RUNTIME_OPTIONS_CANDIDATE_CAPACITY);
