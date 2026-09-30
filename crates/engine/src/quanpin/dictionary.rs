@@ -834,14 +834,18 @@ fn alternative_segmentations(
 ) -> Vec<Vec<String>> {
     let mut alternatives: Vec<Vec<String>> = Vec::with_capacity(SYLLABLE_GRAPH_PATH_LIMIT);
     // Seeding the costlier cuts keeps them out of the frequency-competing tier; they are appended after it.
-    let mut seen: HashSet<String> = std::iter::once(resolution.segmentation.clone())
-        .chain(
-            resolution
-                .costlier_corrected_cuts
-                .iter()
-                .map(|cut| join_segments(cut)),
-        )
-        .collect();
+    let mut seen = HashSet::with_capacity(
+        1usize
+            .saturating_add(resolution.costlier_corrected_cuts.len())
+            .saturating_add(SYLLABLE_GRAPH_PATH_LIMIT),
+    );
+    seen.insert(resolution.segmentation.clone());
+    seen.extend(
+        resolution
+            .costlier_corrected_cuts
+            .iter()
+            .map(|cut| join_segments(cut)),
+    );
     let mut append = |candidate: &[String]| {
         let key = join_segments(candidate);
         if !key.is_empty() && seen.insert(key) && alternatives.len() < SYLLABLE_GRAPH_PATH_LIMIT {
