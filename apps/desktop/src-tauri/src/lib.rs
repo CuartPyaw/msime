@@ -2577,10 +2577,12 @@ async fn install_input_source(app: tauri::AppHandle) -> Result<(), HostActionErr
 struct InputSourceStartupStatus {
     /// `installed`, `updated`, `up_to_date`, `login_required` (installed, but the source list only picks it up after the next login) or `failed`.
     action: &'static str,
-    /// Whether the input source is in the System Settings list afterwards; absent when that list could not be read.
+    /// Whether the input source is in the System Settings list at the time of the request (see `input_source_status_now`); absent when that list could not be read.
     enabled: Option<bool>,
     bundled_version: Option<String>,
     installed_version: Option<String>,
+    /// Copies of the input method in `/Library/Input Methods`, read at the time of the request like `enabled`. They compete with the user's copy and need an administrator to remove, which the setup guide asks the user to do.
+    system_bundles: Vec<String>,
 }
 
 /// The start-time check runs in the background, so the settings page may ask before it has finished; the command waits for it. `None` inside means the check did not run for this launch (a panel launch, a run outside a packaged app, or a build that carries no input method).
@@ -2626,6 +2628,7 @@ fn run_input_source_startup(
                 macos_input_source::Refresh::UpToDate => "up_to_date",
             },
             enabled: None,
+            system_bundles: Vec::new(),
             bundled_version: outcome
                 .bundled
                 .as_ref()
@@ -2644,6 +2647,7 @@ fn run_input_source_startup(
                 "failed"
             },
             enabled: None,
+            system_bundles: Vec::new(),
             bundled_version: macos_input_source::bundle_version(
                 &resource_directory.join(macos_input_source::INPUT_SOURCE_BUNDLE_NAME),
             )
@@ -2654,10 +2658,24 @@ fn run_input_source_startup(
                 .map(|version| version.label().to_string()),
         },
     };
-    Some(InputSourceStartupStatus {
-        enabled: macos_input_source::input_source_enabled(),
-        ..status
-    })
+    Some(status)
+}
+
+/// The start-time result with `enabled` and `system_bundles` read at the time of the call rather than when that check ran. The setup guide asks again whenever the window regains focus and while it is waiting for the user to act in System Settings or Finder, so this must stay cheap: it never copies or registers anything, only waits for the one start-time check, reads the input source list and looks for a few paths.
+#[cfg(target_os = "macos")]
+fn input_source_status_now(
+    state: &InputSourceStartupState,
+    timeout: std::time::Duration,
+    enabled: impl FnOnce() -> Option<bool>,
+    system_bundles: impl FnOnce() -> Vec<std::path::PathBuf>,
+) -> Option<InputSourceStartupStatus> {
+    let mut status = state.wait(timeout)?;
+    status.enabled = enabled();
+    status.system_bundles = system_bundles()
+        .into_iter()
+        .map(|path| path.display().to_string())
+        .collect();
+    Some(status)
 }
 
 #[cfg(target_os = "macos")]
@@ -2667,11 +2685,18 @@ async fn input_source_startup_status(
 ) -> Result<Option<InputSourceStartupStatus>, HostActionError> {
     let state = Arc::clone(&state);
     // Copying and registering takes seconds, not minutes; the bound only keeps a wedged registration from holding the page's request open forever.
-    tauri::async_runtime::spawn_blocking(move || state.wait(std::time::Duration::from_secs(120)))
-        .await
-        .map_err(|_| HostActionError {
-            code: "unavailable",
-        })
+    tauri::async_runtime::spawn_blocking(move || {
+        input_source_status_now(
+            &state,
+            std::time::Duration::from_secs(120),
+            macos_input_source::input_source_enabled,
+            macos_input_source::system_bundles,
+        )
+    })
+    .await
+    .map_err(|_| HostActionError {
+        code: "unavailable",
+    })
 }
 
 #[cfg(target_os = "macos")]
