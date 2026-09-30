@@ -305,12 +305,12 @@ impl NineKeySession {
         }
         let table = spelling_table();
         let locked_length = self.locked_length();
-        let remaining = self.digits[locked_length..].to_string();
-        self.spellings = table.spellings_for(&remaining, locked_length);
+        let remaining = remaining_digits(&self.digits, locked_length);
+        self.spellings = table.spellings_for(remaining, locked_length);
         let alternatives = if remaining.is_empty() {
             vec![Vec::new()]
         } else {
-            let mut alternatives = table.paths(&remaining);
+            let mut alternatives = table.paths(remaining);
             // Even an unfinished or invalid tail must still offer the leading syllable for partial selection.
             alternatives.extend(
                 self.spellings
@@ -513,6 +513,10 @@ impl NineKeySession {
             Err(_) => Some(diagnostics::NINE_KEY_FREQUENCY_NOT_PERSISTED.to_string()),
         }
     }
+}
+
+fn remaining_digits(digits: &str, locked_length: usize) -> &str {
+    &digits[locked_length..]
 }
 
 /// A row read under the locked syllables must spell them, or be a whole-syllable prefix of them.
@@ -817,6 +821,11 @@ mod tests {
 
     fn item(word: &str, digits: &str, weight: i64, source: CandidateSource) -> WordItem {
         WordItem::new(digits, word, weight, source, "")
+    }
+
+    #[test]
+    fn refresh_tail_is_borrowed_from_digits() {
+        assert_eq!(remaining_digits("64426", 2), "426");
     }
 
     #[test]
