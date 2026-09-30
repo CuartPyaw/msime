@@ -37,7 +37,7 @@ pub fn collect_typo_edges(
     let planned = plan_keys(profile, segments, literal_best, autocorrect_types);
 
     let mut rows: HashMap<String, Vec<DictRow>> = HashMap::with_capacity(planned.len());
-    let mut misses = Vec::new();
+    let mut misses = Vec::with_capacity(planned.len());
     for entry in &planned {
         match span_cache.get(&entry.key) {
             Some(cached) => {
