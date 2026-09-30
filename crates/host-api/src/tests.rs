@@ -7115,6 +7115,174 @@ fn key_sound_pack_boundary_resolves_validated_files() {
     );
 }
 
+/// A music pack in `<state>/plugins/music/<id>` with one synthetic WAV track.
+fn installed_music_pack(state: &std::path::Path, id: &str) -> std::path::PathBuf {
+    let pack = state.join("plugins/music").join(id);
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        format!("schema_version = 1\nkind = 'music'\nid = '{id}'\nname = '雨声'\nversion = '1.0.0'\nlicense = 'CC0-1.0'\n[music]\ntracks = ['rain.wav']\n"),
+    )
+    .unwrap();
+    let mut wav = b"RIFF\x24\0\0\0WAVEfmt ".to_vec();
+    wav.extend_from_slice(&[0; 32]);
+    std::fs::write(pack.join("rain.wav"), wav).unwrap();
+    pack
+}
+
+#[test]
+fn music_pack_boundary_resolves_validated_tracks() {
+    let call =
+        |request: &[u8]| read(unsafe { msime_client_music_pack(request.as_ptr(), request.len()) });
+    let state = tempfile::tempdir().unwrap();
+    let pack = installed_music_pack(state.path(), "rain");
+    let request =
+        json!({"state_root": state.path(), "sound_packs": null, "pack": "rain"}).to_string();
+    let music = call(request.as_bytes());
+    assert_eq!(music["ok"], true, "{music}");
+    assert_eq!(music["value"]["id"], "rain");
+    assert_eq!(music["value"]["license"], "CC0-1.0");
+    assert_eq!(
+        music["value"]["tracks"],
+        json!([pack.join("rain.wav").to_string_lossy()])
+    );
+    assert_eq!(music["value"]["max_track_seconds"], 15 * 60);
+
+    // A sound pack id is not a music pack, even a built-in one.
+    let sound_packs =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/sound-packs");
+    let builtin =
+        json!({"state_root": state.path(), "sound_packs": sound_packs, "pack": "default"})
+            .to_string();
+    assert_eq!(call(builtin.as_bytes())["ok"], false);
+    let relative = json!({"state_root": "state", "sound_packs": null, "pack": "rain"}).to_string();
+    assert_eq!(
+        call(relative.as_bytes())["error"],
+        "music pack paths must be absolute"
+    );
+    assert_eq!(
+        call(br#"{"pack":"rain","tracks":[]}"#)["error"],
+        "invalid music pack request"
+    );
+    assert_eq!(
+        read(unsafe { msime_client_music_pack(std::ptr::null(), 4) })["error"],
+        "invalid music pack request"
+    );
+}
+
+#[test]
+fn plugins_boundary_lists_imports_removes_and_keeps_the_name_list() {
+    let state = tempfile::tempdir().unwrap();
+    let picked = tempfile::tempdir().unwrap();
+    let sound_packs =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/sound-packs");
+    let call = |action: Value| {
+        let request = serde_json::to_vec(
+            &json!({"state_root": state.path(), "sound_packs": sound_packs, "action": action}),
+        )
+        .unwrap();
+        read(unsafe { msime_client_plugins(request.as_ptr(), request.len()) })
+    };
+
+    let catalog = call(json!({"operation": "catalog"}));
+    assert_eq!(catalog["ok"], true, "{catalog}");
+    let ids = |catalog: &Value| -> Vec<String> {
+        catalog["value"]["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pack| pack["id"].as_str().unwrap().to_owned())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    };
+    assert_eq!(ids(&catalog), ["default", "twinkle"], "the built-in packs");
+
+    let source = picked.path().join("rain");
+    std::fs::rename(installed_music_pack(picked.path(), "rain"), &source).unwrap();
+    let imported = call(json!({"operation": "import", "source": source}));
+    assert_eq!(imported["ok"], true, "{imported}");
+    assert_eq!(imported["value"]["kind"], "music");
+    assert_eq!(imported["value"]["tracks"], json!(["rain.wav"]));
+    assert!(state.path().join("plugins/music/rain/rain.wav").is_file());
+    assert_eq!(
+        ids(&call(json!({"operation": "catalog"}))),
+        ["default", "rain", "twinkle"]
+    );
+
+    // Refusals carry the desktop shell's codes, and the rule a pack broke as the detail.
+    let broken = picked.path().join("broken");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(broken.join("plugin.toml"), "schema_version = 2\n").unwrap();
+    let refused = call(json!({"operation": "import", "source": broken}));
+    assert_eq!(refused["error"], "plugin_invalid", "{refused}");
+    assert!(refused["detail"]
+        .as_str()
+        .is_some_and(|detail| !detail.is_empty()));
+    let unsupported = call(json!({"operation": "import", "source": picked.path().join("x.txt")}));
+    assert_eq!(unsupported["error"], "plugin_unsupported_source");
+    assert!(unsupported.get("detail").is_none());
+    assert_eq!(
+        call(json!({"operation": "import", "source": "relative/rain"}))["error"],
+        "invalid"
+    );
+    assert_eq!(
+        call(json!({"operation": "remove", "kind": "sound", "id": "default"}))["error"],
+        "plugin_reserved"
+    );
+    assert_eq!(
+        call(json!({"operation": "remove", "kind": "script", "id": "rain"}))["error"],
+        "invalid"
+    );
+    let removed = call(json!({"operation": "remove", "kind": "music", "id": "rain"}));
+    assert_eq!(removed, json!({"ok": true, "value": null}));
+    assert_eq!(
+        ids(&call(json!({"operation": "catalog"}))),
+        ["default", "twinkle"]
+    );
+
+    assert_eq!(
+        call(json!({"operation": "load_mentions"}))["value"],
+        json!([])
+    );
+    let entries = json!([{"text": "张三", "key": "zhang'san"}, {"text": "Alice", "key": ""}]);
+    let saved = call(json!({"operation": "save_mentions", "entries": entries}));
+    assert_eq!(saved, json!({"ok": true, "value": null}));
+    assert_eq!(
+        call(json!({"operation": "load_mentions"}))["value"],
+        entries
+    );
+    assert!(state.path().join("plugins/mentions.json").is_file());
+    let invalid =
+        call(json!({"operation": "save_mentions", "entries": [{"text": "张三", "key": "Zhang"}]}));
+    assert_eq!(invalid["error"], "mention_invalid", "{invalid}");
+    assert!(invalid["detail"]
+        .as_str()
+        .is_some_and(|detail| detail.contains("张三")));
+    assert_eq!(
+        call(json!({"operation": "load_mentions"}))["value"],
+        entries
+    );
+
+    // Requests the page could not have meant.
+    assert_eq!(call(json!({"operation": "rename"}))["error"], "invalid");
+    let raw =
+        |request: &[u8]| read(unsafe { msime_client_plugins(request.as_ptr(), request.len()) });
+    assert_eq!(
+        raw(br#"{"state_root":"state","sound_packs":null,"action":{"operation":"catalog"}}"#)
+            ["error"],
+        "invalid"
+    );
+    assert_eq!(
+        raw(br#"{"action":{"operation":"catalog"}}"#)["error"],
+        "invalid"
+    );
+    assert_eq!(
+        read(unsafe { msime_client_plugins(std::ptr::null(), 4) })["error"],
+        "invalid"
+    );
+}
+
 /// A statistics record reports which achievement milestone it passed; without a session asking for achievement sounds it never looks.
 #[test]
 fn statistics_record_reports_the_milestone_field() {

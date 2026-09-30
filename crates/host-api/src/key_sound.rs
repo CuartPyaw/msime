@@ -4,7 +4,7 @@
 //!
 //! The key path only posts a request. A session compares a generation number rather than its settings, the request goes into a bounded queue with `try_send`, so a full queue drops a sound instead of holding up a keystroke, and everything else - resolving packs, decoding, mixing - happens on the player's own thread. Samples are decoded on a thread of their own and the whole table is swapped in when it is ready, so changing packs never plays half of one and half of the other.
 //!
-//! Only macOS, Windows and Linux play anything here. On iOS, Android and HarmonyOS the entry points report that nothing was queued; HarmonyOS plays packs itself from the files `pack_files` resolves.
+//! Only macOS, Windows and Linux play anything here. On iOS, Android and HarmonyOS the entry points report that nothing was queued; HarmonyOS plays packs itself from the files `pack_files` and `music_pack_files` resolve.
 //!
 //! A failure of the audio device, or a panic anywhere in the player, turns sound off for the rest of the process with one line on standard error. A pack that does not decode is reported once and stays silent.
 
@@ -14,7 +14,7 @@
     allow(dead_code)
 )]
 
-use msime_client_core::plugins::{self, sound_pack, PluginContent, PluginKind};
+use msime_client_core::plugins::{self, music_pack, sound_pack, PluginContent, PluginKind};
 use msime_client_core::preferences::{KeySoundMode, PluginPreferences};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -325,6 +325,32 @@ pub(crate) fn pack_files(roots: &PluginRoots, id: &str) -> Result<Value, String>
         })),
         "max_sample_millis": sound_pack::MAX_SAMPLE_MILLIS,
         "melody_idle_reset_millis": sound_pack::MELODY_IDLE_RESET_MILLIS,
+    }))
+}
+
+/// The tracks of one validated music pack as absolute paths, in play order, for a host that streams music itself. The pack is checked by the same client-core rules `scan` lists it by; how long a track may play is `music_pack::MAX_TRACK_SECONDS`, which the host checks against each track's duration before playing it, as the desktop decoder checks its frame count.
+pub(crate) fn music_pack_files(roots: &PluginRoots, id: &str) -> Result<Value, String> {
+    let installed = roots.installed.as_deref().unwrap_or(Path::new(""));
+    let package = plugins::load_package(
+        installed,
+        roots.builtin_sounds.as_deref(),
+        PluginKind::Music,
+        id,
+    )?;
+    let PluginContent::Music(pack) = &package.content else {
+        return Err("not a music pack".into());
+    };
+    let tracks: Vec<String> = pack
+        .tracks
+        .iter()
+        .map(|track| package.directory.join(track).to_string_lossy().into_owned())
+        .collect();
+    Ok(json!({
+        "id": package.id,
+        "name": package.name,
+        "license": package.license,
+        "tracks": tracks,
+        "max_track_seconds": music_pack::MAX_TRACK_SECONDS,
     }))
 }
 
