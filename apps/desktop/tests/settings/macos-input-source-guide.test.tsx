@@ -225,7 +225,7 @@ test("a copy in /Library/Input Methods: asks the user to remove it and moves on 
     />,
   );
 
-  expect(screen.getByRole("heading", { name: "移除旧版水杉输入法" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "移除多余的水杉输入法副本" })).toBeTruthy();
   expect(screen.getByText(systemCopy)).toBeTruthy();
   expect(screen.getByText(/Shift\+Command\+G/)).toBeTruthy();
   expect(screen.getByText(/选「退出登录」/)).toBeTruthy();

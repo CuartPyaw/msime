@@ -191,6 +191,8 @@ const vocabularyReview: VocabularyReviewClient = {
   removeWordbook: (wordbook) => invoke("remove_vocabulary_wordbook", { wordbook }),
   reset: () => invoke("reset_vocabulary_review"),
 };
+/** How long the first window waits for the macOS start-time install before opening without the input source guide. */
+const MACOS_INPUT_GUIDE_WAIT_MS = 15_000;
 const inputSourceStartup: NonNullable<SettingsClient["inputSourceStartup"]> = {
   status: () => invoke("input_source_startup_status"),
   openSettings: () => invoke("open_input_source_settings"),
@@ -640,9 +642,16 @@ function DesktopSettings() {
         host?.platform === "linux"
           ? await invoke<LinuxSetupStatus>("linux_setup_status").catch(() => null)
           : null;
-      // macOS installs the input method when the app starts but cannot add it to the user's input sources, so a launch that leaves it unusable opens on the guide for that step. The status waits for the start-time install, which takes seconds on a first run or an update and is immediate otherwise.
+      // macOS installs the input method when the app starts but cannot add it to the user's input sources, so a launch that leaves it unusable opens on the guide for that step. The status waits for the start-time install, which takes seconds on a first run or an update and is immediate otherwise; a registration that hangs longer would keep the window blank, so past the bound the app opens on the settings page, whose notice shows the result once it arrives.
       const macosInputSource =
-        host?.platform === "macos" ? await inputSourceStartup.status().catch(() => null) : null;
+        host?.platform === "macos"
+          ? await Promise.race([
+              inputSourceStartup.status().catch(() => null),
+              new Promise<null>((resolve) =>
+                window.setTimeout(() => resolve(null), MACOS_INPUT_GUIDE_WAIT_MS),
+              ),
+            ])
+          : null;
       if (!active) return;
       if (linuxSetupStatus && !linuxSetupStatus.prepared) setLinuxSetup(linuxSetupStatus);
       if (macosInputSourceGuideNeeded(macosInputSource)) setMacosInputGuide(macosInputSource);

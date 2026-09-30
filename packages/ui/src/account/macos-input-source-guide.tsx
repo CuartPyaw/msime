@@ -54,7 +54,7 @@ function stageOf(status: InputSourceStartupStatus): Stage {
 
 const titles: Record<Stage, string> = {
   failed: "水杉输入法未能安装",
-  system: "移除旧版水杉输入法",
+  system: "移除多余的水杉输入法副本",
   login: "注销并重新登录",
   add: "把水杉输入法添加到系统",
   ready: "已添加水杉输入法",
@@ -172,7 +172,7 @@ export function MacosInputSourceGuide({
             <>
               <p className={onboarding.lead}>
                 「/Library/Input
-                Methods」里还有一份旧版水杉输入法。它和你现在用的是同一个输入法，会让系统的输入法列表出现重复项，或用上旧版本。这个文件夹属于整台
+                Methods」里还有一份水杉输入法。它和你现在用的是同一个输入法，会让系统的输入法列表出现重复项，或用上其中较旧的版本。这个文件夹属于整台
                 Mac，移除需要管理员密码，MSIME 不会替你操作。
               </p>
               <ul className={onboarding.note}>
