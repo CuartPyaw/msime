@@ -839,7 +839,7 @@ fn alternative_segmentations(
             .saturating_add(resolution.costlier_corrected_cuts.len())
             .saturating_add(SYLLABLE_GRAPH_PATH_LIMIT),
     );
-    seen.insert(resolution.segmentation.clone());
+    let primary_segmentation = resolution.segmentation.as_str();
     seen.extend(
         resolution
             .costlier_corrected_cuts
@@ -848,7 +848,11 @@ fn alternative_segmentations(
     );
     let mut append = |candidate: &[String]| {
         let key = join_segments(candidate);
-        if !key.is_empty() && seen.insert(key) && alternatives.len() < SYLLABLE_GRAPH_PATH_LIMIT {
+        if !key.is_empty()
+            && !is_duplicate_segmentation(primary_segmentation, &seen, &key)
+            && alternatives.len() < SYLLABLE_GRAPH_PATH_LIMIT
+        {
+            seen.insert(key);
             alternatives.push(candidate.to_vec());
         }
     };
@@ -871,6 +875,10 @@ fn alternative_segmentations(
         }
     }
     alternatives
+}
+
+fn is_duplicate_segmentation(primary: &str, seen: &HashSet<String>, key: &str) -> bool {
+    key == primary || seen.contains(key)
 }
 
 /// Letters of a row's matched code, what the fuzzy merge sorts by.
