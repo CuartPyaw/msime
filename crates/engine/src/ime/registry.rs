@@ -1,4 +1,4 @@
-//! The providers, one per scheme family (`R/providers/provider_registry.cpp`, `pinyin_candidate_provider.cpp`): pinyin (quanpin and shuangpin engines), wubi and Japanese.
+//! The providers, one per scheme family (`R/providers/provider_registry.cpp`, `pinyin_candidate_provider.cpp`): pinyin (quanpin and shuangpin engines), wubi and Japanese. Korean has no provider: its syllables are the text, so every Korean query answers nothing.
 //!
 //! The registry answers queries and lookups only. The reference also routed `create_word` / `update_weight_by_pinyin_and_word` / `delete_by_pinyin_and_word` through it; here the session writes pins, removals and frequency learning into user_dictionary itself, choosing the dictionary kind from the selected row's scheme (overlays.md §3.3), and phrases through its own canonical-pinyin `QuanpinEngine`, so a second writer path would only diverge from it.
 
@@ -50,6 +50,7 @@ impl ProviderRegistry {
             SchemeType::Shuangpin => self.shuangpin.query(request, keymap),
             SchemeType::Wubi => return self.wubi.query(request),
             SchemeType::JapaneseRomaji => return self.japanese.query(request),
+            SchemeType::Korean => return Vec::new(),
         };
         for item in &mut candidates {
             item.scheme = request.scheme;
@@ -57,12 +58,12 @@ impl ProviderRegistry {
         candidates
     }
 
-    /// Wubi and Japanese never answer a lookup (wubi_candidate_provider.h:19-22; the Japanese one read the dropped `japanese_lexicon`).
+    /// Wubi, Japanese and Korean never answer a lookup (wubi_candidate_provider.h:19-22; the Japanese one read the dropped `japanese_lexicon`).
     pub fn find_candidate(&self, scheme: SchemeType, key: &str, value: &str) -> Option<WordItem> {
         match scheme {
             SchemeType::Quanpin => self.quanpin.find_candidate(key, value),
             SchemeType::Shuangpin => self.shuangpin.find_candidate(key, value),
-            SchemeType::Wubi | SchemeType::JapaneseRomaji => None,
+            SchemeType::Wubi | SchemeType::JapaneseRomaji | SchemeType::Korean => None,
         }
     }
 
@@ -75,6 +76,7 @@ impl ProviderRegistry {
             }
             SchemeType::Wubi => self.wubi.reset_cache(),
             SchemeType::JapaneseRomaji => self.japanese.reset_cache(),
+            SchemeType::Korean => {}
         }
     }
 
@@ -95,6 +97,8 @@ impl ProviderRegistry {
                     .cache_dynamic_candidate(&request.raw_input, word, source),
                 _ => false,
             },
+            // Korean takes no online rows.
+            SchemeType::Korean => false,
         }
     }
 
@@ -109,7 +113,7 @@ impl ProviderRegistry {
             SchemeType::Shuangpin => self
                 .shuangpin
                 .expand_initial_candidates(request, candidates),
-            SchemeType::Wubi | SchemeType::JapaneseRomaji => false,
+            SchemeType::Wubi | SchemeType::JapaneseRomaji | SchemeType::Korean => false,
         }
     }
 }

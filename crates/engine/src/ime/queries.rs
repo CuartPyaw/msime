@@ -370,6 +370,14 @@ mod tests {
                 "ni",
             ),
             (
+                SchemeType::Korean,
+                on,
+                expressive_on,
+                false,
+                LocalInputMode::None,
+                "ni",
+            ),
+            (
                 SchemeType::Quanpin,
                 on,
                 expressive_on,

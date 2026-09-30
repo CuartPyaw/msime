@@ -71,6 +71,8 @@ pub enum SchemeType {
     Shuangpin = 1,
     Wubi = 2,
     JapaneseRomaji = 3,
+    /// Korean Hangul on the Dubeolsik layout: syllables compose in the preedit and commit themselves, with no candidates.
+    Korean = 4,
 }
 
 impl SchemeType {
@@ -80,6 +82,7 @@ impl SchemeType {
             1 => Self::Shuangpin,
             2 => Self::Wubi,
             3 => Self::JapaneseRomaji,
+            4 => Self::Korean,
             _ => return None,
         })
     }
@@ -91,6 +94,7 @@ impl SchemeType {
             Self::Shuangpin => "shuangpin",
             Self::Wubi => "wubi",
             Self::JapaneseRomaji => "japanese",
+            Self::Korean => "korean",
         }
     }
 

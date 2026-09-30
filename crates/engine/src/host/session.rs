@@ -52,7 +52,7 @@ pub struct EngineSnapshot {
     pub microsoft_shuangpin: bool,
     pub shuangpin_profile: String,
     pub preedit: String,
-    /// The kana reading in Japanese, else empty.
+    /// The kana reading in Japanese, the composed Hangul in Korean, else empty.
     pub reading: String,
     pub editing_text: String,
     pub caret_position: usize,
@@ -156,7 +156,10 @@ impl Session {
             microsoft_shuangpin: self.microsoft_shuangpin,
             shuangpin_profile: self.shuangpin_profile.clone(),
             preedit: value.preedit,
-            reading: if value.scheme == SchemeType::JapaneseRomaji {
+            reading: if matches!(
+                value.scheme,
+                SchemeType::JapaneseRomaji | SchemeType::Korean
+            ) {
                 value.normalized_segmentation
             } else {
                 String::new()

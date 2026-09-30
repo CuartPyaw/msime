@@ -1,6 +1,7 @@
-//! The active input scheme. Four concrete schemes with the same five operations: an enum, not a trait object.
+//! The active input scheme. Five concrete schemes with the same five operations: an enum, not a trait object.
 
 use crate::japanese::JapaneseRomajiScheme;
+use crate::korean::KoreanScheme;
 use crate::quanpin::QuanpinScheme;
 use crate::shuangpin::profile::profile;
 use crate::shuangpin::ShuangpinScheme;
@@ -12,6 +13,7 @@ pub enum Scheme {
     Shuangpin(ShuangpinScheme),
     Wubi(WubiScheme),
     Japanese(JapaneseRomajiScheme),
+    Korean(KoreanScheme),
 }
 
 impl Scheme {
@@ -22,6 +24,7 @@ impl Scheme {
             SchemeType::Shuangpin => Self::Shuangpin(ShuangpinScheme::new(profile(profile_kind))),
             SchemeType::Wubi => Self::Wubi(WubiScheme::new()),
             SchemeType::JapaneseRomaji => Self::Japanese(JapaneseRomajiScheme::new()),
+            SchemeType::Korean => Self::Korean(KoreanScheme::new()),
         }
     }
 
@@ -31,6 +34,7 @@ impl Scheme {
             Self::Shuangpin(_) => SchemeType::Shuangpin,
             Self::Wubi(_) => SchemeType::Wubi,
             Self::Japanese(_) => SchemeType::JapaneseRomaji,
+            Self::Korean(_) => SchemeType::Korean,
         }
     }
 
@@ -40,6 +44,7 @@ impl Scheme {
             Self::Shuangpin(scheme) => scheme.reset(),
             Self::Wubi(scheme) => scheme.reset(),
             Self::Japanese(scheme) => scheme.reset(),
+            Self::Korean(scheme) => scheme.reset(),
         }
     }
 
@@ -49,6 +54,7 @@ impl Scheme {
             Self::Shuangpin(scheme) => scheme.handle_key(key),
             Self::Wubi(scheme) => scheme.handle_key(key),
             Self::Japanese(scheme) => scheme.handle_key(key),
+            Self::Korean(scheme) => scheme.handle_key(key),
         }
     }
 
@@ -58,6 +64,7 @@ impl Scheme {
             Self::Shuangpin(scheme) => scheme.build_request(),
             Self::Wubi(scheme) => scheme.build_request(),
             Self::Japanese(scheme) => scheme.build_request(),
+            Self::Korean(scheme) => scheme.build_request(),
         }
     }
 
@@ -67,6 +74,7 @@ impl Scheme {
             Self::Shuangpin(scheme) => scheme.preedit(),
             Self::Wubi(scheme) => scheme.preedit(),
             Self::Japanese(scheme) => scheme.preedit(),
+            Self::Korean(scheme) => scheme.preedit(),
         }
     }
 
@@ -77,6 +85,7 @@ impl Scheme {
             Self::Shuangpin(scheme) => scheme.set_raw_input(raw, raw_with_cases),
             Self::Wubi(scheme) => scheme.set_raw_input(raw),
             Self::Japanese(scheme) => scheme.set_raw_input(raw, raw_with_cases),
+            Self::Korean(scheme) => scheme.set_raw_input(raw, raw_with_cases),
         }
     }
 

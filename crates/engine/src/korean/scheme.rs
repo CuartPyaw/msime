@@ -1,0 +1,224 @@
+//! Korean Hangul key handling on the Dubeolsik layout. The composition is the key letters of the open syllable; a key that starts the next syllable moves the finished one into `committed`, which the session hands to the host with the key's result.
+
+use super::dubeolsik::{compose, split_finished};
+use crate::types::{QueryRequest, SchemeKey, SchemeType};
+
+#[derive(Debug, Clone, Default)]
+pub struct KoreanScheme {
+    /// Key letters of the text still composing, case kept: Shift selects the double consonants and ㅒ ㅖ.
+    raw: String,
+    /// Syllables the last key finished, waiting for the session to commit them.
+    committed: String,
+}
+
+impl KoreanScheme {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn reset(&mut self) {
+        self.raw.clear();
+        self.committed.clear();
+    }
+
+    /// Letters feed the automaton and Backspace removes the last jamo keystroke; every other key is ignored. A letter that opens a new syllable moves the finished ones to `committed`.
+    pub fn handle_key(&mut self, key: SchemeKey) {
+        match key {
+            SchemeKey::Backspace => {
+                self.raw.pop();
+            }
+            SchemeKey::Letter(letter) if letter.is_ascii_alphabetic() => {
+                self.raw.push(char::from(letter));
+                let (finished, open) = split_finished(&self.raw);
+                if !finished.is_empty() {
+                    self.committed.push_str(&finished);
+                    self.raw = open.to_owned();
+                }
+            }
+            SchemeKey::Letter(_)
+            | SchemeKey::Apostrophe
+            | SchemeKey::Semicolon
+            | SchemeKey::Minus
+            | SchemeKey::Requery => {}
+        }
+    }
+
+    /// Only the composing text is described; there is no dictionary behind it, so `normalized_segmentation` carries the Hangul the way the Japanese scheme carries its kana reading.
+    pub fn build_request(&self) -> QueryRequest {
+        let hangul = compose(&self.raw);
+        QueryRequest {
+            scheme: SchemeType::Korean,
+            raw_input: self.raw.to_ascii_lowercase(),
+            raw_input_with_cases: self.raw.clone(),
+            normalized_input: self.raw.to_ascii_lowercase(),
+            raw_segmentation: self.raw.clone(),
+            normalized_segmentation: hangul.clone(),
+            segmentation: hangul,
+            valid: !self.raw.is_empty(),
+            ..QueryRequest::default()
+        }
+    }
+
+    /// The composed Hangul, never the key letters.
+    pub fn preedit(&self) -> String {
+        compose(&self.raw)
+    }
+
+    /// Keeps letters only; nothing is committed, so a host edit that spells several syllables keeps them all composing. The cased spelling wins when the host sent one, because case selects jamo here.
+    pub fn set_raw_input(&mut self, raw: &str, raw_with_cases: &str) {
+        let source = if raw_with_cases.is_empty() {
+            raw
+        } else {
+            raw_with_cases
+        };
+        self.raw = source.chars().filter(char::is_ascii_alphabetic).collect();
+        self.committed.clear();
+    }
+
+    /// The syllables the last key finished; empty when it finished none.
+    pub fn take_committed(&mut self) -> String {
+        std::mem::take(&mut self.committed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Types `keys` and collects what each key committed.
+    fn typed(keys: &str) -> (KoreanScheme, String) {
+        let mut scheme = KoreanScheme::new();
+        let mut committed = String::new();
+        for byte in keys.bytes() {
+            scheme.handle_key(SchemeKey::Letter(byte));
+            committed.push_str(&scheme.take_committed());
+        }
+        (scheme, committed)
+    }
+
+    #[test]
+    fn finished_syllables_leave_the_composition() {
+        let cases = [
+            ("rk", "", "가"),
+            ("rks", "", "간"),
+            ("rksk", "가", "나"),
+            ("dkssud", "안", "녕"),
+            ("dkssudgktpdy", "안녕하세", "요"),
+            ("ekfr", "", "닭"),
+            ("ekfrk", "달", "가"),
+            ("rr", "ㄱ", "ㄱ"),
+            ("kk", "ㅏ", "ㅏ"),
+            ("rhk", "", "과"),
+            ("RkTkEk", "까싸", "따"),
+        ];
+        for (keys, committed, preedit) in cases {
+            let (scheme, text) = typed(keys);
+            assert_eq!(text, committed, "{keys}");
+            assert_eq!(scheme.preedit(), preedit, "{keys}");
+        }
+    }
+
+    #[test]
+    fn the_composition_keeps_only_the_open_syllable_keys() {
+        let (scheme, _) = typed("ekfrk");
+        assert_eq!(scheme.build_request().raw_input_with_cases, "rk");
+        let (scheme, _) = typed("dkssud");
+        assert_eq!(scheme.build_request().raw_input_with_cases, "sud");
+    }
+
+    #[test]
+    fn backspace_removes_one_jamo_at_a_time() {
+        let (mut scheme, _) = typed("ekfr");
+        let mut shown = vec![scheme.preedit()];
+        while !scheme.preedit().is_empty() {
+            scheme.handle_key(SchemeKey::Backspace);
+            shown.push(scheme.preedit());
+        }
+        assert_eq!(shown, ["닭", "달", "다", "ㄷ", ""]);
+
+        let (mut scheme, _) = typed("rhkd");
+        let mut shown = vec![scheme.preedit()];
+        while !scheme.preedit().is_empty() {
+            scheme.handle_key(SchemeKey::Backspace);
+            shown.push(scheme.preedit());
+        }
+        assert_eq!(shown, ["광", "과", "고", "ㄱ", ""]);
+
+        // After a final moved on, Backspace edits the new syllable only; the committed one is gone.
+        let (mut scheme, committed) = typed("rksk");
+        assert_eq!(committed, "가");
+        scheme.handle_key(SchemeKey::Backspace);
+        assert_eq!(scheme.preedit(), "ㄴ");
+        assert_eq!(scheme.take_committed(), "");
+        scheme.handle_key(SchemeKey::Backspace);
+        assert_eq!(scheme.preedit(), "");
+        scheme.handle_key(SchemeKey::Backspace);
+        assert_eq!(scheme.preedit(), "");
+    }
+
+    #[test]
+    fn other_keys_are_ignored() {
+        let (mut scheme, _) = typed("rk");
+        for key in [
+            SchemeKey::Apostrophe,
+            SchemeKey::Semicolon,
+            SchemeKey::Minus,
+            SchemeKey::Requery,
+            SchemeKey::Letter(b'1'),
+        ] {
+            scheme.handle_key(key);
+        }
+        assert_eq!(scheme.preedit(), "가");
+        assert_eq!(scheme.take_committed(), "");
+    }
+
+    #[test]
+    fn set_raw_input_round_trips_and_prefers_the_cased_spelling() {
+        let (scheme, _) = typed("Rks");
+        let request = scheme.build_request();
+        let mut restored = KoreanScheme::new();
+        restored.set_raw_input(&request.raw_input, &request.raw_input_with_cases);
+        assert_eq!(restored.preedit(), "깐");
+        assert_eq!(restored.build_request(), request);
+
+        // Without the cased spelling the lowercase letters are all there is.
+        restored.set_raw_input("rks", "");
+        assert_eq!(restored.preedit(), "간");
+
+        // Several syllables stay composing, and non-letters are dropped.
+        restored.set_raw_input("dkssud", "dks'sud 1");
+        assert_eq!(restored.preedit(), "안녕");
+        assert_eq!(restored.take_committed(), "");
+        // The next key finishes everything before the open syllable.
+        restored.handle_key(SchemeKey::Letter(b'g'));
+        assert_eq!(restored.take_committed(), "안녕");
+        assert_eq!(restored.preedit(), "ㅎ");
+    }
+
+    #[test]
+    fn request_fields() {
+        let (scheme, _) = typed("gkS");
+        let request = scheme.build_request();
+        assert_eq!(request.scheme, SchemeType::Korean);
+        assert_eq!(request.raw_input, "gks");
+        assert_eq!(request.normalized_input, "gks");
+        assert_eq!(request.raw_input_with_cases, "gkS");
+        assert_eq!(request.raw_segmentation, "gkS");
+        assert_eq!(request.normalized_segmentation, "한");
+        assert_eq!(request.segmentation, "한");
+        assert!(request.valid);
+        assert!(!KoreanScheme::new().build_request().valid);
+    }
+
+    #[test]
+    fn reset_drops_the_composition_and_pending_commits() {
+        let mut scheme = KoreanScheme::new();
+        for byte in b"rkr" {
+            scheme.handle_key(SchemeKey::Letter(*byte));
+        }
+        scheme.handle_key(SchemeKey::Letter(b'r'));
+        scheme.reset();
+        assert_eq!(scheme.preedit(), "");
+        assert_eq!(scheme.take_committed(), "");
+    }
+}

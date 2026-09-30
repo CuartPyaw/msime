@@ -151,6 +151,14 @@ impl ImeSession {
         true
     }
 
+    /// The Korean syllables the last key finished, which leave the composition as a commit; empty for every other scheme.
+    pub fn take_korean_commit(&mut self) -> String {
+        let Scheme::Korean(korean) = &mut self.scheme else {
+            return String::new();
+        };
+        korean.take_committed()
+    }
+
     /// Whether the active scheme is wubi and its code is exactly four letters.
     pub fn wubi_has_complete_code(&self) -> bool {
         self.scheme

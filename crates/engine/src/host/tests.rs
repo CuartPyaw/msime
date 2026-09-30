@@ -863,6 +863,47 @@ fn real_engine_cycles_the_last_japanese_kana_variant() {
 }
 
 #[test]
+fn real_engine_composes_korean_with_the_hangul_as_its_reading() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 4;
+    let mut session = Session::new(&value).unwrap();
+    let mut committed = String::new();
+    for character in b"gksrmf" {
+        let result = session.character(*character, false).unwrap();
+        assert!(result.handled);
+        committed.push_str(&result.commit);
+    }
+    assert_eq!(committed, "한");
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.scheme, 4);
+    assert_eq!(snapshot.preedit, "글");
+    assert_eq!(snapshot.reading, "글");
+    assert_eq!(snapshot.editing_text, "rmf");
+    assert_eq!(snapshot.caret_position, 3);
+    assert!(snapshot.candidates.is_empty() && snapshot.candidate_sources.is_empty());
+    assert!(snapshot.segment_raw_boundaries.is_empty());
+    assert!(!session.online_query().unwrap().available);
+
+    // Enter commits the syllable and leaves the key to the host; nothing is learned as an English word.
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert!(!result.handled);
+    assert!(result.has_commit);
+    assert_eq!(result.commit, "글");
+    assert_eq!(result.diagnostic, "");
+    assert!(!Path::new(&value.dictionaries).join("english.db").exists());
+
+    // The raw commit without learning behaves the same, and punctuation stays ASCII.
+    session.character(b'r', false).unwrap();
+    let result = session.command(Command::CommitRawWithoutLearning).unwrap();
+    assert_eq!((result.handled, result.commit.as_str()), (false, "ㄱ"));
+    session.character(b'r', false).unwrap();
+    session.character(b'k', false).unwrap();
+    let result = session.punctuation(b',').unwrap();
+    assert_eq!((result.handled, result.commit.as_str()), (true, "가,"));
+}
+
+#[test]
 fn commit_raw_applies_windows_english_learning_policy() {
     let dir = tempfile::tempdir().unwrap();
     let value = options(dir.path());
