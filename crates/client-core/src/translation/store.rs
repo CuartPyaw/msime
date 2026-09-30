@@ -176,10 +176,7 @@ impl TranslationGlossStore {
         if !metadata.file_type().is_file() {
             return Err(GlossStoreError::InvalidRecord);
         }
-        let file = match open_shared(&path) {
-            Ok(file) => file,
-            Err(error) => return Err(error.into()),
-        };
+        let file = open_shared(&path)?;
         let bytes = crate::bounded_io::read_bounded_file(file, MAX_RECORD_BYTES, || {
             GlossStoreError::InvalidRecord
         })?;

@@ -28,12 +28,12 @@
 ## 模块边界
 
 - `crates/client-core`：宿主无关的客户端业务——本地配置、固定资源分代安装、账号与会话、云与 AI、皮肤、词库、剪贴板、语音、翻译、打字统计；不依赖 Tauri、UI 或平台宿主。
-- `crates/input-runtime`：会话编排、焦点取消、候选分页和带代次的选择；不复制 Engine 组词状态机。
-- `crates/engine-bridge`：通过 CXX 调用固定上游 C++ Engine 的公共 Session。
+- `crates/input-runtime`：会话编排、焦点取消、候选分页和带代次的选择；不复制 engine 的组词状态机。
+- `crates/engine`（`msime-engine`）：纯 Rust 输入引擎——组合状态、各输入方案、词库查询与学习回放；由原 C++ MSIME-Engine 移植而来。
 - `crates/host-api`：版本化 C 接口、线程绑定的会话句柄和显式响应释放，六个平台的宿主都链接它。
 - `packages/ui`、`apps/desktop`：共享 React 设置页与 Tauri 承载层，各平台使用同一个 Rust 入口库、commands 与 React 页面；目录名沿用 desktop。Rust 入口按 `platform/{android,ios,linux,macos,windows,desktop}`、`shared/`、`tests/` 分层。**Tauri 是公共组件，不是任何平台的产品本体**：最终安装、启动、被系统识别为输入法的，始终是 `platforms/<os>` 下的原生宿主，Tauri/React 由它按需承载。
 - `shared/apple/`：macOS 与 iOS 共用的 Foundation / Objective-C++ 桥接，不包含系统输入法入口。
-- `platforms/`：各系统入口和适配层。Android、iOS、macOS、Linux、Windows 与 HarmonyOS 六个平台各自维护宿主边界，每个宿主都以该系统的原生方式被识别为输入法：Android 的输入法服务、iOS 的键盘扩展、macOS 的 InputMethodKit bundle、Linux 的 IBus 与 Fcitx5 入口、Windows 的 TSF DLL 与 Server、HarmonyOS 的 InputMethodExtensionAbility。共享输入算法和组合状态由 C++ Engine 持有，宿主不复制。
+- `platforms/`：各系统入口和适配层。Android、iOS、macOS、Linux、Windows 与 HarmonyOS 六个平台各自维护宿主边界，每个宿主都以该系统的原生方式被识别为输入法：Android 的输入法服务、iOS 的键盘扩展、macOS 的 InputMethodKit bundle、Linux 的 IBus 与 Fcitx5 入口、Windows 的 TSF DLL 与 Server、HarmonyOS 的 InputMethodExtensionAbility。共享输入算法和组合状态由 `crates/engine` 持有，宿主不复制。
 
 ## 平台目录与宿主形态
 
@@ -82,41 +82,36 @@ Linux 本地构建、隔离 D-Bus / IBus 测试和安装后的首次配置见 [L
 
 功能对齐以 MSIME-Windows 的完整功能为行为基线：公共业务和界面逐项接入共享层与 Tauri，Windows TSF DLL / Server 的进程和协议边界原样保留，Android、iOS、macOS、Linux 与 HarmonyOS 按各自系统能力适配。`scripts/test-reference-*.py` 把这条基线固化成可复跑的门禁——参考实现的出厂配置键、四个界面的机器可读能力清单、changelog 的每条特性、以及 `windows/`、`server/`、`ui/src` 下的每个源文件，都必须对应到本仓库的实现或一条写明理由的缺席记录。
 
-## Engine 桥接
+## 输入引擎
 
 ```sh
-# 构建时自动准备；也可手动跑一次
-python3 scripts/fetch_engine.py
-# 安装 Engine 的 Boost、fmt、spdlog、SQLite3 和 CMake 依赖后：
-cargo test -p msime-engine-bridge --locked
-# macOS Homebrew 环境可能需要：
-CMAKE_PREFIX_PATH="$(brew --prefix)" cargo test -p msime-engine-bridge --locked
+cargo test -p msime-engine --locked
 ```
 
-Engine 由 `engine-lock.json` 固定：锁文件同时记录 Engine 及其第三方源码归档的 commit 和 SHA-256，`scripts/fetch_engine.py` 校验并展开这些归档，不使用 gitlink、`.gitmodules` 或递归 Git checkout；`crates/engine-bridge` 的 build.rs 在编译前调用它。离线构建可用 `MSIME_SKIP_ENGINE_FETCH=1` 跳过。CXX 生成互操作代码，CMake 构建原有 C++ 引擎，Cargo 链接静态引擎与系统 SQLite。会话不实现 Send/Sync，C++ 异常在桥接边界转成 Result。路径由宿主明确提供，字符输入是 Engine 支持的 ASCII 动作。桥接与运行时测试使用真实 Engine 而非替身，其中本地 Unicode 模式那组用例覆盖裸数字键归 Engine 还是归候选选择的判定。
+输入引擎是 workspace 里的 `crates/engine`，与其它 crate 一起构建，不需要额外拉取源码、也不需要 C++ 工具链；SQLite 由 `rusqlite` 的 `bundled` 特性编进去。行为基准是从原 C++ Engine 录下的 `crates/engine/tests/golden/`，录制方法见 `tools/engine-golden/README.md`。路径由宿主明确提供，字符输入是 engine 支持的 ASCII 动作。engine 与运行时测试使用真实 engine 而非替身，其中本地 Unicode 模式那组用例覆盖裸数字键归 engine 还是归候选选择的判定。
 
 ## 原生宿主接口
 
-`cargo build -p msime-host-api --locked` 产出静态库和动态库。头文件为 `crates/host-api/include/msime_client.h`，C 消费示例为 `crates/host-api/native/native_smoke.c`。调用链为 C 宿主 → host-api → input-runtime → CXX → C++ Engine，无 Tauri 运行时依赖。
+`cargo build -p msime-host-api --locked` 产出静态库和动态库。头文件为 `crates/host-api/include/msime_client.h`，C 消费示例为 `crates/host-api/native/native_smoke.c`。调用链为 C 宿主 → host-api → input-runtime → engine，无 Tauri 运行时依赖。
 
 宿主创建会话后须显式传入焦点状态，将 `handled` 映射为系统吃键，将 `commit` 通过系统 API 上屏，将值快照渲染为候选。候选选择携带返回的 generation 和全局 index。全部会话操作在创建线程执行；过期、销毁或错误线程句柄返回错误。每个 UTF-8 JSON 响应必须通过 `msime_client_string_free` 释放一次。逐键延迟由 `crates/input-runtime` 的 `rerank_latency` 示例按帧预算测量，`scripts/verify-local.sh` 把它作为一个门禁阶段运行。
 
-`msime_client_select_edge(session, generation, index, edge)` 是 ABI 1 附加接口，适配器与宿主库须成套更新。方向使用 `MSIME_FIRST_HAN` / `MSIME_LAST_HAN`；共享层核对候选所属会话、代次和当前页，C++ Engine 提取首／尾汉字并在成功后清空整个组合。候选没有汉字时返回未处理并保留组合，不自动选词或追加标点；这类有效调用仍更新视图代次，宿主后续操作必须使用新快照。非法方向和失效身份在状态推进前拒绝。Windows 适配库的配置键路由、无汉字回退与 TSF 回复编码都已接进生产 KeyHandler，对应的 `msime-tsf-client-key-router`、`msime-tsf-character-result` 和 `msime-tsf-engine-response` 等测试在 `platforms/windows/tsf` 的 ctest 里覆盖这条路径。
+`msime_client_select_edge(session, generation, index, edge)` 是 ABI 1 附加接口，适配器与宿主库须成套更新。方向使用 `MSIME_FIRST_HAN` / `MSIME_LAST_HAN`；共享层核对候选所属会话、代次和当前页，engine 提取首／尾汉字并在成功后清空整个组合。候选没有汉字时返回未处理并保留组合，不自动选词或追加标点；这类有效调用仍更新视图代次，宿主后续操作必须使用新快照。非法方向和失效身份在状态推进前拒绝。Windows 适配库的配置键路由、无汉字回退与 TSF 回复编码都已接进生产 KeyHandler，对应的 `msime-tsf-client-key-router`、`msime-tsf-character-result` 和 `msime-tsf-engine-response` 等测试在 `platforms/windows/tsf` 的 ctest 里覆盖这条路径。
 
 ## 固定词库资源
 
-`resources/desktop-dictionary.lock.json` 固定已发布 `dict-v2.0.1` 的来源、长度和 SHA-256。其中 `mozc_dictionary_oss_README.txt` 是日文词库的许可证全文，IPAdic 与 ICOT 的条款都要求它随词库一同分发，重新打包时不可省略；详见[第三方组件清单](docs/third-party.md#日文词库的分发义务)。首次下载约 170 MB。**词库发布与 `engine-lock.json` 配对**：词库锁的 `source_commit` 记录它是哪次 Engine 提交产出的，其中 `bigram.bin` 与 `trigram.bin` 是整句词格仲裁的语言模型表。表缺失时 Engine 不报错，只是整句路径不加权——候选照出，顺序变差，所以提 Engine 锁必须同时提词库锁。开发准备命令：
+`resources/desktop-dictionary.lock.json` 固定已发布 `dict-v2.0.1` 的来源、长度和 SHA-256。其中 `mozc_dictionary_oss_README.txt` 是日文词库的许可证全文，IPAdic 与 ICOT 的条款都要求它随词库一同分发，重新打包时不可省略；详见[第三方组件清单](docs/third-party.md#日文词库的分发义务)。首次下载约 170 MB。词库锁的 `source_commit` 记录这批词库是上游 Engine 哪次提交产出的，其中 `bigram.bin` 与 `trigram.bin` 是整句词格仲裁的语言模型表。表缺失时 engine 不报错，只是整句路径不加权——候选照出，顺序变差，所以换词库版本时要确认 `crates/engine` 还读得了新表，并重跑句子转换评测。开发准备命令：
 
 ```sh
 cargo run -p msime-client-core --example install_resources -- target/resources
 ```
 
-安装器通过注入的流读取资源，限制长度并校验摘要；全部成功后才发布到内容标识目录。再次使用时检查缓存字节；损坏缓存报错，失败安装不替换旧代。这里只准备不可变发布资源，不激活现有输入法，不迁移用户学习数据。资源按独立文件下载，不整包解压 Engine 归档。
+安装器通过注入的流读取资源，限制长度并校验摘要；全部成功后才发布到内容标识目录。再次使用时检查缓存字节；损坏缓存报错，失败安装不替换旧代。这里只准备不可变发布资源，不激活现有输入法，不迁移用户学习数据。资源按独立文件下载，不整包解压归档。
 
-`engine-bridge::prepare_options` 调用 Engine 权威的工作词库准备与学习回放入口，调用方必须先验证资源并暂停相关会话。以下探针使用临时用户目录和缓存，验证已发布词库中的 `nihao` 查询、选词提交及首／尾汉字选择：
+`msime_engine::host::prepare_options` 是工作词库准备与学习回放的权威入口，调用方必须先验证资源并暂停相关会话。以下探针使用临时用户目录和缓存，验证已发布词库中的 `nihao` 查询、选词提交及首／尾汉字选择：
 
 ```sh
-cargo run -p msime-engine-bridge --example query_dictionary -- <上一步返回的资源目录>
+cargo run -p msime-engine --example query_dictionary -- <上一步返回的资源目录>
 ```
 
 整句神经重排模型另有一份 `resources/neural-model.lock.json`，把键盘用的小模型和桌面落定时使用的大模型锁在同一发布版本。需要单独准备两份模型时运行：

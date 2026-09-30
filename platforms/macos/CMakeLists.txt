@@ -27,8 +27,6 @@ set(MSIME_PANEL_SESSION_PROBE "" CACHE FILEPATH "Optional Cargo panel_session_pr
 if(MSIME_PANEL_SESSION_PROBE)
   add_test(NAME desktop-input-interop COMMAND desktop-input-interop-test "${MSIME_PANEL_SESSION_PROBE}")
 endif()
-# The voice settings window still accepts a Whisper model file for the `local` provider, so this host carries that recognizer by default. A default, not a forced value: CI configures with -DMSIME_SHARED_VOICE_LOCAL_WHISPER=OFF to keep whisper.cpp out of its builds, and a build without it serves a Whisper file through the platform recognizer. Installed on-device model directories do not need it at all; they run in the msime-voice-local helper bundled below.
-set(MSIME_SHARED_VOICE_LOCAL_WHISPER ON CACHE BOOL "Build the on-device Whisper provider into the input method")
 add_subdirectory(../../shared/voice shared-voice)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_OBJCXX_STANDARD 17)
@@ -85,12 +83,14 @@ target_include_directories(apple-client PUBLIC ../../shared/apple src ../../crat
 # AppKit for the marked text attributes: a composition carrying an already chosen phrase piece is
 # drawn as two clauses, and NSUnderlineStyle* and the marked clause attribute live there. The iOS
 # build of these same sources compiles that block out - UIKit's document proxy takes a plain string.
-target_link_libraries(apple-client PUBLIC "${MSIME_HOST_LIBRARY}" ${SQLITE_TARGET} "-framework Foundation" "-framework Security" "-framework CoreText" "-framework AppKit")
+# CoreAudio and AudioToolbox for host-api's microphone capture (cpal), which every consumer of the archive links whether or not it records.
+set(MSIME_HOST_LIBRARY_FRAMEWORKS "-framework Foundation" "-framework Security" "-framework CoreText" "-framework CoreAudio" "-framework AudioToolbox")
+target_link_libraries(apple-client PUBLIC "${MSIME_HOST_LIBRARY}" ${SQLITE_TARGET} ${MSIME_HOST_LIBRARY_FRAMEWORKS} "-framework AppKit")
 if(TARGET shared-doubao-auth)
   # The Rust archive needs the same Apple/system dependencies in shared ABI tests.
-  target_link_libraries(shared-doubao-auth PRIVATE ${SQLITE_TARGET} "-framework Foundation" "-framework Security")
+  target_link_libraries(shared-doubao-auth PRIVATE ${SQLITE_TARGET} ${MSIME_HOST_LIBRARY_FRAMEWORKS})
 endif()
-add_executable(MSIMEClientInputMethod MACOSX_BUNDLE src/cloud/CloudFileTransfer.mm src/input/input_method_main.mm src/cloud/CloudClipboardWindowController.mm src/cloud/CloudClipboardClient.mm src/cloud/CloudURLSession.mm src/core/AccountSessionManager.mm src/core/AccountAuthClient.mm src/core/AccountWindowController.mm src/core/AccountKeychain.mm src/cloud/CloudDictionaryClient.mm src/settings/PreferencesWindowController.mm src/core/SupportWindowController.mm src/voice/VoiceInputService.mm src/voice/VoiceWaveOverlay.mm src/voice/VoiceCuePlayer.mm src/voice/VoiceAudioMuter.mm src/voice/VoiceSettings.mm src/voice/VoiceProviderSettings.mm src/input/InputController.mm src/input/InputModeHUDPanel.mm src/candidate/CandidateSkinAppearance.mm src/settings/AppearancePreferences.mm src/core/DiagnosticLog.cpp src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/core/ChineseTextConversion.mm src/core/StringConversion.mm src/settings/ShuangpinKeymapPanel.mm src/input/InputSourceRegistration.mm src/core/FloatingToolbarPanel.mm src/core/UpdateController.mm src/dictionary/DictionaryWindowController.mm src/core/ClientDictionaryRuntime.mm src/dictionary/DictionaryInstaller.mm ../../crates/host-macos/native/uninstaller.mm)
+add_executable(MSIMEClientInputMethod MACOSX_BUNDLE src/cloud/CloudFileTransfer.mm src/input/input_method_main.mm src/cloud/CloudClipboardWindowController.mm src/cloud/CloudClipboardClient.mm src/cloud/CloudURLSession.mm src/core/AccountSessionManager.mm src/core/AccountAuthClient.mm src/core/AccountWindowController.mm src/core/AccountKeychain.mm src/cloud/CloudDictionaryClient.mm src/settings/PreferencesWindowController.mm src/core/SupportWindowController.mm src/voice/VoiceInputService.mm src/voice/VoiceWaveOverlay.mm src/voice/VoiceCuePlayer.mm src/voice/VoiceAudioMuter.mm src/voice/VoiceSettings.mm src/voice/VoiceProviderSettings.mm src/input/InputController.mm src/input/InputModeHUDPanel.mm src/candidate/CandidateSkinAppearance.mm src/settings/AppearancePreferences.mm src/core/DiagnosticLog.cpp src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/core/ChineseTextConversion.mm src/settings/ShuangpinKeymapPanel.mm src/input/InputSourceRegistration.mm src/core/FloatingToolbarPanel.mm src/core/UpdateController.mm src/dictionary/DictionaryWindowController.mm src/core/ClientDictionaryRuntime.mm src/dictionary/DictionaryInstaller.mm ../../crates/host-macos/native/uninstaller.mm)
 target_sources(MSIMEClientInputMethod PRIVATE src/core/AISettingsWindow.mm src/core/ScreenKeyboardPanel.mm src/cloud/CloudCandidateRequest.mm src/core/CustomTranslationBatch.mm src/voice/VoicePCMBuffer.mm src/voice/HTTPVoiceRequest.mm)
 target_sources(MSIMEClientInputMethod PRIVATE src/voice/DoubaoVoiceRequest.mm src/voice/LocalVoiceRequest.mm)
 target_sources(MSIMEClientInputMethod PRIVATE src/core/DesktopInputSession.mm)
@@ -110,7 +110,7 @@ add_custom_command(OUTPUT "${MSIME_SWIFT_BACKEND_OUTPUT}"
 add_custom_target(macos-swift-backend DEPENDS "${MSIME_SWIFT_BACKEND_OUTPUT}")
 add_dependencies(MSIMEClientInputMethod macos-swift-backend)
 target_link_libraries(MSIMEClientInputMethod PRIVATE "${MSIME_SWIFT_BACKEND_OUTPUT}")
-target_include_directories(MSIMEClientInputMethod PRIVATE src ../../vendor/MSIME-Engine ../../vendor/MSIME-Engine/include)
+target_include_directories(MSIMEClientInputMethod PRIVATE src)
 target_compile_options(MSIMEClientInputMethod PRIVATE -fobjc-arc -Wall -Wextra -Werror)
 target_link_libraries(MSIMEClientInputMethod PRIVATE apple-client msime-voice-providers "-framework AppKit" "-framework InputMethodKit" "-framework Carbon" "-framework AVFoundation" "-framework Speech")
 # Sparkle orders releases by CFBundleVersion, not by the marketing version, so a build that ships a
@@ -138,17 +138,10 @@ set(MSIME_LEGAL_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Licenses")
 file(MAKE_DIRECTORY "${MSIME_LEGAL_DIRECTORY}")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../LICENSE" "${MSIME_LEGAL_DIRECTORY}/GPL-3.0.txt" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/Licenses/THIRD_PARTY_NOTICES.txt" "${MSIME_LEGAL_DIRECTORY}/THIRD_PARTY_NOTICES.txt" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/LICENSE" "${MSIME_LEGAL_DIRECTORY}/msime-engine-GPL-3.0.txt" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/NOTICE.md" "${MSIME_LEGAL_DIRECTORY}/msime-engine-NOTICE.md" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/dictionary/NOTICE.md" "${MSIME_LEGAL_DIRECTORY}/msime-engine-dictionary-NOTICE.md" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/helpcode/NOTICE.md" "${MSIME_LEGAL_DIRECTORY}/msime-engine-helpcode-NOTICE.md" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/voice/LICENSE" "${MSIME_LEGAL_DIRECTORY}/msime-engine-voice-LICENSE.txt" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/googlepinyinime-rev/LICENSE" "${MSIME_LEGAL_DIRECTORY}/Apache-2.0-googlepinyinime.txt" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/utfcpp/LICENSE" "${MSIME_LEGAL_DIRECTORY}/Boost-1.0-utfcpp.txt" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/voice/third_party/miniaudio/LICENSE" "${MSIME_LEGAL_DIRECTORY}/miniaudio-LICENSE.txt" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/voice/third_party/whisper.cpp/LICENSE" "${MSIME_LEGAL_DIRECTORY}/MIT-whisper.txt" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/handwriting/models/HandwritingModel-LICENSE.txt" "${MSIME_LEGAL_DIRECTORY}/HandwritingModel-LICENSE.txt" COPYONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/handwriting/third_party/zinnia/Zinnia-LICENSE.txt" "${MSIME_LEGAL_DIRECTORY}/Zinnia-LICENSE.txt" COPYONLY)
+# The dictionary data in the pinned release, the helpcode notice kept with the Engine's helpcode tables, and zinnia, whose recognizer crates/engine/src/handwriting ports and host-api links in. The first and last are the copies the Linux package installs.
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../linux/data/licenses/msime-engine-dictionary-NOTICE.md" "${MSIME_LEGAL_DIRECTORY}/msime-engine-dictionary-NOTICE.md" COPYONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/helpcodes/ENGINE-NOTICE.md" "${MSIME_LEGAL_DIRECTORY}/msime-engine-helpcode-NOTICE.md" COPYONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../linux/data/licenses/Zinnia-LICENSE.txt" "${MSIME_LEGAL_DIRECTORY}/Zinnia-LICENSE.txt" COPYONLY)
 # The on-device speech runtime staged into Contents/Frameworks below. The upstream archive carries no license file, so the texts come from the copies the other desktops ship: sherpa-onnx's beside its vendored C header, ONNX Runtime's pinned under platforms/linux.
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/voice/third_party/sherpa-onnx/LICENSE" "${MSIME_LEGAL_DIRECTORY}/sherpa-onnx-Apache-2.0.txt" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../linux/data/licenses/onnxruntime-MIT.txt" "${MSIME_LEGAL_DIRECTORY}/onnxruntime-MIT.txt" COPYONLY)
@@ -209,24 +202,6 @@ add_custom_command(TARGET MSIMEClientInputMethod POST_BUILD
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MSIME_SWIFT_BACKEND_OUTPUT}" "$<TARGET_BUNDLE_DIR:MSIMEClientInputMethod>/Contents/Frameworks/MSIMEBackend.dylib"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MSIME_VOICE_RUNTIME_LIBRARY}" "$<TARGET_BUNDLE_DIR:MSIMEClientInputMethod>/Contents/Frameworks/libsherpa-onnx-c-api.dylib"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:msime-voice-local>" "$<TARGET_BUNDLE_DIR:MSIMEClientInputMethod>/Contents/MacOS/msime-voice-local")
-# The Whisper recognizer, when this host carries it, is linked in, not staged beside it.
-#
-# `MSIME_SHARED_VOICE_LOCAL_WHISPER` defaults ON above, so the input method normally carries whisper and the four ggml libraries. They used to arrive as dylibs and be copied here, because a first configure of a fresh build directory produced shared libraries - see the cache entry in shared/voice/CMakeLists.txt for why that happened and why it no longer does. Without the copies an installed bundle aborted at launch with `Library not loaded: @rpath/libwhisper.1.dylib`, which the build and the signature both let through.
-#
-# Static archives cannot fail that way: there is nothing to find at runtime. The guard stays, and
-# fails the configure rather than silently shipping a bundle that will not start, if the Engine's
-# voice dependencies ever come out shared again.
-foreach(MSIME_BUNDLED_LIBRARY whisper ggml ggml-base ggml-cpu ggml-metal)
-  if(TARGET ${MSIME_BUNDLED_LIBRARY})
-    get_target_property(MSIME_BUNDLED_LIBRARY_TYPE ${MSIME_BUNDLED_LIBRARY} TYPE)
-    if(MSIME_BUNDLED_LIBRARY_TYPE STREQUAL "SHARED_LIBRARY")
-      message(FATAL_ERROR
-        "${MSIME_BUNDLED_LIBRARY} came out shared; this bundle links the Engine's voice dependencies "
-        "statically and stages no dylib for them, so it would abort at launch on @rpath. "
-        "See shared/voice/CMakeLists.txt.")
-    endif()
-  endif()
-endforeach()
 set(MSIME_OPTIONS_FILE "" CACHE FILEPATH "Optional development runtime configuration; never distribute this file")
 if(MSIME_OPTIONS_FILE)
   target_sources(MSIMEClientInputMethod PRIVATE "${MSIME_OPTIONS_FILE}")
@@ -325,7 +300,7 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/emoji-swift-host-test"
     -target "${CMAKE_HOST_SYSTEM_PROCESSOR}-apple-macosx${CMAKE_OSX_DEPLOYMENT_TARGET}"
     ${MSIME_EMOJI_SWIFT_HOST_SOURCES}
     -Xlinker -force_load -Xlinker "$<TARGET_FILE:apple-client>"
-    "${MSIME_HOST_LIBRARY}" -lsqlite3 -lc++ -framework Foundation -framework Security -framework CoreText -framework AppKit
+    "${MSIME_HOST_LIBRARY}" -lsqlite3 -lc++ -framework Foundation -framework Security -framework CoreText -framework CoreAudio -framework AudioToolbox -framework AppKit
     -o "${CMAKE_CURRENT_BINARY_DIR}/emoji-swift-host-test"
   DEPENDS ${MSIME_EMOJI_SWIFT_HOST_SOURCES} apple-client "${MSIME_HOST_LIBRARY}" VERBATIM)
 add_custom_target(emoji-swift-host-test-build ALL DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/emoji-swift-host-test")
@@ -510,7 +485,7 @@ target_link_libraries(voice-failure-messages-test PRIVATE msime-voice-providers 
 add_test(NAME voice-failure-messages COMMAND voice-failure-messages-test)
 add_executable(doubao-voice-request-test tests/voice/DoubaoVoiceRequestTest.mm src/voice/DoubaoVoiceRequest.mm)
 target_compile_options(doubao-voice-request-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
-target_link_libraries(doubao-voice-request-test PRIVATE apple-client MetasequoiaIme::Voice "-framework Foundation")
+target_link_libraries(doubao-voice-request-test PRIVATE apple-client "-framework Foundation")
 add_test(NAME doubao-voice-request COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/voice/doubao_voice_fixture.py" "$<TARGET_FILE:doubao-voice-request-test>")
 # Above the fixture's own 60 s client limit plus the 3 s stack sample it takes of a hung client, so a hang reports where it is stuck instead of being killed silently.
 set_tests_properties(doubao-voice-request PROPERTIES TIMEOUT 80)
@@ -669,22 +644,9 @@ target_link_libraries(translation-settings-test PRIVATE apple-client "-framework
 add_test(NAME translation-settings COMMAND translation-settings-test)
 # Run explicitly with the directory matching desktop-dictionary.lock.json.
 # This resource-dependent integration test does not enable or trigger CI.
-# The shared dictionary installation bridge decides which generation a running keyboard reads.
-# These cases need no Engine session or dictionary release, so they run in the ordinary suite.
-add_executable(dictionary-installation-test
-  tests/dictionary/DictionaryInstallationTest.mm ../../shared/apple-bridge/DictionaryInstallation.mm)
-target_compile_options(dictionary-installation-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
-target_include_directories(dictionary-installation-test
-  PRIVATE ../../shared/apple-bridge ../../vendor/MSIME-Engine ../../vendor/MSIME-Engine/include)
-target_link_libraries(dictionary-installation-test PRIVATE apple-client)
-add_test(NAME dictionary-installation COMMAND dictionary-installation-test)
 add_executable(snapshot-activation-test tests/core/SnapshotActivationTest.mm)
 target_compile_options(snapshot-activation-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(snapshot-activation-test PRIVATE apple-client)
-add_executable(string-conversion-test tests/core/StringConversionTest.mm src/core/StringConversion.mm)
-target_compile_options(string-conversion-test PRIVATE -fobjc-arc -Wall -Wextra -Werror)
-target_link_libraries(string-conversion-test PRIVATE "-framework Foundation")
-add_test(NAME string-conversion COMMAND string-conversion-test)
 add_executable(chinese-text-conversion-test tests/core/ChineseTextConversionTest.mm src/core/ChineseTextConversion.mm)
 target_compile_options(chinese-text-conversion-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(chinese-text-conversion-test PRIVATE apple-client "-framework Foundation")
@@ -705,7 +667,6 @@ target_compile_options(voice-session-delivery-test PRIVATE -fobjc-arc -Wall -Wex
 target_link_libraries(voice-session-delivery-test PRIVATE apple-client "-framework AVFoundation" "-framework Speech" "-framework CoreAudio" "-framework AudioToolbox")
 add_test(NAME voice-session-delivery COMMAND voice-session-delivery-test)
 add_executable(shortcut-test tests/input/ShortcutTest.mm src/core/DiagnosticLog.cpp src/core/UpdateController.mm src/settings/AppearancePreferences.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/core/ChineseTextConversion.mm src/settings/ShuangpinKeymapPanel.mm src/input/InputSourceRegistration.mm src/core/FloatingToolbarPanel.mm src/dictionary/DictionaryWindowController.mm src/core/ClientDictionaryRuntime.mm)
-target_include_directories(shortcut-test PRIVATE ../../vendor/MSIME-Engine ../../vendor/MSIME-Engine/include)
 target_compile_options(shortcut-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(shortcut-test PRIVATE apple-client "-framework AppKit" "-framework InputMethodKit" "-framework Carbon")
 target_compile_options(shortcut-test PRIVATE "-F${MSIME_SPARKLE_ROOT}")
@@ -740,17 +701,14 @@ add_executable(http-voice-controller-test tests/voice/HTTPVoiceControllerTest.mm
 target_sources(http-voice-controller-test PRIVATE src/cloud/TranslationCache.mm src/cloud/TranslationSettingsWindow.mm src/core/AISettingsWindow.mm src/input/InputModeHUDPanel.mm)
 get_target_property(MSIME_CONTROLLER_TEST_LIBS shortcut-test LINK_LIBRARIES)
 target_link_libraries(http-voice-controller-test PRIVATE ${MSIME_CONTROLLER_TEST_LIBS})
-target_include_directories(http-voice-controller-test PRIVATE ../../vendor/MSIME-Engine ../../vendor/MSIME-Engine/include)
 target_compile_options(http-voice-controller-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG "-F${MSIME_SPARKLE_ROOT}")
 add_test(NAME http-voice-controller COMMAND http-voice-controller-test)
 add_executable(doubao-voice-controller-test tests/voice/DoubaoVoiceControllerTest.mm ${MSIME_CONTROLLER_TEST_SOURCES} src/cloud/TranslationCache.mm src/cloud/TranslationSettingsWindow.mm src/core/AISettingsWindow.mm src/input/InputModeHUDPanel.mm)
 target_link_libraries(doubao-voice-controller-test PRIVATE ${MSIME_CONTROLLER_TEST_LIBS})
-target_include_directories(doubao-voice-controller-test PRIVATE ../../vendor/MSIME-Engine ../../vendor/MSIME-Engine/include)
 target_compile_options(doubao-voice-controller-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG "-F${MSIME_SPARKLE_ROOT}")
 add_test(NAME doubao-voice-controller COMMAND doubao-voice-controller-test)
 add_executable(live-voice-controller-test tests/voice/LiveVoiceControllerTest.mm ${MSIME_CONTROLLER_TEST_SOURCES} src/cloud/TranslationCache.mm src/cloud/TranslationSettingsWindow.mm src/core/AISettingsWindow.mm src/input/InputModeHUDPanel.mm)
 target_link_libraries(live-voice-controller-test PRIVATE ${MSIME_CONTROLLER_TEST_LIBS})
-target_include_directories(live-voice-controller-test PRIVATE ../../vendor/MSIME-Engine ../../vendor/MSIME-Engine/include)
 target_compile_options(live-voice-controller-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG "-F${MSIME_SPARKLE_ROOT}")
 add_test(NAME live-voice-controller COMMAND live-voice-controller-test)
 add_test(NAME live-voice-socket-route COMMAND live-voice-controller-test --socket)
@@ -763,7 +721,6 @@ add_executable(smart-punctuation-space-test tests/input/SmartPunctuationSpaceTes
   src/cloud/TranslationCache.mm src/cloud/TranslationSettingsWindow.mm src/core/AISettingsWindow.mm
   src/input/InputModeHUDPanel.mm)
 target_link_libraries(smart-punctuation-space-test PRIVATE ${MSIME_CONTROLLER_TEST_LIBS})
-target_include_directories(smart-punctuation-space-test PRIVATE ../../vendor/MSIME-Engine ../../vendor/MSIME-Engine/include)
 target_compile_options(smart-punctuation-space-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG "-F${MSIME_SPARKLE_ROOT}")
 add_test(NAME smart-punctuation-space COMMAND smart-punctuation-space-test)
 set_tests_properties(smart-punctuation-space PROPERTIES TIMEOUT 30)
@@ -771,7 +728,6 @@ add_executable(smart-punctuation-shadow-test tests/input/SmartPunctuationShadowT
   src/cloud/TranslationCache.mm src/cloud/TranslationSettingsWindow.mm src/core/AISettingsWindow.mm
   src/input/InputModeHUDPanel.mm)
 target_link_libraries(smart-punctuation-shadow-test PRIVATE ${MSIME_CONTROLLER_TEST_LIBS})
-target_include_directories(smart-punctuation-shadow-test PRIVATE ../../vendor/MSIME-Engine ../../vendor/MSIME-Engine/include)
 target_compile_options(smart-punctuation-shadow-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG "-F${MSIME_SPARKLE_ROOT}")
 add_test(NAME smart-punctuation-shadow COMMAND smart-punctuation-shadow-test)
 set_tests_properties(smart-punctuation-shadow PROPERTIES TIMEOUT 30)
@@ -780,7 +736,6 @@ add_executable(dictionary-quiesce-controller-test tests/input/DictionaryQuiesceT
   src/cloud/TranslationCache.mm src/cloud/TranslationSettingsWindow.mm src/core/AISettingsWindow.mm
   src/input/InputModeHUDPanel.mm)
 target_link_libraries(dictionary-quiesce-controller-test PRIVATE ${MSIME_CONTROLLER_TEST_LIBS})
-target_include_directories(dictionary-quiesce-controller-test PRIVATE ../../vendor/MSIME-Engine ../../vendor/MSIME-Engine/include)
 target_compile_options(dictionary-quiesce-controller-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG "-F${MSIME_SPARKLE_ROOT}")
 add_test(NAME dictionary-quiesce-controller COMMAND dictionary-quiesce-controller-test)
 set_tests_properties(dictionary-quiesce-controller PROPERTIES TIMEOUT 30)
@@ -807,20 +762,9 @@ set_tests_properties(voice-polish-request PROPERTIES TIMEOUT 65)
 add_executable(shared-polish-prompt-test ../../shared/voice/tests/polish_prompt.cpp)
 target_compile_options(shared-polish-prompt-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME shared-polish-prompt COMMAND shared-polish-prompt-test)
-# Which compute backends the linked-in recognizer registers. shared/voice registers this itself where its
-# own BUILD_TESTING is on; this host adds the Engine's voice tree without it, and this host is the one that
-# links those libraries statically, so the check has to exist here too. A backend the registry never hears
-# about costs nothing visible: whisper still answers, on the CPU.
-if(TARGET ggml AND NOT TARGET shared-voice-backend-registry)
-  add_executable(shared-voice-backend-registry ../../shared/voice/tests/backend_registry.cpp)
-  target_link_libraries(shared-voice-backend-registry PRIVATE ggml)
-  add_test(NAME shared-voice-backend-registry COMMAND shared-voice-backend-registry)
-  # Registering the Metal backend compiles ggml's embedded shader library: under a second with a warm Metal cache, 12-15 s on a fresh arm64 runner and past the 20 s CI default on the Intel one.
-  set_tests_properties(shared-voice-backend-registry PROPERTIES TIMEOUT 120)
-endif()
 target_sources(shortcut-test PRIVATE src/cloud/TranslationCache.mm src/input/InputModeHUDPanel.mm)
 add_executable(shuangpin-keymap-input-test tests/input/ShuangpinKeymapInputTest.mm src/settings/ShuangpinKeymapPanel.mm)
-target_include_directories(shuangpin-keymap-input-test PRIVATE src ../../vendor/MSIME-Engine ../../vendor/MSIME-Engine/include)
+target_include_directories(shuangpin-keymap-input-test PRIVATE src)
 target_compile_options(shuangpin-keymap-input-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(shuangpin-keymap-input-test PRIVATE apple-client "-framework AppKit")
 add_test(NAME shuangpin-keymap-input COMMAND shuangpin-keymap-input-test)
@@ -839,7 +783,6 @@ add_test(NAME candidate-item-layout COMMAND candidate-item-layout-test)
 # The candidate page layout rendered through the same controller shortcut-test imports, on its own so its assertions report independently of that suite.
 add_executable(candidate-row-layout-test tests/candidate/CandidateRowLayoutTest.mm ${MSIME_CONTROLLER_TEST_SOURCES} src/cloud/TranslationCache.mm src/cloud/TranslationSettingsWindow.mm src/core/AISettingsWindow.mm src/input/InputModeHUDPanel.mm)
 target_link_libraries(candidate-row-layout-test PRIVATE ${MSIME_CONTROLLER_TEST_LIBS})
-target_include_directories(candidate-row-layout-test PRIVATE ../../vendor/MSIME-Engine ../../vendor/MSIME-Engine/include)
 target_compile_options(candidate-row-layout-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG "-F${MSIME_SPARKLE_ROOT}")
 add_test(NAME candidate-row-layout COMMAND candidate-row-layout-test)
 add_executable(candidate-hover-test tests/candidate/CandidateHoverTest.mm)
@@ -856,9 +799,7 @@ add_executable(candidate-pagination-test tests/candidate/CandidatePaginationTest
 target_include_directories(candidate-pagination-test PRIVATE src)
 target_compile_options(candidate-pagination-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME candidate-pagination COMMAND candidate-pagination-test)
-# The current client host uses the host-api adapter. src/dictionary/DictionaryRuntime.mm is
-# the retained Apple snapshot adapter for MetasequoiaInputController, not this host.
-# src/candidate/CandidatePanel.mm is likewise that adapter's panel, built only by candidate-panel-test.
+# src/candidate/CandidatePanel.mm is the panel of the Apple snapshot's direct-engine controller, which is gone; only candidate-panel-test builds it.
 # Installing a dictionary over the one already in place. Every refusal here protects that file, and
 # the install itself must not be able to leave the user without one.
 add_executable(dictionary-installer-test tests/dictionary/DictionaryInstallerTest.mm src/dictionary/DictionaryInstaller.mm)
@@ -894,7 +835,6 @@ target_compile_options(apple-stored-preferences-test PRIVATE -fobjc-arc -Wall -W
 target_link_libraries(apple-stored-preferences-test PRIVATE "-framework Foundation")
 add_test(NAME apple-stored-preferences COMMAND apple-stored-preferences-test)
 add_executable(floating-toolbar-panel-test tests/settings/FloatingToolbarPanelTest.mm src/core/FloatingToolbarPanel.mm src/core/SupportWindowController.mm src/candidate/CandidateSkinAppearance.mm src/candidate/CandidateSkin.cpp)
-target_include_directories(floating-toolbar-panel-test PRIVATE ../../vendor/MSIME-Engine/include)
 target_compile_options(floating-toolbar-panel-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(floating-toolbar-panel-test PRIVATE "-framework AppKit")
 add_test(NAME floating-toolbar-panel COMMAND floating-toolbar-panel-test)
@@ -938,18 +878,12 @@ add_test(
   COMMAND "${Python3_EXECUTABLE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/settings/preference_coverage.py"
           "${CMAKE_CURRENT_SOURCE_DIR}/../..")
-# Only a build with the Whisper option on is required to carry the recogniser; CI builds with it off.
-set(MSIME_BUNDLE_WHISPER_FLAG "")
-if(MSIME_SHARED_VOICE_LOCAL_WHISPER)
-  set(MSIME_BUNDLE_WHISPER_FLAG --whisper)
-endif()
 add_test(
   NAME bundle-contents
   COMMAND "${Python3_EXECUTABLE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/settings/bundle_contents.py"
           "$<TARGET_BUNDLE_DIR:MSIMEClientInputMethod>"
-          --languages zh-Hans,en
-          ${MSIME_BUNDLE_WHISPER_FLAG})
+          --languages zh-Hans,en)
 add_test(
   NAME info-plist-icons
   COMMAND "${Python3_EXECUTABLE}"
@@ -980,20 +914,6 @@ add_executable(input-source-registration-test tests/input/InputSourceRegistratio
 target_compile_options(input-source-registration-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(input-source-registration-test PRIVATE "-framework AppKit" "-framework Carbon" "-framework Foundation")
 add_test(NAME input-source-registration COMMAND input-source-registration-test)
-add_executable(local-input-mode-test tests/input/LocalInputModeTests.cpp)
-target_include_directories(local-input-mode-test PRIVATE ../../vendor/MSIME-Engine/include)
-target_compile_options(local-input-mode-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
-target_link_libraries(local-input-mode-test PRIVATE apple-client)
-add_test(NAME local-input-mode COMMAND local-input-mode-test)
-add_executable(frequency-adjustment-preference-test tests/settings/FrequencyAdjustmentPreferenceTests.cpp)
-target_include_directories(frequency-adjustment-preference-test PRIVATE ../../vendor/MSIME-Engine/include)
-target_compile_options(frequency-adjustment-preference-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
-add_test(NAME frequency-adjustment-preference COMMAND frequency-adjustment-preference-test)
-add_executable(candidate-selection-state-test tests/candidate/CandidateSelectionStateTests.cpp)
-target_include_directories(candidate-selection-state-test PRIVATE src ../../vendor/MSIME-Engine/include)
-target_compile_options(candidate-selection-state-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
-target_link_libraries(candidate-selection-state-test PRIVATE "-framework Foundation")
-add_test(NAME candidate-selection-state COMMAND candidate-selection-state-test)
 # The page-size rules had a test file and no target: it had never been built, let alone run, which is
 # how a clamp that rewrote the shared default stayed in place.
 add_executable(candidate-page-size-test tests/candidate/CandidatePageSizeTest.cpp)

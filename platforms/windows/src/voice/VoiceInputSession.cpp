@@ -1,4 +1,5 @@
 #include "VoiceInputSession.h"
+#include "AudioCapture.h"
 #include "PolishPrompt.h"
 
 #include "LocalAsr.h"
@@ -7,9 +8,6 @@
 #include "VoiceProviders.h"
 #include "VoiceSessionPolicy.h"
 #include "msime_client.h"
-#include <msime/voice/audio_capture.h>
-#include <msime/voice/cloud_stt_worker.h>
-#include <msime/voice/provider_protocol.h>
 
 #include <algorithm>
 #include <chrono>
@@ -357,7 +355,7 @@ VoiceInputSession::VoiceInputSession(WaveOverlay &overlay,
                                      ConfigProvider config_provider)
     : overlay_(overlay), lease_provider_(std::move(lease_provider)),
       sender_(std::move(sender)), config_provider_(std::move(config_provider)),
-      capture_owner_(std::make_unique<metasequoia::voice::AudioCapture>()) {
+      capture_owner_(std::make_unique<AudioCapture>()) {
   capture_ = capture_owner_.get();
 }
 
@@ -457,7 +455,7 @@ bool VoiceInputSession::start(std::shared_ptr<VoiceReviewResult> review,
                          ? default_asr_model(config.asr_provider)
                          : config.model;
   const bool local = is_local_asr_provider(config.asr_provider);
-  // An installed catalog model decodes as the audio arrives and reports partial text like Doubao. A Whisper model file, what the setting held before the catalog, still recognizes the finished recording in one pass.
+  // An installed catalog model decodes as the audio arrives and reports partial text like Doubao. Any other path, such as a Whisper model file the setting held before the catalog, goes through the batch recognizer, which refuses it after the recording.
   const bool local_stream =
       local && msime::voice::is_local_model_dir(config.asr_model_path);
   const bool stream_inline = voice_inline_allowed(

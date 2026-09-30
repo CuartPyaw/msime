@@ -43,10 +43,11 @@ try {
         'THIRD_PARTY_NOTICES.txt',
         'LICENSE',
         'target/release/msime-desktop.exe',
-        'vendor/MSIME-Engine/handwriting/models/handwriting-zh_CN.model',
-        'vendor/MSIME-Engine/handwriting/models/HandwritingModel-LICENSE.txt',
-        'vendor/MSIME-Engine/handwriting/provenance.json',
-        'vendor/MSIME-Engine/helpcode/helpcodes/helpcode.txt'
+        'resources/handwriting/handwriting-zh_CN.model',
+        'resources/handwriting/HandwritingModel-LICENSE.txt',
+        'resources/handwriting/provenance.json',
+        'resources/helpcodes/helpcode.txt',
+        'resources/helpcodes/NOTICE.md'
     )) { Write-Fixture $file }
     Write-Fixture 'windows/build32-release/Release/msime_host_api.dll' 'synthetic x86 host'
     Write-Fixture 'windows/build64-release/Release/msime_host_api.dll' 'synthetic x64 host'
@@ -118,6 +119,7 @@ try {
                          'app_data/helpcodes/helpcode.txt', 'THIRD_PARTY_NOTICES.txt', 'LICENSE.txt')) {
         if (-not (Test-Path (Join-Path $installer $file))) { throw "Missing packaged file: $file" }
     }
+    if (Test-Path (Join-Path $installer 'app_data/helpcodes/NOTICE.md')) { throw 'Staged a helpcode notice as a table' }
     foreach ($testFile in @(
         'server_exe/MetasequoiaImeServerTests.exe',
         'server_exe/MetasequoiaImeServerTests.pdb',
@@ -224,7 +226,7 @@ try {
             throw "Light package lost handwriting resource: $name"
         }
     }
-    $notice = Join-Path $fixture 'vendor/MSIME-Engine/handwriting/models/HandwritingModel-LICENSE.txt'
+    $notice = Join-Path $fixture 'resources/handwriting/HandwritingModel-LICENSE.txt'
     Remove-Item -LiteralPath $notice
     $rejected = $false
     try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture } catch { $rejected = $true }

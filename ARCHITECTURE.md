@@ -8,15 +8,15 @@
 
 ```
 平台宿主 (platforms/)          系统输入法入口，各自进程
-    ↓  C ABI / JNI / CXX / Objective-C++
+    ↓  C ABI / JNI / Objective-C++
 crates/host-api                版本化 C 接口，线程绑定会话句柄
     ↓
 crates/input-runtime           会话编排、焦点、候选分页、带代次的选择
     ↓
-crates/engine-bridge           CXX 桥接
-    ↓
-msime-engine (C++, 固定版本)   输入算法与组合状态
+crates/engine                  输入算法与组合状态（纯 Rust）
 ```
+
+`host-api` 的词库管理接口（个人词条、固定资源的校验与编辑）直接调用 `crates/engine`，不经过 `input-runtime`；按键与会话一律走上面这条链路。
 
 `crates/client-core` 与上面这条链路平行，负责本地配置和固定资源的分代安装，不参与按键处理。`packages/ui` 与 `apps/desktop` 是共享的 React 设置页和承载它们的 Tauri 层，各平台共用同一个 Rust 入口库与同一套页面。
 
@@ -24,7 +24,7 @@ msime-engine (C++, 固定版本)   输入算法与组合状态
 
 ## 四条不能打破的边界
 
-**输入算法归 C++ Engine。** 组词状态机、候选排序、学习回放都在 Engine 里。`input-runtime` 只维护宿主编排和展示状态——它知道当前是第几页、焦点在不在、这次选择属于哪一代快照，但它不知道「ni hao」应该出什么词。在 Rust 侧复制一份组词逻辑，就等于让两份实现开始漂移。
+**输入算法归 Rust 引擎 crate `crates/engine`。** 组词状态机、候选排序、学习回放都在 engine 里。`input-runtime` 仍然不复制组词逻辑：它只维护宿主编排和展示状态——它知道当前是第几页、焦点在不在、这次选择属于哪一代快照，但它不知道「ni hao」应该出什么词。在 `input-runtime` 或宿主里再写一份组词规则，就等于让两份实现开始漂移。
 
 **`client-core` 不依赖 Tauri、React、Engine 或平台宿主。** 平台能力一律通过接口注入。这条保证了它可以被链进任何宿主进程，包括没有 Tauri 运行时的键盘扩展。
 
@@ -34,7 +34,9 @@ msime-engine (C++, 固定版本)   输入算法与组合状态
 
 ## 上游 Engine
 
-Engine 由 `engine-lock.json` 固定：锁文件记录 Engine 及其第三方源码归档的 commit 和 SHA-256。`scripts/fetch_engine.py` 校验并展开这些归档到被忽略的 `vendor/MSIME-Engine/`，不使用 gitlink、`.gitmodules` 或递归 Git checkout；`crates/engine-bridge` 的 build.rs 在编译前调用它。离线构建可用 `MSIME_SKIP_ENGINE_FETCH=1` 跳过。
+输入引擎是本仓库里的 `crates/engine`（`msime-engine`），随 workspace 一起构建和测试，没有锁文件，也不再从外部拉取源码归档。它由 C++ 版 MSIME-Engine 移植而来：移植时用参考实现（固定 commit 加当时的 overlay）录下了行为基准，提交在 `crates/engine/tests/golden/`，由 `crates/engine/tests/golden.rs` 对照；录制方法和参考实现的来源记在 `tools/engine-golden/README.md`，只在需要从归档的参考构建重新录制时才用得上。引擎行为的改动直接改 `crates/engine` 并更新对应的基准，不再有 overlay 这一层。
+
+平台仍要用到的非引擎文件已随仓库提交：Windows 与各宿主共用的 IPC 契约头文件在 `shared/contracts/`，辅助码表在 `resources/helpcodes/`，Windows 提示音用的 miniaudio 在 `platforms/windows/third_party/miniaudio/`。
 
 引入新的上游代码、字体、图标、模型或服务 SDK 时，同时提交来源提交、许可证文本、通知位置和分发限制。
 
@@ -49,7 +51,7 @@ bash scripts/verify-local.sh --quick   # 只编译，合并前的门禁
 bash scripts/verify-local.sh           # 全量
 ```
 
-Windows 的编译门禁不需要 Windows 机器。装好 MinGW（`x86_64-w64-mingw32-g++`）后，在主工作区跑一次 `platforms/windows/build-cross.sh x64` 把 vcpkg 引导到清单基线，整台机器就位了：之后 `verify-local.sh` 在任何一个 worktree 里都会自动接管这条路径，把 host DLL、TSF DLL、Server 与全部原生测试链接一遍（vcpkg 树从 `MSIME_VCPKG_ROOT`、本工作区的 `target/tooling/vcpkg`、主工作区的同名目录依次查找；编译好的依赖放在该 vcpkg 树旁边共用，不必每个 worktree 各自把 curl 和 boost 再编一遍）。没有这套环境时该阶段仍然跳过，但会把这行命令打出来——它曾经在每台机器上都只打印「skipped」，而背后的原生构建同时坏了六处。
+Windows 的编译门禁不需要 Windows 机器。装好 MinGW（`x86_64-w64-mingw32-g++`）后，在主工作区跑一次 `platforms/windows/build-cross.sh x64` 把 vcpkg 引导到清单基线，整台机器就位了：之后 `verify-local.sh` 在任何一个 worktree 里都会自动接管这条路径，把 host DLL、TSF DLL、Server 与全部原生测试链接一遍（vcpkg 树从 `MSIME_VCPKG_ROOT`、本工作区的 `target/tooling/vcpkg`、主工作区的同名目录依次查找；编译好的依赖放在该 vcpkg 树旁边共用，不必每个 worktree 各自把 curl 再编一遍）。没有这套环境时该阶段仍然跳过，但会把这行命令打出来——它曾经在每台机器上都只打印「skipped」，而背后的原生构建同时坏了六处。
 
 Linux 的 Tauri 外壳同理，只要机器上有 Docker 就不需要 Linux 机器：`verify-local.sh` 会在 `platforms/linux/tests/tools/Dockerfile.desktop-check` 构建的镜像（固定摘要的 `rust:1.97.1-bookworm` 预装 webkit2gtk/gtk3/libsoup，按 checkout 打 tag）里 `cargo check -p msime-desktop --all-targets`。这一阶段的由来和 Windows 那条一样——`cargo check --workspace` 只看宿主 target，而 macOS 上 `msime-desktop` 因为缺少它当资源列出的 app bundle 被整包排除，于是 Tauri 外壳里所有 `#[cfg(target_os = "linux")]` 分支从来没被任何东西编译过，攒到 36 个编译错误：Linux 的设置窗口、全部共享面板和账号界面根本构建不出来。没有 Docker 时该阶段跳过并打印命令。
 

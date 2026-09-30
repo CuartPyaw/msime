@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux setup rejects oversized download and extracted resource bodies."""
+"""Linux setup rejects oversized download bodies."""
 
 import importlib.machinery
 import importlib.util

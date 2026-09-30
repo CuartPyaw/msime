@@ -19,7 +19,7 @@
 #include "../Utils/PerfTimer.h"
 #include "../../common/PipeMetadata.h"
 #include <chrono>
-#include "../../../../vendor/MSIME-Engine/contracts/ipc_negotiation.h"
+#include "../../../../shared/contracts/ipc_negotiation.h"
 
 // 0xF003, 0xF004 are the keys that the touch keyboard sends for next/previous
 #define THIRDPARTY_NEXTPAGE static_cast<WORD>(0xF003)

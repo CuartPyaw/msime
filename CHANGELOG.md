@@ -11,7 +11,7 @@
 #### 共享层与宿主接口
 
 - 不依赖 Tauri、React 或任何平台宿主的 Rust 共享层，覆盖偏好设置、资源安装与校验、输入运行时、账号与云服务、语音、翻译、皮肤、社区资源、剪贴板、个人词库、打字统计和候选释义。
-- 通过 CXX 接入由 `engine-lock.json` 固定提交与 SHA-256 的 msime-engine；输入算法、组合状态和学习数据继续由 C++ Engine 管理，共享层只做编排。
+- 输入引擎 `crates/engine`（`msime-engine`）是纯 Rust 实现，由 C++ MSIME-Engine 移植而来，输入算法、组合状态和学习数据归它管理，共享层只做编排；已有的用户词库日志、个人词库与学习数据按原格式读写，无需迁移。
 - 版本化 C ABI（`crates/host-api`）作为所有原生宿主的唯一入口，以 `cdylib`/`staticlib`/`rlib` 三种形态提供，覆盖会话生命周期、候选与代次选择、词库快照、云词典、云剪贴板、系统字体目录、翻译提供方、语音提供方与打字统计。
 - 输入运行时统一处理焦点、候选翻页、代次选择与全半角转换，并接入固定版本的整句重排模型。
 - macOS 与 Windows 各有一层宿主支持 crate：macOS 提供面板会话、云剪贴板与云词典桥接；Windows 提供语音控制器、语音上屏策略与 Windows Ink 手写。桌面 shell 禁用 `unsafe`，平台 API 调用集中在这两个 crate 里做安全封装。
@@ -26,7 +26,7 @@
 #### macOS
 
 - InputMethodKit 输入法宿主，支持候选面板（定位、分页、悬停、行宽适配、释义布局）、内置与外部皮肤包、候选释义与翻译、云联想、悬浮工具栏、中英模式 HUD、双拼键位提示、屏幕键盘、手写、表情与符号面板、剪贴板历史面板。
-- 语音输入覆盖豆包 WSS 与 HTTP 提供方、波形面板、录音设备选择、系统静音与恢复、润色和提示音；macOS 另可选用本地 Whisper 与系统识别，音频不出设备。
+- 语音输入覆盖豆包 WSS 与 HTTP 提供方、波形面板、录音设备选择、系统静音与恢复、润色和提示音；macOS 另可选用系统识别，音频不出设备。
 - 词库安装、运行时挂载、快照与云词典，账号与云剪贴板，打字统计、诊断日志、成对标点、智能标点空格、五笔上屏策略与辅助码。
 - Sparkle 自动更新；`platforms/macos/scripts/install.sh` 完成重签名、原子替换与失败回滚，`platforms/macos/scripts/check_input_source.swift` 核查输入源注册。
 
@@ -96,7 +96,8 @@
 
 #### 工程与文档
 
-- 固定上游：`engine-lock.json` 记录 Engine 及其嵌套依赖的提交与 SHA-256，配套 overlay 脚本；`resources/*.lock.json` 固定随包词库与模型的 URL、长度与 SHA-256。
+- 输入引擎从取回并打 overlay 的 C++ 归档改为仓库内的 Rust crate：`engine-lock.json`、`scripts/fetch_engine.py`、`scripts/relock_engine.py`、全部 `scripts/apply_engine_*.py` 与 `scripts/engine-overlays/`、每周重锁与自动合并的两个工作流、`crates/engine-bridge` 及其 Boost／fmt／spdlog 构建依赖一并删除，构建不再需要 C++ 工具链或 `vendor/MSIME-Engine`。行为基准从 C++ 参考实现录制在 `crates/engine/tests/golden/`，录制方法见 `tools/engine-golden/README.md`；平台仍用的 IPC 契约头文件、辅助码表与 miniaudio 改为随仓库提交（`shared/contracts/`、`resources/helpcodes/`、`platforms/windows/third_party/miniaudio/`）。Google 整句解码器及其 `dict_pinyin.dat`、Whisper 本地文件识别随之去掉。
+- `resources/*.lock.json` 固定随包词库与模型的 URL、长度与 SHA-256。
 - `scripts/verify-local.sh` 提供本地统一验证，分快速门禁与完整两档；长期失败集中记在 `scripts/known-failures.txt`，每条附完整取证记录，比对只对不在清单里的失败名报错。
 - 静态与契约门禁以独立脚本形式进入本地验证，覆盖配置键覆盖率、界面动作覆盖率、源码清单与设置页产物一致性。
 - 整句转换评测与重排延迟测量各有固定数据集与基线文件，可在本地复跑。

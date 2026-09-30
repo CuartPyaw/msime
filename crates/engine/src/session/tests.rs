@@ -271,10 +271,14 @@ fn caret_prefix_decodes_only_the_complete_units_before_the_caret() {
     assert_eq!(session.prefix_end(), 7);
     assert_eq!(words(&session), at_hao);
 
+    // A caret inside the first unit has no whole unit before it, so the whole-input list stays (904bd0976) instead of an empty prefix query.
+    for caret in [0, 1, 2] {
+        session.set_caret(Some(caret));
+        assert_eq!(words(&session), full, "caret {caret}");
+        assert_eq!(session.prefix_end(), 0, "caret {caret}");
+        assert_eq!(session.pending_suffix(), sentence, "caret {caret}");
+    }
     session.set_caret(Some(0));
-    assert!(words(&session).is_empty());
-    assert_eq!(session.prefix_end(), 0);
-    assert_eq!(session.pending_suffix(), sentence);
     let snapshot = session.snapshot();
     assert_eq!(snapshot.editing_text, sentence);
     assert_eq!(snapshot.caret_position, 0);
@@ -327,17 +331,24 @@ fn caret_commands_redecode_and_selection_returns_to_the_end() {
     let snapshot = session.snapshot();
     assert_eq!(snapshot.editing_text, "ni");
     assert_eq!(snapshot.caret_position, 1);
-    // The caret sits inside the only unit, so there is no complete prefix to decode.
-    assert!(snapshot.candidates.is_empty());
+    // The caret sits inside the only unit, so there is no complete prefix to decode and the whole input answers.
+    let whole: Vec<String> = snapshot
+        .candidates
+        .into_iter()
+        .map(|item| item.word)
+        .collect();
+    assert_eq!(whole.first().map(String::as_str), Some("你"));
     session.command(Command::MoveEnd);
-    assert_eq!(words(&session).first().map(String::as_str), Some("你"));
+    assert_eq!(words(&session), whole);
     session.command(Command::Cancel);
 
     type_text(&mut session, "nihao");
+    let full = words(&session);
     let prefix_index = index_of(&session, "你");
     session.command(Command::MoveHome);
-    assert!(words(&session).is_empty());
-    assert!(!session.select(prefix_index).handled);
+    assert_eq!(words(&session), full);
+    session.command(Command::MoveRight);
+    assert_eq!(words(&session), full);
     session.command(Command::MoveEnd);
     let selected = session.select(prefix_index);
     assert_eq!(selected.commit.as_deref(), Some("你"));
@@ -360,6 +371,45 @@ fn selecting_a_prefix_candidate_exits_prefix_mode() {
     assert_eq!(snapshot.caret_position, snapshot.editing_text.len());
     assert_eq!(session.prefix_end(), "shijie".len());
     assert!(words(&session).contains(&"是".to_owned()));
+}
+
+/// 904bd0976: the prefix list goes through the same personal context reorder as the whole input, and a pinned leader keeps its seat there too.
+#[test]
+fn caret_prefix_follows_the_personal_context_order_and_its_pins() {
+    let fixture = Fixture::new(CONTEXT_FIXTURE);
+    let mut session = fixture.session();
+    // 子 is followed by 乙, never by 甲, however often.
+    for _ in 0..4 {
+        type_text(&mut session, "hao");
+        select_word(&mut session, "子");
+        type_text(&mut session, "ni");
+        select_word(&mut session, "乙");
+        session.punctuation(b',');
+    }
+    type_text(&mut session, "ni");
+    assert_eq!(words(&session).first().map(String::as_str), Some("甲"));
+    session.command(Command::Cancel);
+
+    type_text(&mut session, "hao");
+    select_word(&mut session, "子");
+    type_text(&mut session, "nihao");
+    session.set_caret(Some(2));
+    assert_eq!(session.prefix_end(), 2);
+    assert_eq!(
+        words(&session).first().map(String::as_str),
+        Some("乙"),
+        "after 子 the prefix ni leads with 乙: {:?}",
+        words(&session)
+    );
+    let result = session.pin(index_of(&session, "甲"));
+    assert!(result.handled && result.diagnostic.is_none(), "{result:?}");
+    assert_eq!(session.prefix_end(), 2);
+    assert_eq!(
+        words(&session).first().map(String::as_str),
+        Some("甲"),
+        "the pinned leader was moved: {:?}",
+        words(&session)
+    );
 }
 
 // ---- wubi mixed routing (overlays.md §3.3) ----
@@ -437,6 +487,29 @@ fn pinning_a_quanpin_row_in_mixed_wubi_writes_the_pinyin_table() {
             "SELECT count(*) FROM user_dictionary_operations WHERE dictionary='wubi'"
         ),
         0
+    );
+}
+
+/// 904bd0976: learning ranks against the list before any personal reorder, filtered to the selected row's producer, so a wubi row heavier than every quanpin row does not take part in a quanpin row's rank.
+#[test]
+fn a_quanpin_row_in_mixed_wubi_ranks_among_the_quanpin_rows_only() {
+    let fixture =
+        Fixture::new(&WUBI_ROUTING_FIXTURE.replace("'gege','工',100", "'gege','工',5000"));
+    let mut session = wubi_mixed(&fixture);
+    assert_eq!(words(&session).first().map(String::as_str), Some("工"));
+    let result = session.pin(index_of(&session, "个"));
+    assert!(result.handled && result.diagnostic.is_none(), "{result:?}");
+    let main = fixture.main_db();
+    let pinned = count(&main, "SELECT weight FROM tbl_1_g WHERE value='个'");
+    // Above 哥哥, the heaviest quanpin row, but ranked without 工: counting it would have lifted 个 past 5000.
+    assert!(pinned > 1000 && pinned < 5000, "个 weighs {pinned}");
+    assert_eq!(
+        count(&main, "SELECT weight FROM wubi86 WHERE value='工'"),
+        5000
+    );
+    assert_eq!(
+        count(&main, "SELECT weight FROM tbl_2_g WHERE value='哥哥'"),
+        1000
     );
 }
 

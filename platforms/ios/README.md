@@ -4,9 +4,9 @@
 
 App 业务位于 `App/Sources/<feature>/`，键盘扩展位于 `KeyboardExtension/Sources/<feature>/`，共享 SwiftUI/UIKit 位于 `SharedUI/<feature>/`；`KeyboardTests/`、`ServiceTests/`、`TransportTests/` 和 `UITests/` 分别覆盖键盘、服务、桥接和界面边界。Tauri 生成工程位于 `apps/desktop/src-tauri/gen/apple`，不在其中维护第二份键盘实现。
 
-Xcode 工程由 XcodeGen 从 `project.yml` 生成，`project.yml` 是唯一权威来源；构建前先跑一次 `xcodegen generate`。生成的工程包含设置 App、`UIInputViewController` 键盘扩展和共享 Swift 适配层。输入算法与组合状态由 C++ Engine 管理；扩展只负责宿主事件、候选展示和文本提交。键盘扩展不直接使用桌面音频采集桥接。构建前需要先按下面的步骤把词库暂存到 `target/ios/EngineResources`。
+Xcode 工程由 XcodeGen 从 `project.yml` 生成，`project.yml` 是唯一权威来源；构建前先跑一次 `xcodegen generate`。生成的工程包含设置 App、`UIInputViewController` 键盘扩展和共享 Swift 适配层。输入算法与组合状态由 Rust Engine（`crates/engine`）管理；扩展只负责宿主事件、候选展示和文本提交。键盘扩展不直接使用桌面音频采集桥接。构建前需要先按下面的步骤把词库暂存到 `target/ios/EngineResources`。
 
-`apps/desktop/src-tauri/gen/apple` 下的 Tauri 生成工程是共享设置界面的构建产物来源，使用 iOS 17 最低版本和同一 `group.app.msime.ios` App Group。它服务于原生宿主承载共享界面这一用途，**不作为 iOS 的产品 App 分发或启动**。原生入口只解析系统提供的共享容器 URL 并注入状态根；偏好校验、并发 revision 和首次 HostOptions 默认文档仍由 Rust 共享层负责。生成工程链接 Engine 所需的系统 SQLite，并从既有 `target/ios/EngineResources` 嵌入固定词库。
+`apps/desktop/src-tauri/gen/apple` 下的 Tauri 生成工程是共享设置界面的构建产物来源，使用 iOS 17 最低版本和同一 `group.app.msime.ios` App Group。它服务于原生宿主承载共享界面这一用途，**不作为 iOS 的产品 App 分发或启动**。原生入口只解析系统提供的共享容器 URL 并注入状态根；偏好校验、并发 revision 和首次 HostOptions 默认文档仍由 Rust 共享层负责。生成工程链接系统 SQLite，并从既有 `target/ios/EngineResources` 嵌入固定词库。
 
 共享 Tauri 语音面板通过 `tauri-mobile-platform` 在 App 进程内使用 `AVAudioRecorder` 录制 16 kHz、单声道、PCM16 WAV，最长 60 秒；停止后把有界录音上传到当前 `PreferencesStore` 中选择的服务。OpenAI、SiliconFlow 和 Groq 使用 HTTPS multipart 批量转写；Doubao 使用 WSS、共享 `client-core` 鉴权策略和帧编解码 ABI，并按 Windows 的 200 ms PCM16 分帧发送。两种传输都禁止重定向并限制接口、模型、token、音频、消息、累计响应和识别文本大小；取消会停止录音或网络请求并删除临时文件。provider 凭据只在 Rust 与原生插件之间传递，不进入 WebView、日志或键盘扩展。
 
@@ -58,7 +58,7 @@ App 的“输入设置 → 标点”页直接读写共享 `PreferencesStore`：�
 
 同一页的「自定义候选释义」对应 Windows 放进用户目录的 `custom_translations.txt`：每行「源词 Tab 译文」，`#` 开头为注释，同一源词以最后一次为准，优先于内置词库、学到的释义和在线翻译。iOS 用户够不着 App Group 容器，所以 App 直接编辑键盘 Engine 用户目录（`MSIME/user`）里的这个文件，也可以从“文件”导入一份 Windows 用的原文件。解析规则与共享设置页的 `custom-translations.ts` 一致，用来显示条数和无法识别的行；写入规则与桌面外壳的 `write_custom_translations_at` 一致：上限 1 MB、拒绝 NUL、原子替换，清空即删除文件。Engine 在建会话时读取它，所以键盘下次载入时生效。
 
-“输入设置 → 辅助码”页分别设置双拼和全拼的辅助码：开关、方案（蓝天小雨点、自然码、首右2.0、首右plus、小鹤、加加）以及是否在候选栏显示辅助码，默认值与 Windows 相同（双拼蓝天小雨点并显示，全拼自然码不显示）。全拼或双拼组字时点一下 Shift，下一个字母作为辅助码交给 Engine，用于缩小候选；五笔、九宫格、日语和本地模式不使用辅助码。辅助码表是 Engine 资产，不在词库发布里：`stage-resources.sh` 按 Engine 资产契约（`contracts/assets/assets.json`）把各方案的表从已准备的 `vendor/MSIME-Engine` 复制到 `EngineResources/helpcodes/`，资源校验只放行这一个目录，钉住的词库文件仍逐个校验。缺了这些表，Shift 字母会被当作辅助码吃掉却不缩小任何候选。候选栏显示的辅助码来自 Engine 给每个候选的注释，桌面版把它加括号接在词后，iOS 放在候选下方，与五笔编码提示一致，不带括号。
+“输入设置 → 辅助码”页分别设置双拼和全拼的辅助码：开关、方案（蓝天小雨点、自然码、首右2.0、首右plus、小鹤、加加）以及是否在候选栏显示辅助码，默认值与 Windows 相同（双拼蓝天小雨点并显示，全拼自然码不显示）。全拼或双拼组字时点一下 Shift，下一个字母作为辅助码交给 Engine，用于缩小候选；五笔、九宫格、日语和本地模式不使用辅助码。辅助码表不在词库发布里，由仓库自带在 `resources/helpcodes/`：`stage-resources.sh` 把六个方案的表按 Engine 读取的文件名（`crates/engine/src/assets.rs`）复制到 `EngineResources/helpcodes/`，资源校验只放行这一个目录，钉住的词库文件仍逐个校验。缺了这些表，Shift 字母会被当作辅助码吃掉却不缩小任何候选。候选栏显示的辅助码来自 Engine 给每个候选的注释，桌面版把它加括号接在词后，iOS 放在候选下方，与五笔编码提示一致，不带括号。
 
 全拼和双拼组字时可以按音节编辑拼写，对应 Windows 组字里的 Ctrl+Backspace 和 Ctrl+←/→（共享 C ABI 的 `SegmentBackspace` / `SegmentMoveLeft` / `SegmentMoveRight` 三个命令，macOS 用的是同一组）。手机上没有 Ctrl，所以按住删除键时每一下退掉光标前的一个音节，拼到一半发现哪个音节错了，可以退回那里重拼，而不是整串丢掉；拼写删空后连按随即停止，不会继续删进文档。拖动空格移动组字光标时，慢拖仍按字母移动，快速一甩（横向速度不低于每秒 900 点）按音节跳。九键的数字串在选出拼音前还没有确定的音节，五笔编码不由音节组成，所以九键、五笔和其他方案保持原来的行为：按住删除键清空整个组字，拖动空格只按字符移动。Windows 组字里还有 Home、End 和 Delete，手机键盘没有这几个键，所以组字时轻点候选栏左侧的拼写，会弹出系统菜单“编辑拼写”：光标移到开头、光标移到末尾、删除光标后的字母（共享 C ABI 的 `MoveHome` / `MoveEnd` / `DeleteForward`）。当前位置做不了的项会置灰而不是消失，菜单形状不变；空闲时同一个位置仍是本地输入模式菜单，日语读音和本地输入模式不提供这个菜单。VoiceOver 把组字中的拼写读作按钮并提示“轻点编辑拼写”。
 
@@ -123,14 +123,14 @@ iOS 26 会默认在滚动视图边缘叠加渐隐和模糊。键盘内的候选�
 
 ## 开发构建
 
-准备交叉编译目标，并准备一个提供 Boost 的依赖前缀：
+准备交叉编译目标：
 
 ```sh
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 rustup component add llvm-tools
 ```
 
-Engine 不再是子模块，无需手动初始化：`engine-lock.json` 记录提交与源码归档的 SHA-256，`crates/engine-bridge` 的构建脚本会在构建时校验并准备 `vendor/MSIME-Engine`。离线构建一棵已准备好的树时设 `MSIME_SKIP_ENGINE_FETCH`。
+Engine 是工作区内的纯 Rust crate `crates/engine`（`msime-engine`），随 `msime-host-api` 一起编进静态库，不需要取回源码、Boost 或任何依赖前缀；SQLite 由 `rusqlite` 的 `bundled` 特性编进同一个库。
 
 Xcode 27 的 SwiftPM 会把静态库中的 `@_cdecl` 导出内部化；当前 `swift-rs` 构建桥会使用 `llvm-tools` 中的 `llvm-objcopy` 恢复应用 package 的符号。仓库同时固定到上游 PR #79 的提交 `a83e2b2f196e3fa9605cb21c7d3b82652205c279`，使传递嵌入的 SwiftRs runtime 导出在优化构建中保持公开。缺少该组件或移除补丁时，Tauri iOS Rust 动态库会在链接阶段报告 Swift 桥符号未定义。
 
@@ -143,22 +143,18 @@ platforms/ios/stage-resources.sh "$resource_dir"
 
 第二个可选参数是非英语离线释义目录（默认 `target/offline-glosses`，由 `scripts/build_offline_glosses.py` 生成，见 [docs/third-party.md](../../docs/third-party.md#非英语离线释义resourcesoffline-glosseslockjson)）。其中的 `zh-<语言>.db` 与 NOTICE 暂存到 `target/ios/offline-glosses`，键盘扩展把它作为 EngineResources 的同级目录打包；候选释义语言选了已安装的语言时，该行不需要完全访问或网络即可显示。目录总会创建，没有词典时为空，只有英语走离线释义。
 
-只构建 Rust/C++ 宿主库时运行：
+只构建 Rust 宿主库时运行：
 
 ```sh
-MSIME_IOS_DEPS=/absolute/ios/dependency-prefix \
-  platforms/ios/build-native.sh simulator
+platforms/ios/build-native.sh simulator
 ```
 
-Engine 只用到 Boost 的头文件（`find_package(Boost REQUIRED)` 之后链接 `Boost::headers`），所以依赖前缀不需要为 iOS 交叉编译过的 Boost 二进制，任何提供完整头文件与 CMake 配置的前缀都可以，例如 Homebrew 的 `/opt/homebrew/Cellar/boost/<version>`。
-
-`device` 目标产出 `target/ios/device/libmsime_host_api.a`，`simulator` 目标产出 arm64 的 `target/ios/simulator/libmsime_host_api.a`。脚本会自动识别依赖前缀下唯一的版本化 `BoostConfig.cmake` 与 `boost_headers-config.cmake`；有多个版本时，分别用 `MSIME_BOOST_DIR` 和 `MSIME_BOOST_HEADERS_DIR` 指向对应配置目录。
+`device` 目标产出 `target/ios/device/libmsime_host_api.a`，`simulator` 目标产出 arm64 的 `target/ios/simulator/libmsime_host_api.a`。
 
 一条命令完成资源暂存、键盘扩展 native 构建，并构建 iOS 的产品宿主 `MSIMEApp`（同时嵌入键盘扩展）。要改为单独构建 Tauri/React 这个公共组件，在同一条命令前加 `MSIME_IOS_TAURI_COMPONENT=1`：
 
 ```sh
-MSIME_IOS_DEPS=/absolute/ios/dependency-prefix \
-  platforms/ios/build-app.sh "$resource_dir" simulator
+platforms/ios/build-app.sh "$resource_dir" simulator
 ```
 
 ## 真机签名构建
@@ -168,7 +164,7 @@ MSIME_IOS_DEPS=/absolute/ios/dependency-prefix \
 ```sh
 resource_dir="$(cargo run --quiet -p msime-client-core --example install_resources -- target/resources)"
 platforms/ios/stage-resources.sh "$resource_dir"
-MSIME_IOS_DEPS=/opt/homebrew/Cellar/boost/<version> platforms/ios/build-native.sh device
+platforms/ios/build-native.sh device
 cd platforms/ios && xcodegen generate -s project.yml -p . && pod install --deployment && cd -
 xcodebuild -workspace platforms/ios/MSIMEClient.xcworkspace -scheme MSIMEApp \
   -sdk iphoneos -configuration Release -destination 'generic/platform=iOS' \
@@ -184,7 +180,7 @@ xcrun devicectl device install app --device <udid> \
 
 ```sh
 cd apps/desktop/src-tauri/gen/apple && pod install --deployment && cd -
-APPLE_DEVELOPMENT_TEAM=LXCL4Z68GU MSIME_IOS_DEPS=/absolute/ios/dependency-prefix \
+APPLE_DEVELOPMENT_TEAM=LXCL4Z68GU \
   pnpm --filter @msime/desktop tauri ios build --target aarch64 --ci
 ```
 
@@ -270,7 +266,7 @@ xcrun simctl delete "$device"
 **上面那条 SIGTRAP 只挡 Tauri 宿主，不挡这个。** `MSIMEApp` 不加载 WebView，在 iOS 27 模拟器上界面能正常起来，键盘扩展也随它一起装进去，所以要在模拟器上看界面就走这条路：
 
 ```sh
-MSIME_IOS_DEPS=/absolute/ios/dependency-prefix platforms/ios/build-native.sh simulator
+platforms/ios/build-native.sh simulator
 xcodebuild -project platforms/ios/MSIMEClient.xcodeproj -scheme MSIMEApp \
   -destination 'platform=iOS Simulator,name=<设备名>' \
   -derivedDataPath target/ios/derived-sim CODE_SIGNING_ALLOWED=NO build
@@ -286,6 +282,5 @@ xcrun simctl launch booted app.msime.ios
 cd apps/desktop/src-tauri/gen/apple
 pod install --deployment
 cd ../../../../..
-MSIME_IOS_DEPS=/absolute/ios/dependency-prefix \
-  pnpm --filter @msime/desktop tauri ios build --target aarch64 --no-sign --ci
+pnpm --filter @msime/desktop tauri ios build --target aarch64 --no-sign --ci
 ```

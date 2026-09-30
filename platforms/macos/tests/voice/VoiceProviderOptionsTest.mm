@@ -10,13 +10,11 @@ int main() {
         // Every provider offered as an HTTPS multipart preset must use the batch request path.
         // Falling through starts macOS Speech and silently ignores the selected endpoint and token.
         for (NSString *provider in @[@"openai", @"groq", @"siliconflow", @"everyapi", @"mistral", @"cloud"])
-            assert(MSIMEVoiceUsesNativeHTTPProvider(provider, NO, NO));
-        for (NSString *provider in @[@"doubao", @"system", @"unknown", @""])
-            assert(!MSIMEVoiceUsesNativeHTTPProvider(provider, NO, NO));
-        assert(!MSIMEVoiceUsesNativeHTTPProvider(@"everyapi", YES, NO));
-        assert(!MSIMEVoiceUsesNativeHTTPProvider(@"local", NO, NO));
-        assert(MSIMEVoiceUsesNativeHTTPProvider(@"local", NO, YES));
-        // An installed model directory streams through the helper; a Whisper file, another provider or an external socket does not.
+            assert(MSIMEVoiceUsesNativeHTTPProvider(provider, NO));
+        for (NSString *provider in @[@"doubao", @"system", @"unknown", @"", @"local"])
+            assert(!MSIMEVoiceUsesNativeHTTPProvider(provider, NO));
+        assert(!MSIMEVoiceUsesNativeHTTPProvider(@"everyapi", YES));
+        // An installed model directory streams through the helper; any other local path, another provider or an external socket does not.
         assert(MSIMEVoiceUsesLocalModelHelper(@"local", NO, YES) && MSIMEVoiceUsesLocalModelHelper(@"Local", NO, YES));
         assert(!MSIMEVoiceUsesLocalModelHelper(@"local", NO, NO) && !MSIMEVoiceUsesLocalModelHelper(@"local", YES, YES));
         for (NSString *provider in @[@"doubao", @"system", @"openai", @""])

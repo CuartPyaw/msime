@@ -55,10 +55,8 @@ area/ui:
 area/engine:
   - changed-files:
       - any-glob-to-any-file:
-          - engine-lock.json
-          - scripts/fetch_engine.py
-          - scripts/apply_engine_*.py
-          - scripts/engine-overlays/**
+          - crates/engine/**
+          - tools/engine-golden/**
 
 area/ci:
   - changed-files:

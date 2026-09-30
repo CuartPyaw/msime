@@ -23,6 +23,8 @@ for name in libmsime_host_api.so libmsime_android.so libc++_shared.so libsherpa-
     case "$dependency" in
       libc.so|libm.so|libdl.so|liblog.so|libc++_shared.so|libmsime_host_api.so|'') ;;
       libandroid.so|libonnxruntime.so) [[ "$name" == libsherpa-onnx-c-api.so ]] || { echo "Unexpected dynamic dependency: $name -> $dependency" >&2; exit 1; } ;;
+      # Microphone capture in host-api goes through cpal, which links AAudio where the Engine's miniaudio used to dlopen it. AAudio is a public NDK library from API 26, below this host's minSdk 28.
+      libaaudio.so) [[ "$name" == libmsime_host_api.so ]] || { echo "Unexpected dynamic dependency: $name -> $dependency" >&2; exit 1; } ;;
       *) echo "Unexpected dynamic dependency: $name -> $dependency" >&2; exit 1 ;;
     esac
   done <<< "$dependencies"
@@ -39,9 +41,11 @@ done
 nm_tool="${readelf_tool%/llvm-readelf}/llvm-nm"
 [[ -x "$nm_tool" ]] || { echo "llvm-nm is required beside llvm-readelf" >&2; exit 1; }
 host_symbols=$("$nm_tool" -C --defined-only "$library_dir/libmsime_host_api.so")
-# The header-only candidate ordering policy is shared with Android. Keep only
-# the optional model-backed recognizer and its Zinnia implementation out.
-if grep -Eq 'handwriting_recognize|metasequoia::handwriting::Recognizer|zinnia::' <<< "$host_symbols"; then
+# The candidate ordering policy of msime-engine's handwriting module is shared with Android; the model-backed recognizer and its zinnia port (the recognizer, model and features submodules) are compiled out there. The ordering policy has to be present, or the symbols were stripped and the exclusion below would prove nothing.
+if ! grep -q 'msime_engine::handwriting::order_handwriting_candidates' <<< "$host_symbols"; then
+  echo "libmsime_host_api.so carries no msime-engine symbol names; the recognizer exclusion cannot be checked" >&2; exit 1
+fi
+if grep -Eq 'handwriting_recognize|msime_engine::handwriting::(recognizer|model|features)::' <<< "$host_symbols"; then
   echo "Android host unexpectedly contains the Engine handwriting recognizer" >&2; exit 1
 fi
 echo "libmsime_host_api.so: Engine handwriting recognizer excluded for Android"

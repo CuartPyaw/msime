@@ -78,7 +78,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let helpcodes = match arguments.next() {
         Some(path) => std::fs::canonicalize(path)?,
-        None => std::path::PathBuf::from("vendor/MSIME-Engine/helpcode/helpcodes"),
+        // The tables msime carries in the repository, wherever the example is run from.
+        None => std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/helpcodes"),
     };
     if !resources.join("helpcodes").is_dir() && !helpcodes.is_dir() {
         return Err(format!(

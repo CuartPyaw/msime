@@ -2583,6 +2583,256 @@ fn only_the_lattice_source_is_treated_as_alternative_readings() {
     }
 }
 
+/// A runtime over an engine answering `rows` (text, source) in that order, with one key typed.
+fn lattice_runtime(rows: &[(&str, u8)]) -> Runtime<Fixture> {
+    let mut runtime = Runtime::new(
+        Fixture {
+            local_mode: "none".into(),
+            words: rows.iter().map(|(text, _)| (*text).to_owned()).collect(),
+            sources: rows.iter().map(|(_, source)| *source).collect(),
+            codes: vec![String::new(); rows.len()],
+            ..Fixture::default()
+        },
+        9,
+    )
+    .unwrap();
+    runtime.focus(true).unwrap();
+    type_key(&mut runtime);
+    runtime
+}
+
+fn candidate_texts(runtime: &mut Runtime<Fixture>) -> Vec<String> {
+    runtime
+        .all_candidates()
+        .candidates
+        .into_iter()
+        .map(|candidate| candidate.text)
+        .collect()
+}
+
+#[test]
+fn a_long_sentence_keeps_three_readings_together_on_the_first_page() {
+    let mut runtime = lattice_runtime(&[
+        ("根据官方新闻稿", 8),
+        ("根据", 0),
+        ("跟", 0),
+        ("根据官房新闻稿", 8),
+        ("根据关防新闻稿", 8),
+        ("根据官方新闻高", 8),
+        ("根据官方新闻告", 8),
+    ]);
+    assert_eq!(
+        candidate_texts(&mut runtime),
+        [
+            "根据官方新闻稿",
+            "根据官房新闻稿",
+            "根据关防新闻稿",
+            "根据",
+            "跟",
+            "根据官方新闻高",
+            "根据官方新闻告",
+        ]
+    );
+}
+
+#[test]
+fn the_kept_readings_follow_the_first_one_wherever_it_sits() {
+    let mut runtime = lattice_runtime(&[
+        ("根据", 0),
+        ("通过虚开发票", 8),
+        ("跟", 0),
+        ("通过需开发票", 8),
+        ("通过虚开发飘", 8),
+        ("通过需开发飘", 8),
+    ]);
+    assert_eq!(
+        candidate_texts(&mut runtime),
+        [
+            "根据",
+            "通过虚开发票",
+            "通过需开发票",
+            "通过虚开发飘",
+            "跟",
+            "通过需开发飘",
+        ]
+    );
+}
+
+#[test]
+fn a_two_character_reading_keeps_only_the_first() {
+    let mut runtime =
+        lattice_runtime(&[("你好", 8), ("倪好", 8), ("你号", 8), ("你", 0), ("尼", 0)]);
+    assert_eq!(
+        candidate_texts(&mut runtime),
+        ["你好", "你", "尼", "倪好", "你号"]
+    );
+}
+
+#[test]
+fn only_readings_as_wide_as_the_first_are_counted() {
+    // A shorter lattice row is a reading of part of the key, not a runner-up for the whole of it.
+    let mut runtime = lattice_runtime(&[
+        ("根据官方新闻稿", 8),
+        ("根据官方", 8),
+        ("根据", 0),
+        ("根据官房新闻稿", 8),
+        ("根据关防新闻稿", 8),
+        ("根据官方新闻高", 8),
+    ]);
+    assert_eq!(
+        candidate_texts(&mut runtime),
+        [
+            "根据官方新闻稿",
+            "根据官房新闻稿",
+            "根据关防新闻稿",
+            "根据官方",
+            "根据",
+            "根据官方新闻高",
+        ]
+    );
+}
+
+#[test]
+fn single_character_lattice_rows_are_left_alone() {
+    // Japanese kana: あ and ア are both Generated and both one character.
+    let mut runtime = lattice_runtime(&[("あ", 8), ("ア", 8), ("阿", 0)]);
+    assert_eq!(candidate_texts(&mut runtime), ["あ", "ア", "阿"]);
+}
+
+#[test]
+fn a_regrouped_reading_commits_what_its_seat_shows() {
+    let mut runtime = lattice_runtime(&[
+        ("根据官方新闻稿", 8),
+        ("根据", 0),
+        ("根据官房新闻稿", 8),
+        ("根据关防新闻稿", 8),
+        ("根据官方新闻高", 8),
+    ]);
+    let view = runtime.view();
+    assert_eq!(view.candidates[1].text, "根据官房新闻稿");
+    assert_eq!(view.candidates[3].text, "根据");
+    let transition = runtime
+        .dispatch(Action::Select(view.candidates[1].id))
+        .unwrap();
+    assert_eq!(transition.commit.as_deref(), Some("根据官房新闻稿"));
+
+    let mut runtime = lattice_runtime(&[
+        ("根据官方新闻稿", 8),
+        ("根据", 0),
+        ("根据官房新闻稿", 8),
+        ("根据关防新闻稿", 8),
+        ("根据官方新闻高", 8),
+    ]);
+    let view = runtime.view();
+    let transition = runtime
+        .dispatch(Action::Select(view.candidates[3].id))
+        .unwrap();
+    assert_eq!(transition.commit.as_deref(), Some("根据"));
+}
+
+#[test]
+fn regrouping_twice_changes_nothing() {
+    // The settle pass runs the same regrouping over a list that already went through it.
+    let mut runtime = lattice_runtime(&[
+        ("根据官方新闻稿", 8),
+        ("根据", 0),
+        ("根据官房新闻稿", 8),
+        ("根据关防新闻稿", 8),
+        ("根据官方新闻高", 8),
+    ]);
+    let before = candidate_texts(&mut runtime);
+    assert!(!runtime.demote_runner_up_readings());
+    assert_eq!(candidate_texts(&mut runtime), before);
+}
+
+/// Records every rescoring context the runtime hands over.
+struct RecordsContext {
+    inner: Fixture,
+    contexts: Vec<String>,
+}
+
+impl InputEngine for RecordsContext {
+    fn set_rescoring_context(&mut self, context: &str) {
+        self.contexts.push(context.to_owned());
+    }
+    fn snapshot(&self) -> Result<EngineSnapshot, RuntimeError> {
+        self.inner.snapshot()
+    }
+    fn character(&mut self, value: u8, shift: bool) -> Result<EngineResult, RuntimeError> {
+        self.inner.character(value, shift)
+    }
+    fn command(&mut self, command: Command) -> Result<EngineResult, RuntimeError> {
+        self.inner.command(command)
+    }
+    fn select(&mut self, index: usize) -> Result<EngineResult, RuntimeError> {
+        self.inner.select(index)
+    }
+    fn select_edge(
+        &mut self,
+        index: usize,
+        edge: CandidateEdge,
+    ) -> Result<EngineResult, RuntimeError> {
+        self.inner.select_edge(index, edge)
+    }
+    fn finish(&mut self, index: usize) -> Result<EngineResult, RuntimeError> {
+        self.inner.finish(index)
+    }
+    fn punctuation(&mut self, value: u8) -> Result<EngineResult, RuntimeError> {
+        self.inner.punctuation(value)
+    }
+}
+
+fn recording_engine() -> RecordsContext {
+    RecordsContext {
+        inner: Fixture {
+            local_mode: "none".into(),
+            words: vec!["会议".into(), "回忆".into()],
+            ..Fixture::default()
+        },
+        contexts: Vec::new(),
+    }
+}
+
+#[test]
+fn committed_text_reaches_the_engine_rescoring_context() {
+    let mut runtime = Runtime::new(recording_engine(), 5).unwrap();
+    runtime.focus(true).unwrap();
+    assert_eq!(runtime.engine.contexts.last().map(String::as_str), Some(""));
+
+    runtime.seed_context("明天开");
+    assert_eq!(
+        runtime.engine.contexts.last().map(String::as_str),
+        Some("明天开")
+    );
+
+    runtime
+        .dispatch(Action::Character {
+            value: b'h',
+            shift: false,
+        })
+        .unwrap();
+    let transition = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(transition.commit.as_deref(), Some("会议"));
+    assert_eq!(
+        runtime.engine.contexts.last().map(String::as_str),
+        Some("明天开会议")
+    );
+    assert_eq!(runtime.ai_context, "明天开会议");
+
+    // Leaving the client ends the sentence for the Engine's models as it does for the AI provider.
+    runtime.focus(false).unwrap();
+    assert_eq!(runtime.engine.contexts.last().map(String::as_str), Some(""));
+}
+
+#[test]
+fn a_replacement_engine_inherits_the_committed_text() {
+    let mut runtime = Runtime::new(recording_engine(), 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime.seed_context("上一句");
+    runtime.replace_engine(recording_engine(), 5).unwrap();
+    assert_eq!(runtime.engine.contexts, ["上一句"]);
+}
+
 // The real Engine, not the fixture. Unicode mode is the one place where a bare
 // digit is input rather than a candidate index, and the two layers decide that
 // separately: the Engine reports the digit as handled, and the runtime only

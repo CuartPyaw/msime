@@ -1,4 +1,4 @@
-//! The Engine owns handwriting recognition; macOS only locates packaged data.
+//! The engine owns handwriting recognition; macOS only locates packaged data.
 use std::path::{Path, PathBuf};
 
 pub(crate) fn bundled_model(executable: &Path) -> Option<PathBuf> {
@@ -50,15 +50,27 @@ mod tests {
         }
     }
 
-    fn engine_model() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../vendor/MSIME-Engine/handwriting/models/handwriting-zh_CN.model")
-            .canonicalize()
-            .unwrap()
+    /// The pinned model (resources/handwriting-model.lock.json): `MSIME_HANDWRITING_MODEL`, else where `scripts/fetch_handwriting_model.py` puts it. It is a 26.8 MB download, so the recognition cases are skipped, with the reason printed, when it has not been fetched.
+    fn engine_model() -> Option<PathBuf> {
+        let path = std::env::var_os("MSIME_HANDWRITING_MODEL")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../../target/handwriting-model/handwriting-zh_CN.model")
+            });
+        if path.is_file() {
+            return Some(path);
+        }
+        eprintln!(
+            "skipped: no handwriting model at {}; run scripts/fetch_handwriting_model.py or set MSIME_HANDWRITING_MODEL",
+            path.display()
+        );
+        None
     }
 
     #[test]
-    fn relocated_bundle_uses_the_fixed_engine_model_for_real_single_character_recognition() {
+    fn relocated_bundle_finds_the_packaged_model() {
         let root = tempfile::tempdir().unwrap();
         let executable = root.path().join("Synthetic.app/Contents/MacOS/synthetic");
         assert!(bundled_model(&executable).is_none());
@@ -67,12 +79,18 @@ mod tests {
             .join("Synthetic.app/Contents/Resources/handwriting");
         std::fs::create_dir_all(&resource).unwrap();
         let model = resource.join("handwriting-zh_CN.model");
-        std::fs::copy(engine_model(), &model).unwrap();
-        let resolved = bundled_model(&executable).expect("packaged model");
-        assert_eq!(resolved, model);
+        std::fs::write(&model, b"placeholder").unwrap();
+        assert_eq!(bundled_model(&executable), Some(model));
         assert!(bundled_model(Path::new("Synthetic.app/Contents/MacOS/synthetic")).is_none());
         assert!(bundled_model(&root.path().join("synthetic")).is_none());
-        // Synthetic 中, the same ordered-stroke fixture used by the Engine.
+    }
+
+    #[test]
+    fn the_packaged_model_recognizes_a_single_character() {
+        let Some(resolved) = engine_model() else {
+            return;
+        };
+        // Synthetic 中, the same ordered-stroke fixture used by the engine.
         let query = query(zhong_strokes(|(x, y)| (x, y)));
         let candidates =
             msime_host_api::handwriting_local_candidates(resolved.to_str().unwrap(), &query)
@@ -90,7 +108,9 @@ mod tests {
         strokes.extend(zhong_strokes(|(x, y)| {
             (220. + (x - 35.) * scale, 130. + (y - 15.) * scale)
         }));
-        let model = engine_model();
+        let Some(model) = engine_model() else {
+            return;
+        };
         let candidates =
             msime_host_api::handwriting_local_candidates(model.to_str().unwrap(), &query(strokes))
                 .unwrap();
@@ -99,20 +119,19 @@ mod tests {
     }
 
     #[test]
-    fn macos_bundle_declares_model_licenses_and_pinned_provenance() {
+    fn macos_package_ships_the_model_with_its_licenses() {
         let configuration: serde_json::Value =
             serde_json::from_str(include_str!("../../../tauri.macos.conf.json")).unwrap();
         let resources = configuration["bundle"]["resources"].as_object().unwrap();
-        for name in [
-            "handwriting-zh_CN.model",
-            "HandwritingModel-LICENSE.txt",
-            "Zinnia-LICENSE.txt",
-            "provenance.json",
-        ] {
-            assert!(resources
-                .values()
-                .any(|path| path == &format!("handwriting/{name}")));
-        }
+        assert!(resources
+            .values()
+            .any(|path| path == "handwriting/Zinnia-LICENSE.txt"));
         assert_eq!(configuration["bundle"]["active"], true);
+        // The model and its licence are copied into the app by the release script rather than declared here, so a development build does not need the download; the script must still put both where bundled_model looks.
+        let package = include_str!("../../../../../../platforms/macos/package-release.sh");
+        assert!(package.contains("scripts/fetch_handwriting_model.py"));
+        assert!(package.contains(
+            r#""$handwriting_model/handwriting-zh_CN.model" "$handwriting_model/HandwritingModel-LICENSE.txt" "$app/Contents/Resources/handwriting/""#
+        ));
     }
 }

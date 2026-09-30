@@ -25,6 +25,8 @@ pub enum RuntimeError {
 pub trait InputEngine {
     /// Ends the committed-word context the Engine learns and ranks against. Engines without one ignore it.
     fn reset_context(&mut self) {}
+    /// The committed text the Engine's neural sentence models condition on, pushed by the runtime whenever the text it keeps changes. Engines without such models ignore it.
+    fn set_rescoring_context(&mut self, _context: &str) {}
     /// Moves the caret prefix decoding answers for; `None` returns to the end of the composition. Engines without
     /// prefix decoding ignore it and report nothing pending below.
     fn set_caret(&mut self, _caret: Option<usize>) {}
@@ -156,6 +158,9 @@ pub enum SegmentCommand {
 impl InputEngine for Session {
     fn reset_context(&mut self) {
         Session::reset_context(self);
+    }
+    fn set_rescoring_context(&mut self, context: &str) {
+        Session::set_rescoring_context(self, context);
     }
     fn set_caret(&mut self, caret: Option<usize>) {
         Session::set_caret(self, caret);

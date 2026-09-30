@@ -916,6 +916,117 @@ mod tests {
         );
     }
 
+    /// 904bd0976 / 8d046e269: mixed Wubi asks quanpin for the same letters, and that request honours the refusal too, so a correction the user turned down by committing raw does not come back through the Wubi pinyin fallback.
+    #[test]
+    fn a_refused_correction_stays_refused_in_mixed_wubi() {
+        let fixture = Fixture::new(&[("shang", "上", 100), ("sha", "沙", 50)], &[]);
+        let types = autocorrect_type::TRANSPOSITION | autocorrect_type::NEIGHBOR;
+        let mixed_wubi = |o: &mut SessionOptions| {
+            o.scheme = SchemeType::Wubi;
+            o.wubi.mixed_pinyin = true;
+            o.autocorrect_types = types;
+        };
+        let offers_correction = |session: &Session| {
+            session
+                .snapshot()
+                .candidates
+                .iter()
+                .any(|item| !item.corrected_from.is_empty())
+        };
+
+        // Without a refusal the fallback offers the neighbor correction, otherwise the check below proves nothing.
+        let mut wubi = fixture.session(mixed_wubi);
+        type_text(&mut wubi, "shabg");
+        assert_eq!(wubi.snapshot().editing_text, "shabg");
+        assert!(
+            offers_correction(&wubi),
+            "mixed wubi did not offer the correction: {:?}",
+            words(&wubi)
+        );
+        cancel(&mut wubi);
+        drop(wubi);
+
+        // The refusal is learned where it can be: in quanpin, by committing the raw letters.
+        let mut quanpin = fixture.session(|o| o.autocorrect_types = types);
+        type_text(&mut quanpin, "shabg");
+        let raw = quanpin.command(crate::types::Command::CommitRaw);
+        assert_eq!(raw.commit.as_deref(), Some("shabg"));
+        assert_eq!(
+            fixture.journal_count(
+                "SELECT commits FROM pinyin_autocorrect_suppressions WHERE input='shabg'"
+            ),
+            1
+        );
+        drop(quanpin);
+
+        let mut wubi = fixture.session(mixed_wubi);
+        type_text(&mut wubi, "shabg");
+        assert_eq!(wubi.snapshot().editing_text, "shabg");
+        assert!(
+            !offers_correction(&wubi),
+            "the refused correction came back through mixed wubi: {:?}",
+            words(&wubi)
+        );
+    }
+
+    /// 904bd0976: a sentence a neural model picked has no dictionary row to re-rank, so selecting it stores the sentence as a user phrase like a lattice sentence. Needs the keyboard model from `MSIME_EVAL_RESOURCES`.
+    #[test]
+    fn a_neural_sentence_is_learned_as_a_sentence() {
+        let Some(model) = std::env::var_os("MSIME_EVAL_RESOURCES")
+            .map(|resources| PathBuf::from(resources).join(assets::NEURAL_MODEL_KEYBOARD))
+            .filter(|path| path.is_file())
+        else {
+            eprintln!("skipping a_neural_sentence_is_learned_as_a_sentence: no keyboard model in MSIME_EVAL_RESOURCES");
+            return;
+        };
+        let fixture = Fixture::new(
+            &[
+                ("shu'ru", "输入", 20000),
+                ("fa", "法", 800000),
+                ("fa", "发", 900000),
+                ("fa", "罚", 100000),
+            ],
+            &[],
+        );
+        std::fs::copy(
+            &model,
+            fixture.paths.resource(assets::NEURAL_MODEL_KEYBOARD),
+        )
+        .unwrap();
+        Connection::open(fixture.paths.dictionary(assets::MAIN_DICTIONARY))
+            .unwrap()
+            .execute_batch("CREATE TABLE IF NOT EXISTS tbl_3_s(key TEXT, jp TEXT, value TEXT, weight INTEGER);")
+            .unwrap();
+        let mut session = fixture.session(|o| {
+            o.sentence_association.neural_keyboard = true;
+            o.sentence_association.show_next_on_duplicate = true;
+        });
+        type_text(&mut session, "shurufa");
+        let neural = session
+            .snapshot()
+            .candidates
+            .into_iter()
+            .find(|item| item.source == CandidateSource::NeuralKeyboard)
+            .unwrap_or_else(|| panic!("no neural row: {:?}", words(&session)));
+        let result = select_word(&mut session, &neural.word);
+        assert_eq!(result.commit.as_deref(), Some(neural.word.as_str()));
+        assert_eq!(result.diagnostic, None);
+        assert_eq!(
+            fixture.main_count(&format!(
+                "SELECT count(*) FROM tbl_3_s WHERE key='shu''ru''fa' AND value='{}'",
+                neural.word
+            )),
+            1
+        );
+        assert_eq!(
+            fixture.journal_count(&format!(
+                "SELECT user_inserted FROM user_dictionary_operations WHERE key='shu''ru''fa' AND value='{}'",
+                neural.word
+            )),
+            1
+        );
+    }
+
     /// test_online_input_session.cpp (personal-learning overlay): a selected cloud word is stored under the typed reading when every character can have it; a character known under other readings only is refused, one no table knows is accepted.
     #[test]
     fn online_words_are_learned_only_under_a_reading_they_can_have() {

@@ -24,6 +24,10 @@ pub fn shuangpin_key_hints(profile: &str) -> Vec<ShuangpinKeyHint> {
     crate::shuangpin::hints::shuangpin_key_hints(profile)
 }
 
+pub fn shuangpin_zero_initials(profile: &str) -> Vec<(&'static str, &'static str)> {
+    crate::shuangpin::hints::shuangpin_zero_initials(profile)
+}
+
 /// Deduplicated items of one page.
 pub fn emoji_catalog_filtered_page(
     resources: &str,

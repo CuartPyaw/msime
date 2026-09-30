@@ -1,6 +1,6 @@
 # Shared voice provider adaptation
 
-`msime-voice-providers` contains the provider defaults, HTTP recognition and polishing adapter extracted unchanged from `platforms/windows/src/VoiceProviders.h` at the shared client repository, commit `f78cf0fdf4f58d3e9405faec3158ed216b17ec78`. It uses the pinned Engine voice protocol/WAV library and has no desktop UI, Windows API, host-process, or microphone dependency.
+`msime-voice-providers` contains the provider defaults, HTTP recognition and polishing adapter extracted unchanged from `platforms/windows/src/VoiceProviders.h` at the shared client repository, commit `f78cf0fdf4f58d3e9405faec3158ed216b17ec78`. It encodes the upload as 16-bit WAV itself, builds the multipart body with libcurl's MIME API, parses the JSON answers with nlohmann/json, and throws `msime::voice::VoiceError` (`VoiceError.h`). It has no desktop UI, Windows API, host-process, or microphone dependency.
 
 Native hosts include `VoiceProviders.h` and use `msime::voice`. The historical `msime::windows` symbols remain for compatibility, with a forwarding header at the old Windows include path. There is only one implementation. No TSF/Server protocol or process ownership changes are involved.
 
@@ -14,7 +14,7 @@ cmake --build build/shared-voice
 ctest --test-dir build/shared-voice --output-on-failure
 ```
 
-The synthetic routing test exercises the platform-neutral entry points and pre-cancelled requests without contacting cloud services. Engine tests also exercise audio and HTTP contracts using a local fixture server.
+The synthetic routing test exercises the platform-neutral entry points and pre-cancelled requests without contacting cloud services. `tests/transport.py` runs the real curl adapter against a loopback fixture server and checks the multipart upload (model, language and WAV parts) as well as rejection, redirect, malformed, oversized and retry answers.
 
 `DoubaoAuth.h` is a thin C++ adapter for `client-core::doubao_auth` through `msime_client_doubao_auth_headers`. It requires the host-api include path and library. Both the Rust credential probe and native Windows recording use this same authentication policy: explicit `api_key` ignores stale App IDs, explicit `legacy` requires an App ID, and missing historical modes infer from a usable App ID. Returned header text contains credentials and must never be logged. Pass an absolute `MSIME_HOST_LIBRARY` when configuring this project to enable the synthetic C++/Rust ABI test `shared-doubao-auth`.
 
@@ -27,7 +27,7 @@ A model is a directory holding the files of one entry of `resources/local-asr-mo
 - Streaming models (`online_transducer`) decode as audio arrives. Whole-utterance models (`offline_sense_voice`, `offline_funasr_nano`) are fed through Silero VAD and decode each finished speech segment. Both report partial text before `finish()`.
 - `hotwords` are used natively when the manifest says `"hotwords": "native"` and the model has what it needs (the transducer needs `bpe_vocab` and a `modeling_unit`). For `"pinyin"` models the recognizer ignores them and the host corrects the final text with `msime_client_voice_hotword_correct`. Hosts get the words from `msime_client_voice_hotwords`, which reads the user's own pinyin dictionary entries.
 - A loaded model is kept for the next dictation. Hosts call `release_idle_local_models()` from a timer, since a model holds hundreds of megabytes to over a gigabyte.
-- `recognize_local_asr()` in `VoiceProviders.h` routes a model directory here and anything else to Whisper when the build carries it (`MSIME_SHARED_VOICE_LOCAL_WHISPER`, off by default). Windows calls it in-process in `msime-client-server`.
+- `recognize_local_asr()` in `VoiceProviders.h` recognizes an installed model directory here and rejects any other path. Windows calls it in-process in `msime-client-server`.
 
 ### The msime-voice-local helper
 

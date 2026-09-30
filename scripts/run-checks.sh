@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The repository's text contracts: every scripts/test-*.py except the special checks named below, plus the registry phase that keeps that list honest.
 #
-# Two callers. verify-local.sh sources this after its vendored-engine phase and its inline special phases, so the output there is unchanged and failures land in its own `failed`. The contracts workflow (.github/workflows/contracts.yml) runs it on its own on an ubuntu runner after fetch_engine.py, which is why every check found here has to skip cleanly and exit 0 when the tool or input it needs is absent.
+# Two callers. verify-local.sh sources this after its inline special phases, so the output there is unchanged and failures land in its own `failed`. The contracts workflow (.github/workflows/contracts.yml) runs it on its own on an ubuntu runner, which is why every check found here has to skip cleanly and exit 0 when the tool or input it needs is absent.
 #
-# Run on its own it expects vendor/MSIME-Engine to be prepared already (python3 scripts/fetch_engine.py) and exits non-zero when any check fails.
+# Run on its own it needs nothing beyond the checkout and exits non-zero when any check fails.
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   set -uo pipefail
@@ -22,9 +22,6 @@ fi
 #
 # - conflict-markers: the pre-commit hook only ever sees the commit that introduces a marker, so a marker already in HEAD is invisible to it forever. Six of them lived in docs/windows-parity.md until this scan existed.
 # - tracked-symlinks: same shape as the marker scan: a symlink pointing at one machine's absolute path breaks every other checkout, and the checkout it was made on is the one place it keeps working.
-# - fetch-engine-matches: the Linux container gates borrow another checkout's vendor/; one prepared for an older lock looks like a code break.
-# - relock-engine: engine-update.yml's relock step, offline: only commit, archive and sha256 may change.
-# - engine-overlay-registry: fetch_engine.py applies only the overlays the lock lists; one dropped by a merge silently never reaches the Engine.
 # - file-locking-goes-through-client-core: same shape again, one target further out: `std::fs::File::lock` compiles for Android and then fails at runtime, so only a keyboard running on a handset ever finds out.
 # - windows-config-keys: the reference's factory configuration is the most complete list of what that product can be told to do. A key it has and this repository does not is a feature nobody migrated, and nothing else would notice. Skips without a reference checkout beside the main worktree.
 # - reference-ui-actions: the configuration is what the reference can be told to do; this is what its interface can ask the host to do. Between them they cover the capability surface from both sides.
@@ -40,12 +37,12 @@ fi
 # - ios-project-config: the iOS counterpart of android-voice-project-config went the same way, and further: it was never wired here at all. Seven assertions rotted silently while the code they pin moved on - the voice types were generalised from Ios* to Mobile* for Android, the voice commands left lib.rs for voice.rs, the onboarding skip button became a CSS-module class, and the keyboard bridging header and two frontend modules moved into their <feature> directories. Nothing built the XcodeGen project on this machine or on a runner either, so the same reasoning that wired the Android one applies here.
 # - reference-config-coverage: the reference ships one file with a default for every setting it has. Comparing the two settings pages by eye has been done repeatedly and keeps producing the same false results in both directions, so the mapping is written down and checked instead - including, when a reference checkout is on the machine, that nothing new has appeared upstream without a home here.
 # - settings-label-parity: the parity checks compare identifiers, and an identifier being right says nothing about the words printed next to it: both Linux menus spelled the 首右 helpcode schemes 搜狗, which is a different company's input method, and the macOS backend page named the paging choices in words where the settings window showed the keys. Every identifier around both was correct.
-# - quick-phrase-limit: a quick phrase ends up in the candidate pipe's text field, whose size the Engine declares. The limit on it was six bare literals across three crates, none attached to that header, so moving the engine lock would have changed the field and nothing else.
+# - quick-phrase-limit: a quick phrase ends up in the candidate pipe's text field, whose size shared/contracts/ipc_protocol_limits.h declares. The limit on it was six bare literals across three crates, none attached to that header, so resizing the field would have changed it and nothing else.
 # - handwriting-limits: the panel and the shared contract cap strokes, points and candidates separately. The panel may be stricter, never looser: past the contract the user draws and recognition silently returns nothing, because the request was refused before it reached a recogniser.
 # - cloud-request-budget: how long a cloud candidate is worth waiting for belongs to the product, but each host reaches the network with its own library and can shorten it on its own. Two of them had, and a dropped cloud candidate looks exactly like a query that had no cloud answer.
 # - phrase-preedit-hosts: a host either holds a half-composed phrase in the composition and draws it, or commits each piece as it is picked. Half of that is invisible in the worst way: a host that asks for the piece to be held and draws it nowhere shows nothing at all for text the user already chose.
 # - preference-suite-cleanup: a macOS test that opens an NSUserDefaults suite writes a plist into the user's Preferences directory, and emptying the domain does not delete the file. Every run of a test that forgets leaves one behind, on every machine, forever.
-# - candidate-sources: whether the candidate right-click actions are offered is decided on the Engine's CandidateSource value, which arrives as a number this side cannot name in C++. Inserting a source there shifts every later one, compiles cleanly, and starts offering 删除 for cloud suggestions.
+# - candidate-sources: whether the candidate right-click actions are offered is decided on the engine's CandidateSource value (crates/engine/src/types.rs), which arrives as a number this side cannot name in C++. Renumbering a source there compiles cleanly and starts offering 删除 for cloud suggestions.
 # - clipboard-capture-bounds: whether a clipboard entry is storable is decided by crates/client-core/src/clipboard.rs alone. Android once kept a second copy of that rule that counted UTF-16 units instead of graphemes, so this fails when a host starts deciding it again.
 # - offline-glosses: the offline glosses for the non-English targets are built from Wiktionary rows whose shape is easy to misread: the Mandarin rows are "Chinese Mandarin", the plain "Chinese" ones are topolects, and senses[] repeats the top-level tables. The fixture holds real rows, so a rule that drifts from them fails here instead of in a release.
 # - settings-palette-parity: the palette is most of what makes one window look like another, and this one is built with Tailwind rather than by importing the source's sheet, so the two copies of the same 64 names can drift a hex at a time without anyone noticing.
@@ -88,7 +85,7 @@ for entry in $special_checks; do
 done
 [ "$registry_ok" -eq 1 ] && echo "contract check registry: every special check is run by the script it names, or documented where no gate runs it"
 
-# Everything else, in file-name order. It has to run after fetch_engine.py (verify-local.sh's vendored-engine phase, or the workflow step before this script): several of these read vendor/MSIME-Engine (candidate-sources, quick-phrase-limit and fetch-engine-matches among them), and a stale tree there fails them for reasons unrelated to the change under test.
+# Everything else, in file-name order.
 for check in scripts/test-*.py; do
   name="${check#scripts/test-}"
   name="${name%.py}"

@@ -66,14 +66,16 @@ only() {
   printf '%s\n' "$1"
 }
 
-# ---- Engine and dictionaries ----
-python3 scripts/fetch_engine.py
+# ---- Dictionaries and the handwriting model ----
+# The offline handwriting model the settings app's handwriting panel recognises with (apps/desktop/src-tauri/src/platform/macos/macos_handwriting.rs), pinned by resources/handwriting-model.lock.json. It is copied into the app below rather than listed in tauri.macos.conf.json, so a development build of the settings app does not need the 26.8 MB download.
+handwriting_model="$repo_root/target/handwriting-model"
+python3 scripts/fetch_handwriting_model.py --out "$handwriting_model"
 # install_resources prints progress on stderr and the verified directory as its last stdout line. stage-resources.sh re-verifies it and stages target/macos/EngineResources, which tauri.macos.conf.json embeds.
 resources="$(cargo run --quiet --locked -p msime-client-core --example install_resources -- "$work/desktop-resources" | tail -n 1)"
 bash platforms/macos/stage-resources.sh "$resources"
 
 # ---- Input method bundle ----
-# The minimum system version goes to the C/C++ compilers and the Engine's CMake build separately, never as MACOSX_DEPLOYMENT_TARGET: rustc applies that to host proc-macro dylibs too, which then fail to load (README.md, 构建与本地测试).
+# The minimum system version goes to the C/C++ compilers and to CMake separately, never as MACOSX_DEPLOYMENT_TARGET: rustc applies that to host proc-macro dylibs too, which then fail to load (README.md, 构建与本地测试).
 CFLAGS="-mmacosx-version-min=13.0" CXXFLAGS="-mmacosx-version-min=13.0" CMAKE_OSX_DEPLOYMENT_TARGET=13.0 CMAKE_PREFIX_PATH="$(brew --prefix)" \
   cargo build --release --locked -p msime-host-api
 # MSIME_HOST_LIBRARY is explicit: the CMake default is target/debug, which would link the debug Rust library into a Release bundle.
@@ -132,6 +134,9 @@ glosses="$repo_root/target/macos/offline-glosses"
 if [ -d "$glosses" ]; then
   ditto "$glosses" "$app/Contents/Resources/offline-glosses"
 fi
+# Beside the Zinnia licence tauri.macos.conf.json already put in Contents/Resources/handwriting.
+mkdir -p "$app/Contents/Resources/handwriting"
+cp "$handwriting_model/handwriting-zh_CN.model" "$handwriting_model/HandwritingModel-LICENSE.txt" "$app/Contents/Resources/handwriting/"
 # Without --deep, so the input method keeps the signature and entitlements it was given above; the outer signature seals it as a nested resource.
 sign "$app"
 codesign --verify --deep --strict "$app"
@@ -143,6 +148,8 @@ check_app() {
   test -d "$resources_dir/EngineResources"
   cargo run --quiet --locked -p msime-client-core --example verify_resources -- "$resources_dir/EngineResources" >/dev/null
   test -f "$resources_dir/handwriting/handwriting-zh_CN.model"
+  test -f "$resources_dir/handwriting/HandwritingModel-LICENSE.txt"
+  test -f "$resources_dir/handwriting/Zinnia-LICENSE.txt"
   test -f "$resources_dir/Licenses/THIRD_PARTY_NOTICES.txt"
   test -x "$root/Contents/MacOS/msime-mcp"
   codesign --verify --strict "$root/Contents/MacOS/msime-mcp"

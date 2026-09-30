@@ -14,12 +14,12 @@
 
 ### Rust workspace
 
-工作区共九个成员：八个 `crates/*` 加 `apps/desktop/src-tauri`。`default-members` 刻意排除 `msime-desktop`——它需要已构建的前端和已打包的平台 bundle 才能跑 build script，所以裸 `cargo test` 只覆盖库。工具链钉在 `rust-toolchain.toml` 的 1.97.1；`[workspace.lints.rust] unsafe_code = "deny"` 用 `deny` 而非 `forbid`，因为五个 FFI crate 需要在 crate root 写 `#![allow(unsafe_code)]` 作为有据可查的豁免，`forbid` 下它们只能整体不继承 lint 表。
+工作区共九个成员：八个 `crates/*` 加 `apps/desktop/src-tauri`。`default-members` 刻意排除 `msime-desktop`——它需要已构建的前端和已打包的平台 bundle 才能跑 build script，所以裸 `cargo test` 只覆盖库。工具链钉在 `rust-toolchain.toml` 的 1.97.1；`[workspace.lints.rust] unsafe_code = "deny"` 用 `deny` 而非 `forbid`，因为四个 FFI crate 需要在 crate root 写 `#![allow(unsafe_code)]` 作为有据可查的豁免，`forbid` 下它们只能整体不继承 lint 表。
 
 | crate | 职责 |
 | --- | --- |
 | `msime-client-core` | 宿主无关的客户端业务：`preferences`、`account`、`ai`、`cloud`、`community`、`credential`、`dictionary`、`helpcode`、`skin`、`translation`、`voice`、`clipboard`、`punctuation`、`chinese_conversion`、`typing_statistics`、`resources`、`host_surface`、`panels`。不依赖 Tauri、React、Engine 或任何平台 API。 |
-| `msime-engine-bridge` | CXX 桥接到钉死的上游 C++ Engine Session API，另含 `dictionary_stage`、`dictionary_revision` 与词典回放工具 `MetasequoiaImeDictionaryReplay`；`examples/` 下是各类真实词库探针。 |
+| `msime-engine` | 纯 Rust 输入引擎（由 C++ MSIME-Engine 移植）：组合状态、全拼／双拼／五笔／九键／日语等方案、词库查询与分代准备、学习日志与回放、手写识别，另含词典回放工具 `MetasequoiaImeDictionaryReplay`；`examples/` 下是各类真实词库探针，`tests/golden/` 是从 C++ 参考实现录下的行为基准。 |
 | `msime-input-runtime` | 输入宿主的会话编排：焦点、候选翻页、代次选择、全半角转换、在线候选调度。含重排模型 `Reranker` 的接入。 |
 | `msime-host-api` | 版本化 C ABI（`msime_client_abi_version()` 返回 3），132 个 `msime_client_*` 导出（头文件另有 2 个 `static inline` 辅助函数），`crate-type = ["cdylib", "staticlib", "rlib"]`。`ffi/` 按 host/session/input/candidates/lifecycle/providers/translation/voice 分文件。 |
 | `msime-host-macos` | macOS 宿主的 Objective-C++ 平台能力：键盘注入、账户、剪贴板、词库、文件选择器、卸载器、录音设备枚举，以及 `panel_session`、`cloud_clipboard`、`cloud_dictionary`。 |
@@ -39,9 +39,9 @@
 
 ### 引擎与资源
 
-`engine-lock.json` 把 Engine 钉到具体 commit 的 tar.gz 归档（带 sha256），而不是 submodule；`patches` 为空，改动全部走 18 个 `scripts/apply_engine_*.py` overlay 脚本和 2 个 overlay asset，这样上游 bump 时冲突面清晰可见。四个嵌套依赖（Google-PinyinIME-Rev、utfcpp、miniaudio、whisper.cpp）各自带归档和摘要。
+输入引擎是仓库内的 `crates/engine`，不再从外部拉取、也没有锁文件和 overlay 脚本：原先由 overlay 改写的行为都已直接写进对应的 Rust 模块。移植的对照基准在 `crates/engine/tests/golden/`，录制方法见 `tools/engine-golden/README.md`。平台仍在用的非引擎文件随仓库提交：IPC 契约头文件在 `shared/contracts/`，Windows 提示音用的 miniaudio 在 `platforms/windows/third_party/miniaudio/`。
 
-`resources/desktop-dictionary.lock.json` 锁定 10 个词库 artifact（合计约 175 MB，含 `msime.db`、`dict_japanese.dat`、`bigram.bin`/`trigram.bin`、`english.db`、`others.db`、`dict_pinyin.dat`、`sentence-model.safetensors`），每项带 sha256 和长度；`resources/neural-model.lock.json` 同时锁定键盘与桌面落定两个神经模型，`scripts/fetch_neural_model.py` 将它们原子下载到 `target/neural-model`；旧的 `resources/settled-model.lock.json` 和 `scripts/fetch_settled_model.py` 仍兼容只准备桌面模型的构建。`resources/eval/` 是四套转换质量数据集及其基线，`resources/helpcodes/` 是辅助码表与其 NOTICE。
+`resources/desktop-dictionary.lock.json` 锁定 9 个词库 artifact（合计约 175 MB，含 `msime.db`、`dict_japanese.dat`、`bigram.bin`/`trigram.bin`、`english.db`、`others.db`、`sentence-model.safetensors`），每项带 sha256 和长度；`resources/neural-model.lock.json` 同时锁定键盘与桌面落定两个神经模型，`scripts/fetch_neural_model.py` 将它们原子下载到 `target/neural-model`；旧的 `resources/settled-model.lock.json` 和 `scripts/fetch_settled_model.py` 仍兼容只准备桌面模型的构建。`resources/eval/` 是四套转换质量数据集及其基线，`resources/helpcodes/` 是辅助码表与其 NOTICE。
 
 ## 三、共享层的最终形态
 
@@ -128,7 +128,7 @@ IBus 与 Fcitx5 是**并列的两个系统入口**，不是宿主和它的插件
 
 在线候选、语音、剪贴板、手写、emoji、词典、翻译各有独立的可执行入口，其中在线候选、语音和剪贴板另配 systemd 用户单元；前两者是 socket 激活的，`ListenStream` 落在 `%t/msime-client/` 下、`SocketMode=0600`。浮层在 `src/overlay/`，提供模式徽章和语音波形，X11 与 Wayland layer-shell 两套后端（Wayland 协议代码由 `wayland-scanner` 从 `data/wayland/` 的 layer-shell 描述加系统 `xdg-shell.xml` 生成），缺依赖时退回面板文字。诊断日志写偏好目录下的 `diagnostic.log`，1 MiB 轮转一份，只用户可读。
 
-安装后的首次配置收成一条命令：`msime-linux-setup` 按词库锁逐个核对名称、大小和 SHA-256，调 `msime-linux-prepare` 在 `$XDG_CONFIG_HOME/msime-client` 建状态并发布 `runtime-options.json`，再把输入法加入正在运行的宿主的输入法列表：Fcitx5 经 D-Bus 追加到当前输入法组并读回核对，IBus 在引擎未被列出时先 `ibus restart`，再追加到 GNOME 的输入源或 IBus 的 `preload-engines`；任何一步失败都退回打印手动步骤，`--no-register` 跳过这一步。默认不联网，取回词库要显式 `--download`；校验不过即中止，不留半份词库；状态目录已存在时报错而不覆盖，但安装流程预先写入的匿名账号文件可以保留并继续准备。升级后自行下载的词库过期时，宿主的刷新以 `dictionary_outdated:` 报告并继续用旧代次，经 `msime-linux-first-run-guide --reason dictionary-outdated` 发通知；`msime-linux-setup --update --download` 只取回过期的几项，再用 `msime-linux-prepare --refresh` 切到新代次并回放用户词库，随包提供的词库目录留给包管理器。`dict_pinyin.dat` 在词库锁里没有下载地址（它来自引擎源码树），改从 `engine-lock.json` 指的固定依赖归档里只取出这一个文件。图形入口是等价的：`msime-linux-settings` 在缺 `runtime-options.json` 时打开首次配置页，页面跑的就是同一个 `msime-linux-setup`。卸载走 `cmake --build <build-dir> --target uninstall`，会先逐个停掉 setup 启用过的用户单元，再用 `msime-linux-setup --unregister` 把输入法从 GNOME 输入源、IBus 预载引擎和当前 Fcitx5 输入法组中移除（会让列表变空时保持原样）；`.deb` 的 prerm 对每个已登录用户做同样两步。
+安装后的首次配置收成一条命令：`msime-linux-setup` 按词库锁逐个核对名称、大小和 SHA-256，调 `msime-linux-prepare` 在 `$XDG_CONFIG_HOME/msime-client` 建状态并发布 `runtime-options.json`，再把输入法加入正在运行的宿主的输入法列表：Fcitx5 经 D-Bus 追加到当前输入法组并读回核对，IBus 在引擎未被列出时先 `ibus restart`，再追加到 GNOME 的输入源或 IBus 的 `preload-engines`；任何一步失败都退回打印手动步骤，`--no-register` 跳过这一步。默认不联网，取回词库要显式 `--download`；校验不过即中止，不留半份词库；状态目录已存在时报错而不覆盖，但安装流程预先写入的匿名账号文件可以保留并继续准备。升级后自行下载的词库过期时，宿主的刷新以 `dictionary_outdated:` 报告并继续用旧代次，经 `msime-linux-first-run-guide --reason dictionary-outdated` 发通知；`msime-linux-setup --update --download` 只取回过期的几项，再用 `msime-linux-prepare --refresh` 切到新代次并回放用户词库，随包提供的词库目录留给包管理器。图形入口是等价的：`msime-linux-settings` 在缺 `runtime-options.json` 时打开首次配置页，页面跑的就是同一个 `msime-linux-setup`。卸载走 `cmake --build <build-dir> --target uninstall`，会先逐个停掉 setup 启用过的用户单元，再用 `msime-linux-setup --unregister` 把输入法从 GNOME 输入源、IBus 预载引擎和当前 Fcitx5 输入法组中移除（会让列表变空时保持原样）；`.deb` 的 prerm 对每个已登录用户做同样两步。
 
 打包由 `cmake/packaging.cmake` 提供（`-DMSIME_ENABLE_PACKAGING=ON`），四道硬性前置：必须 Linux、前缀必须是 `/usr`、运行配置文件必须为空、本地语音必须关。版本取 `-DMSIME_PACKAGE_VERSION`（发布工作流传 `platforms/linux/version.txt` 的版本），不传时同样读 `platforms/linux/version.txt`，与 Windows 的 `MSIME_WINDOWS_VERSION` 读自己的 `version.txt` 一致；这一步在顶层 `CMakeLists.txt` 里完成，IBus 宿主的遥测以 `MSIME_LINUX_VERSION` 报告同一个版本；产出 TGZ 或 DEB，Debian 依赖声明 ibus/python3，开了 Fcitx5 再追加 fcitx5。
 
@@ -182,7 +182,7 @@ ArkTS 宿主，`module.json5` 声明 `mainElement: "KeyboardExtensionAbility"`�
 
 **外部皮肤包的资源解析在 host 边界完成。** 浏览器按样式表位置解析相对 `@import` 与 `url()`，而共享预览用 constructed stylesheet，`@import` 会被直接丢弃、子目录里的资源地址还会被误当成相对包根。所以改为在 host 边界先读同一包内的 CSS，递归展开导入并把每份样式表的资源路径归一到包根；远程、绝对和越出包根的导入删除并报 partial，循环、深度、文件数与总字节都有上限。Tauri 命令只接受 package id 与已归一化的相对路径，Rust 侧重新验证 manifest、目录 containment、MIME、单文件大小与 UTF-8，不向 webview 暴露文件系统路径。
 
-**引擎改动走 overlay 脚本，不走 patch。** `engine-lock.json` 的 `patches` 是空的，18 个 `scripts/apply_engine_*.py` 在取回归档后按顺序改写源码。相比一堆 diff，脚本能表达「在这个函数里找到这一段再改」这种带上下文的合并，上游 bump 时要么干净应用要么明确报错，而不是产生一堆需要手工消解的 reject。引擎本身用归档而非 submodule 固定，因此嵌套依赖的 bump 会以裸路径的形式出现在 diff 里，走人工 review 而不是自动合并。
+**引擎改动直接改 `crates/engine`，改完对照基准。** 引擎曾是钉死的外部 C++ 归档，行为改动只能靠取回后改写源码的 overlay 脚本叠上去；移植成 Rust 后这一层整个去掉了。代价是没有上游可以同步：引擎的行为以 `crates/engine/tests/golden/` 的基准和各模块单测为准，改动行为就同时更新基准，并写明为什么。
 
 **候选窗口的位置有记忆，翻页没有。** 竖排候选在一次组词期间记录出现过的最高卡片高度，用最高高度决定是否从光标下方翻到上方，实际放置仍用当前页高度；候选面板隐藏后清除该记忆。这样短页不会在同一次组词里因为暂时变矮而跳回光标下方，也不会在翻转后留下按最高页算出来的空洞。`candidate_follow_cursor` 关闭时，面板在一次组词期间锁定首次有效光标位置，切换会话、结束组合或重新开启跟随才清除锚点。Linux 的候选位置由桌面 panel 管理，这套逻辑不适用，也没有硬塞进去。
 
@@ -196,13 +196,13 @@ ArkTS 宿主，`module.json5` 声明 `mainElement: "KeyboardExtensionAbility"`�
 
 测试跟着边界走：能在宿主机上跑的就别要求设备，需要设备才成立的就明确标成设备套件，两者不互相冒充。
 
-**共享 Rust。** 裸 `cargo test` 覆盖八个 `default-members`（`client-core`、`engine-bridge`、`input-runtime`、`host-api`、`host-macos`、`host-windows`、`tauri-mobile-platform`、`ios-native-ffi`）；`verify-local.sh` 另外把 `msime-desktop` 一并跑上，并单独检测「编译失败」而不是把它误读成「零个失败测试名」。真实词库不是单测的前提：`crates/engine-bridge/examples/` 下是一批探针，接收一个已备齐的资源目录后在临时用户目录里验证具体行为（九键候选顺序、调频五种模式、混输优先级、辅助码五种方案、双拼四套键位、首尾字抽取），原资源不被改写。`crates/input-runtime/examples/` 另有 `convert_eval` 与 `rerank_latency`，前者跑 `resources/eval/` 的四套数据集比对基线，后者量重排的逐键延迟。
+**共享 Rust。** 裸 `cargo test` 覆盖八个 `default-members`（`client-core`、`engine`、`input-runtime`、`host-api`、`host-macos`、`host-windows`、`tauri-mobile-platform`、`ios-native-ffi`）；`verify-local.sh` 另外把 `msime-desktop` 一并跑上，并单独检测「编译失败」而不是把它误读成「零个失败测试名」。真实词库不是单测的前提：`crates/engine/examples/` 下是一批探针，接收一个已备齐的资源目录后在临时用户目录里验证具体行为（九键候选顺序、调频五种模式、混输优先级、辅助码五种方案、双拼四套键位、首尾字抽取），原资源不被改写。`crates/input-runtime/examples/` 另有 `convert_eval` 与 `rerank_latency`，前者跑 `resources/eval/` 的四套数据集比对基线，后者量重排的逐键延迟。
 
 **共享界面。** `apps/desktop/tests/` 下 99 个 Vitest 文件按 account / candidate / chat / community / core / dictionary / emoji / input / settings / skin / support / voice 十二个域组织。写这些用例有一条必须遵守的时序：`render(<SettingsPage …>)` 之后要先等初始加载落定再去点侧栏，页面此时还在解析快照，加载完成后自己做的选择会覆盖掉提前点下的分类——不等就会得到一个随机失败、看起来像产品回归的用例。
 
 **macOS。** `platforms/macos/CMakeLists.txt` 注册 127 项 CTest，加上 `ClipboardTests.cmake` 与 `shared/voice` 共约 141 项，另有三个标签（`emoji-local`、`clipboard-local`、`handwriting-local`）用于隔离需要本机环境的那部分。`tests/settings/` 下还有一批 Python 校验型用例，检查设置路由覆盖、偏好覆盖、bundle 内容、Info.plist 的图标/用途/名称键和 entitlements 守卫——这些是「打包结果对不对」的检查，不是行为测试。
 
-**Windows。** `platforms/windows/CMakeLists.txt` 96 项、`tsf/CMakeLists.txt` 19 项，加上 `msimeui` 自己的套件与 vendored Engine 的四项语音测试。关键的一点是这些套件在非 Windows 机器上也真的跑：把 Rust `msime-host-api` 编出来指给 `-DMSIME_HOST_LIBRARY`，边界测试就在本机驱动真实的共享库和真实 Engine。要跑交叉产物本身则走 `run-tests-wine.sh`，它把 C++ 套件与 `cargo test --no-run` 产出的 Rust 套件一并在 `xvfb-run wine` 下执行，每个 120 秒超时，结果与基线清单比对。`tsf/tests/exports/` 那组只读 PE 导出表、不加载 DLL，因此不需要 Windows。
+**Windows。** `platforms/windows/CMakeLists.txt` 96 项、`tsf/CMakeLists.txt` 19 项，加上 `msimeui` 自己的套件。关键的一点是这些套件在非 Windows 机器上也真的跑：把 Rust `msime-host-api` 编出来指给 `-DMSIME_HOST_LIBRARY`，边界测试就在本机驱动真实的共享库和真实 engine。要跑交叉产物本身则走 `run-tests-wine.sh`，它把 C++ 套件与 `cargo test --no-run` 产出的 Rust 套件一并在 `xvfb-run wine` 下执行，每个 120 秒超时，结果与基线清单比对。`tsf/tests/exports/` 那组只读 PE 导出表、不加载 DLL，因此不需要 Windows。
 
 **Linux。** `platforms/linux/CMakeLists.txt` 35 项 CTest 加 `fcitx5/` 的 4 项（后者条件注册，需要已校验词库），另有约三十个 Python 用例分布在 candidate / clipboard / core / dictionary / input / provider / runtime / voice 下。编译门禁与隔离验收分开：`build-container.sh` 用的镜像刻意不装 X11/XFixes/Fcitx5 开发包，`check-container.sh` 才起独立 D-Bus 与 IBus daemon 做真实输入。两个容器脚本都按 `$repo_root/vendor` → 主 worktree 的 `vendor` 顺序找 Engine 并只读挂进去，构建镜像按仓库路径哈希打 tag，避免多个 worktree 互相覆盖。
 
@@ -220,7 +220,7 @@ ArkTS 宿主，`module.json5` 声明 `mainElement: "KeyboardExtensionAbility"`�
 
 它的核心设计是**把失败的测试名集合与 `scripts/known-failures.txt` 比对，只对不在清单里的名字失败**。多个套件有长期失败，裸 pass/fail 没有信息量；清单里每一条都带完整的取证记录，文件开头写明「Every line here is debt, not an exemption」。
 
-阶段顺序：校准 vendored Engine → 自动发现的 `scripts/test-*.py` 静态与契约门禁 → Rust workspace 编译 → Android 目标编译与 host 检查 → HarmonyOS ArkTS 打包 → Linux 桌面 shell 与原生宿主 → Windows 交叉构建与 Wine 套件 → macOS 与 shared apple bridge → pipe-only 配置（`--quick` 到此为止）→ Rust 测试、fmt、clippy（七个 crate 的 `-D warnings` 硬门禁，无基线）→ 前端 lint 与格式 → 依赖 advisory → 整句转换质量评测与重排延迟 → 各平台 ctest → TypeScript 与 Vitest。缺少某个工具链时该阶段明确跳过并打印所需条件，不静默通过。
+阶段顺序：自动发现的 `scripts/test-*.py` 静态与契约门禁 → Rust workspace 编译 → Android 目标编译与 host 检查 → HarmonyOS ArkTS 打包 → Linux 桌面 shell 与原生宿主 → Windows 交叉构建与 Wine 套件 → macOS 与 shared apple bridge → pipe-only 配置（`--quick` 到此为止）→ Rust 测试、fmt、clippy（七个 crate 的 `-D warnings` 硬门禁，无基线）→ 前端 lint 与格式 → 依赖 advisory → 整句转换质量评测与重排延迟 → 各平台 ctest → TypeScript 与 Vitest。缺少某个工具链时该阶段明确跳过并打印所需条件，不静默通过。
 
 各平台的直接入口：
 
@@ -240,15 +240,15 @@ bash platforms/windows/run-tests-wine.sh x64                         # 在 Wine 
 
 bash platforms/harmony/tests/run.sh                                  # ArkTS 逻辑测试
 
-MSIME_IOS_DEPS=<含 Boost 的前缀> platforms/ios/build-app.sh "$resource_dir" simulator|device
+platforms/ios/build-app.sh "$resource_dir" simulator|device
 xcodebuild test -project platforms/ios/MSIMEClient.xcodeproj -scheme MSIMEClientTests ...
 
 cmake -S platforms/macos -B target/macos-isolated -DMSIME_HOST_LIBRARY=... -DMSIME_SPARKLE_ROOT=...
 ctest --test-dir target/macos-isolated --output-on-failure
 ```
 
-几个跨平台的前置条件是硬性的，脚本会直接报错而不是继续：macOS 的 CMake 配置要求 Sparkle 2.9.6 就位且 `msime-host-api` 已用 Cargo 构建；iOS 的 `build-native.sh` 要求 `MSIME_IOS_DEPS` 指向含 Boost 的前缀；Android 的原生构建校验 NDK 的 `source.properties` 必须是钉死的那个版本、vcpkg 检出必须是钉死的那个提交；HarmonyOS 要求 `MSIME_OHOS_NDK` 指向含 `ohos.toolchain.cmake` 的 native SDK、`MSIME_OHOS_DEPS` 指向已备齐的依赖前缀；Windows 的 `build-cross.sh` 校验 vcpkg HEAD 必须是清单里那个提交且工作区干净。
+几个跨平台的前置条件是硬性的，脚本会直接报错而不是继续：macOS 的 CMake 配置要求 Sparkle 2.9.6 就位且 `msime-host-api` 已用 Cargo 构建；Android 的原生构建校验 NDK 的 `source.properties` 必须是钉死的那个版本、vcpkg 检出必须是钉死的那个提交；HarmonyOS 要求 `MSIME_OHOS_NDK` 指向含 `ohos.toolchain.cmake` 的 native SDK；Windows 的 `build-cross.sh` 校验 vcpkg HEAD 必须是清单里那个提交且工作区干净。
 
-macOS 上设置最低系统版本要**按目标语言分别下发**：`CFLAGS`/`CXXFLAGS` 给 C 与 C++，`CMAKE_OSX_DEPLOYMENT_TARGET` 给 Engine 的 CMake 构建，不要用 `MACOSX_DEPLOYMENT_TARGET`。在当前 rustc 上，那个变量会一并作用到为宿主编译的 proc-macro 动态库，产出带 `minos 13.0` 的产物之后 rustc 自己就加载不了它；cargo 不把该变量算进指纹，于是某个产物目录里留下一份坏的 proc-macro 就会被后续构建一直复用，失败看起来时有时无。
+macOS 上设置最低系统版本要**按目标语言分别下发**：`CFLAGS`/`CXXFLAGS` 给 C 与 C++，`CMAKE_OSX_DEPLOYMENT_TARGET` 给 CMake 构建，不要用 `MACOSX_DEPLOYMENT_TARGET`。在当前 rustc 上，那个变量会一并作用到为宿主编译的 proc-macro 动态库，产出带 `minos 13.0` 的产物之后 rustc 自己就加载不了它；cargo 不把该变量算进指纹，于是某个产物目录里留下一份坏的 proc-macro 就会被后续构建一直复用，失败看起来时有时无。
 
 `.githooks/`（需 `git config core.hooksPath .githooks` 启用）提供两道更轻的网：`pre-commit` 是亚秒级的冲突标记扫描加 staged 文件的 rustfmt 与前端格式检查；`pre-merge-commit` 与 `pre-push` 都直接跑 `verify-local.sh --quick`。

@@ -1,5 +1,4 @@
 #include "LocalAsr.h"
-#include <msime/voice/stt_service.h>
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -41,7 +40,7 @@ int main() {
             LocalAsrOptions options;
             options.model_dir = (root / "model").u8string();
             recognize_local_model({0.0f, 0.0f}, options, nullptr);
-        } catch (const metasequoia::voice::VoiceError &) {
+        } catch (const VoiceError &) {
             threw = true;
         }
         assert(threw);

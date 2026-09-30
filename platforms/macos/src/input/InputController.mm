@@ -3232,9 +3232,9 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
 }
 - (BOOL)usesNativeHTTPVoice {
     NSString *provider = [NSUserDefaults.standardUserDefaults stringForKey:@"MSIMEClientVoiceASRProvider"] ?: @"";
-    // "local" with a Whisper model file recognises on this machine rather than over HTTP, but it is the same batch shape - record, hand the samples to one request, commit what comes back - so it travels the same path. A build without the Whisper recognizer falls through to the platform recognizer here if a preference file names one anyway. An installed model directory streams through the helper instead.
+    // An installed model directory streams through the helper instead; "local" naming anything else falls through to the platform recognizer.
     if ([self usesLocalModelVoice]) return NO;
-    return MSIMEVoiceUsesNativeHTTPProvider(provider, MSIMEVoiceProviderSocket() != nil, MSIMEVoiceLocalWhisperBuilt());
+    return MSIMEVoiceUsesNativeHTTPProvider(provider, MSIMEVoiceProviderSocket() != nil);
 }
 - (BOOL)usesNativeDoubaoVoice {
     NSString *provider = [NSUserDefaults.standardUserDefaults stringForKey:@"MSIMEClientVoiceASRProvider"] ?: @"doubao";

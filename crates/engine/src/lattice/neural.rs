@@ -122,7 +122,7 @@ impl NeuralReranker {
 #[cfg(test)]
 mod tests {
     use super::super::decode::tests::{lookup, syllables, table};
-    use super::super::decode::LatticeOptions;
+    use super::super::decode::{LatticeOptions, TypoEdge};
     use super::super::merge::merge_lattice_candidates;
     use super::*;
     use crate::assets;
@@ -242,6 +242,93 @@ mod tests {
         let means = Reranker::new(model).log_probabilities("", &["输入法"]);
         assert_eq!(means.len(), 1);
         assert!(means[0] < 0.0);
+    }
+
+    /// 904bd0976: with a reranker running, the typo decode still runs and still starts from the unreranked best, so the typo sentence answers the literal reading rather than whatever the model preferred.
+    #[test]
+    fn the_typo_decode_reads_the_unreranked_best_while_a_model_runs() {
+        let model = match resource_model(assets::NEURAL_MODEL_KEYBOARD) {
+            Ok(model) => model,
+            Err(reason) => {
+                eprintln!(
+                    "skipping the_typo_decode_reads_the_unreranked_best_while_a_model_runs: {reason}"
+                );
+                return;
+            }
+        };
+        let mut rerankers = vec![NeuralReranker::new(CandidateSource::NeuralKeyboard, model)];
+        let options = LatticeOptions {
+            nbest: MAX_RERANK_PATHS,
+            show_next_on_duplicate: true,
+            ..LatticeOptions::default()
+        };
+
+        // The model moves 输入法 ahead of the lattice's 输入发; the typo source still sees 输入发.
+        let rows = table(&[
+            ("shu'ru", &[("输入", 20000)]),
+            ("fa", &[("法", 800000), ("发", 900000), ("罚", 100000)]),
+        ]);
+        let mut seen = Vec::new();
+        let mut source = |best: &SentencePath| {
+            seen.push(best.sentence.clone());
+            Vec::new()
+        };
+        let mut candidates: Vec<WordItem> = Vec::new();
+        let typo = merge_lattice_candidates(
+            &mut candidates,
+            &syllables("shu'ru'fa"),
+            &mut lookup(&rows),
+            "shurufa",
+            &options,
+            Some(&mut source),
+            &mut rerankers,
+            "我在用一个新的",
+        );
+        assert!(typo.is_none());
+        assert_eq!(seen, ["输入发"]);
+        let row = |source: CandidateSource| {
+            candidates
+                .iter()
+                .find(|item| item.source == source)
+                .map(|item| item.word.as_str())
+        };
+        assert_eq!(row(CandidateSource::Generated), Some("输入发"));
+        assert_eq!(row(CandidateSource::NeuralKeyboard), Some("输入法"));
+
+        // And a planned typo edge still comes back as the typo sentence.
+        let rows = table(&[
+            ("ta", &[("他", 900000)]),
+            ("shi", &[("是", 900000)]),
+            ("jian", &[("见", 500000)]),
+            ("shi'jian", &[("时间", 30000)]),
+        ]);
+        let mut seen = Vec::new();
+        let mut source = |best: &SentencePath| {
+            seen.push(best.sentence.clone());
+            vec![TypoEdge {
+                start: 1,
+                end: 3,
+                key: "shi'jian".into(),
+                value: "事件".into(),
+                weight: 90000,
+                penalty: 0.5,
+            }]
+        };
+        let mut candidates: Vec<WordItem> = Vec::new();
+        let typo = merge_lattice_candidates(
+            &mut candidates,
+            &syllables("ta'shi'jian"),
+            &mut lookup(&rows),
+            "tashijian",
+            &options,
+            Some(&mut source),
+            &mut rerankers,
+            "",
+        )
+        .expect("a typo sentence beside the reranked rows");
+        assert_eq!(seen, ["他时间"]);
+        assert_eq!(typo.sentence, "他事件");
+        assert!(candidates.iter().all(|item| item.word != "他事件"));
     }
 
     #[test]

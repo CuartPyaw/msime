@@ -1,5 +1,5 @@
 #include "Ipc.h"
-#include "../../../../vendor/MSIME-Engine/contracts/ipc_negotiation.h"
+#include "../../../../shared/contracts/ipc_negotiation.h"
 #include <algorithm>
 #include <cstring>
 #include <cwctype>

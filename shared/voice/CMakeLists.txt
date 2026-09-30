@@ -5,47 +5,21 @@ if(PROJECT_IS_TOP_LEVEL)
 endif()
 find_package(CURL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-# Off by default: most hosts recognise in the cloud or through the platform, and whisper.cpp plus ggml is a large dependency to carry for a provider they never offer. A host that puts "local" in front of the user turns this on and gets the recognizer behind it.
-option(MSIME_SHARED_VOICE_LOCAL_WHISPER "Build the on-device Whisper provider into msime-voice-providers" OFF)
-if(NOT TARGET MetasequoiaIme::Voice)
-  # Native hosts own capture. Avoid adding a second capture adapter.
-  set(MSIME_VOICE_CAPTURE OFF)
-  set(MSIME_VOICE_WHISPER ${MSIME_SHARED_VOICE_LOCAL_WHISPER})
-  if(MSIME_SHARED_VOICE_LOCAL_WHISPER)
-    # Match the Apple host's pinned configuration: everything static so the bundle carries no loose dylib, no -march=native in a redistributable binary, and no BLAS backend, which would raise the deployment floor to macOS 13.3. Metal and the CPU backend remain.
-    #
-    # Forced into the cache, not set as a normal variable, because whisper.cpp declares this same name with `option()` and does not set CMP0077. With the policy unset, `option()` on a first configure clears the normal variable and writes its own default - so the first configure of a fresh build directory produced shared libraries and every configure after it produced static ones, from the same source. The build directory then disagreed with itself: the macOS bundle staged `libwhisper.1.dylib` and friends into Frameworks, and re-running CMake for any reason - editing a CMakeLists is enough - turned those targets static and failed the generate step on `$<TARGET_SONAME_FILE_NAME:whisper>`. A cache entry is what `option()` looks at, so this decides it once for every configure.
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Static Engine voice dependencies; see shared/voice/CMakeLists.txt" FORCE)
-    set(GGML_NATIVE OFF)
-    set(GGML_BLAS OFF)
-    # Embed the Metal shaders in the archive; otherwise the host has to find and stage a default.metallib next to the binary at runtime.
-    set(GGML_METAL_EMBED_LIBRARY ON)
-  endif()
-  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../vendor/MSIME-Engine/voice" engine-voice)
-endif()
 # On-device recognition through the pinned sherpa-onnx runtime (resources/voice-runtime.lock.json). Built on every host: it needs nothing at build time beyond the vendored C header, and loads the runtime library with dlopen/LoadLibrary when a dictation first asks for it. See LocalAsr.h.
 find_package(Threads REQUIRED)
 add_library(msime-voice-local-asr STATIC LocalAsr.cpp)
 target_compile_features(msime-voice-local-asr PUBLIC cxx_std_17)
 target_include_directories(msime-voice-local-asr
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party" "${CMAKE_CURRENT_LIST_DIR}/../../vendor/MSIME-Engine/voice/include")
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 target_link_libraries(msime-voice-local-asr PRIVATE nlohmann_json::nlohmann_json ${CMAKE_DL_LIBS} PUBLIC Threads::Threads)
 # The recognizer as its own process, which is how the macOS and Linux input methods use it; see LocalAsrHelper.cpp.
 add_executable(msime-voice-local LocalAsrHelper.cpp)
-target_include_directories(msime-voice-local PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../vendor/MSIME-Engine/voice/include")
 target_link_libraries(msime-voice-local PRIVATE msime-voice-local-asr nlohmann_json::nlohmann_json)
 add_library(msime-voice-providers STATIC VoiceProviders.cpp)
 target_compile_features(msime-voice-providers PUBLIC cxx_std_17)
 target_include_directories(msime-voice-providers PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(msime-voice-providers PUBLIC MetasequoiaIme::Voice msime-voice-local-asr PRIVATE CURL::libcurl nlohmann_json::nlohmann_json)
-if(MSIME_SHARED_VOICE_LOCAL_WHISPER)
-  if(NOT TARGET MetasequoiaIme::VoiceWhisper)
-    message(FATAL_ERROR "MSIME_SHARED_VOICE_LOCAL_WHISPER needs the Engine's whisper.cpp checkout; see vendor/MSIME-Engine/voice")
-  endif()
-  target_compile_definitions(msime-voice-providers PUBLIC MSIME_VOICE_LOCAL_WHISPER)
-  target_link_libraries(msime-voice-providers PUBLIC MetasequoiaIme::VoiceWhisper)
-endif()
+target_link_libraries(msime-voice-providers PUBLIC msime-voice-local-asr PRIVATE CURL::libcurl nlohmann_json::nlohmann_json)
 foreach(voice_target msime-voice-providers msime-voice-local-asr msime-voice-local)
   if(MSVC)
     target_compile_options(${voice_target} PRIVATE /W4 /utf-8)
@@ -83,7 +57,6 @@ if(BUILD_TESTING)
   add_test(NAME shared-voice-provider-routing COMMAND shared-voice-provider-routing)
   add_executable(shared-voice-local-asr tests/local_asr.cpp)
   target_link_libraries(shared-voice-local-asr PRIVATE msime-voice-local-asr)
-  target_include_directories(shared-voice-local-asr PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../vendor/MSIME-Engine/voice/include")
   if(MSVC)
     target_compile_options(shared-voice-local-asr PRIVATE /UNDEBUG /utf-8)
   else()
@@ -102,13 +75,5 @@ if(BUILD_TESTING)
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/local_helper.py"
         $<TARGET_FILE:msime-voice-local> "${MSIME_LOCAL_ASR_TEST_RUNTIME}" "${MSIME_LOCAL_ASR_TEST_MODEL}")
     set_tests_properties(shared-voice-local-helper PROPERTIES TIMEOUT 120)
-  endif()
-  if(MSIME_SHARED_VOICE_LOCAL_WHISPER AND TARGET ggml)
-    # Which compute backends the linked-in recognizer actually registers. The libraries are static
-    # here, and a backend the registry never hears about costs nothing visible: whisper still answers,
-    # on the CPU.
-    add_executable(shared-voice-backend-registry tests/backend_registry.cpp)
-    target_link_libraries(shared-voice-backend-registry PRIVATE ggml)
-    add_test(NAME shared-voice-backend-registry COMMAND shared-voice-backend-registry)
   endif()
 endif()

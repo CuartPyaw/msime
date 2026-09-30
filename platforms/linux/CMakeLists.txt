@@ -99,7 +99,7 @@ set(MSIME_HOST_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../target/debug/libmsime_
 set(MSIME_RUNTIME_OPTIONS_FILE "" CACHE FILEPATH "Prepared runtime options")
 set(MSIME_DESKTOP_BINARY "" CACHE FILEPATH "Cargo-built Tauri desktop binary")
 set(MSIME_MCP_BINARY "" CACHE FILEPATH "Cargo-built MCP server (msime-mcp)")
-set(MSIME_HANDWRITING_MODEL "${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/handwriting/models/handwriting-zh_CN.model" CACHE FILEPATH "Trusted packaged handwriting model")
+set(MSIME_HANDWRITING_MODEL_DIR "" CACHE PATH "Offline handwriting model with its license, as fetched by scripts/fetch_handwriting_model.py; empty uses target/handwriting-model when it is there")
 set(MSIME_EMOJI_RESOURCES "" CACHE PATH "Trusted packaged Engine Emoji resource directory")
 set(MSIME_ENGINE_RESOURCES "" CACHE PATH "Trusted packaged Engine desktop resource directory")
 if(NOT EXISTS "${MSIME_HOST_LIBRARY}")
@@ -191,13 +191,12 @@ target_link_libraries(msime-linux-handwriting PRIVATE msime-ibus-host)
 add_executable(msime-linux-voice src/voice/voice_request.cpp)
 target_compile_options(msime-linux-voice PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(msime-linux-voice PRIVATE msime-ibus-host)
-# On-device recognition for the `local` voice provider: the voice service spawns this helper (scripts/msime_voice_local.py) and speaks its JSON-lines protocol, so the model never loads into the service or the input method. It opens the sherpa-onnx runtime with dlopen from its own directory, so it builds without one; MSIME_VOICE_RUNTIME_DIR below installs the runtime beside it. Compiled from the shared sources directly because shared/voice/CMakeLists.txt also builds the cloud providers, which need libcurl and the Engine's voice target.
+# On-device recognition for the `local` voice provider: the voice service spawns this helper (scripts/msime_voice_local.py) and speaks its JSON-lines protocol, so the model never loads into the service or the input method. It opens the sherpa-onnx runtime with dlopen from its own directory, so it builds without one; MSIME_VOICE_RUNTIME_DIR below installs the runtime beside it. Compiled from the shared sources directly because shared/voice/CMakeLists.txt also builds the cloud providers and everything they link.
 find_package(Threads REQUIRED)
 set(MSIME_SHARED_VOICE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/voice")
 add_executable(msime-voice-local "${MSIME_SHARED_VOICE_DIR}/LocalAsrHelper.cpp" "${MSIME_SHARED_VOICE_DIR}/LocalAsr.cpp")
 target_compile_options(msime-voice-local PRIVATE -Wall -Wextra -Werror)
-target_include_directories(msime-voice-local PRIVATE "${MSIME_SHARED_VOICE_DIR}" "${MSIME_SHARED_VOICE_DIR}/third_party"
-                           "${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine/voice/include")
+target_include_directories(msime-voice-local PRIVATE "${MSIME_SHARED_VOICE_DIR}" "${MSIME_SHARED_VOICE_DIR}/third_party")
 target_link_libraries(msime-voice-local PRIVATE nlohmann_json::nlohmann_json Threads::Threads ${CMAKE_DL_LIBS})
 add_executable(msime-linux-emoji src/providers/emoji_request.cpp)
 target_compile_options(msime-linux-emoji PRIVATE -Wall -Wextra -Werror)
@@ -414,17 +413,12 @@ if(MSIME_LINUX_VOICE)
 endif()
 install(PROGRAMS scripts/msime-linux-ibus-launcher scripts/msime-linux-first-run-guide scripts/msime-linux-online-provider scripts/msime-linux-voice-provider scripts/msime-linux-provider-session DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(PROGRAMS scripts/msime-linux-clipboard-monitor DESTINATION "${CMAKE_INSTALL_BINDIR}")
-# 安装后的首次配置入口。词库与状态目录此前没有任何产品侧的路径：词库要么在配置阶段随包
-# 装好，要么只能在仓库检出里跑一个 Cargo 示例去取，于是只拿到安装包的用户凑不齐词库，而
-# 没有词库一个候选都出不来。两份锁无条件随装，它们是这个入口据以校验和取回的依据——词库
-# 锁此前只在 MSIME_ENGINE_RESOURCES 存在时才安装，也就是最需要它的那种安装里反而没有。
+# 安装后的首次配置入口。词库与状态目录此前没有任何产品侧的路径：词库要么在配置阶段随包装好，要么只能在仓库检出里跑一个 Cargo 示例去取，于是只拿到安装包的用户凑不齐词库，而没有词库一个候选都出不来。词库锁无条件随装，它是这个入口据以校验和取回的依据——它此前只在 MSIME_ENGINE_RESOURCES 存在时才安装，也就是最需要它的那种安装里反而没有。
 install(PROGRAMS scripts/msime-linux-setup DESTINATION "${CMAKE_INSTALL_BINDIR}")
 if(NOT MSIME_ENGINE_RESOURCES)
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/desktop-dictionary.lock.json"
           DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client")
 endif()
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../engine-lock.json"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client")
 set(MSIME_SYSTEMD_USER_UNIT_DIR "${CMAKE_INSTALL_DATADIR}/systemd/user" CACHE PATH "systemd user unit installation directory")
 foreach(MSIME_PROVIDER online voice clipboard)
   configure_file(data/msime-linux-${MSIME_PROVIDER}.service.in
@@ -465,16 +459,48 @@ configure_file(data/msime_voice_paths.py.in msime_voice_paths.py @ONLY)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/msime_voice_paths.py" DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES data/voice/start.pcm data/voice/end.pcm data/voice/SOURCE.md
         DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/voice")
-if(MSIME_HANDWRITING_MODEL AND EXISTS "${MSIME_HANDWRITING_MODEL}")
-  install(FILES "${MSIME_HANDWRITING_MODEL}" DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/handwriting"
-          RENAME handwriting-zh_CN.model)
-  get_filename_component(MSIME_HANDWRITING_MODEL_DIR "${MSIME_HANDWRITING_MODEL}" DIRECTORY)
-  foreach(MSIME_HANDWRITING_NOTICE HandwritingModel-LICENSE.txt provenance.json)
-    if(EXISTS "${MSIME_HANDWRITING_MODEL_DIR}/${MSIME_HANDWRITING_NOTICE}")
-      install(FILES "${MSIME_HANDWRITING_MODEL_DIR}/${MSIME_HANDWRITING_NOTICE}"
-              DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/handwriting")
+# The zinnia model `msime-linux-handwriting --local` recognises with, and its LGPL-2.1 license. At 26.8 MB it is not committed: scripts/fetch_handwriting_model.py downloads what resources/handwriting-model.lock.json pins into target/handwriting-model, which is picked up when present, and every file is checked against the lock here. Packaging requires it, because a package without it would offer an offline recognizer that fails on the first stroke; a development install without it only leaves --local reporting that no model is installed.
+if(NOT MSIME_HANDWRITING_MODEL_DIR AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../target/handwriting-model/handwriting-zh_CN.model")
+  get_filename_component(MSIME_HANDWRITING_MODEL_DIR
+                         "${CMAKE_CURRENT_SOURCE_DIR}/../../target/handwriting-model" ABSOLUTE)
+  message(STATUS "Using handwriting model staging directory: ${MSIME_HANDWRITING_MODEL_DIR}")
+endif()
+if(MSIME_HANDWRITING_MODEL_DIR)
+  if(NOT IS_DIRECTORY "${MSIME_HANDWRITING_MODEL_DIR}")
+    message(FATAL_ERROR "MSIME_HANDWRITING_MODEL_DIR is not a directory: ${MSIME_HANDWRITING_MODEL_DIR}")
+  endif()
+  set(MSIME_HANDWRITING_LOCK_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/handwriting-model.lock.json")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${MSIME_HANDWRITING_LOCK_FILE}")
+  file(READ "${MSIME_HANDWRITING_LOCK_FILE}" MSIME_HANDWRITING_LOCK)
+  string(JSON MSIME_HANDWRITING_COUNT LENGTH "${MSIME_HANDWRITING_LOCK}" artifacts)
+  math(EXPR MSIME_HANDWRITING_LAST "${MSIME_HANDWRITING_COUNT} - 1")
+  foreach(MSIME_HANDWRITING_INDEX RANGE 0 ${MSIME_HANDWRITING_LAST})
+    string(JSON MSIME_HANDWRITING_NAME GET "${MSIME_HANDWRITING_LOCK}"
+           artifacts ${MSIME_HANDWRITING_INDEX} name)
+    set(MSIME_HANDWRITING_FILE "${MSIME_HANDWRITING_MODEL_DIR}/${MSIME_HANDWRITING_NAME}")
+    if(NOT EXISTS "${MSIME_HANDWRITING_FILE}" OR
+       IS_DIRECTORY "${MSIME_HANDWRITING_FILE}" OR
+       IS_SYMLINK "${MSIME_HANDWRITING_FILE}")
+      message(FATAL_ERROR "Missing ${MSIME_HANDWRITING_NAME} in ${MSIME_HANDWRITING_MODEL_DIR}; run scripts/fetch_handwriting_model.py")
     endif()
+    string(JSON MSIME_HANDWRITING_SIZE GET "${MSIME_HANDWRITING_LOCK}"
+           artifacts ${MSIME_HANDWRITING_INDEX} size)
+    string(JSON MSIME_HANDWRITING_SHA256 GET "${MSIME_HANDWRITING_LOCK}"
+           artifacts ${MSIME_HANDWRITING_INDEX} sha256)
+    file(SIZE "${MSIME_HANDWRITING_FILE}" MSIME_HANDWRITING_ACTUAL_SIZE)
+    file(SHA256 "${MSIME_HANDWRITING_FILE}" MSIME_HANDWRITING_ACTUAL_SHA256)
+    if(NOT MSIME_HANDWRITING_ACTUAL_SIZE STREQUAL MSIME_HANDWRITING_SIZE OR
+       NOT MSIME_HANDWRITING_ACTUAL_SHA256 STREQUAL MSIME_HANDWRITING_SHA256)
+      message(FATAL_ERROR
+        "${MSIME_HANDWRITING_NAME} in ${MSIME_HANDWRITING_MODEL_DIR} does not match resources/handwriting-model.lock.json")
+    endif()
+    install(FILES "${MSIME_HANDWRITING_FILE}"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/handwriting")
   endforeach()
+  install(FILES "${MSIME_HANDWRITING_LOCK_FILE}" DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client")
+elseif(MSIME_ENABLE_PACKAGING)
+  message(FATAL_ERROR "Packaging requires the handwriting model; fetch it with scripts/fetch_handwriting_model.py (package-container.sh does)")
 endif()
 if(MSIME_EMOJI_RESOURCES)
   if(NOT IS_DIRECTORY "${MSIME_EMOJI_RESOURCES}")
@@ -685,39 +711,27 @@ if(NOT MSIME_ENABLE_FCITX5)
   message(STATUS "跳过：Fcitx5 插件；请安装 Fcitx5 开发包（Fcitx5Core 5.0.20+），"
                  "或在配置时传入 -DMSIME_ENABLE_FCITX5=ON")
 endif()
-# License and third-party notices, the Linux counterpart of the macOS bundle's Resources/Licenses. Every install redistributes the Engine code compiled into the host library, so plain `cmake --install` gets them as well, not only packages. The Engine component notices use the same file names as macOS Resources/Licenses; the sets differ where the builds differ: the project license is `copyright` here (GPL-3.0.txt on macOS), makecikudb, OpenCC, nlohmann/json, the Wayland protocols and the collected Rust/npm notices are Linux-only, and whisper.cpp is macOS-only.
-set(MSIME_ENGINE_NOTICE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/MSIME-Engine")
+# License and third-party notices, the Linux counterpart of the macOS bundle's Resources/Licenses. Every install redistributes the code compiled into the host library, so plain `cmake --install` gets them as well, not only packages. The project license is `copyright` here (GPL-3.0.txt on macOS); it also covers the input engine (crates/engine), which is this project's code. What the engine carries from elsewhere keeps its own notice: zinnia, whose recognizer crates/engine/src/handwriting ports; the provenance of the dictionary data msime-linux-setup downloads, carried verbatim from msime-engine as data/licenses/msime-engine-dictionary-NOTICE.md; and the helpcode tables' provenance, which applies whenever a resource directory provides them.
 set(MSIME_NOTICE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/../../LICENSE"
   "${CMAKE_CURRENT_SOURCE_DIR}/data/THIRD_PARTY_NOTICES.txt"
-  "${MSIME_ENGINE_NOTICE_ROOT}/LICENSE"
-  "${MSIME_ENGINE_NOTICE_ROOT}/NOTICE.md"
-  "${MSIME_ENGINE_NOTICE_ROOT}/dictionary/NOTICE.md"
-  "${MSIME_ENGINE_NOTICE_ROOT}/dictionary/makecikudb/LICENSE"
-  "${MSIME_ENGINE_NOTICE_ROOT}/helpcode/NOTICE.md"
-  "${MSIME_ENGINE_NOTICE_ROOT}/voice/LICENSE"
-  "${MSIME_ENGINE_NOTICE_ROOT}/googlepinyinime-rev/LICENSE"
-  "${MSIME_ENGINE_NOTICE_ROOT}/utfcpp/LICENSE"
-  "${MSIME_ENGINE_NOTICE_ROOT}/voice/third_party/miniaudio/LICENSE"
-  "${MSIME_ENGINE_NOTICE_ROOT}/handwriting/models/HandwritingModel-LICENSE.txt"
-  "${MSIME_ENGINE_NOTICE_ROOT}/handwriting/third_party/zinnia/Zinnia-LICENSE.txt"
+  "${CMAKE_CURRENT_SOURCE_DIR}/data/licenses/msime-engine-dictionary-NOTICE.md"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/helpcodes/ENGINE-NOTICE.md"
+  "${CMAKE_CURRENT_SOURCE_DIR}/data/licenses/Zinnia-LICENSE.txt"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../crates/client-core/data/opencc/LICENSE")
-# `copyright` is the name Debian policy requires for the package license. whisper.cpp is absent on purpose: the Linux host library compiles only the Engine's audio capture file, not its whisper voice target.
+# `copyright` is the name Debian policy requires for the package license.
 set(MSIME_NOTICE_NAMES
   copyright
   THIRD_PARTY_NOTICES.txt
-  msime-engine-GPL-3.0.txt
-  msime-engine-NOTICE.md
   msime-engine-dictionary-NOTICE.md
-  msime-engine-dictionary-makecikudb-LICENSE.txt
   msime-engine-helpcode-NOTICE.md
-  msime-engine-voice-LICENSE.txt
-  Apache-2.0-googlepinyinime.txt
-  Boost-1.0-utfcpp.txt
-  miniaudio-LICENSE.txt
-  HandwritingModel-LICENSE.txt
   Zinnia-LICENSE.txt
   OpenCC-Apache-2.0.txt)
+# The handwriting model's LGPL-2.1 license travels with the model, so it is a notice only when the model is installed.
+if(MSIME_HANDWRITING_MODEL_DIR)
+  list(APPEND MSIME_NOTICE_SOURCES "${MSIME_HANDWRITING_MODEL_DIR}/HandwritingModel-LICENSE.txt")
+  list(APPEND MSIME_NOTICE_NAMES HandwritingModel-LICENSE.txt)
+endif()
 # Header-only nlohmann/json is compiled into the IBus engine, the provider programs and the Fcitx5 addon; no runtime package carries its copyright, so a pinned copy of its license ships instead.
 list(APPEND MSIME_NOTICE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/data/licenses/nlohmann_json-MIT.txt")
 list(APPEND MSIME_NOTICE_NAMES nlohmann_json-MIT.txt)
@@ -773,9 +787,9 @@ foreach(MSIME_NOTICE_SOURCE MSIME_NOTICE_NAME IN ZIP_LISTS MSIME_NOTICE_SOURCES 
 endforeach()
 if(MSIME_MISSING_NOTICES)
   list(JOIN MSIME_MISSING_NOTICES "\n  " MSIME_MISSING_NOTICE_LIST)
-  # A redistributable package without the notices of the code it contains must not be produced; a development install only warns so a checkout without the prepared Engine tree still configures.
+  # A redistributable package without the notices of the code it contains must not be produced; a development install only warns.
   if(MSIME_ENABLE_PACKAGING)
-    message(FATAL_ERROR "Packaging requires every third-party notice; missing:\n  ${MSIME_MISSING_NOTICE_LIST}\nRun scripts/fetch_engine.py to prepare vendor/MSIME-Engine")
+    message(FATAL_ERROR "Packaging requires every third-party notice; missing:\n  ${MSIME_MISSING_NOTICE_LIST}")
   endif()
   message(WARNING "Installing without these third-party notices:\n  ${MSIME_MISSING_NOTICE_LIST}")
 endif()

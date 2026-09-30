@@ -32,10 +32,6 @@ if [ "$desktop" = 1 ] && [ ! -f apps/desktop/dist/index.html ]; then
   exit 2
 fi
 
-# Same Engine lookup as build-container.sh: mount whichever tree already holds the prepared archive.
-# Only a tree prepared for this checkout's engine-lock.json: one at the same Engine commit with older overlays compiles, or fails, against the wrong Engine source. With no match the container fetches its own.
-vendor="$(python3 scripts/fetch_engine.py --borrowable)"
-
 build_root="$repo_root/target/linux-package"
 mkdir -p "$build_root"
 # Third-party notices of the statically linked Rust crates and the bundled npm packages. The npm walk runs here because the container has no node_modules of its own; the crate walk runs in the container after the builds that resolve those crates. Cleared first so a desktop-less run cannot pick up an earlier frontend notice.
@@ -57,7 +53,6 @@ echo "package image: $package_image" >&2
 
 docker run --rm --init \
   -v "$repo_root":/source \
-  ${vendor:+-v "$vendor":/source/vendor:ro} \
   -v "$build_root":/build \
   -w /source \
   -e CARGO_TARGET_DIR=/build/cargo \
@@ -65,7 +60,6 @@ docker run --rm --init \
   -e MSIME_PACKAGE_DESKTOP="$desktop" \
   ${CARGO_BUILD_JOBS:+-e CARGO_BUILD_JOBS="$CARGO_BUILD_JOBS"} \
   ${CMAKE_BUILD_PARALLEL_LEVEL:+-e CMAKE_BUILD_PARALLEL_LEVEL="$CMAKE_BUILD_PARALLEL_LEVEL"} \
-  ${vendor:+-e MSIME_SKIP_ENGINE_FETCH=1} \
   "$package_image" bash -euo pipefail -c '
     cargo build --release --locked -p msime-host-api
     cargo build --release --locked -p msime-mcp-server --bin msime-mcp
@@ -86,6 +80,8 @@ docker run --rm --init \
       *) echo "no pinned voice runtime for $(uname -m)" >&2; exit 2 ;;
     esac
     python3 scripts/fetch_voice_runtime.py --platform "$voice_platform" --out /build/voice-runtime
+    # The zinnia model msime-linux-handwriting --local recognises with, pinned by resources/handwriting-model.lock.json.
+    python3 scripts/fetch_handwriting_model.py --out /build/handwriting-model
     # Non-English candidate glosses from scripts/fetch_offline_glosses.py, installed only when the databases and their NOTICE are both there; without them the package glosses offline in English only.
     glosses_args=()
     if compgen -G "target/offline-glosses/zh-*.db" >/dev/null && [ -f target/offline-glosses/offline-glosses-NOTICE.txt ]; then
@@ -103,6 +99,7 @@ docker run --rm --init \
       -DMSIME_PACKAGE_VERSION="$MSIME_VERSION" \
       -DMSIME_RUST_NOTICES=/build/notices/rust-crates-NOTICES.txt \
       -DMSIME_VOICE_RUNTIME_DIR=/build/voice-runtime \
+      -DMSIME_HANDWRITING_MODEL_DIR=/build/handwriting-model \
       "${desktop_args[@]}" "${glosses_args[@]}"
     cmake --build /build/cmake
     ctest --test-dir /build/cmake --output-on-failure

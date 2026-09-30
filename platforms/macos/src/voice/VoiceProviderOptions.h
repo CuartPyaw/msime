@@ -6,13 +6,10 @@
 // every HTTPS multipart preset belongs to the batch request path, while Doubao
 // and system Speech have dedicated transports. An external provider socket owns
 // all provider routing when present.
-// `localASRAvailable` means this process can recognise a `local` model in-process: a Whisper model file with the Whisper recognizer built in. An installed on-device model directory never takes this path; see MSIMEVoiceUsesLocalModelHelper.
-static inline BOOL MSIMEVoiceUsesNativeHTTPProvider(NSString *provider,
-                                                     BOOL providerSocketAvailable,
-                                                     BOOL localASRAvailable) {
+// `local` never takes this path: an installed on-device model directory runs in the helper (MSIMEVoiceUsesLocalModelHelper), and anything else the preference holds for it, such as a Whisper model file from before the model catalog, falls through to the platform recognizer.
+static inline BOOL MSIMEVoiceUsesNativeHTTPProvider(NSString *provider, BOOL providerSocketAvailable) {
     if (providerSocketAvailable) return NO;
     NSString *identifier = provider.lowercaseString ?: @"";
-    if ([identifier isEqual:@"local"]) return localASRAvailable;
     return [@[@"openai", @"groq", @"siliconflow", @"everyapi", @"mistral", @"cloud"]
         containsObject:identifier];
 }
@@ -26,7 +23,7 @@ static inline BOOL MSIMEVoiceUsesLocalModelHelper(NSString *provider, BOOL provi
 static inline BOOL MSIMEVoiceASRTokenMissing(NSString *provider, NSString *token, BOOL providerSocketAvailable) {
     if (providerSocketAvailable || token.length) return NO;
     return !provider || [provider.lowercaseString isEqual:@"doubao"] ||
-        MSIMEVoiceUsesNativeHTTPProvider(provider, NO, NO);
+        MSIMEVoiceUsesNativeHTTPProvider(provider, NO);
 }
 
 // Adapt native preferences to the existing provider contract. Do not infer an

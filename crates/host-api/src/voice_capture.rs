@@ -60,7 +60,7 @@ fn byte_device_id(prefix: &str, native: &str) -> Option<String> {
 mod backend {
     use super::{capacity, MAX_DEVICES, MAX_MILLISECONDS, SAMPLE_RATE};
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    use cpal::{FromSample, HostId, SampleFormat, SizedSample, StreamConfig};
+    use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
     use rubato::audioadapter_buffers::direct::InterleavedSlice;
     use rubato::{Fft, FixedSync, Resampler};
     use std::sync::{Arc, Condvar, Mutex};
@@ -224,16 +224,16 @@ mod backend {
                 let native = device.id().ok()?;
                 let id = match native.host() {
                     #[cfg(target_os = "windows")]
-                    HostId::Wasapi => super::wasapi_device_id(native.id()),
+                    cpal::HostId::Wasapi => super::wasapi_device_id(native.id()),
                     #[cfg(target_vendor = "apple")]
-                    HostId::CoreAudio => super::byte_device_id("coreaudio:", native.id()),
+                    cpal::HostId::CoreAudio => super::byte_device_id("coreaudio:", native.id()),
                     #[cfg(any(
                         target_os = "linux",
                         target_os = "dragonfly",
                         target_os = "freebsd",
                         target_os = "netbsd"
                     ))]
-                    HostId::Alsa => super::byte_device_id("alsa:", native.id()),
+                    cpal::HostId::Alsa => super::byte_device_id("alsa:", native.id()),
                     // Other backends (AAudio, ASIO, JACK) had no identity the hosts could select by.
                     #[allow(unreachable_patterns)]
                     _ => None,

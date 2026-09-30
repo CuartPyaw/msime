@@ -16,7 +16,7 @@ Java/Kotlin 宿主按 `java/app/msime/android/<feature>/` 分为 `account`、`ca
 
 这条原生键盘策略与共享设置页的响应式布局彼此独立：`platforms/android` 负责系统 IME 窗口，Tauri/React 设置页仍按自身 600 px CSS 断点在手机底部标签栏与大屏侧栏之间切换。`KeyboardFormFactorPolicySmoke` 固定验证 599/600 dp 边界、手机横屏、600 dp 折叠展开态、1280 dp 二合一的 720 dp 上限，以及配置暂时缺失当前宽度时的安全回退；`check-host.sh` 会编译并执行该回归。设备上的旋转、分屏、自由窗口和折叠铰链切换走的是同一条策略，JVM 回归钉住的是策略边界本身。
 
-`check-host.sh` 在装有固定 NDK 28.2.13676358 的机器上额外用 `aarch64-linux-android28-clang++` 以 `-Wall -Werror` 对 `native/client_jni.cpp` 做目标平台编译：Java 里声明 `native` 的方法在没有 C++ 实现时照样能编过，而这是 Java 声明与共享 FFI 签名唯一必须一致的地方；完整原生构建需要 vcpkg 和 Engine，这一步不需要。没有固定 NDK 的机器会跳过并明确说明。`verify-native.sh` 的导出清单同时覆盖 online query、云 URL、AI 请求描述符和两个在线候选写回入口。
+`check-host.sh` 在装有固定 NDK 28.2.13676358 的机器上额外用 `aarch64-linux-android28-clang++` 以 `-Wall -Werror` 对 `native/client_jni.cpp` 做目标平台编译：Java 里声明 `native` 的方法在没有 C++ 实现时照样能编过，而这是 Java 声明与共享 FFI 签名唯一必须一致的地方；完整原生构建需要 vcpkg、Rust Android 目标和固定的语音运行时，这一步都不需要。没有固定 NDK 的机器会跳过并明确说明。`verify-native.sh` 的导出清单同时覆盖 online query、云 URL、AI 请求描述符和两个在线候选写回入口。
 
 宿主 Java 以 API 35 的 `android.jar` 编译，而 manifest 声明 minSdk 28，因此比真实 APK 构建宽松；`Files.readString`/`writeString` 属于 API 34，本宿主不使用，`check-host.sh` 对这两个方法有定向检查，其余 API 级别问题仍由 Gradle lint 覆盖。`scripts/verify-local.sh` 另有 `compile: android target` 阶段，在固定 NDK、Rust `aarch64-linux-android` 目标与 vcpkg 依赖前缀齐备时检查 `msime-desktop` 的 Android 分支；宿主的 `cargo check --workspace` 只覆盖宿主目标。
 
@@ -92,7 +92,7 @@ Android Tauri 设置仅在 Android WebView 注入统计能力，桌面设置不�
 
 候选区独立显示当前组合文本、当前页和候选按钮；Engine 候选超过当前页容量时显示展开入口。用户打开面板后，宿主通过按需 host API 一次复制当前 generation 的完整 Engine 候选，在顶部显示 preedit、候选总数和收起入口，候选 chip 按实际测量宽度自动换行且不绘制序号；全局序号只保留在无障碍描述中。展开面板没有分页按钮，点按页外候选通过独立的全代次选择 API 交回 Engine。普通候选栏继续使用分页 `View` 和当前页选择边界，每次按键不会携带完整列表；两条选择路径都校验 session、generation 和全局索引，宿主不复制候选算法或组合状态。
 
-候选英文释义按固定 Apple 来源 `MSIME-Apple@d117009573a1a619cfb1702645f38c3b4c378a78` 实现，并通过共享 `candidate_english_gloss` 偏好选择性开启，默认关闭。开启后，Android 只在 IME 主线程复制当前 generation 的完整候选；无 session 的有界 worker 请求由 C++ Engine bridge 只读访问随包 `english.db`，Java 不实现输入算法也不读取 SQLite。完成结果返回主线程后必须同时匹配 session、generation 和生命周期 epoch，才会调用共享 `apply_translations`；停止输入、替换会话、偏好变化与服务销毁都会使旧结果失效。Engine 的五笔等候选提示优先占用次要文本位置，离线释义仅在没有 Engine 提示时显示；候选条与展开面板以较小的皮肤兼容文字和不同无障碍说明展示，候选身份、点击选择和上屏原文不变。查询失败静默保留普通候选，不记录候选文字；关闭偏好会立即隐藏已返回释义，缺失资源不会创建数据库或用户数据。
+候选英文释义按固定 Apple 来源 `MSIME-Apple@d117009573a1a619cfb1702645f38c3b4c378a78` 实现，并通过共享 `candidate_english_gloss` 偏好选择性开启，默认关闭。开启后，Android 只在 IME 主线程复制当前 generation 的完整候选；无 session 的有界 worker 请求由 Rust Engine（`crates/engine`）只读访问随包 `english.db`，Java 不实现输入算法也不读取 SQLite。完成结果返回主线程后必须同时匹配 session、generation 和生命周期 epoch，才会调用共享 `apply_translations`；停止输入、替换会话、偏好变化与服务销毁都会使旧结果失效。Engine 的五笔等候选提示优先占用次要文本位置，离线释义仅在没有 Engine 提示时显示；候选条与展开面板以较小的皮肤兼容文字和不同无障碍说明展示，候选身份、点击选择和上屏原文不变。查询失败静默保留普通候选，不记录候选文字；关闭偏好会立即隐藏已返回释义，缺失资源不会创建数据库或用户数据。
 
 非英文目标语言（fr、ja、es、ru、de、ko）的离线释义来自 `scripts/build_offline_glosses.py` 生成的 `zh-<lang>.db`。`build-apk.sh` 与 `build-client-apk.sh` 在 `target/offline-glosses`（或 `MSIME_OFFLINE_GLOSSES` 指定的目录）同时有数据库和 `offline-glosses-NOTICE.txt` 时把它们打进 `assets/offline-glosses/`，没有则照常构建。每次打开 MSIME 应用时 `Bootstrap.prepare` 都会检查（已有运行配置也一样）：安装包的 `lastUpdateTime` 变化时把它们解压到资源目录旁的 `files/bootstrap/offline-glosses/`，不含它们的新包会清掉旧文件；这一步不属于已校验的运行配置，失败只影响非英文释义。同一个 `candidate_english_gloss` 开关控制它们；已安装词典的目标语言按用户的目标顺序与英文释义、账户翻译逐候选合并，离线释义优先，账户翻译只补离线没有的行。日文方案与临时日文模式不请求其他语言释义，与账户路径一致。
 
@@ -201,7 +201,7 @@ JNI `loadPreferences` 只读取共享层，快照回到会话主线程后调用�
 
 ## 原生库交叉构建
 
-固定 NDK r28c (`28.2.13676358`)、Android API 28 与 vcpkg `ef7dbf94b9198bc58f45951adcf1f041fcbc5ea0`。vcpkg manifest 固定 Boost/fmt/spdlog/SQLite 来源；依赖和构建产物放在忽略的 target 下，不修改 Engine 子模块。需要先自行安装对应 SDK/NDK 和 Rust Android 目标；脚本不自动接受 SDK 许可。
+固定 NDK r28c (`28.2.13676358`)、Android API 28 与 vcpkg `ef7dbf94b9198bc58f45951adcf1f041fcbc5ea0`。vcpkg manifest 只固定 `shared/voice/LocalAsr.cpp` 用到的 nlohmann-json；Engine 是纯 Rust crate，随 `msime-host-api` 一起编译，SQLite 由 `rusqlite` 的 `bundled` 特性编进宿主库。依赖和构建产物放在忽略的 target 下。需要先自行安装对应 SDK/NDK 和 Rust Android 目标；脚本不自动接受 SDK 许可。
 
 ```sh
 git clone --depth 1 --branch 2025.06.13 https://github.com/microsoft/vcpkg.git target/tooling/vcpkg
@@ -211,7 +211,7 @@ ANDROID_SDK_ROOT=<SDK绝对路径> bash platforms/android/build-native.sh arm64-
 ANDROID_SDK_ROOT=<SDK绝对路径> bash platforms/android/build-native.sh x86_64
 ```
 
-可用 `MSIME_VCPKG_ROOT`、`MSIME_ANDROID_NDK` 指定绝对路径。脚本校验固定版本后安装锁定依赖，构建 release Rust/C++ 宿主和 JNI，SQLite 静态链接；产物为 `target/android/jniLibs/<abi>/{libmsime_host_api.so,libmsime_android.so,libc++_shared.so}`。验证脚本检查 ELF 架构、16 KB LOAD 对齐、动态依赖白名单与宿主/JNI 导出。NDK 和 vcpkg 声明复制到 `target/android/notices/<abi>`，正式分发还需汇总 Rust/Engine 与词库许可材料。
+可用 `MSIME_VCPKG_ROOT`、`MSIME_ANDROID_NDK` 指定绝对路径。脚本校验固定版本后安装锁定依赖，构建 release Rust 宿主和 C++ JNI，SQLite 静态链接进宿主库；产物为 `target/android/jniLibs/<abi>/{libmsime_host_api.so,libmsime_android.so,libc++_shared.so}`。验证脚本检查 ELF 架构、16 KB LOAD 对齐、动态依赖白名单与宿主/JNI 导出。NDK 和 vcpkg 声明复制到 `target/android/notices/<abi>`，正式分发还需汇总 Rust/Engine 与词库许可材料。
 
 提供 arm64-v8a 与 x86_64 两条构建路径；不提供 32 位 ABI，也没有 Windows 构建脚本。原生库本身不是 APK，需用下述脚本打包。
 

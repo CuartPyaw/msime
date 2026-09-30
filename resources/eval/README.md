@@ -35,7 +35,7 @@ cargo run --release -p msime-input-runtime --example rerank_latency -- \
 
 ### `quanpin-words-v1.tsv` — 25,119 条词级
 
-由 `build_eval_set` 从 `vendor/MSIME-Engine/dictionary/source/SampleIMESimplifiedQuanPin.txt` 固化而来，来源是 microsoft/Windows-classic-samples，MIT 授权，没有任何构建脚本读它，也不进入 `msime.db`。之所以固化进仓库：`vendor/MSIME-Engine` 不受 git 跟踪，`scripts/fetch_engine.py` 在磁盘标记与 `engine-lock.json` 不一致时会整树删除。
+由 `build_eval_set` 从 microsoft/Windows-classic-samples 的 `SampleIMESimplifiedQuanPin.txt` 固化而来，MIT 授权，本仓库不收录该文件，没有任何构建脚本读它，也不进入 `msime.db`，所以一次性固化进仓库；重新生成需要自备那份源文件。
 
 生成时丢弃 27,561 条单字、1,955 条截断条目，无解析失败。截断过滤用 Engine 自己的 `normalize_full_pinyin` 判断「key 能否恰好切成 gold 字数个音节」，而不是长度阈值——该格式在 12 字符处截断，但 `chulufengma`、`shumenshul` 这类更短的 key 同样被砍，长度阈值漏得掉。
 
@@ -47,7 +47,7 @@ cargo run --release -p msime-input-runtime --example rerank_latency -- \
 
 从 C4 中文部分（ODC-BY，保留标点的原文，不是 `corpus/fetch.py` 剥过标点的训练语料）收割：把句子用 Engine 的拼音表转成拼音再打回去，首选与原句不同的收下来，上文取同一篇的前一句。`harvest_eval_set` 做这件事，`scripts/review-harvested-cases.py` 用 Jev 过一道评审（选中原文且无强歧义否决），再按拼音+原文去重。500 条收割 → 345 条通过 → 310 条。
 
-**它不是准确率基准，用错了会得出荒谬结论。** 用例是按「产品当前打错」筛出来的，所以 `top1` 天生接近零（0.123），拿它和 v1 的 0.850 相减没有任何意义。它回答的是另一个问题：**已经打错的那些里，有多少是排序够得着的**——`top5` 是 0.561，即五成六的正确答案就在前五名，剩下四成四要解码器出力。`found` 恒为 1.000，因为收割时就要求金标准必须出现在候选列表里（`hanzi_to_pinyin` 对多音字不总是对，键错了原句永远解不出来，那种用例是废的）。
+**它不是准确率基准，用错了会得出荒谬结论。** 用例是按「产品当前打错」筛出来的，所以 `top1` 天生接近零（0.263），拿它和 v1 的 0.850 相减没有任何意义。它回答的是另一个问题：**已经打错的那些里，有多少是排序够得着的**——`top5` 是 0.763，即七成六的正确答案就在前五名，剩下两成四要解码器出力。收割时要求金标准必须出现在候选列表里（`hanzi_to_pinyin` 对多音字不总是对，键错了原句永远解不出来，那种用例是废的），所以对着 C++ Engine 加 Google 整句解码器收割时 `found` 是 1.000；Google 解码器删掉后，只有它给得出的答案没了，`found` 现在是 0.901（v2）和 0.899（neutral）。
 
 想要有代表性的准确率集，得不筛成败地随机抽样，那是 `harvest_eval_set` 换一个判断条件的事，不是换一份语料。
 
@@ -156,7 +156,7 @@ TYPESAFE_API_KEY=... scripts/review-harvested-cases.py target/harvest.jsonl targ
 
 ## 为什么报告要分 source
 
-候选带 `source`，对应 `vendor/MSIME-Engine/core/word_item.h` 的 `CandidateSource`。3 音节以上时 Engine 加入词图路径（`sentence_alternatives` 打开时是多条，关闭时一条），随后**在 Google-Pinyin 回退产出了整句的前提下**把那条回退搬到 index 0（`quanpin/quanpin_dictionary.cpp`，注释原文：「The lattice is a secondary source」）。
+候选带 `source`，对应 `msime_engine::CandidateSource`。3 音节以上时 Engine 加入词图路径（`sentence_alternatives` 打开时是多条）。Google 回退已删除，source 9 不再占据位置 1。runtime 的 `demote_runner_up_readings` 对 3 字及以上的读法保留三条词图整句，紧跟在第一条之后，其余移到列表末尾；2 字读法只保留一条。
 
 所以位置 1 到底是谁，随输入而变——词图的改动能不能反映到 top-1 也随之而变。`top1_source` 和 `gold_source` 每次运行都记录实际情况，而不是假定其中一种。
 

@@ -110,7 +110,11 @@ pub fn parse_tencent_tmt_response(response: &str, expected: usize) -> Option<Vec
         return None;
     }
     let mut translations = Vec::with_capacity(expected);
-    translations.extend(values.iter().map(|value| value.as_str().unwrap().to_owned()));
+    translations.extend(
+        values
+            .iter()
+            .map(|value| value.as_str().unwrap().to_owned()),
+    );
     Some(translations)
 }
 

@@ -13,7 +13,7 @@ output="$repo_root/target/voice-wire-interop"
 mkdir -p "$output"
 "${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -pthread \
   -fsanitize=address,undefined -fno-omit-frame-pointer \
-  -I"$repo_root/vendor/MSIME-Engine/contracts" \
+  -I"$repo_root/shared/contracts" \
   $(find "$repo_root/platforms/windows/src" -type d -exec printf -- '-I%s ' {} +) \
   "$repo_root/platforms/windows/tests/voice/voice_wire_peer.cpp" -o "$output/peer"
 MSIME_VOICE_WIRE_PEER="$output/peer" \

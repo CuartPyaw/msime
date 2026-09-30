@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 150
     env:
       VCPKG_DISABLE_METRICS: '1'
-      # Python on Windows otherwise decodes text as the ANSI code page, and the Engine overlays and the Engine's own generators read UTF-8 sources.
+      # Python on Windows otherwise decodes text as the ANSI code page, and the fetch and packaging scripts read UTF-8 sources.
       PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,11 +33,10 @@ jobs:
         shell: pwsh
         # rust-toolchain.toml pins the compiler; adding targets from the repository root installs that toolchain first.
         run: rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc
-      - name: Prepare the locked Engine archive, settled-rerank model and offline candidate glosses
+      - name: Fetch the settled-rerank model and offline candidate glosses
         # bash stops at the first failing command; a multi-line pwsh step only reports the last one.
         shell: bash
         run: |
-          python scripts/fetch_engine.py
           python scripts/fetch_settled_model.py
           python scripts/fetch_offline_glosses.py
       # Build-Client.ps1 takes installed dependency prefixes rather than a vcpkg toolchain, so the manifest is installed into one prefix per architecture: x64 for the Server, Watchdog and 64-bit TSF DLL, x86 for the 32-bit TSF DLL.

@@ -83,7 +83,6 @@ fn resource_verification_rejects_a_symlinked_state_root() {
         artifacts: vec![msime_client_core::resources::Artifact {
             name: "fixture.db".into(),
             url: "https://example.invalid/fixture.db".into(),
-            engine_path: String::new(),
             sha256: hex::encode(Sha256::digest(b"fixture")),
             size: 7,
         }],
@@ -536,6 +535,28 @@ fn shuangpin_key_hint_boundary_publishes_the_engine_face() {
     let value = "xiaohe";
     assert_eq!(
         read(unsafe { msime_client_shuangpin_key_hints(value.as_ptr(), 4096) })["ok"],
+        false
+    );
+}
+
+#[test]
+fn shuangpin_zero_initial_boundary_publishes_the_engine_table() {
+    let codes = |value: &str| {
+        // SAFETY: the slice outlives the call.
+        read(unsafe { msime_client_shuangpin_zero_initials(value.as_ptr(), value.len()) })
+    };
+
+    let xiaohe = codes("xiaohe");
+    assert_eq!(xiaohe["ok"], true);
+    assert_eq!(xiaohe["value"].as_object().unwrap().len(), 12);
+    assert_eq!(xiaohe["value"]["ang"], "ah");
+
+    let unknown = codes("xiaohe-v2");
+    assert_eq!(unknown["ok"], true);
+    assert_eq!(unknown["value"].as_object().unwrap().len(), 0);
+
+    assert_eq!(
+        read(unsafe { msime_client_shuangpin_zero_initials(std::ptr::null(), 6) })["ok"],
         false
     );
 }

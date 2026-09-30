@@ -162,7 +162,7 @@ find_path(UTF8CPP_INCLUDE_DIR NAMES utf8cpp/utf8.h REQUIRED)
 target_include_directories(msime-tsf PRIVATE
   . Candidate Compartment Composition DisplayAttribute Edit FanyLog Global
   Header IME IPC Key LanguageBar Register Tf Thread UI Utils
-  ../../../vendor/MSIME-Engine/contracts
+  ../../../shared/contracts
   ${UTF8CPP_INCLUDE_DIR}
   ../../../crates/host-api/include
 )

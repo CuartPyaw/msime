@@ -13,16 +13,8 @@ use std::path::{Path, PathBuf};
 #[serde(deny_unknown_fields)]
 pub struct Artifact {
     pub name: String,
-    /// Download location. Empty when the artifact is supplied by the Engine tree instead; see
-    /// `engine_path`.
-    #[serde(default)]
+    /// HTTPS download location.
     pub url: String,
-    /// Path inside the pinned Engine checkout, for artifacts that ship with the Engine rather than
-    /// with the dictionary release. The Engine is already pinned by commit and archive SHA-256 in
-    /// engine-lock.json, so republishing the same bytes in the dictionary release would create a
-    /// second source of truth for them.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub engine_path: String,
     pub sha256: String,
     pub size: u64,
 }
@@ -80,11 +72,7 @@ impl ResourceSet {
                 || !names.insert(artifact.name.to_ascii_lowercase())
                 || !hex(&artifact.sha256, 64)
                 || artifact.size > 2 * 1024 * 1024 * 1024
-                // Exactly one source, and a download must be HTTPS. An artifact with both, or
-                // with neither, is a manifest that cannot be resolved unambiguously.
-                || artifact.url.is_empty() == artifact.engine_path.is_empty()
-                || (!artifact.url.is_empty() && !artifact.url.starts_with("https://"))
-                || !portable_relative_path(&artifact.engine_path)
+                || !artifact.url.starts_with("https://")
             {
                 return Err(ResourceError::InvalidManifest);
             }
@@ -97,17 +85,6 @@ impl ResourceSet {
         let encoded = serde_json::to_vec(self).map_err(|_| ResourceError::InvalidManifest)?;
         Ok(hex::encode(Sha256::digest(encoded)))
     }
-}
-
-/// An Engine path must stay inside the checkout on every host, so it is checked as text rather
-/// than with `Path`, which would read `C:` or `a\b` as ordinary components on Linux: forward-slash
-/// segments of the same characters a name allows, none empty, `.` or `..`. Empty is left to the
-/// one-source rule.
-fn portable_relative_path(path: &str) -> bool {
-    path.is_empty()
-        || path.split('/').all(|segment| {
-            !matches!(segment, "" | "." | "..") && crate::is_ascii_identifier_with_dots(segment)
-        })
 }
 
 /// Remove stages an installer left when it was killed mid-download. Only called under the
@@ -288,9 +265,7 @@ fn copy_verified(
 /// `verify` reads every artifact to recompute its SHA-256. That is the right thing to do once,
 /// and the wrong thing to do on every launch: the desktop set is 169 MB, which costs about half a
 /// second of hashing before the first keystroke can be served, every time the Server process
-/// starts. The Engine is already handled this way - `scripts/fetch_engine.py` writes a marker
-/// naming what it prepared and skips the work when it matches - and this is the same idea for the
-/// dictionaries.
+/// starts.
 ///
 /// What the marker cannot do is replace the hashes. It records the identity of the *set* and, per
 /// file, the size and modification time the verified bytes had. A file whose size or mtime moved is
@@ -432,7 +407,6 @@ mod tests {
             artifacts: vec![Artifact {
                 name: "msime.db".into(),
                 url: "https://example.invalid/msime.db".into(),
-                engine_path: String::new(),
                 sha256: hex::encode(Sha256::digest(b"fixture")),
                 size: 7,
             }],
@@ -442,29 +416,15 @@ mod tests {
         Box::new(Cursor::new(bytes.to_vec()))
     }
     #[test]
-    fn an_artifact_names_exactly_one_source() {
-        let with = |url: &str, engine: &str| {
+    fn an_artifact_needs_an_https_url() {
+        let with = |url: &str| {
             let mut set = specification();
             set.artifacts[0].url = url.into();
-            set.artifacts[0].engine_path = engine.into();
             set.validate()
         };
-        assert!(with("https://example.invalid/a", "").is_ok());
-        assert!(with("", "googlepinyinime-rev/data/dict_pinyin.dat").is_ok());
-        // Neither source, or both, leaves the artifact unresolvable.
-        assert!(with("", "").is_err());
-        assert!(with("https://example.invalid/a", "data/a.dat").is_err());
-        // A download must still be HTTPS, and an Engine path must stay inside the checkout.
-        assert!(with("http://example.invalid/a", "").is_err());
-        assert!(with("", "../escape.dat").is_err());
-        assert!(with("", "/absolute.dat").is_err());
-        // Windows would re-root these on join, so they are refused on every host.
-        for path in [
-            "C:/x.dat", "C:x.dat", "a\\b.dat", "\\x.dat", "a//b", "./a", "a/",
-        ] {
-            assert!(with("", path).is_err(), "{path}");
-        }
-        assert!(with("", "data/a..b.dat").is_ok());
+        assert!(with("https://example.invalid/a").is_ok());
+        assert!(with("").is_err());
+        assert!(with("http://example.invalid/a").is_err());
     }
 
     #[test]

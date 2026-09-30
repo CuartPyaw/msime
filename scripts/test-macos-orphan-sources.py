@@ -23,10 +23,7 @@ MARKER = "not compiled by any target"
 SOURCE_SUFFIXES = (".mm", ".m", ".cpp", ".cc", ".c")
 
 # Orphan -> the file that carries this behaviour in the product. Keep the reason in the file itself.
-RETAINED = {
-    "src/dictionary/DictionaryRuntime.mm": "src/core/ClientDictionaryRuntime.mm",
-    "src/input/MetasequoiaInputController.mm": "src/input/InputController.mm",
-}
+RETAINED: dict[str, str] = {}
 
 
 def compiled_sources(cmake: Path) -> str:

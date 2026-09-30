@@ -372,6 +372,36 @@ pub unsafe extern "C" fn msime_client_shuangpin_key_hints(
     })
 }
 
+/// The double-pinyin codes of the whole zero-initial syllables for one profile, read out of the Engine's own profile tables, as a JSON object such as `{"a":"aa","ang":"ah",...}`.
+///
+/// A keymap panel shows these next to the key face, and like the key hints they depend only on the profile, so this takes no handle. An unknown name yields an empty object.
+/// # Safety
+/// `profile` points to `length` readable UTF-8 bytes. Null is rejected.
+/// The returned response must be released with `msime_client_string_free`.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_shuangpin_zero_initials(
+    profile: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if profile.is_null() || length > 64 {
+            return Err("invalid shuangpin profile buffer".into());
+        }
+        // SAFETY: guaranteed by the documented caller contract; size checked above.
+        let bytes = unsafe { std::slice::from_raw_parts(profile, length) };
+        let name = std::str::from_utf8(bytes).map_err(|_| "invalid shuangpin profile encoding")?;
+        let entries = msime_engine::host::shuangpin_zero_initials(name);
+        let mut codes = serde_json::Map::with_capacity(entries.len());
+        codes.extend(entries.into_iter().map(|(syllable, code)| {
+            (
+                syllable.to_string(),
+                serde_json::Value::String(code.to_string()),
+            )
+        }));
+        Ok(serde_json::Value::Object(codes))
+    })
+}
+
 /// Load the shared store on a worker thread; no session handle is accessed.
 /// # Safety
 /// `directory` points to `length` readable UTF-8 bytes. Null is rejected.

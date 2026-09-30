@@ -1,6 +1,6 @@
 # Client Windows build entry
 
-Run `Build-Client.ps1` in a Windows MSVC environment with CMake, Cargo, pnpm, the x86_64-pc-windows-msvc and i686-pc-windows-msvc Rust targets, and the locked Engine sources prepared with `python3 scripts/fetch_engine.py`. Supply separate absolute native dependency prefixes with the packages listed in `vcpkg.json`:
+Run `Build-Client.ps1` in a Windows MSVC environment with CMake, Cargo, pnpm, and the x86_64-pc-windows-msvc and i686-pc-windows-msvc Rust targets. Supply separate absolute native dependency prefixes with the packages listed in `vcpkg.json`:
 
 ```powershell
 .\platforms\windows\Build-Client.ps1 -X64Dependencies C:\deps\x64 -X86Dependencies C:\deps\x86

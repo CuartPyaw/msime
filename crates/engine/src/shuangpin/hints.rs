@@ -54,6 +54,13 @@ pub fn shuangpin_key_hints(profile_name: &str) -> Vec<ShuangpinKeyHint> {
         .collect()
 }
 
+/// Each whole zero-initial syllable of the profile with its two-key code, in table order. An unknown name yields nothing, the same as `shuangpin_key_hints`.
+pub fn shuangpin_zero_initials(profile_name: &str) -> Vec<(&'static str, &'static str)> {
+    ShuangpinProfileKind::from_name(profile_name)
+        .map(|kind| profile(kind).zero_initials.to_vec())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

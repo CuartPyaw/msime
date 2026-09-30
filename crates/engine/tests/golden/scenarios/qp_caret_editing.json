@@ -1,6 +1,7 @@
 {
  "name": "qp_caret_editing",
  "source": "tests/src/test_input_session.cpp:384-430,534-535; segment boundaries :1289-1324 plus caret commands",
+ "note": "The reference build had no caret_prefix overlay. Steps 4-5 (MoveHome, MoveRight on nihaoma: the caret has no whole syllable before it) keep the whole-input list, as recorded and as the fixed overlay of 904bd0976 does. Step 6 (DeleteForward, nhaoma with the caret after the lone initial n) was edited by hand to the caret-prefix answer of upstream bc46f27: the prefix n alone decodes, giving 虐.",
  "covers": [
   "caret",
   "segmentation"

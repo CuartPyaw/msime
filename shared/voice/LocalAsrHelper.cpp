@@ -7,7 +7,6 @@
 #include "LocalAsr.h"
 #include "VoiceProviders.h"
 
-#include <msime/voice/stt_service.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>

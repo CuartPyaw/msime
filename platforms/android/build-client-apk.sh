@@ -7,15 +7,14 @@ cd "$repo_root"
 resource_dir=${1:?usage: build-client-apk.sh <verified-resource-directory> [arm64-v8a|x86_64]}
 abi=${2:-arm64-v8a}
 case "$abi" in
-  arm64-v8a) tauri_target=aarch64; dependency_triplet=arm64-msime-android ;;
-  x86_64) tauri_target=x86_64; dependency_triplet=x64-msime-android ;;
+  arm64-v8a) tauri_target=aarch64 ;;
+  x86_64) tauri_target=x86_64 ;;
   *) echo "Unsupported ABI" >&2; exit 1 ;;
 esac
 android_sdk=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}
 [[ -n "$android_sdk" ]] || { echo "Android SDK required" >&2; exit 1; }
 [[ -f "$android_sdk/platforms/android-36/android.jar" && -x "$android_sdk/build-tools/35.0.0/apksigner" ]] || { echo "Android API 36 and build-tools 35 required" >&2; exit 1; }
 android_ndk=${MSIME_ANDROID_NDK:-$android_sdk/ndk/28.2.13676358}
-android_dependencies="$repo_root/target/android-deps/$abi/$dependency_triplet"
 tauri_android_dir=${TAURI_ANDROID_DIR:-}
 if [[ -z "$tauri_android_dir" ]]; then
   tauri_manifest=$(cargo metadata --locked --format-version 1 | node -e '
@@ -59,8 +58,7 @@ if compgen -G "$glosses_source/zh-*.db" >/dev/null && [ -f "$glosses_source/offl
 else
   echo "no offline glosses at $glosses_source; candidates are glossed offline in English only"
 fi
-ANDROID_HOME="$android_sdk" NDK_HOME="$android_ndk" MSIME_ANDROID_NDK="$android_ndk" \
-  MSIME_ANDROID_DEPS="$android_dependencies" TAURI_ANDROID_DIR="$tauri_android_dir" \
+ANDROID_HOME="$android_sdk" NDK_HOME="$android_ndk" TAURI_ANDROID_DIR="$tauri_android_dir" \
   pnpm --filter @msime/desktop tauri android build --apk --target "$tauri_target" --ci
 unsigned="$repo_root/apps/desktop/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk"
 [[ -f "$unsigned" ]] || { echo "Expected Tauri APK not produced" >&2; exit 1; }

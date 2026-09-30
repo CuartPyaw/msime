@@ -227,7 +227,8 @@ impl InputSession {
         }
         let end = self.prefix_end();
         let raw_with_cases = self.raw_with_cases();
-        if end >= raw_with_cases.len() {
+        // A caret inside the first unit has no whole unit before it: the whole-input list stays rather than an empty prefix query.
+        if end == 0 || end >= raw_with_cases.len() {
             self.prefix_candidates.clear();
             self.prefix_query_input.clear();
             return;
@@ -290,7 +291,7 @@ pub(super) fn quanpin_raw_boundaries(raw: &str, display: &str) -> Vec<usize> {
 mod tests {
     use super::quanpin_raw_boundaries;
 
-    /// Why caret 1 decodes nothing on `nihaoma` but 虐 on `nhaoma` (golden qp_caret_editing, MoveRight vs DeleteForward): the prefix floors to a segmentation boundary, and a lone initial is its own unit, so only the second spelling has a boundary at 1.
+    /// Why caret 1 keeps the whole-input list on `nihaoma` but decodes 虐 on `nhaoma` (golden qp_caret_editing, MoveRight vs DeleteForward): the prefix floors to a segmentation boundary, and a lone initial is its own unit, so only the second spelling has a boundary at 1.
     #[test]
     fn a_lone_initial_is_a_complete_unit_but_a_split_syllable_is_not() {
         assert_eq!(quanpin_raw_boundaries("nihaoma", "ni'hao'ma"), [0, 2, 5, 7]);

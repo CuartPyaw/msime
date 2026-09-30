@@ -29,7 +29,7 @@ try {
     foreach ($dll in $voiceRuntimeLibraries) {
         Write-PEFixture (Join-Path $fixture "target/windows-full/x64/bin/$dll") x64 dll
     }
-    foreach ($relative in @('Cargo.toml', 'vendor/MSIME-Engine/CMakeLists.txt',
+    foreach ($relative in @('Cargo.toml', 'crates/engine/Cargo.toml',
         'platforms/windows/CMakeLists.txt', 'platforms/windows/tsf/CMakeLists.txt',
         'platforms/windows/settings/MSIME.Settings.vcxproj', 'apps/desktop/package.json',
         'scripts/fetch_voice_runtime.py')) {

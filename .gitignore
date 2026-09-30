@@ -52,11 +52,7 @@ local.properties
 .tmp-*
 *.report.html
 
-# Prepared by scripts/fetch_engine.py from engine-lock.json rather than tracked or submoduled.
-# The whole directory is build output: fetch_engine.py creates it, and a worktree gets a link to
-# the main checkout's copy rather than its own. One of those links reached a commit once, and an
-# absolute path to somebody's machine is a broken link everywhere else - it made fetch_engine.py
-# fail outright, because the path exists and is not a directory.
+# Nothing reads vendor/ any more: the input engine is crates/engine. Checkouts made before that still hold the fetched C++ Engine tree (or a link to one) there, so it stays ignored rather than showing up as thousands of untracked files a broad `git add` would commit. Delete the directory by hand.
 /vendor/
 
 # Downloaded neural sentence weights are reproducible build output; their lock and attribution

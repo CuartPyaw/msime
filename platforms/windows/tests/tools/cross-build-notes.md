@@ -2,8 +2,7 @@
 
 ```sh
 bash platforms/windows/build-cross.sh x64
-MSIME_WINDOWS_DEPS="$PWD/target/windows-native-deps/x64/x64-mingw-static" \
-  CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
   cargo check -p msime-desktop --target x86_64-pc-windows-gnu --locked
 ```
 
@@ -21,7 +20,7 @@ c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
   -Iplatforms/windows/common \
   -Iplatforms/windows/src/candidate -Iplatforms/windows/src/input \
   -Iplatforms/windows/src/ipc -Iplatforms/windows/src/system \
-  -Icrates/host-api/include -Ivendor/MSIME-Engine/contracts \
+  -Icrates/host-api/include -Ishared/contracts \
   -I/opt/homebrew/include \
   platforms/windows/tests/ui/candidate_initialization.cpp \
   platforms/windows/src/input/ChineseTextConversion.cpp \

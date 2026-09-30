@@ -34,7 +34,7 @@ msime-linux-setup --update --download   # 升级之后只取回过期的那几�
 
 它按 `desktop-dictionary.lock.json` 逐个核对词库的名称、大小和 SHA-256，再调用 `msime-linux-prepare` 在 `$XDG_CONFIG_HOME/msime-client`（默认 `~/.config/msime-client`）建立状态并发布 `runtime-options.json`，最后把输入法加入正在运行的 Fcitx5 或 IBus 的输入法列表（见下文）。词库目录按「随包安装的 `${CMAKE_INSTALL_DATADIR}/msime-client/resources` → `$XDG_DATA_HOME/msime-client/resources`」的顺序查找，`--resources` 显式指定优先；状态目录必须尚不存在，已存在时报错而不是覆盖，只有下文的 `--update` 例外。所有需要取回的词库先在同一文件系统的临时目录里下载并逐个校验，全部通过后才改名放进词库目录；校验不过或下载中断就中止，词库目录一个文件都不动，不会留下半份或新旧混杂的词库。锁之外的文件同样报出来（Engine 的 `helpcodes` 子目录除外），因为宿主会因此拒绝整份词库，而下载补不掉它们，需要用户自己移走。
 
-`--download` 之外不发起任何网络请求。词库锁里 `dict_pinyin.dat` 没有下载地址——它来自引擎源码树——所以该项按同样随装的 `engine-lock.json` 找到对应的固定依赖归档，校验归档摘要后只取出这一个文件，再按词库锁校验它本身。两份锁都无条件随装：此前词库锁只在配置阶段传了 `MSIME_ENGINE_RESOURCES` 时才安装，也就是最需要它的那种安装里反而没有，只拿到安装包的用户没有任何办法把词库凑齐。
+`--download` 之外不发起任何网络请求。词库锁里每一项都带 HTTPS 下载地址；需要取回的某一项没有地址时，在发出第一个请求之前就中止并提示用 `--resources` 指向已备齐的目录，不会下出半份词库。词库锁无条件随装：此前它只在配置阶段传了 `MSIME_ENGINE_RESOURCES` 时才安装，也就是最需要它的那种安装里反而没有，只拿到安装包的用户没有任何办法把词库凑齐。
 
 不想开终端也可以直接打开应用列表里的「水杉输入法」：还没有 `runtime-options.json` 时，`msime-linux-settings` 不再报错退出，而是打开首次配置页。页面运行的就是同一个随装的 `msime-linux-setup`（优先取桌面二进制旁边的那份，其次 `PATH`），状态目录固定为设置窗口读取的那个 `runtime-options.json` 所在目录，输出逐行显示在页面上；下载只在勾选「词库不完整时从固定地址下载」时才加 `--download`。配置完成后直接进入设置，窗口每次读取都会重读这份文件，所以不需要重启。目录已存在但缺少 `runtime-options.json` 时，只有其中仅有安装流程创建的匿名账号文件这一种情况仍可继续；含其他文件时页面只说明原因、不提供按钮，与脚本拒绝覆盖的规则一致；已安装系统级配置（`MSIME_SETTINGS_SYSTEM_CONFIG`）时仍以它为准，不出现首次配置页。
 
@@ -64,7 +64,7 @@ msime-linux-setup --update --download   # 升级之后只取回过期的那几�
 
 在 Linux 上手工打包时，同样显式传入 `-DMSIME_ENABLE_PACKAGING=ON -DCMAKE_INSTALL_PREFIX=/usr`，并提供 Release 版 Host API 库、桌面二进制和已固定来源的资源；`-DMSIME_PACKAGE_VERSION=<版本>` 指定包版本，不传时取 `platforms/linux/version.txt`（发布工作流读的同一个文件）；IBus 宿主在启动与崩溃上报里报告的也是这个版本。打包构建必定包含 Fcitx5 原生插件（不受开发机上是否装有 Fcitx5 开发包影响）；若只需 IBus 开发构建，可显式传入 `-DMSIME_ENABLE_FCITX5=OFF`。打包构建不得设置 `MSIME_RUNTIME_OPTIONS_FILE`，也不得启用安装开发测试程序的 `MSIME_LINUX_VOICE`。打包构建还必须传入 `-DMSIME_RUST_NOTICES=<文件>`（`python3 platforms/linux/collect-notices.py cargo <文件> msime-host-api msime-desktop:tauri/custom-protocol`，不打桌面二进制时去掉后一项），打包桌面二进制时再传 `-DMSIME_FRONTEND_NOTICES=<文件>`（`python3 platforms/linux/collect-notices.py npm <文件> apps/desktop`，需先装好 `node_modules`），缺哪一个配置就失败。构建完成后运行 `cpack --config <build-dir>/CPackConfig.cmake -G "TGZ;DEB"`；DEB 需要 `dpkg-shlibdeps`（`dpkg-dev`）与 `file`。Debian 包在手写的 IBus、Python、Fcitx5 依赖之外，由 `dpkg-shlibdeps` 从 ELF 文件生成共享库依赖。归档不是可任意搬移的便携包。
 
-许可证与第三方声明装在 `${CMAKE_INSTALL_DATADIR}/doc/msime-client/`，普通 `cmake --install` 与安装包相同：`copyright`（本项目 GPL-3.0）、`THIRD_PARTY_NOTICES.txt`（本平台随附组件总览，源文件 `data/THIRD_PARTY_NOTICES.txt`），Engine 的许可证与 `NOTICE.md`、词库与辅助码声明、`makecikudb` 脚本许可、Engine 语音模块与 miniaudio、googlepinyinime、utfcpp、zinnia 与手写模型、OpenCC 词典的许可证，编进原生宿主与 Fcitx5 插件的 nlohmann/json（`nlohmann_json-MIT.txt`，固定副本在 `data/licenses/`）与 Wayland 协议代码（配置时从实际编译的 `wlr-layer-shell-unstable-v1.xml`、`xdg-shell.xml` 取出 `<copyright>` 段，只在找到 `xdg-shell.xml`、协议代码确实编入时安装），以及打包时收集的 `rust-crates-NOTICES.txt` 与 `frontend-npm-NOTICES.txt`。Engine 组件的声明与 macOS 包内 `Resources/Licenses` 同名；两边的集合并不相同：本项目许可证在这里按 Debian 的要求叫 `copyright`（macOS 是 `GPL-3.0.txt`），`makecikudb`、OpenCC、nlohmann/json、Wayland 协议和 Rust/npm 汇总只有 Linux 有，whisper.cpp 只有 macOS 有——Linux 的 Host API 库只编译 Engine 的录音采集文件，不链接 whisper。打包配置时任何一份声明的来源缺失（通常是没有准备 `vendor/MSIME-Engine`，或没有传入 Rust/npm 汇总）都会直接失败；普通开发配置不要求 Rust/npm 汇总，其余缺失只给出警告并安装剩下的部分。
+许可证与第三方声明装在 `${CMAKE_INSTALL_DATADIR}/doc/msime-client/`，普通 `cmake --install` 与安装包相同：`copyright`（本项目 GPL-3.0）、`THIRD_PARTY_NOTICES.txt`（本平台随附组件总览，源文件 `data/THIRD_PARTY_NOTICES.txt`），词库来源声明 `msime-engine-dictionary-NOTICE.md`（从 msime-engine 原样带过来，固定副本在 `data/licenses/`）、辅助码声明 `msime-engine-helpcode-NOTICE.md`（`resources/helpcodes/ENGINE-NOTICE.md`）、离线手写识别所移植的 zinnia 的许可证 `Zinnia-LICENSE.txt`（`data/licenses/`）、装了手写模型时随模型的 `HandwritingModel-LICENSE.txt`、OpenCC 词典的许可证，编进原生宿主与 Fcitx5 插件的 nlohmann/json（`nlohmann_json-MIT.txt`，固定副本在 `data/licenses/`）与 Wayland 协议代码（配置时从实际编译的 `wlr-layer-shell-unstable-v1.xml`、`xdg-shell.xml` 取出 `<copyright>` 段，只在找到 `xdg-shell.xml`、协议代码确实编入时安装），以及打包时收集的 `rust-crates-NOTICES.txt` 与 `frontend-npm-NOTICES.txt`。输入引擎是本项目自己的 Rust 代码（`crates/engine`），由同为 GPL-3.0 的 msime-engine 移植而来，由 `copyright` 覆盖，不再单独附 Engine 的许可证；录音采集走 cpal，其许可证在 Rust 汇总里。本项目许可证在这里按 Debian 的要求叫 `copyright`（macOS 是 `GPL-3.0.txt`）。打包配置时任何一份声明的来源缺失（通常是没有传入 Rust/npm 汇总，或没有手写模型）都会直接失败；普通开发配置不要求 Rust/npm 汇总，其余缺失只给出警告并安装剩下的部分。
 
 安装包不包含用户状态，不自动启用 provider 服务或切换输入法。首次使用由随装的 `msime-linux-setup` 备齐词库并准备运行配置（见上面的「安装后首次使用」）；语音录音、剪贴板、Wayland/X11 输入工具及可选模型按对应功能章节配置。包的内容取决于配置阶段传入了什么：没有传入桌面二进制或资源的构建只打包实际配置的部分，完整包需要同时提供二者。
 
@@ -152,11 +152,11 @@ Linux 独立手写面板使用同一类用户管理 Unix socket，不把 GTK、W
 
 识别服务返回 `{"candidates":["你","好"]}`，最多 12 个候选，每项最多 4096 字节；请求和响应各自限时 500ms。模型、凭据和平台识别器由该服务负责，面板可以用 `msime-linux-handwriting /absolute/socket` 复用 Host API 契约。服务不可用或响应过期时面板保留笔画，不向 IBus 会话伪造提交；候选点击应由面板在当前手写请求代次内完成。
 
-若部署了 Engine 的可选离线手写组件，面板也可执行 `msime-linux-handwriting --local /absolute/handwriting-zh_CN.model`。安装后的工具省略模型参数时会读取绝对路径环境变量 `MSIME_HANDWRITING_MODEL`，否则按自身安装前缀查找 `share/msime-client/handwriting/handwriting-zh_CN.model`。该入口把归一化笔画交给 Engine 内置的 Zinnia 识别器，模型路径必须是受信任的绝对路径；没有模型或识别失败时返回错误，不回退为伪造候选。
+装有离线手写模型时，面板也可执行 `msime-linux-handwriting --local /absolute/handwriting-zh_CN.model`。安装后的工具省略模型参数时会读取绝对路径环境变量 `MSIME_HANDWRITING_MODEL`，否则按自身安装前缀查找 `share/msime-client/handwriting/handwriting-zh_CN.model`。该入口把归一化笔画交给输入引擎里移植自 zinnia 的识别器，模型路径必须是受信任的绝对路径；没有模型或识别失败时返回错误，不回退为伪造候选。
 
 独立 Emoji 面板也可通过该 socket 查询目录。请求使用 `kind:"emoji"`，查询包含 `search`、`category` 和 `limit`；服务返回 `{"items":[{"text":"😀","annotation":"grinning face"}]}`。搜索最多 256 字节、分类最多 128 字节、结果最多 96 项，每项文本最多 64 字节、注释最多 256 字节，调用限时 500ms。面板使用 `msime-linux-emoji /absolute/socket` 获取结果；没有 provider 时可用 `msime-linux-emoji --local /absolute/resource-generation` 直接查询已验证的 `others.db`。Linux 桌面打开面板时保存当前输入目标，点击项目优先用 `xdotool type` 或 `wtype` 回填当前编辑器，目标已失效时回退到剪贴板；IBus Engine 仍只负责组合中的本地 Emoji 模式，不读取系统剪贴板。
 
-桌面 Tauri Emoji 面板在 Linux 上直接读取 HostOptions `resources` 下 Engine 提供的 `others.db`，通过 Engine bridge 分页读取完整 Emoji、颜文字和符号目录，并按数据库分类聚合后交给共享 UI；读取失败时 UI 保留内置目录。面板只接收资源目录中的目录数据，不读取用户输入、凭据或私人资料。
+桌面 Tauri Emoji 面板在 Linux 上直接读取 HostOptions `resources` 下 Engine 提供的 `others.db`，通过输入引擎分页读取完整 Emoji、颜文字和符号目录，并按数据库分类聚合后交给共享 UI；读取失败时 UI 保留内置目录。面板只接收资源目录中的目录数据，不读取用户输入、凭据或私人资料。
 
 桌面 Tauri 面板的系统剪贴板按 Linux 会话能力选择后端：优先使用 Wayland 的 `wl-paste` / `wl-copy`，不可用时回退到 X11 的 `xclip`；剪贴板历史仍只在用户开启设置后写入本地受限存储。桌面宿主运行期间以低频轮询捕获新的文本剪贴板内容，设置关闭后立即停止记录并清除本轮监视状态，读取失败不会伪造同步结果。
 
@@ -256,7 +256,7 @@ IBus 面板注册 `InputMode` 开关：选中时按当前输入方案转换，�
 
 共享 `word_character` 支持方括号或减号/等号选择高亮候选的首/末汉字，按 Windows 基线默认启用方括号；与同组翻页配置互斥，由共享配置校验拒绝冲突。旧偏好或 Linux 宿主选项缺少该对象时使用相同默认值。启动及实时设置发布均更新绑定，活动组合保留；宿主将当前候选代次和全局索引传给 Engine，不自行切分汉字。无汉字候选走共享组合完成与标点路径，关闭功能后恢复通常的标点输入；Shift 符号不触发以词定字。
 
-需要 Linux、Rust 1.97.1、CMake 3.25+、C++17 编译器、IBus 1.5.20+ 开发包、nlohmann-json 3.11+、Boost/fmt/spdlog/SQLite 开发包。通用 Wayland 的全局面板注入可选安装 `ydotool` 并运行 `ydotoold`；没有它时仍尝试 `wtype`。原生构建：
+需要 Linux、Rust 1.97.1、CMake 3.25+、C++17 编译器、IBus 1.5.20+ 开发包、nlohmann-json 3.11+、ALSA 开发包（`libasound2-dev`，Host API 的录音采集经 cpal 链接它，由 pkg-config 查找）。SQLite 由 rusqlite 的 bundled 特性编进 Host API，不需要系统开发包。通用 Wayland 的全局面板注入可选安装 `ydotool` 并运行 `ydotoold`；没有它时仍尝试 `wtype`。原生构建：
 
 ```sh
 cargo build -p msime-host-api --locked
@@ -302,7 +302,7 @@ Emoji 本地 CLI 的 `msime-linux-emoji --local` 会按显式资源目录、其�
 
 `msime-linux-handwriting --local` 也会按显式模型路径、`MSIME_HANDWRITING_MODEL`、`$XDG_DATA_HOME`、`$XDG_DATA_DIRS`、安装前缀和系统目录自动查找模型；未找到模型时不访问网络。
 
-Linux 安装还会在 `${CMAKE_INSTALL_DATADIR}/msime-client/handwriting` 放置 Engine 随附的离线中文模型（可用 `-DMSIME_HANDWRITING_MODEL=/absolute/model` 覆盖）。模型及其许可证随 Engine 发布，面板应只引用该受信任安装路径。
+离线中文手写模型（zinnia 格式，26.8 MB，LGPL-2.1）不进版本库：`resources/handwriting-model.lock.json` 按 msime-engine 固定提交的 HTTPS 地址、字节数和 SHA-256 锁定模型与许可证，`python3 scripts/fetch_handwriting_model.py` 把两者下载到 `target/handwriting-model`（`--out` 可改），不符即丢弃、已符合则跳过。CMake 在该目录存在时自动使用（也可 `-DMSIME_HANDWRITING_MODEL_DIR=/absolute/dir` 指定），逐个按锁校验后装到 `${CMAKE_INSTALL_DATADIR}/msime-client/handwriting`，锁本身装到 `${CMAKE_INSTALL_DATADIR}/msime-client` 作来源记录；打包时缺少模型直接失败，`package-container.sh` 会在容器内取回。面板应只引用该受信任安装路径。
 
 若要把 Tauri 设置窗口一并安装，可先用 `pnpm --filter @msime/desktop tauri build --no-bundle` 生成 Linux 二进制，再在 CMake 配置阶段传入 `-DMSIME_DESKTOP_BINARY=/absolute/path/to/msime-desktop`。安装会增加 `msime-linux-desktop`、`msime-linux-settings` 和桌面菜单项；设置启动器按 `MSIME_CLIENT_HOST_OPTIONS`、`MSIME_IBUS_OPTIONS`、用户配置路径、安装时配置的系统配置路径的顺序选择绝对 runtime-options，并把它传给 Tauri 宿主，不把开发机路径写入桌面文件。设置页的“语音输入”分类可打开独立语音面板，面板调用同一 provider 并把识别结果提交到打开前捕获的编辑器。Linux IBus 与 Fcitx5 菜单顶层的“词库…”“设置…”“关于水杉输入法”以及“桌面工具”中的“帮助”“反馈”分别路由到共享 Tauri 的对应设置页（`msime-linux-settings --panel dictionary|settings|about|help|feedback` 同样如此）；“快捷键”分类提供“重启输入法服务”按钮：先用 `fcitx5-remote --check` 探测当前会话，Fcitx5 正在运行时经 `gdbus` 调用它的 `ReloadAddonConfig`（参数 `msime`）重置水杉插件，否则调用当前用户的 `ibus restart`。探测不会通过 D-Bus 启动一个原本未运行的 Fcitx5，也不会为了刷新 MSIME 杀掉承载其他输入法的整个 Fcitx5 进程。普通配置保存仍通过 runtime-options 文件热重载，不需要为了设置变更重启服务。
 
@@ -314,11 +314,11 @@ Linux 安装还会在 `${CMAKE_INSTALL_DATADIR}/msime-client/handwriting` 放置
 
 `bash build-container.sh` 在容器里编译整个 Linux 原生宿主（IBus engine、Fcitx5 插件、全部 provider 入口和单测）并运行 `ctest`，不需要词库、不启动任何 daemon，也不需要本机是 Linux；它由 `scripts/verify-local.sh` 作为编译门禁自动调用，Linux 主机上则直接用系统 ibus 开发包跑同一套配置。镜像定义在 `tests/tools/Dockerfile.build-gate`，与隔离验收镜像分开，以免给后者加上会改变其构建内容的 X11/XFixes/Fcitx5 开发包。
 
-`scripts/verify-local.sh` 的「compile: linux desktop shell」阶段在非 Linux 主机上用 `tests/tools/Dockerfile.desktop-check` 构建的镜像跑 `cargo check -p msime-desktop --locked --all-targets`：与编译门禁同一个固定摘要的 `rust:1.97.1-bookworm`，预装 Tauri 外壳需要的 webkit2gtk、gtk3、libsoup、javascriptcoregtk 和 Engine bridge 的构建依赖，apt 只在 Dockerfile 变化后的第一次运行时执行，`--quick` 和 pre-push 钩子不再每次重装。镜像构建日志留在 `target/linux-desktop-check/image.log`，apt 失败时阶段打印其末尾并 FAIL。
+`scripts/verify-local.sh` 的「compile: linux desktop shell」阶段在非 Linux 主机上用 `tests/tools/Dockerfile.desktop-check` 构建的镜像跑 `cargo check -p msime-desktop --locked --all-targets`：与编译门禁同一个固定摘要的 `rust:1.97.1-bookworm`，预装 Tauri 外壳需要的 webkit2gtk、gtk3、libsoup、javascriptcoregtk 和 cpal 需要的 ALSA 开发包，apt 只在 Dockerfile 变化后的第一次运行时执行，`--quick` 和 pre-push 钩子不再每次重装。镜像构建日志留在 `target/linux-desktop-check/image.log`，apt 失败时阶段打印其末尾并 FAIL。
 
 这两个镜像都按 checkout 路径打 tag（`msime-linux-build-gate:<哈希>`、`msime-linux-desktop-check:<哈希>`，哈希取仓库绝对路径的 SHA-1 前 12 位），每个跑过门禁的 worktree 各留一份，单个占 2.4–3.3 GB，worktree 删除后不会自动回收。清理只删这两类 tag，不要 `docker system prune`（会连带别的项目和并发会话在用的镜像）：先 `docker images 'msime-linux-*'` 看有哪些，再 `docker image rm <tag>` 删掉已不存在的 worktree 对应的那些，最后 `docker image prune` 回收失去 tag 的悬空层。当前 checkout 的哈希可用 `printf %s "$PWD" | shasum | cut -c1-12` 在仓库根目录算出；删错了也无妨，下次运行会重建。
 
-隔离验收脚本会像 Windows 门禁找 vcpkg 那样，按「本仓 `vendor` → 主 worktree 的 `vendor`」的顺序找已有的 `vendor/MSIME-Engine` 并只读挂进容器，因此在 worktree 里也能跑（`/source` 是只读挂载，Engine 归档没法在容器里就地取回）。这个查找统一由 `python3 scripts/fetch_engine.py --borrowable` 完成，它打印第一棵可借用的树的绝对路径，都不匹配时什么也不打印。只借用标记与本 checkout `engine-lock.json` 完全一致的树（判定规则即 `--matches <vendor>`）：标记按内容记录了 overlay 脚本，同一 Engine commit 但 overlay 较旧的树会被拒绝，而不是编出缺符号的 `bridge.cpp`。编译门禁、打包和 `verify-local.sh` 用同一条规则；都不匹配时，编译门禁与打包让容器自己取回，`check-container.sh` 则先在宿主上为本仓准备一份。`check-container.sh` 还会在本仓留一个空的 `vendor/` 作挂载点（只读的 `/source` 里 Docker 建不出它），并设 `MSIME_SKIP_ENGINE_FETCH=1`，构建直接使用挂进来的 Engine 树。它的测试镜像与编译门禁一样按 checkout 路径打 tag，并发的 worktree 不会互相覆盖镜像。随包在线/语音/剪贴板 provider、凭据、豆包鉴权、翻译缓存、录音设备这一整片 Python 测试都在容器内执行。
+隔离验收脚本只读挂载源码，输入引擎是仓库里的 Rust crate，不再需要预先准备或借用任何 Engine 树，因此在 worktree 里也能直接跑。它的测试镜像与编译门禁一样按 checkout 路径打 tag，并发的 worktree 不会互相覆盖镜像。随包在线/语音/剪贴板 provider、凭据、豆包鉴权、翻译缓存、录音设备这一整片 Python 测试都在容器内执行。
 
 `bash tests/tools/check-container.sh /absolute/verified-resources` 创建专用 Linux 容器，源码与词库只读挂载，构建缓存仅写入本仓 target/linux。基础 Rust 镜像固定摘要，apt 开发依赖来自 Debian bookworm 仓库；不声称所有系统包字节级可复现。容器内创建独立 D-Bus 和 IBus daemon，不连接宿主桌面，不修改现有输入源，结束后移除容器并保留构建缓存。
 
@@ -343,8 +343,6 @@ Linux 桌面设置页通过宿主能力显示共享的模糊音配置。总开�
 本地词典管理可从 IBus 与 Fcitx5 菜单顶层的“词库…”、桌面启动器的“本地词典”动作或执行 `msime-linux-settings --panel dictionary` 打开，与 Windows 桌面工具使用同一设置宿主和词典状态。
 
 全角/半角输出与 Windows 模式面板对应：`CharacterWidth` 由 `input-runtime` 和 `msime-host-api` 按会话携带，IBus 属性菜单和 Fcitx5 状态栏都提供该开关，可打印 ASCII 在上屏时完成全角转换。配置了共享偏好目录时，模式按 `character_width` 持久化；没有该目录的直接预览配置保持会话级。Fcitx5 与 IBus 都在会话建立时按 `character_width` 设置全角，共享偏好热重载、属性/状态菜单和快捷键切换都会立即同步到正在运行的会话；焦点切换不会丢失全角状态。Fcitx5 新会话以偏好存储中的 `character_width` 为准，另一个窗口在状态栏切换的宽度也会带过来；状态栏切换后尚未写入存储的宽度（保存失败待重试，或隐私输入窗口中本不保存的切换）不会被热重载改回，下一个会话再以存储为准。IBus 冒烟夹具和 Fcitx5 原生上下文测试覆盖全角与半角 ASCII 上屏。
-
-容器验收依赖固定 Engine 词库源码 `googlepinyinime-rev/src/share/dictbuilder.cpp`，它随 `engine-lock.json` 指向的依赖归档取回；缺少它时容器内无法完成完整 daemon 编译。
 
 IBus 注册入口通过 launcher 启动，配置优先级为 `MSIME_IBUS_OPTIONS`、用户的 `$XDG_CONFIG_HOME/msime-client/runtime-options.json`（默认 `~/.config`）、安装时配置的系统 runtime-options。IBus 与桌面启动器仅在用户配置不存在时回退；显式覆盖、已存在但不可读的用户配置、悬空符号链接或相对用户配置目录会报错，不会悄悄改用系统配置。系统配置的写入权限沿用安装权限，启动器不会自动复制或改写配置。直接运行 launcher 时可用第一个参数指定系统配置回退路径。
 
@@ -617,7 +615,7 @@ Linux 安装包包含 Windows 固定提交中的开始、结束录音提示音�
 
 本地离线手写识别和外部 socket 识别共同使用 Engine 的候选策略：去重、中文候选优先、同组保持原顺序，最多十二项。本地识别也从八项扩展为十二项。中文范围对齐 Windows 手写面板固定基线的 CJK、扩展 A 与兼容汉字范围；排序不由平台界面维护。
 
-自定义 `MSIME_HANDWRITING_MODEL` 构建输入可以使用任意源文件名，安装时统一命名为 `handwriting-zh_CN.model`，保证桌面面板和 `msime-linux-handwriting --local` 自动找到同一模型。桌面配置或环境变量的模型路径为空时视为未配置并继续查找安装资源；非空但无效的显式路径仍会报错，不切换到其他模型。
+构建只安装按 `resources/handwriting-model.lock.json` 校验过的模型，文件名固定为 `handwriting-zh_CN.model`，保证桌面面板和 `msime-linux-handwriting --local` 自动找到同一模型；要试别的模型，在运行时用显式模型参数或 `MSIME_HANDWRITING_MODEL` 指过去。桌面配置或环境变量的模型路径为空时视为未配置并继续查找安装资源；非空但无效的显式路径仍会报错，不切换到其他模型。
 
 ### Wayland 剪贴板变更通知
 

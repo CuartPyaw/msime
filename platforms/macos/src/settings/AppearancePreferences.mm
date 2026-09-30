@@ -2734,7 +2734,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         // configuring the scheme that is actually in use.
         @[ @(scheme == 1), @[_shuangpinSchemeButton] ],
         @[ @(scheme == 2), @[_wubiSchemeButton] ],
-        // Fuzzy rules and the two quanpin corrections reach the candidates of every scheme but Japanese. ImeSession::refresh_candidates (vendor/MSIME-Engine/core/ime_session.cpp) puts all three into the query request whatever the scheme is, and only the quanpin and shuangpin engines read them back out (quanpin/engine.cpp, shuangpin/engine.cpp); the Japanese provider never looks. 五笔 is not in this rule even though its own table ignores them too, because the same method builds a second, quanpin request carrying the same three values when 编码打不出时用拼音候选 is on and the table cannot answer the code — so under 五笔 they decide what that fallback offers.
+        // Fuzzy rules and the two quanpin corrections reach the candidates of every scheme but Japanese. refresh_candidates (crates/engine/src/ime/mod.rs) puts all three into the query request whatever the scheme is, and only the quanpin and shuangpin engines read them back out (crates/engine/src/quanpin/engine.rs, crates/engine/src/shuangpin/engine.rs); the Japanese provider never looks. 五笔 is not in this rule even though its own table ignores them too, because the same method builds a second, quanpin request carrying the same three values when 编码打不出时用拼音候选 is on and the table cannot answer the code — so under 五笔 they decide what that fallback offers.
         @[ @(scheme != 3), @[_fuzzyPinyinToggle, _transpositionToggle, _neighborToggle] ],
         @[ @(self.fuzzyPinyinEnabled && scheme != 3), _fuzzyPinyinRuleButtons.allValues ],
         // Both places the space conversion is read — InputController.mm, where a space after a
@@ -2742,9 +2742,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         @[ @(self.smartPunctuation), @[_smartPunctuationSpaceToggle] ],
         @[ @(self.mixedEnglishInput), @[_mixedEnglishPrefixButton] ],
         @[ @(learning), @[_frequencyModeButton, _frequencyTriggerButton] ],
-        // The step is read only by the linear mode — EngineFrequencyOptions in
-        // src/core/FrequencyAdjustmentPreference.h takes it whatever the mode is and the engine
-        // then ignores it — so it is live only where it does something.
+        // The step is read only by the linear mode — host-api passes frequency_linear_step to the engine whatever the mode is (crates/host-api/src/lib.rs) and the engine then ignores it — so it is live only where it does something.
         @[ @(learning && [self.frequencyAdjustmentMode isEqual:@"linear"]), @[_frequencyStepButton] ],
         @[ @(toolbar), @[_toolbarEnglishModeButton, _toolbarPunctuationButton, _toolbarFullWidthButton,
                          _toolbarCharacterSetButton, _toolbarEmojiButton, _toolbarHandwritingButton,
@@ -3828,7 +3826,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         voiceContent,
     ]];
     // The dictation form builds its own rows, in a class resolved at runtime so that the keychain and CoreAudio stay out of the test executables. It cannot register them, so the page registers the names it draws and the result lands on the form.
-    [self registerSearchKeywords:@[ @"识别方式", @"服务地址", @"API 密钥", @"识别模型", @"Whisper 模型", @"录音设备",
+    [self registerSearchKeywords:@[ @"识别方式", @"服务地址", @"API 密钥", @"识别模型", @"本地模型", @"录音设备",
                                     @"识别后整理文本", @"整理模型", @"整理方案", @"整理提示词" ]
                          section:@"语音识别与文本整理"
                           onPage:MSIMESettingsPageVoice

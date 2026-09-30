@@ -24,15 +24,13 @@ case $(uname -s) in
 esac
 toolchain="$ndk/toolchains/llvm/prebuilt/$host_tag"
 compiler="$toolchain/bin/${compiler_target}28-clang"
-# vcpkg manifest installs reconcile their root: keep ABIs separate so one build
-# cannot uninstall the other ABI's dependencies.
+# vcpkg provides only nlohmann-json, which shared/voice/LocalAsr.cpp includes. Manifest installs reconcile their root, so the ABIs are kept apart and one build cannot uninstall the other ABI's copy.
 deps="$repo_root/target/android-deps/$abi"
 ANDROID_NDK_HOME="$ndk" VCPKG_DISABLE_METRICS=1 "$vcpkg_root/vcpkg" install \
   --x-manifest-root="$repo_root/platforms/android" --x-install-root="$deps" \
   --overlay-triplets="$repo_root/platforms/android/triplets" --triplet="$triplet"
 env "CC_${rust_target//-/_}=$compiler" "CXX_${rust_target//-/_}=$compiler++" \
   "AR_${rust_target//-/_}=$toolchain/bin/llvm-ar" "$cargo_linker=$compiler" \
-  MSIME_ANDROID_NDK="$ndk" MSIME_ANDROID_DEPS="$deps/$triplet" \
   CARGO_TARGET_DIR="$repo_root/target/android-cargo" \
   RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384" \
   cargo build -p msime-host-api --target "$rust_target" --release --locked
@@ -47,8 +45,7 @@ unzip -o -j -q "$voice_aar" "jni/$abi/libsherpa-onnx-c-api.so" "jni/$abi/libonnx
 "$compiler++" -std=c++17 -shared -fPIC -Wall -Wextra -Werror \
   -Wl,--no-undefined -Wl,-z,max-page-size=16384 -Wl,-soname,libmsime_android.so \
   platforms/android/native/client_jni.cpp shared/voice/LocalAsr.cpp \
-  -Icrates/host-api/include -Ishared -Ishared/voice/third_party \
-  -Ivendor/MSIME-Engine/voice/include -I"$deps/$triplet/include" \
+  -Icrates/host-api/include -Ishared -Ishared/voice/third_party -I"$deps/$triplet/include" \
   -L"$output" -lmsime_host_api -ldl -o "$output/libmsime_android.so"
 bash platforms/android/verify-native.sh "$toolchain/bin/llvm-readelf" "$output" "$abi"
 notices="$repo_root/target/android/notices/$abi"

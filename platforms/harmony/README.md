@@ -2,7 +2,7 @@
 
 ArkTS 宿主与 NAPI 原生边界是完整实现：键盘扩展、设置应用、账号、社区、AI、语音、手写、候选与词库都在本目录内。能力对照见 [docs/harmony-parity.md](../../docs/harmony-parity.md)：用什么方法比过 MSIME-Apple、哪些是按平台特性裁剪而不是欠账。
 
-OpenHarmony 适配保留 ArkTS/ArkUI 应用入口与 NAPI 原生边界。共享输入算法、组合状态、配置校验和资源准备继续由 Rust Host API 与 C++ Engine 提供；`platforms/harmony/native/client_napi.cpp` 只负责 NAPI 注册和 C ABI 转发，不复制候选分页或输入状态机。
+OpenHarmony 适配保留 ArkTS/ArkUI 应用入口与 NAPI 原生边界。共享输入算法、组合状态、配置校验和资源准备继续由 Rust Host API 与 Rust Engine（`crates/engine`）提供；`platforms/harmony/native/client_napi.cpp` 只负责 NAPI 注册和 C ABI 转发，不复制候选分页或输入状态机。
 
 繁体输出只在显示与上屏边界转换：候选条与展开候选面板的显示文字、Engine 提交、`insert` 与 `insertWithSource` 经过 `KeyboardSession.asTraditional`，Engine 的候选原文、候选身份（按序号选择）和组合文本保持简体；由 `ChineseOutputPolicy` 决定是否适用（dedicated English、日语方案、临时日语保留原文），转换本身走 NAPI `simplifiedToTraditional` 调共享导出 `msime_client_simplified_to_traditional`，即 OpenCC s2t 词级转换，与 Windows、macOS、Linux、Android、iOS 逐字一致——「头发」出「頭髮」、「发展」出「發展」，ICU `i18n.Transliterator` 的逐字转换分不开这两个「发」。C ABI 拒绝的输入（内嵌 NUL）返回 `null`，保留原文。`scripts/test-harmony-traditional-output.py` 钉住从 C 头文件到调用点的这条接线，并拒绝宿主源码里重新出现 ICU 转写。
 
@@ -150,33 +150,7 @@ Apple 润色的是**选区**：用户选中一段话，点润色，面板给出�
 
 `build-native.sh` 在本机已跑通（2026-09-20）：`arm64-v8a`（真机）、`x86_64`（模拟器）和 `armeabi-v7a` 三个 ABI 的 Rust/C++/NAPI 交叉构建全部成功，各产出 `libmsimeclient.so`、`libmsime_host_api.so` 和 `libc++_shared.so`；`hvigorw assembleHap` 打出的 HAP 约 25 MB，包含全部三个 `libs/<abi>/`。`msime-client-core` 对 `aarch64-unknown-linux-ohos` 的 `cargo check` 亦通过。
 
-`MSIME_OHOS_DEPS` 指的是某一个 ABI 的前缀本身（里面直接是 `lib/` 和 `include/`），不是放着各 ABI 子目录的父目录——每个 ABI 传各自那一个。脚本在找不到时会把要跑的三条命令连同它期望的绝对路径一起打出来，照抄即可，但 `sqlite3.h` 不要从 vcpkg 的 `buildtrees` 里拿：那份被 vcpkg 改过，开头 `#include "sqlite3-vcpkg-config.h"`，只复制它会在编译 Engine 时报找不到该头文件。把同名文件从 `target/tooling/vcpkg/packages/sqlite3_<triplet>/include/` 一并复制过去，并用它记录的那几个开关（`SQLITE_ENABLE_UNLOCK_NOTIFY`、`SQLITE_ENABLE_COLUMN_METADATA`、`SQLITE_OS_UNIX`）编译 `sqlite3.c`，这样与其他平台用的是同一套特性。前缀放在 worktree 之外（例如 `~/ohos-deps/<abi>`）可以避免每开一个 worktree 重建一次。
-
-32 位的 `armeabi-v7a` 需要额外一步：Engine 的 `find_package(fmt CONFIG)` 和 `find_package(spdlog CONFIG)` 会拒绝 Homebrew 的 config，因为那两份 config 带 64 位断言。两者在这里都只作头文件使用（Engine 只链接 `fmt::fmt-header-only`，并从 `spdlog::spdlog_header_only` 读取头文件目录），所以自建两份不带位宽断言的最小 config 指过去即可，无需改 Engine：
-
-```sh
-deps=$PWD/target/ohos-deps/armeabi-v7a
-mkdir -p "$deps/cmake/fmt" "$deps/cmake/spdlog"
-cat > "$deps/cmake/fmt/fmt-config.cmake" <<EOF
-add_library(fmt::fmt-header-only INTERFACE IMPORTED)
-set_target_properties(fmt::fmt-header-only PROPERTIES
-  INTERFACE_INCLUDE_DIRECTORIES "$(brew --prefix fmt)/include"
-  INTERFACE_COMPILE_DEFINITIONS "FMT_HEADER_ONLY=1")
-EOF
-cat > "$deps/cmake/spdlog/spdlog-config.cmake" <<EOF
-add_library(spdlog::spdlog_header_only INTERFACE IMPORTED)
-set_target_properties(spdlog::spdlog_header_only PROPERTIES
-  INTERFACE_INCLUDE_DIRECTORIES "$(brew --prefix spdlog)/include"
-  INTERFACE_COMPILE_DEFINITIONS "SPDLOG_FMT_EXTERNAL=1"
-  INTERFACE_LINK_LIBRARIES fmt::fmt-header-only)
-EOF
-# 各自再放一个 <name>-config-version.cmake，只需把 PACKAGE_VERSION_COMPATIBLE 设为 TRUE
-MSIME_FMT_DIR="$deps/cmake/fmt" MSIME_SPDLOG_DIR="$deps/cmake/spdlog" \
-MSIME_OHOS_NDK=/absolute/openharmony/native MSIME_OHOS_DEPS="$deps" \
-  bash platforms/harmony/build-native.sh armeabi-v7a
-```
-
-`SPDLOG_FMT_EXTERNAL` 不能省：它让 spdlog 用上面那份 fmt 而不是自带副本，与 64 位构建的解析方式一致。
+Engine 换成纯 Rust crate 之后（2026-09-30），同一脚本在三个 ABI 上重新跑通，除 NDK 之外不再需要任何准备：以前要手工编译的 `libsqlite3.a` 前缀和 32 位 `armeabi-v7a` 需要的 fmt/spdlog 替身 config 都随 C++ Engine 一起去掉了，`libmsime_host_api.so` 的动态依赖只剩 `libc.so`。这一轮没有重新打 HAP，也没有上设备。
 
 ## 应用图标切换：本平台没有这个能力
 
@@ -359,14 +333,13 @@ bash platforms/harmony/stage-settings.sh   # 需先在仓库根目录 pnpm insta
 
 ## 本地构建
 
-准备 DevEco Studio 提供的 OpenHarmony NDK，或设置 `MSIME_OHOS_NDK` 指向包含 `build/cmake/ohos.toolchain.cmake` 的 NDK。先安装依赖（根目录 `pnpm install --frozen-lockfile`），准备对应 Rust target、目标 ABI 的 SQLite 前缀和 Boost/fmt/spdlog CMake 配置目录。非 Homebrew 布局需显式设置 `MSIME_BOOST_DIR`、`MSIME_BOOST_HEADERS_DIR`、`MSIME_FMT_DIR` 和 `MSIME_SPDLOG_DIR`，再运行：
+准备 DevEco Studio 提供的 OpenHarmony NDK，或设置 `MSIME_OHOS_NDK` 指向包含 `build/cmake/ohos.toolchain.cmake` 的 NDK。先安装依赖（根目录 `pnpm install --frozen-lockfile`）和对应 Rust target，再运行。Engine 是纯 Rust crate（`crates/engine`），SQLite 由 `rusqlite` 的 `bundled` 特性用 NDK 的编译器包装一起编进 `libmsime_host_api.so`，不需要另备设备端依赖前缀：
 
 ```sh
 resource_dir="$(cargo run --quiet -p msime-client-core --example install_resources --locked -- target/resources)"
 bash platforms/harmony/stage-resources.sh "$resource_dir"
 bash platforms/harmony/stage-settings.sh
 MSIME_OHOS_NDK=/absolute/openharmony/native \
-MSIME_OHOS_DEPS=/absolute/ohos-deps/arm64-v8a \
 bash platforms/harmony/build-native.sh arm64-v8a
 bash platforms/harmony/stage-voice-runtime.sh
 cd platforms/harmony
@@ -376,22 +349,6 @@ hvigorw assembleHap
 ```
 
 `stage-resources.sh` 的第二个参数（默认 `target/offline-glosses`）是可选的非英文离线释义，由 `scripts/build_offline_glosses.py` 生成。数据库和 `offline-glosses-NOTICE.txt` 都在时暂存到 `resfile/offline-glosses`，键盘启动时用同一个 `StagedResources` 复制到 `files/offline-glosses`，与 `files/engine` 相邻，引擎就在那里找 `zh-<lang>.db`；新包不带它们时会删掉旧副本。已安装词典的目标语言在翻译查询里以 `offline_gloss_languages` 出现：用户自己配置的在线翻译先答，离线词典只补在线没答上的候选，同一行按目标顺序合并。
-
-`MSIME_OHOS_DEPS` 指向的 sqlite3 前缀需要自己准备一次，NDK 不带，仓库也不带。2026-09-20 用官方 amalgamation 走通过一次，记录在此以便复现：
-
-```sh
-# sqlite.org 下载页公布的 SHA3-256 为
-# 628a44cfe82c66aed1ccbbe85a562d2e33ebe64b3288981ed76285612227934e
-curl -O https://sqlite.org/2026/sqlite-amalgamation-3530400.zip
-openssl dgst -sha3-256 sqlite-amalgamation-3530400.zip   # 与上面核对后再解压
-unzip -q sqlite-amalgamation-3530400.zip
-ndk=/absolute/openharmony/native
-deps=$PWD/target/ohos-deps/arm64-v8a && mkdir -p "$deps/lib" "$deps/include"
-"$ndk/llvm/bin/aarch64-unknown-linux-ohos-clang" -O2 -fPIC \
-  -c sqlite-amalgamation-3530400/sqlite3.c -o "$deps/sqlite3.o"
-"$ndk/llvm/bin/llvm-ar" rcs "$deps/lib/libsqlite3.a" "$deps/sqlite3.o"
-cp sqlite-amalgamation-3530400/sqlite3.h "$deps/include/"
-```
 
 支持 `arm64-v8a`、`armeabi-v7a` 和 `x86_64`。原生库暂存到 `entry/libs/<abi>/`，这些目录是构建产物，不提交到仓库。
 

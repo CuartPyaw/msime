@@ -2,6 +2,8 @@
 
 Records the C++ reference engine's behaviour once, as JSON under `crates/engine/tests/golden/`, so the Rust engine (`crates/engine`) is tested against committed data and the C++ engine can be deleted. After the C++ is gone this recipe only matters for re-recording from an archived reference build.
 
+The recipe below is historical. `engine-lock.json`, `scripts/fetch_engine.py` and the `scripts/apply_engine_*.py` overlays it runs were removed with the C++ engine, and `crates/engine-bridge` (cited for the product options) went in `addfbd4ab`; to re-record, take them from a commit before their removal, such as `e8056a24e`.
+
 ## Oracle
 
 - Engine: `metasequoiaime/msime-engine` commit `a9b9f092219505166c927843762b650d1e0e501d`, archive sha256 `9510e03f761e94c44c9dcba74f84de23db661251b0eb67766aba0991a7e5445e`, plus the `dependencies` of `engine-lock.json` (googlepinyinime-rev, utfcpp, ...) extracted at their paths, exactly as `scripts/fetch_engine.py` stages them.

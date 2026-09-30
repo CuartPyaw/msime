@@ -1,2 +1,2 @@
 #pragma once
-#include "../../../../vendor/MSIME-Engine/contracts/voice_composition_pipe.h"
+#include "../../../../shared/contracts/voice_composition_pipe.h"

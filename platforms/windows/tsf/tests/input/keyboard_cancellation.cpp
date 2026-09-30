@@ -1,5 +1,5 @@
 #include "../../KeyboardCancellation.h"
-#include "../../../../../vendor/MSIME-Engine/contracts/keyboard_composition_pipe.h"
+#include "../../../../../shared/contracts/keyboard_composition_pipe.h"
 #include <cassert>
 #include <vector>
 

@@ -32,7 +32,7 @@ inline bool valid_candidate_url(std::string_view url, bool allow_http = false)
         return close != std::string_view::npos &&
                authority.substr(1, close - 1) == "::1" &&
                (close == authority.size() - 1 ||
-                authority.substr(close + 1).starts_with(":"));
+                authority[close + 1] == ':');
     }
     const auto colon = authority.find(':');
     const auto host = authority.substr(0, colon);

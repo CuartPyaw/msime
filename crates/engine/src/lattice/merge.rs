@@ -103,7 +103,7 @@ fn sentence_row(typed_pinyin: &str, path: &SentencePath, source: CandidateSource
     item
 }
 
-/// One row per source when neural rerankers ran (overlays.md §1.6.2 rules 2-8): the unreranked best as Generated when `include_lattice_best`, then each model's first path not already listed. When both models agree on their first pick, keyboard takes it and desktop moves to its next distinct path; otherwise desktop goes first. Desktop alone is withheld while keyboard is enabled but has not answered, so the desktop pick never takes the keyboard's seat. The rows carry their words like every sentence row, so learning them records the personal context the lattice rows do.
+/// One row per source when neural rerankers ran (overlays.md §1.6.2 rules 2-8): the unreranked best as Generated when `include_lattice_best`, then each model's first path not already listed. When both models agree on their first pick, keyboard takes it and desktop moves to its next distinct path; otherwise desktop goes first. Desktop alone is withheld while keyboard is enabled but has not answered, so the desktop pick never takes the keyboard's seat. The rows carry their words like every sentence row; selecting one stores the sentence as a user phrase (`CandidateSource::is_sentence_learning`), while the personal context chain, which reads Generated and Fallback rows only, starts afresh after it as in the reference.
 fn reranked_block(
     paths: &[SentencePath],
     keyboard: Option<&[SentencePath]>,

@@ -100,18 +100,6 @@ std::string Polish(std::string text, NSDictionary *options, const std::shared_pt
     }
     if (recognitionRequired) {
         const auto provider = msime::voice::normalize_voice_provider(String(snapshot, @"asr_provider"));
-        if (provider == "local") {
-            // Nothing leaves the process, so there is no endpoint or token to check. What has to hold is that this build carries the Whisper recognizer and that the model is a readable file rather than a directory or a path the user has since moved. An installed model directory is recognised by the msime-voice-local helper (LocalVoiceRequest.h), never here.
-            NSString *model = snapshot[@"asr_model_path"];
-            BOOL directory = NO;
-            if (!MSIMEVoiceLocalWhisperBuilt() || !model.isAbsolutePath ||
-                ![NSFileManager.defaultManager fileExistsAtPath:model isDirectory:&directory] || directory) {
-                if (error) *error = Failure(); return nil;
-            }
-            snapshot[@"asr_provider"] = @"local";
-            _options = [snapshot copy];
-            return self;
-        }
         const auto endpoint = msime::voice::resolved_asr_endpoint(provider, String(snapshot, @"asr_endpoint"));
         // The batch multipart providers. Doubao is the streaming websocket and never reaches
         // this request; anything else is stale configuration rather than a provider choice.
@@ -128,8 +116,7 @@ std::string Polish(std::string text, NSDictionary *options, const std::shared_pt
     return self;
 }
 - (NSUInteger)sampleLimit {
-    return String(_options, @"asr_provider") == "local"
-        ? msime::voice::local_asr_sample_limit : msime::voice::batch_capture_sample_limit;
+    return msime::voice::batch_capture_sample_limit;
 }
 - (BOOL)recognizePCM:(NSData *)pcm completion:(void (^)(NSString *, NSError *))completion error:(NSError **)error {
     @synchronized(self) {
@@ -155,10 +142,8 @@ std::string Polish(std::string text, NSDictionary *options, const std::shared_pt
                 auto language = String(options, @"language");
                 if (language == "en-US" || language == "en-us") language = "en";
                 if (language == "zh-CN") language = "zh-cn";
-                auto text = String(options, @"asr_provider") == "local"
-                    ? msime::voice::recognize_local_asr(samples, String(options, @"asr_model_path"), language, cancelled)
-                    : msime::voice::recognize_cloud_asr(samples, String(options, @"asr_provider"),
-                        String(options, @"asr_endpoint"), String(options, @"asr_model"), String(options, @"asr_token"), language, cancelled);
+                auto text = msime::voice::recognize_cloud_asr(samples, String(options, @"asr_provider"),
+                    String(options, @"asr_endpoint"), String(options, @"asr_model"), String(options, @"asr_token"), language, cancelled);
                 text = Polish(std::move(text), options, cancelled, polishing);
                 result = [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
                 if (!result.length) failure = Failure();

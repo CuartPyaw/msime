@@ -51,13 +51,20 @@ int main()
         settings.polishEnabled = NO;
         settings.provider = @"local";
         settings.token = @"";
-        settings.modelPath = @"/nonexistent/msime-whisper-model.bin";
+        settings.modelPath = @"/nonexistent/msime-voice-model";
         Require(![settings validate:nil], "missing local model accepted");
         settings.modelPath = NSTemporaryDirectory();
-        Require(![settings validate:nil], "directory accepted as model");
+        Require(![settings validate:nil], "directory without a model manifest accepted as model");
         NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
         Require([@"model fixture" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil],
                 "model fixture creation failed");
+        settings.modelPath = path;
+        Require(![settings validate:nil], "a model file accepted in place of an installed model directory");
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        Require([[NSFileManager defaultManager] createDirectoryAtPath:path withIntermediateDirectories:NO attributes:nil error:nil],
+                "model directory fixture creation failed");
+        Require([@"{}" writeToFile:[path stringByAppendingPathComponent:@"msime-model.json"] atomically:YES
+                          encoding:NSUTF8StringEncoding error:nil], "model manifest fixture creation failed");
         settings.modelPath = path;
         Require([settings validate:nil], "local mode requires unused cloud credentials");
         [[NSFileManager defaultManager] removeItemAtPath:path error:nil];

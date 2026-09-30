@@ -7,7 +7,6 @@
 # scripts/verify-local.sh does.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
-# git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE into hooks, which redirects every
-# git command the script runs - fetch_engine.py fails outright under them.
+# git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE into hooks, which redirects every git command the script runs (verify-local.sh resolves the main worktree and diffs against the base with git).
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 exec bash scripts/verify-local.sh --quick

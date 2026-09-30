@@ -22,13 +22,6 @@ command -v docker >/dev/null 2>&1 || {
   exit 2
 }
 
-# The Engine is an unpacked archive under vendor/, not a checked-in tree, so a
-# fresh worktree has none. Mount whichever tree already holds it rather than
-# fetching another copy per worktree - the same order the Windows gate uses to
-# find its vcpkg.
-# Only a tree prepared for this checkout's engine-lock.json: one at the same Engine commit with older overlays compiles, or fails, against the wrong Engine source. With no match the container fetches its own.
-vendor="$(python3 scripts/fetch_engine.py --borrowable)"
-
 build_root="$repo_root/target/linux-build-gate"
 mkdir -p "$build_root"
 
@@ -44,11 +37,9 @@ echo "gate image: $image_tag" >&2
 
 docker run --rm --init \
   -v "$repo_root":/source \
-  ${vendor:+-v "$vendor":/source/vendor:ro} \
   -v "$build_root":/build \
   -w /source \
   -e CARGO_TARGET_DIR=/build/cargo \
-  ${vendor:+-e MSIME_SKIP_ENGINE_FETCH=1} \
   "$image_tag" bash -euo pipefail -c '
     cargo build -p msime-host-api --locked
     cmake -S platforms/linux -B /build/cmake -G Ninja \
