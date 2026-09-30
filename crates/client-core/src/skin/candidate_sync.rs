@@ -25,6 +25,8 @@ const RATE_LIMITED: &str = "account_rate_limited";
 const LIBRARY_LIMIT: &str = "candidate_skin_library_limit";
 const PACKAGE: &str = "candidate_skin_package";
 const STORAGE: &str = "storage";
+/// A public package removed locally: taking it down would clear its downloads and ratings, so that stays a choice made in the gallery.
+const PUBLIC_KEPT: &str = "candidate_skin_public_kept";
 
 /// One run at a time in this process, and no state-file update from [`record_install`] or [`forget`] in the middle of one, since a run writes back the state it read.
 static SYNC_RUNS: Mutex<()> = Mutex::new(());
@@ -176,17 +178,26 @@ fn content_digest(
     request_digest("", "", manifest, files)
 }
 
-/// The folders in `root` the catalog would list, whether or not their manifest is valid.
-fn local_packages(root: &Path) -> BTreeSet<String> {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return BTreeSet::new();
+/// The folders in `root` the catalog would list, whether or not their manifest is valid. A package missing from this set is deleted from the library when it was synced before, so a root or entry that cannot be read fails the run instead of reading as empty; only a root that does not exist yet is empty.
+fn local_packages(root: &Path) -> std::io::Result<BTreeSet<String>> {
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
+        Err(error) => return Err(error),
     };
-    entries
-        .flatten()
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| catalog::is_external_id(name))
-        .collect()
+    let mut packages = BTreeSet::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        if let Ok(name) = entry.file_name().into_string() {
+            if catalog::is_external_id(&name) {
+                packages.insert(name);
+            }
+        }
+    }
+    Ok(packages)
 }
 
 /// Record that `package_id` was just installed from the gallery publication `publication`. A later run leaves the package alone unless that publication is one of the user's own, and compares it afresh if it is, since the install replaced whatever was synced before.
@@ -198,14 +209,20 @@ pub fn record_install(state_path: &Path, package_id: &str, publication: Uuid) {
     let _ = save_state(state_path, &state);
 }
 
-/// Forget the library row `publication` was synced with, after the user removed that row from the library themselves. The local folder is then uploaded again as a new private package by the next run rather than deleted to match.
-pub fn forget(state_path: &Path, publication: Uuid) {
+/// Take the publication `publication` out of the library and forget the row it was synced with. The local folder is then uploaded again as a new private package by the next run rather than deleted to match. Both happen under the run lock: a run that listed the library between the two would find the row gone while its state still named it, and delete the local folder.
+pub fn unpublish(
+    state_path: &Path,
+    remote: &impl CandidateSkinSyncRemote,
+    publication: Uuid,
+) -> Result<(), AccountError> {
     let _run = lock_runs();
+    remote.unpublish(publication)?;
     let mut state = load_state(state_path);
     state
         .packages
         .retain(|_, synced| synced.cloud_id != publication);
     let _ = save_state(state_path, &state);
+    Ok(())
 }
 
 /// The library row each package was last synced with, by package id.
@@ -255,7 +272,19 @@ pub fn publish(
         state.user_id = user;
         state.packages.clear();
     }
-    let existing = state.packages.get(package_id).map(|synced| synced.cloud_id);
+    // A package sync has not recorded yet may still have a row, from another device or a run that has not finished; updating that row keeps the library at one row per package.
+    let existing = match state.packages.get(package_id) {
+        Some(synced) => Some(synced.cloud_id),
+        None => match remote.sync_list() {
+            Ok(rows) => rows
+                .into_iter()
+                .find(|row| row.package_id == package_id)
+                .map(|row| row.id),
+            // A server that predates the library has no listing, and every package there is a new publication.
+            Err(AccountError::NotFound) => None,
+            Err(error) => return Err(CandidateSkinPublishError::Account(error)),
+        },
+    };
     let item = match existing {
         Some(id) => match update_in_place(remote, id, &name, &description, &packed, visibility) {
             Err(AccountError::NotFound) => None,
@@ -329,17 +358,16 @@ pub fn sync_candidate_skins(
     }
     let rows = remote.sync_list()?;
     let owned: BTreeSet<Uuid> = rows.iter().map(|row| row.id).collect();
-    // Two rows of one package (a publication made before sync knew about it) resolve to the newest.
+    // Two rows of one package (a publication made before sync knew about it) resolve to the newest. The server lists newest first; `updated_at` is not compared as text, since RFC 3339 with a variable fraction does not sort that way.
     let mut newest: BTreeMap<String, CandidateSkinSyncEntry> = BTreeMap::new();
     for row in rows {
-        match newest.get(&row.package_id) {
-            Some(kept) if (&kept.updated_at, kept.id) >= (&row.updated_at, row.id) => {}
-            _ => {
-                newest.insert(row.package_id.clone(), row);
-            }
-        }
+        newest.entry(row.package_id.clone()).or_insert(row);
     }
-    let local = local_packages(root);
+    let local = local_packages(root).map_err(|_| AccountError::Storage)?;
+    // A root that is gone while packages were synced from it is more likely moved or unmounted than emptied on purpose; reading it as empty would delete every one of them from the library.
+    if !root.is_dir() && !state.packages.is_empty() {
+        return Err(AccountError::Storage);
+    }
     let ids: BTreeSet<String> = local
         .iter()
         .cloned()
@@ -505,10 +533,13 @@ impl<R: CandidateSkinSyncRemote> Run<'_, R> {
                 }
             }
             (None, Some(row), Some(saved)) => {
-                if row.request_sha256 == saved.cloud_digest {
-                    self.delete_cloud(id, row)
-                } else {
+                if row.request_sha256 != saved.cloud_digest {
                     self.download(id, row)
+                } else if row.visibility == CandidateSkinVisibility::Public {
+                    self.skip(id, PUBLIC_KEPT);
+                    Ok(())
+                } else {
+                    self.delete_cloud(id, row)
                 }
             }
             (None, Some(row), None) => self.download(id, row),

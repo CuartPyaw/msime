@@ -547,6 +547,7 @@ fn item() -> CandidateSkinItem {
         created_at: "2026-09-30T00:00:00Z".into(),
         visibility: CandidateSkinVisibility::Public,
         updated_at: "2026-09-30T00:00:00Z".into(),
+        request_sha256: String::new(),
     }
 }
 
@@ -1050,6 +1051,31 @@ fn items_from_a_server_before_private_packages_read_as_public() {
     let parsed: CandidateSkinItem = serde_json::from_value(value).unwrap();
     assert_eq!(parsed.visibility, CandidateSkinVisibility::Public);
     assert_eq!(parsed.updated_at, "");
+}
+
+#[test]
+fn the_owner_reads_their_item_with_its_request_digest() {
+    // The server adds `request_sha256` to the signed-in user's own items; every owner-side call (the mine listing, detail, publish, replace, visibility) reads them.
+    let mut owned = item();
+    owned.owned = true;
+    owned.visibility = CandidateSkinVisibility::Private;
+    owned.request_sha256 = "b".repeat(64);
+    let (origin, _received) = serve_once(serde_json::to_vec(&owned).unwrap());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    assert_eq!(
+        client.candidate_skin(owned.id, Some(&token(b'c'))).unwrap(),
+        owned
+    );
+
+    let mut bad = owned.clone();
+    bad.request_sha256 = "B".repeat(64);
+    assert_eq!(validate_item(&bad), Err(AccountError::Unavailable));
+    // Someone else's item carries no digest at all, and none is sent back to the page.
+    assert!(!serde_json::to_value(item())
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .contains_key("request_sha256"));
 }
 
 #[test]

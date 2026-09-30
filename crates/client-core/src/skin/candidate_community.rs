@@ -114,6 +114,9 @@ pub struct CandidateSkinItem {
     /// When the content or visibility last changed; `""` from a server that predates it.
     #[serde(default)]
     pub updated_at: String,
+    /// [`request_digest`] of the request that last set the content. The server sends it only for the signed-in user's own packages; `""` otherwise.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub request_sha256: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -702,6 +705,7 @@ fn validate_item(item: &CandidateSkinItem) -> Result<(), AccountError> {
         || item.created_at.is_empty()
         || !crate::text::is_bounded_text(&item.created_at, 64)
         || !crate::text::is_bounded_text(&item.updated_at, 64)
+        || !(item.request_sha256.is_empty() || is_sha256_hex(&item.request_sha256))
     {
         return Err(AccountError::Unavailable);
     }

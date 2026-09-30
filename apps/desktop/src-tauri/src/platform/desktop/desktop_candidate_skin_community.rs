@@ -234,9 +234,7 @@ pub async fn candidate_skin_community_unpublish(
     let id = community_id(&id)?;
     let state_path = sync_state(&directory.0);
     community_service_call(Arc::clone(&state.service), move |service| {
-        service.unpublish(id)?;
-        candidate_sync::forget(&state_path, id);
-        Ok(())
+        candidate_sync::unpublish(&state_path, service, id)
     })
     .await?;
     Ok(CandidateSkinUnpublishResponse { deleted: true })

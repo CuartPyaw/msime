@@ -75,6 +75,8 @@ export function useCandidateSkinSync(
 
 /** Why one package was left out of a run, as a fixed sentence. */
 function skipReason(code: string): string {
+  if (code === "candidate_skin_public_kept")
+    return "这是公开作品，删除本地皮肤不会下架它；如需下架，请在社区中操作。";
   if (code.startsWith("candidate_skin_") || code === "storage")
     return candidateSkinMessage({ code });
   switch (code) {

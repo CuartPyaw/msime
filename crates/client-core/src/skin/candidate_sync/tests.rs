@@ -122,6 +122,7 @@ impl Library {
             created_at: row.updated_at.clone(),
             visibility: row.visibility,
             updated_at: row.updated_at.clone(),
+            request_sha256: row.digest.clone(),
         })
     }
 
@@ -140,7 +141,7 @@ impl CandidateSkinSyncRemote for Library {
     }
     fn sync_list(&self) -> Result<Vec<CandidateSkinSyncEntry>, AccountError> {
         self.log("list");
-        Ok(self
+        let mut rows: Vec<_> = self
             .rows
             .borrow()
             .iter()
@@ -151,7 +152,10 @@ impl CandidateSkinSyncRemote for Library {
                 visibility: row.visibility,
                 updated_at: row.updated_at.clone(),
             })
-            .collect())
+            .collect();
+        // The server lists the newest row first.
+        rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(rows)
     }
     fn detail(&self, id: Uuid) -> Result<CandidateSkinItem, AccountError> {
         self.log("detail");
@@ -677,13 +681,13 @@ fn publishing_a_new_package_creates_a_row_that_sync_then_knows() {
 }
 
 #[test]
-fn a_forgotten_row_is_uploaded_again_rather_than_deleted_locally() {
+fn an_unpublished_row_is_uploaded_again_rather_than_deleted_locally() {
     let fixture = Fixture::new();
     write_skin(&fixture.root, "sakura", "樱花", 1);
     fixture.sync();
     let id = *fixture.library.rows.borrow().keys().next().unwrap();
-    fixture.library.unpublish(id).unwrap();
-    forget(&fixture.state, id);
+    unpublish(&fixture.state, &fixture.library, id).unwrap();
+    assert!(synced_packages(&fixture.state).is_empty());
     let report = fixture.sync();
     assert!(report.deleted_local.is_empty());
     assert_eq!(report.uploaded, ids(&["sakura"]));
@@ -691,4 +695,106 @@ fn a_forgotten_row_is_uploaded_again_rather_than_deleted_locally() {
         synced_packages(&fixture.state).keys().collect::<Vec<_>>(),
         ["sakura"]
     );
+}
+
+#[test]
+fn a_failed_unpublish_keeps_the_row_remembered() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fixture.sync();
+    assert_eq!(
+        unpublish(&fixture.state, &fixture.library, Uuid::new_v4()),
+        Err(AccountError::NotFound)
+    );
+    assert_eq!(
+        synced_packages(&fixture.state).keys().collect::<Vec<_>>(),
+        ["sakura"]
+    );
+}
+
+#[test]
+fn a_missing_skin_root_deletes_nothing_once_packages_are_remembered() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fixture.sync();
+    fs::remove_dir_all(&fixture.root).unwrap();
+    fixture.library.calls();
+    assert_eq!(
+        sync_candidate_skins(&fixture.root, &fixture.state, &fixture.library),
+        Err(AccountError::Storage)
+    );
+    assert!(!fixture.library.calls().contains(&"unpublish".to_owned()));
+    assert_eq!(fixture.library.rows.borrow().len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_skin_root_deletes_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fixture.sync();
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o000)).unwrap();
+    let readable = fs::read_dir(&fixture.root).is_ok();
+    let result = sync_candidate_skins(&fixture.root, &fixture.state, &fixture.library);
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o755)).unwrap();
+    // A superuser reads the folder regardless of its mode, and then there is nothing to prove.
+    if !readable {
+        assert_eq!(result, Err(AccountError::Storage));
+    }
+    assert_eq!(fixture.library.rows.borrow().len(), 1);
+}
+
+#[test]
+fn a_public_package_deleted_locally_stays_published() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fixture.sync();
+    let id = *fixture.library.rows.borrow().keys().next().unwrap();
+    fixture
+        .library
+        .rows
+        .borrow_mut()
+        .get_mut(&id)
+        .unwrap()
+        .visibility = CandidateSkinVisibility::Public;
+    fs::remove_dir_all(fixture.root.join("sakura")).unwrap();
+    let report = fixture.sync();
+    assert!(report.deleted_cloud.is_empty());
+    assert_eq!(
+        report.skipped,
+        [CandidateSkinSyncSkip {
+            package_id: "sakura".into(),
+            code: PUBLIC_KEPT
+        }]
+    );
+    assert_eq!(fixture.library.rows.borrow().len(), 1);
+    assert!(!fixture.installed("sakura"));
+}
+
+#[test]
+fn publishing_updates_a_row_sync_has_not_recorded_yet() {
+    let fixture = Fixture::new();
+    let other = tempfile::tempdir().unwrap();
+    write_skin(other.path(), "sakura", "樱花", 1);
+    let id = fixture.library.insert(other.path(), "sakura", "樱花");
+    write_skin(&fixture.root, "sakura", "樱花", 2);
+    let item = publish(
+        &fixture.root,
+        &fixture.state,
+        &fixture.library,
+        "sakura",
+        Uuid::new_v4(),
+        "新樱花".into(),
+        String::new(),
+        CandidateSkinVisibility::Private,
+    )
+    .unwrap();
+    assert_eq!(item.id, id);
+    assert_eq!(fixture.library.calls(), ["list", "replace 新樱花"]);
+    assert_eq!(
+        fixture.library.row_names(),
+        [("sakura".to_owned(), "新樱花".to_owned())]
+    );
+    assert_eq!(fixture.sync(), CandidateSkinSyncReport::default());
 }

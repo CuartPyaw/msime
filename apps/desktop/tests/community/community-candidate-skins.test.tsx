@@ -603,6 +603,7 @@ test("sync names each package it left out, and why uploads stopped, in fixed sen
             { package_id: "styled", code: "candidate_skin_file_type" },
             { package_id: "moved", code: "account_conflict" },
             { package_id: "offline", code: "account_unavailable" },
+            { package_id: "shared", code: "candidate_skin_public_kept" },
           ],
           stopped: "candidate_skin_library_limit",
         }),
@@ -612,10 +613,13 @@ test("sync names each package it left out, and why uploads stopped, in fixed sen
   expect(
     await screen.findByText("本地皮肤已与云端皮肤库同步。 云端皮肤库已满 100 款，其余皮肤未上传。"),
   ).not.toBeNull();
-  expect(screen.getByText("3 款皮肤未同步")).not.toBeNull();
+  expect(screen.getByText("4 款皮肤未同步")).not.toBeNull();
   expect(screen.getByText("styled：仅支持 PNG 或 JPEG 图片，且不能包含样式表。")).not.toBeNull();
   expect(screen.getByText("moved：云端的同名作品属于另一个皮肤包，未覆盖。")).not.toBeNull();
   expect(screen.getByText("offline：暂时无法同步，下次再试。")).not.toBeNull();
+  expect(
+    screen.getByText("shared：这是公开作品，删除本地皮肤不会下架它；如需下架，请在社区中操作。"),
+  ).not.toBeNull();
 });
 
 test("signed out, the row says sign-in turns sync on; other failures stay fixed sentences", async () => {
