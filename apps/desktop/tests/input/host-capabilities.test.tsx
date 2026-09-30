@@ -610,7 +610,7 @@ test("a host whose skin folder is unreachable is offered an import, not a folder
   // actually does — it was disabled there, promising a folder that never appeared.
   mount({
     host: capabilities({ platform: "harmony", skin_directory_import: true }),
-    scanSkinCatalog: async () => ({ directory: "/skins", skins: [] }) as never,
+    scanSkinCatalog: async () => ({ directory: "/skins", packages: [], issues: [] }),
     openSkinDirectory: async () => undefined,
   });
   await screen.findByRole("button", { name: "保存设置" });
@@ -622,7 +622,7 @@ test("a host whose skin folder is unreachable is offered an import, not a folder
 test("a desktop host still opens its skin folder", async () => {
   mount({
     host: capabilities({ platform: "windows" }),
-    scanSkinCatalog: async () => ({ directory: "C:/skins", skins: [] }) as never,
+    scanSkinCatalog: async () => ({ directory: "C:/skins", packages: [], issues: [] }),
     openSkinDirectory: async () => undefined,
   });
   await screen.findByRole("button", { name: "保存设置" });

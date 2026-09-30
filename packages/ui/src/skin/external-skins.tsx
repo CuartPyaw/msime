@@ -394,6 +394,8 @@ export function ExternalSkins({
     setCatalog(null);
     setBusy(false);
     setFailed(false);
+    // Scan as the page opens, as the native fallback page (SkinSettingsView) does. Waiting for a manual refresh left the list empty while the custom theme card already named the package in use, so the skin in use looked missing. The refresh button stays for folders copied in while the page is open.
+    void refresh();
     return () => {
       generation.current++;
       pending.current = false;
