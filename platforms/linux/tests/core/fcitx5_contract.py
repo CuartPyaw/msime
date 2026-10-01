@@ -37,6 +37,12 @@ assert "wlr-layer-shell-unstable-v1.xml" in cmake_fcitx5
 
 source = (root / "fcitx5/FcitxEngine.cpp").read_text()
 ibus_source = (root / "src/core/ClientEngine.cpp").read_text()
+# Commit statistics also run on detached workers. They must be included in the same
+# pending-write barrier as key-count batches, or an addon unload can execute this
+# translation unit after its shared library has already been unmapped.
+record_statistics = source[source.index("void recordTypingStatistics("):source.index("  // `typingStatistics`", source.index("void recordTypingStatistics("))]
+assert "fcitx_key_press_writes.begin();" in record_statistics
+assert "fcitx_key_press_writes.end();" in record_statistics
 # 中英文切换提示：面板那个弹出物必须排在面板更新之后，先弹再刷会被 clearPanel()/render()
 # 收掉，表现为提示时有时无。
 assert "showCustomInputMethodInformation" in source
