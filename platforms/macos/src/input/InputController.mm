@@ -1320,8 +1320,8 @@ static NSImage *MSIMECandidateLogoImage() {
         return NO;
     const unichar character = [event.characters characterAtIndex:0];
     if (!MSIMESmartPunctuationSpaceKey(character)) return NO;
-    // Korean and Vietnamese marks are ASCII already, and the repeat gesture that would turn them Chinese never arms there: the key goes to the Engine, which writes the mark after the open composition or leaves it to the application.
-    if (![self schemeUsesChinesePunctuation]) {
+    // Korean and Vietnamese marks are ASCII already, and the repeat gesture that would turn them Chinese never arms there: the key goes to the Engine, which writes the mark after the open composition or leaves it to the application. Zhuyin's marks are bopomofo keys or its Shift overlay, which the Engine writes in any state, so the contextual ASCII route below never takes them either.
+    if (![self schemeUsesChinesePunctuation] || MSIMEViewScheme(_view) == msime::mac::scheme::Zhuyin) {
         [self resetSmartPunctuationState];
         return NO;
     }
@@ -5366,8 +5366,9 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     // the Engine punctuation policy when idle. With a composition, every
     // keypad mark finishes the highlighted candidate and appends its literal
     // ASCII byte. Physical routing keeps '-' and '=' out of main-row paging.
+    // A keypad mark the view lists among its spelling symbols (Zhuyin's bopomofo keys, an expression operator) is input like the keypad digits and goes on as a character.
     const char keypadPunctuation = msime::mac::KeypadPunctuation(event.keyCode);
-    if (keypadPunctuation &&
+    if (keypadPunctuation && !MSIMESpellingSymbol(_view, (unichar)keypadPunctuation) &&
         !(event.modifierFlags & (NSEventModifierFlagShift | NSEventModifierFlagControl |
                                  NSEventModifierFlagOption | NSEventModifierFlagCommand))) {
         const BOOL hasComposition = [_view[@"editing_text"] length] ||

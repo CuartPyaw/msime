@@ -2503,16 +2503,19 @@ static void TestSchemeKeyRouting() {
         return @{@"focused": @YES, @"scheme": scheme, @"local_mode": @"none", @"editing_text": editing, @"caret_position": @(editing.length),
                  @"spelling_symbols": symbols, @"candidate_list_open": @(listOpen), @"session": @3, @"generation": @9, @"candidates": candidates};
     };
-    // Sends one key from a view and reports whether the host handed it to the Engine as a character.
+    // Sends one key from a view and reports whether the host claimed it.
     __block NSUInteger asciiBefore = 0;
-    BOOL (^send)(NSDictionary *, NSEvent *, BOOL) = ^BOOL(NSDictionary *state, NSEvent *event, BOOL panelVisible) {
+    BOOL (^handle)(NSDictionary *, NSEvent *, BOOL) = ^BOOL(NSDictionary *state, NSEvent *event, BOOL panelVisible) {
         [controller setValue:state forKey:@"view"];
         panel.requestedVisible = panelVisible;
         session.nextTransition = @{@"handled": @YES, @"view": state};
         session.lastCommand = UINT32_MAX;
         asciiBefore = session.asciiCalls;
-        const BOOL handled = [controller handleEvent:event client:client];
-        return handled && session.asciiCalls == asciiBefore + 1;
+        return [controller handleEvent:event client:client];
+    };
+    // Sends one key from a view and reports whether the host handed it to the Engine as a character.
+    BOOL (^send)(NSDictionary *, NSEvent *, BOOL) = ^BOOL(NSDictionary *state, NSEvent *event, BOOL panelVisible) {
+        return handle(state, event, panelVisible) && session.asciiCalls == asciiBefore + 1;
     };
     NSString *const zhuyinIdle = @"125890,./;-";
     NSString *const zhuyinComposing = @"1234567890,./;- ";
@@ -2536,19 +2539,38 @@ static void TestSchemeKeyRouting() {
     // Shift+`{` is the Engine's 『 in Zhuyin, so the host does not open a `{` pair of its own.
     assert(send(view(@6, @"su3", zhuyinComposing, NO), key(33, @"{", NSEventModifierFlagShift), NO) && session.lastASCII == '{');
     assert(session.punctuationASCIICalls == punctuationRoutes && client.committed == nil && client.insertions.count == 0);
+    // Keypad `-` and `.` spell ㄦ and ㄡ like the keypad digits do, rather than taking the keypad punctuation route that would finish the conversion and append the ASCII mark.
+    assert(send(view(@6, @"su3", zhuyinComposing, NO), KeypadKey(78, @"-", 0, NO), NO) && session.lastASCII == '-');
+    assert(send(view(@6, @"", zhuyinIdle, NO), KeypadKey(65, @".", 0, NO), NO) && session.lastASCII == '.');
+    assert(session.punctuationASCIICalls == punctuationRoutes && session.enginePunctuationCalls == 0 && client.insertions.count == 0);
+    // Shift+`:` after an ASCII letter is the Engine's overlay mark, not the host's contextual smart punctuation, which Quanpin still takes.
+    appearance.smartPunctuation = YES;
+    client.document = @"a";
+    client.selection = NSMakeRange(1, 0);
+    NSEvent *colon = key(41, @":", NSEventModifierFlagShift);
+    assert(send(view(@6, @"", zhuyinIdle, NO), colon, NO) && session.lastASCII == ':' && session.lastShift);
+    assert(session.contextualPunctuationCalls == 0 && session.enginePunctuationCalls == 0);
+    assert(handle(view(@0, @"", @"", NO), colon, NO) && session.contextualPunctuationCalls == 1 && session.lastPrecedingScalar == 'a');
+    appearance.smartPunctuation = NO;
+    session.contextualPunctuationCalls = 0;
+    session.enginePunctuationCalls = 0;
+    client.document = @"";
+    client.selection = NSMakeRange(0, 0);
+    client.insertions = [NSMutableArray array];
+    client.committed = nil;
 
     // Down opens a closed Zhuyin list whatever the arrow binding says (it is off here) and is never handed to the application.
     const NSEventModifierFlags arrowFlags = NSEventModifierFlagFunction | NSEventModifierFlagNumericPad;
     NSString *down = [NSString stringWithFormat:@"%C", (unichar)NSDownArrowFunctionKey];
-    assert(!send(view(@6, @"su3", zhuyinComposing, NO), key(125, down, arrowFlags), NO));
-    assert(session.lastCommand == MSIME_OPEN_CANDIDATE_LIST);
+    assert(handle(view(@6, @"su3", zhuyinComposing, NO), key(125, down, arrowFlags), NO));
+    assert(session.lastCommand == MSIME_OPEN_CANDIDATE_LIST && session.asciiCalls == asciiBefore);
     [appearance applySharedCandidatePreferences:@{@"navigation": @{@"arrows": @YES}}];
-    assert(!send(view(@6, @"su3", zhuyinComposing, NO), key(125, down, arrowFlags), NO));
-    assert(session.lastCommand == MSIME_OPEN_CANDIDATE_LIST);
+    assert(handle(view(@6, @"su3", zhuyinComposing, NO), key(125, down, arrowFlags), NO));
+    assert(session.lastCommand == MSIME_OPEN_CANDIDATE_LIST && session.asciiCalls == asciiBefore);
     // With the list open Down moves the highlight as in any list, and with Shift held or nothing composing it is not the list key.
     appearance.vertical = YES;
-    assert(!send(view(@6, @"su3", zhuyinListOpen, YES), key(125, down, arrowFlags), YES));
-    assert(session.lastCommand == MSIME_NEXT_CANDIDATE);
+    assert(handle(view(@6, @"su3", zhuyinListOpen, YES), key(125, down, arrowFlags), YES));
+    assert(session.lastCommand == MSIME_NEXT_CANDIDATE && session.asciiCalls == asciiBefore);
     appearance.vertical = NO;
     send(view(@6, @"su3", zhuyinComposing, NO), key(125, down, arrowFlags | NSEventModifierFlagShift), NO);
     assert(session.lastCommand != MSIME_OPEN_CANDIDATE_LIST);
