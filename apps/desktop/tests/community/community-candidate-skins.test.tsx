@@ -538,6 +538,36 @@ test("publish dialog: a preview write from a replaced client is ignored", async 
   expect(nextClient.packPreview).toHaveBeenCalledTimes(1);
 });
 
+test("preview generation ignores a same-tick duplicate submission", async () => {
+  const missing = catalog(["ink-wash"]);
+  missing.packages[0].preview = null;
+  const pending = deferred<SkinCatalog>();
+  const communityClient = client({
+    packPreview: vi.fn().mockRejectedValue({ code: "candidate_skin_preview_required" }),
+    addPreview: vi.fn().mockReturnValue(pending.promise),
+  });
+  renderSkinPreview.mockResolvedValue([137, 80, 78, 71]);
+  render(
+    <CandidateSkinPublishDialog
+      client={communityClient}
+      localSkins={vi.fn().mockResolvedValue(missing)}
+      initialSkinId="ink-wash"
+      readImage={vi.fn()}
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  const draw = await screen.findByRole("button", { name: "生成预览图" });
+  act(() => {
+    fireEvent.click(draw);
+    fireEvent.click(draw);
+  });
+  await waitFor(() => expect(communityClient.addPreview).toHaveBeenCalled());
+  expect(communityClient.addPreview).toHaveBeenCalledOnce();
+  pending.resolve(catalog(["ink-wash"]));
+  await settle();
+});
+
 test("publish dialog: without an image reader a missing preview is explained", async () => {
   const communityClient = client({
     packPreview: vi.fn().mockRejectedValue({ code: "candidate_skin_preview_required" }),
