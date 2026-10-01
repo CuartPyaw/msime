@@ -9,8 +9,8 @@ use crate::pinyin::active_helpcode::{
 use crate::pinyin::autocorrect::{autocorrect_cut_detail, looks_like_syllable_with_jianpin_tail};
 use crate::pinyin::segment::{is_complete_pinyin_input, join_segments, split_segments};
 use crate::shuangpin::query::{
-    detect_active_double_helpcode_length, is_complete_input, raw_length_for_effective_prefix,
-    remove_manual_delimiters,
+    detect_active_double_helpcode_length, effective_input_length, is_complete_input,
+    raw_length_for_effective_prefix, remove_manual_delimiters,
 };
 use crate::shuangpin::ShuangpinProfile;
 use crate::text::count_han_chars;
@@ -85,6 +85,35 @@ fn remove_delimiters(segmented: &str) -> String {
 /// A consumed prefix can leave the remainder starting with the separator that followed it.
 fn remove_consumed_leading_separators(raw: &str) -> &str {
     raw.trim_start_matches('\'')
+}
+
+/// Detect an active shuangpin helpcode without constructing the owned composition base. The
+/// candidate refresh path only needs this length to decide whether dynamic rows can move.
+fn active_shuangpin_helpcode_length(request: &QueryRequest, profile: &ShuangpinProfile) -> usize {
+    if !request.enable_shuangpin_helpcode {
+        return 0;
+    }
+    let raw = &request.raw_input;
+    let raw_with_cases = if request.raw_input_with_cases.is_empty() {
+        raw
+    } else {
+        &request.raw_input_with_cases
+    };
+    if effective_input_length(raw) == 0 {
+        return 0;
+    }
+    if detect_active_double_helpcode_length(raw, raw_with_cases, profile) == 2 {
+        return 2;
+    }
+    let length = effective_input_length(raw);
+    if length % 2 == 1 && length > 1 {
+        let raw_prefix_length = raw_length_for_effective_prefix(raw, length - 1);
+        let separated = raw.as_bytes().get(raw_prefix_length) == Some(&b'\'');
+        if !separated && is_complete_input(&raw[..raw_prefix_length], profile) {
+            return 1;
+        }
+    }
+    0
 }
 
 /// The canonical reading of a selected word, if it has one complete syllable per character (input_session_composition.cpp:76-96).
@@ -451,9 +480,7 @@ impl InputSession {
         match self.engine.current_scheme_type() {
             SchemeType::Wubi | SchemeType::JapaneseRomaji | SchemeType::Korean => false,
             SchemeType::Shuangpin => {
-                resolve_shuangpin_composition_base(request, self.shuangpin_profile())
-                    .helpcode_length
-                    > 0
+                active_shuangpin_helpcode_length(request, self.shuangpin_profile()) > 0
             }
             SchemeType::Quanpin => {
                 request.enable_quanpin_helpcode
@@ -645,5 +672,29 @@ mod tests {
             ..QueryRequest::default()
         };
         assert_eq!(build_quanpin_autocorrect_display(&request), "x");
+    }
+
+    #[test]
+    fn helpcode_length_matches_the_composition_base() {
+        let profile =
+            crate::shuangpin::profile::profile(crate::types::ShuangpinProfileKind::Xiaohe);
+        for (raw, raw_with_cases, enabled) in [
+            ("nihcAB", "nihcAB", true),
+            ("uiu", "uiu", true),
+            ("ui'u", "ui'u", true),
+            ("uiu", "uiu", false),
+        ] {
+            let request = QueryRequest {
+                raw_input: raw.to_owned(),
+                raw_input_with_cases: raw_with_cases.to_owned(),
+                enable_shuangpin_helpcode: enabled,
+                ..QueryRequest::default()
+            };
+            assert_eq!(
+                active_shuangpin_helpcode_length(&request, profile),
+                resolve_shuangpin_composition_base(&request, profile).helpcode_length,
+                "{raw}/{raw_with_cases}/{enabled}"
+            );
+        }
     }
 }
