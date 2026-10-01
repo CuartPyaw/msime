@@ -102,6 +102,7 @@ export function CandidateSkinPublishDialog({
   const clientGeneration = useRef(0);
   const packGeneration = useRef(0);
   const actionRunning = useRef(false);
+  const drawRunning = useRef(false);
   // The package whose name the form was filled from, so switching visibility re-checks the package without discarding a name the user typed.
   const namedSkin = useRef("");
 
@@ -182,7 +183,8 @@ export function CandidateSkinPublishDialog({
         )
       : undefined;
   const drawPreview = async () => {
-    if (!previewless || !readImage || drawing) return;
+    if (!previewless || !readImage || drawing || drawRunning.current) return;
+    drawRunning.current = true;
     const clientGenerationAtStart = clientGeneration.current;
     const packGenerationAtStart = packGeneration.current;
     setDrawing(true);
@@ -204,6 +206,7 @@ export function CandidateSkinPublishDialog({
       )
         setDrawFailed(true);
     } finally {
+      drawRunning.current = false;
       if (
         packGenerationAtStart === packGeneration.current &&
         clientGenerationAtStart === clientGeneration.current
