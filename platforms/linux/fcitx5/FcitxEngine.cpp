@@ -41,6 +41,7 @@
 #include "../src/core/CandidateSkinCatalog.h"
 #include "../src/core/GlobalTheme.h"
 #include "../src/core/DictionaryQuiesceLease.h"
+#include "../src/core/EmojiPluginGroups.h"
 #include "../src/core/RuntimeOptionsRefresh.h"
 #include "../src/core/FirstRunGuidance.h"
 #include "../src/core/InputModeIndicator.h"
@@ -147,6 +148,19 @@ Json response(char *raw) {
 }
 
 Json readOptions();
+
+// 读已安装符号集插件的组（`list_plugin_symbol_groups`）。读不出来时返回空列表，表情面板照常只显示内置目录。
+Json loadPluginSymbolGroups(const std::string &resources, const std::string &plugins) {
+  if (plugins.empty() || resources.empty()) return Json::array();
+  try {
+    const auto query = Json{{"limit", 1}, {"list_plugin_symbol_groups", true}, {"plugins", plugins}}.dump();
+    auto listed = response(msime_client_emoji_catalog_request(
+        reinterpret_cast<const uint8_t *>(query.data()), query.size(),
+        reinterpret_cast<const uint8_t *>(resources.data()), resources.size()));
+    if (listed.is_object()) return listed.value("plugin_symbol_groups", Json::array());
+  } catch (...) {}
+  return Json::array();
+}
 
 Json savePreference(const PendingPreferenceSave &request) {
   // Save where the locator points now, not where the session was opened: moving the data directory rewrites it, and a save must neither land in the old root while it is copied nor recreate it afterwards (core/DictionaryQuiesceLease.h). A held save fails and stays queued for retry.
@@ -505,9 +519,13 @@ public:
     emoji_group_.clear();
     emoji_groups_.clear();
     emoji_groups_job_ = {};
+    emoji_groups_loaded_ = false;
     emoji_group_index_ = 0;
-    emoji_offset_ = 0;
-    emoji_next_offset_ = 0;
+    emoji_plugin_group_.reset();
+    emoji_plugin_groups_.clear();
+    emoji_plugins_stale_ = true;
+    emoji_offset_ = {};
+    emoji_next_offset_ = {};
     emoji_complete_ = false;
     emoji_previous_offsets_.clear();
     if (voice_job_.valid() && !voice_socket_.empty() && voice_generation_ != 0) {
@@ -2204,6 +2222,9 @@ public:
           emoji_groups_.clear();
           for (const auto &item : result.value("groups", Json::array()))
             if (item.is_string() && !item.get<std::string>().empty()) emoji_groups_.push_back(item.get<std::string>());
+          if (result.contains("_plugin_groups"))
+            emoji_plugin_groups_ = msime::linux_host::parse_plugin_symbol_groups(result.at("_plugin_groups"));
+          emoji_groups_loaded_ = true;
         }
       }
       if (emoji_job_.valid()) {
@@ -2212,36 +2233,76 @@ public:
         emoji_job_ = {};
         const auto requestQuery = emoji_job_query_;
         emoji_job_query_.clear();
+        const bool current = result.is_object() && result.value("_generation", uint64_t{}) == emoji_generation_;
+        if (current && result.contains("_plugin_groups"))
+          emoji_plugin_groups_ = msime::linux_host::parse_plugin_symbol_groups(result.at("_plugin_groups"));
         if (ic_.hasFocus() && !restricted() && !privateInput() &&
-            requestQuery == emoji_search_ && result.is_object() &&
-            result.value("_generation", uint64_t{}) == emoji_generation_) {
-          emoji_items_ = result.value("items", Json::array());
-          emoji_next_offset_ = result.value("next_offset", emoji_offset_ + emoji_items_.size());
-          emoji_complete_ = result.value("complete", true);
+            requestQuery == emoji_search_ && current) {
+          // 内置目录的页之后接上符号集插件的条目；内置目录读不出来时只剩插件条目，没有插件时与原来的内置分页一致。
+          const auto pluginItems = msime::linux_host::plugin_emoji_items(
+              emoji_plugin_groups_, emoji_category_, emojiBuiltinGroup(), emoji_plugin_group_, requestQuery);
+          msime::linux_host::EmojiPage page;
+          if (emoji_offset_.plugin || emoji_plugin_group_) {
+            page = msime::linux_host::plugin_emoji_page(pluginItems, emoji_offset_.offset, kEmojiPageSize);
+          } else if (result.value("_builtin_failed", false)) {
+            page = msime::linux_host::merge_builtin_emoji_page(Json::array(), emoji_offset_.offset, true,
+                                                               pluginItems, kEmojiPageSize);
+          } else {
+            const auto items = result.value("items", Json::array());
+            page = msime::linux_host::merge_builtin_emoji_page(
+                items, result.value("next_offset", emoji_offset_.offset + items.size()),
+                result.value("complete", true), pluginItems, kEmojiPageSize);
+          }
+          emoji_items_ = std::move(page.items);
+          emoji_next_offset_ = page.next;
+          emoji_complete_ = page.complete;
         } else if (emoji_search_mode_ && requestQuery != emoji_search_ && ic_.hasFocus() &&
                    !restricted() && !privateInput()) {
           emoji_items_.clear();
-          requestEmojiPage(0);
+          requestEmojiPage({});
         }
       }
     } catch (...) { emoji_items_.clear(); }
   }
-  bool requestEmojiPage(size_t offset) {
+  static constexpr size_t kEmojiPageSize = 5;
+  // 交给 Host API 的内置分组名；选中插件组时内置目录不参与。
+  std::string emojiBuiltinGroup() const { return emoji_plugin_group_ ? std::string{} : emoji_group_; }
+  // 插件目录与 Host API 的 preferences_directory 是同一个状态目录；没有绝对路径时不读插件。
+  std::string emojiPluginsDirectory() const {
+    if (options_path_.empty() || options_path_.front() != '/') return {};
+    return (std::filesystem::path(options_path_) / "plugins").string();
+  }
+  bool requestEmojiPage(msime::linux_host::EmojiPageCursor cursor) {
     if (emoji_job_.valid() || resources_.empty()) return false;
     const auto resources = resources_;
     const auto category = emoji_category_;
-    const auto group = emoji_group_;
+    const auto group = emojiBuiltinGroup();
     const auto search = emoji_search_;
     const auto generation = emoji_generation_;
-    emoji_offset_ = offset;
+    // 插件阶段的游标或选中了插件组时不再查内置目录。
+    const bool builtin = !cursor.plugin && !emoji_plugin_group_;
+    const bool reloadPlugins = emoji_plugins_stale_ && (category == "symbols" || category == "kaomoji");
+    const auto plugins = reloadPlugins ? emojiPluginsDirectory() : std::string{};
+    if (reloadPlugins) emoji_plugins_stale_ = false;
+    emoji_offset_ = cursor;
     emoji_job_query_ = search;
-    emoji_job_ = detachedJob([resources, category, group, search, offset, generation] {
-      const auto query = Json{{"limit", 5}, {"offset", offset}, {"cursor", true},
-                              {"category", category}, {"group", group}, {"search", search}}.dump();
-      auto result = response(msime_client_emoji_catalog_request(
-          reinterpret_cast<const uint8_t *>(query.data()), query.size(),
-          reinterpret_cast<const uint8_t *>(resources.data()), resources.size()));
-      if (!result.is_object()) return Json::object();
+    emoji_job_ = detachedJob([resources, plugins, reloadPlugins, builtin, category, group, search, offset = cursor.offset,
+                              generation] {
+      auto result = Json::object();
+      if (reloadPlugins) result["_plugin_groups"] = loadPluginSymbolGroups(resources, plugins);
+      if (builtin) {
+        try {
+          const auto query = Json{{"limit", kEmojiPageSize}, {"offset", offset}, {"cursor", true},
+                                  {"category", category}, {"group", group}, {"search", search}}.dump();
+          auto page = response(msime_client_emoji_catalog_request(
+              reinterpret_cast<const uint8_t *>(query.data()), query.size(),
+              reinterpret_cast<const uint8_t *>(resources.data()), resources.size()));
+          if (page.is_object()) result.update(page);
+          else result["_builtin_failed"] = true;
+        } catch (...) {
+          result["_builtin_failed"] = true;
+        }
+      }
       result["_generation"] = generation;
       return result;
     });
@@ -2252,11 +2313,12 @@ public:
     emoji_search_mode_ = true;
     emoji_search_.clear();
     emoji_items_.clear();
-    emoji_offset_ = 0;
-    emoji_next_offset_ = 0;
+    emoji_offset_ = {};
+    emoji_next_offset_ = {};
     emoji_complete_ = false;
     emoji_previous_offsets_.clear();
-    if (!emoji_job_.valid()) requestEmojiPage(0);
+    emoji_plugins_stale_ = true;
+    if (!emoji_job_.valid()) requestEmojiPage({});
     render();
     return true;
   }
@@ -2276,7 +2338,7 @@ public:
       if (!text.empty()) { commitText(text, msime::linux_host::TypingSource::Local); return true; }
     }
     if (index != 0 || !emoji_items_.empty()) return false;
-    return requestEmojiPage(0);
+    return requestEmojiPage({});
   }
   bool nextEmojiPage() {
     if (restricted() || privateInput() || !ic_.hasFocus()) return false;
@@ -2301,41 +2363,55 @@ public:
         ? categories.front() : *std::next(it);
     emoji_group_.clear();
     emoji_groups_.clear();
+    emoji_groups_loaded_ = false;
     emoji_group_index_ = 0;
+    emoji_plugin_group_.reset();
+    emoji_plugins_stale_ = true;
     emoji_items_.clear();
-    emoji_offset_ = 0;
-    emoji_next_offset_ = 0;
+    emoji_offset_ = {};
+    emoji_next_offset_ = {};
     emoji_complete_ = false;
     emoji_previous_offsets_.clear();
-    return requestEmojiPage(0);
+    return requestEmojiPage({});
   }
   bool cycleEmojiGroup() {
     if (restricted() || privateInput() || !ic_.hasFocus() || emoji_job_.valid() ||
         emoji_groups_job_.valid()) return false;
-    if (emoji_groups_.empty()) {
+    const auto count = msime::linux_host::emoji_group_count(emoji_groups_, emoji_plugin_groups_, emoji_category_);
+    if (!emoji_groups_loaded_ || count == 0) {
       if (resources_.empty()) return false;
       const auto resources = resources_;
       const auto category = emoji_category_;
       const auto generation = emoji_generation_;
-      emoji_groups_job_ = detachedJob([resources, category, generation] {
-        const auto query = Json{{"limit", 1}, {"list_groups", true}, {"category", category}}.dump();
-        auto result = response(msime_client_emoji_catalog_request(
-            reinterpret_cast<const uint8_t *>(query.data()), query.size(),
-            reinterpret_cast<const uint8_t *>(resources.data()), resources.size()));
-        if (!result.is_object()) return Json::object();
+      // 内置分组和插件组一起读，分组循环看到的是同一时刻的插件列表；内置目录读不出来时插件组照样可选。
+      const bool withPlugins = category == "symbols" || category == "kaomoji";
+      const auto plugins = withPlugins ? emojiPluginsDirectory() : std::string{};
+      emoji_groups_job_ = detachedJob([resources, category, generation, withPlugins, plugins] {
+        auto result = Json::object();
+        try {
+          const auto query = Json{{"limit", 1}, {"list_groups", true}, {"category", category}}.dump();
+          auto listed = response(msime_client_emoji_catalog_request(
+              reinterpret_cast<const uint8_t *>(query.data()), query.size(),
+              reinterpret_cast<const uint8_t *>(resources.data()), resources.size()));
+          if (listed.is_object()) result["groups"] = listed.value("groups", Json::array());
+        } catch (...) {}
+        if (withPlugins) result["_plugin_groups"] = loadPluginSymbolGroups(resources, plugins);
         result["_generation"] = generation;
         return result;
       });
       return false;
     }
-    emoji_group_index_ = (emoji_group_index_ + 1) % (emoji_groups_.size() + 1);
-    emoji_group_ = emoji_group_index_ == 0 ? std::string{} : emoji_groups_.at(emoji_group_index_ - 1);
+    emoji_group_index_ = (emoji_group_index_ + 1) % (count + 1);
+    const auto choice = msime::linux_host::emoji_group_choice(emoji_groups_, emoji_plugin_groups_,
+                                                              emoji_category_, emoji_group_index_);
+    emoji_group_ = choice.label;
+    emoji_plugin_group_ = choice.plugin;
     emoji_items_.clear();
-    emoji_offset_ = 0;
-    emoji_next_offset_ = 0;
+    emoji_offset_ = {};
+    emoji_next_offset_ = {};
     emoji_complete_ = false;
     emoji_previous_offsets_.clear();
-    return requestEmojiPage(0);
+    return requestEmojiPage({});
   }
   void hideVoiceOverlay() {
     if (wave_overlay_surface_ && wave_overlay_visible_)
@@ -3268,11 +3344,17 @@ public:
   std::vector<std::string> emoji_groups_;
   std::shared_future<Json> emoji_groups_job_;
   uint64_t emoji_generation_ = 0;
+  bool emoji_groups_loaded_ = false;
   size_t emoji_group_index_ = 0;
-  size_t emoji_offset_ = 0;
-  size_t emoji_next_offset_ = 0;
+  // 已安装符号集插件的组（插件目录是 preferences_directory 下的 plugins），在切换目录、开始搜索和读取分组时重新读取，装卸插件后下次打开就能看到。
+  std::vector<msime::linux_host::PluginSymbolGroup> emoji_plugin_groups_;
+  bool emoji_plugins_stale_ = true;
+  // 分组循环选中的插件组；选中内置分组或「全部」时为空。
+  std::optional<msime::linux_host::PluginGroupKey> emoji_plugin_group_;
+  msime::linux_host::EmojiPageCursor emoji_offset_;
+  msime::linux_host::EmojiPageCursor emoji_next_offset_;
   bool emoji_complete_ = false;
-  std::vector<size_t> emoji_previous_offsets_;
+  std::vector<msime::linux_host::EmojiPageCursor> emoji_previous_offsets_;
   std::string voice_socket_;
   std::string voice_language_ = "zh-cn";
   Json voice_options_ = Json::object();
@@ -6400,11 +6482,11 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
     if (sym == FcitxKey_BackSpace) {
       if (!emoji_search_.empty()) emoji_search_.pop_back();
       emoji_items_.clear();
-      emoji_offset_ = 0;
-      emoji_next_offset_ = 0;
+      emoji_offset_ = {};
+      emoji_next_offset_ = {};
       emoji_complete_ = false;
       emoji_previous_offsets_.clear();
-      if (!emoji_job_.valid()) requestEmojiPage(0);
+      if (!emoji_job_.valid()) requestEmojiPage({});
       render();
       return true;
     }
@@ -6424,11 +6506,11 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
          (searchText[0] >= '0' && searchText[0] <= '9') || searchText == " ")) {
       if (emoji_search_.size() < 256) emoji_search_.append(searchText);
       emoji_items_.clear();
-      emoji_offset_ = 0;
-      emoji_next_offset_ = 0;
+      emoji_offset_ = {};
+      emoji_next_offset_ = {};
       emoji_complete_ = false;
       emoji_previous_offsets_.clear();
-      if (!emoji_job_.valid()) requestEmojiPage(0);
+      if (!emoji_job_.valid()) requestEmojiPage({});
       render();
       return true;
     }
