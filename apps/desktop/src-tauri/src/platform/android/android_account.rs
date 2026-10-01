@@ -1301,6 +1301,27 @@ fn apply_frequency_preferences(
     Ok(())
 }
 
+fn apply_input_scheme(
+    preferences: &mut Preferences,
+    values: &BTreeMap<String, AccountPreferenceValue>,
+    schema: &AccountPreferenceSchema,
+) -> Result<(), AccountError> {
+    if let Some(value) = string_setting(values, "input.schema")? {
+        if supports_schema_field(schema, "input.schema", "string")? {
+            // A scheme this host does not offer (a newer device's Cantonese, Zhuyin or Vietnamese) keeps the local one rather than refusing the whole sync, so the rest of the document still applies.
+            preferences.scheme = match value.as_str() {
+                "quanpin" => InputScheme::Quanpin,
+                "shuangpin" => InputScheme::Shuangpin,
+                "wubi" => InputScheme::Wubi,
+                "japanese" => InputScheme::Japanese,
+                "korean" => InputScheme::Korean,
+                _ => preferences.scheme,
+            };
+        }
+    }
+    Ok(())
+}
+
 fn apply_local_account_preferences(
     snapshot: &PreferencesSnapshot,
     cloud: &AccountPreferences,
@@ -1319,18 +1340,7 @@ fn apply_local_account_preferences(
     }
     let mut preferences = snapshot.preferences.clone();
     let values = &cloud.settings;
-    if let Some(value) = string_setting(values, "input.schema")? {
-        if supports_schema_field(schema, "input.schema", "string")? {
-            preferences.scheme = match value.as_str() {
-                "quanpin" => InputScheme::Quanpin,
-                "shuangpin" => InputScheme::Shuangpin,
-                "wubi" => InputScheme::Wubi,
-                "japanese" => InputScheme::Japanese,
-                "korean" => InputScheme::Korean,
-                _ => return Err(AccountError::Invalid),
-            };
-        }
-    }
+    apply_input_scheme(&mut preferences, values, schema)?;
     if let Some(value) = string_setting(values, "input.character_set")? {
         if supports_schema_field(schema, "input.character_set", "string")? {
             preferences.traditional_chinese_output = match value.as_str() {
@@ -1644,11 +1654,12 @@ pub async fn mobile_keyboard_feedback_preview(
 #[cfg(test)]
 mod tests {
     use super::{
-        account_input_schema, apply_frequency_preferences, frequency_account_preferences,
-        AccountPreferenceSchema, AccountPreferenceValue, FrequencyMode, FrequencyPreferences,
-        InputScheme, Preferences,
+        account_input_schema, apply_frequency_preferences, apply_input_scheme,
+        frequency_account_preferences, AccountPreferenceSchema, AccountPreferenceValue,
+        FrequencyMode, InputScheme, Preferences,
     };
     use msime_client_core::account::AccountPreferenceField;
+    use msime_client_core::preferences::FrequencyPreferences;
     use std::collections::BTreeMap;
 
     fn frequency_schema() -> AccountPreferenceSchema {
@@ -1738,5 +1749,48 @@ mod tests {
         ] {
             assert_eq!(account_input_schema(scheme), schema, "{scheme:?}");
         }
+    }
+
+    #[test]
+    fn an_unknown_cloud_scheme_keeps_the_local_one_and_the_rest_applies() {
+        let mut schema = frequency_schema();
+        schema.fields.insert(
+            "input.schema".into(),
+            AccountPreferenceField {
+                value_type: "string".into(),
+            },
+        );
+        for unknown in ["cantonese", "zhuyin", "vietnamese", "esperanto"] {
+            let mut values = frequency_account_preferences(&FrequencyPreferences {
+                mode: FrequencyMode::Linear,
+                trigger_count: 7,
+                linear_step: 4,
+            });
+            values.insert(
+                "input.schema".into(),
+                AccountPreferenceValue::String(unknown.into()),
+            );
+            let mut preferences = Preferences {
+                scheme: InputScheme::Wubi,
+                ..Preferences::default()
+            };
+            apply_input_scheme(&mut preferences, &values, &schema).unwrap();
+            apply_frequency_preferences(&mut preferences, &values, &schema).unwrap();
+            assert_eq!(preferences.scheme, InputScheme::Wubi, "{unknown}");
+            assert_eq!(
+                preferences.frequency.mode,
+                FrequencyMode::Linear,
+                "{unknown}"
+            );
+        }
+
+        let mut values = BTreeMap::new();
+        values.insert(
+            "input.schema".into(),
+            AccountPreferenceValue::String("korean".into()),
+        );
+        let mut preferences = Preferences::default();
+        apply_input_scheme(&mut preferences, &values, &schema).unwrap();
+        assert_eq!(preferences.scheme, InputScheme::Korean);
     }
 }

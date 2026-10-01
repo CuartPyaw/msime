@@ -199,7 +199,8 @@ impl IosPreferencePlan {
                 )
             }
             Some("korean") => Some("korean".into()),
-            Some(_) => return Err(AccountError::Invalid),
+            // A scheme this host does not offer (a newer device's Cantonese, Zhuyin or Vietnamese) keeps the local one rather than refusing the whole sync, so the rest of the document still applies.
+            Some(_) => None,
         };
         let traditional_chinese_output =
             match string_setting(values, "input.character_set")?.as_deref() {
@@ -687,6 +688,40 @@ mod tests {
         plan.apply_shared(&native, &mut preferences).unwrap();
         assert_eq!(preferences.scheme, InputScheme::Shuangpin);
         assert_eq!(preferences.shuangpin_profile, ShuangpinProfile::Microsoft);
+    }
+
+    #[test]
+    fn an_unknown_cloud_scheme_keeps_the_local_one_and_the_rest_applies() {
+        for unknown in ["cantonese", "zhuyin", "vietnamese", "esperanto"] {
+            let cloud = AccountPreferences {
+                revision: 11,
+                settings: BTreeMap::from([
+                    (
+                        "input.schema".into(),
+                        AccountPreferenceValue::String(unknown.into()),
+                    ),
+                    (
+                        "input.character_set".into(),
+                        AccountPreferenceValue::String("traditional".into()),
+                    ),
+                ]),
+            };
+            let plan = IosPreferencePlan::from_cloud(&cloud).unwrap();
+            let mut native = native();
+            native.input_scheme = "wubi".into();
+            native.traditional_chinese_output = false;
+            let requested = plan.requested_native(&native).unwrap();
+            assert_eq!(requested.input_scheme, "wubi", "{unknown}");
+            assert!(requested.traditional_chinese_output, "{unknown}");
+
+            let mut preferences = Preferences {
+                scheme: InputScheme::Wubi,
+                ..Preferences::default()
+            };
+            plan.apply_shared(&requested, &mut preferences).unwrap();
+            assert_eq!(preferences.scheme, InputScheme::Wubi, "{unknown}");
+            assert!(preferences.traditional_chinese_output, "{unknown}");
+        }
     }
 
     #[test]
