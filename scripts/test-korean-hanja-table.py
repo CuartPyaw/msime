@@ -2,6 +2,8 @@
 """Check the committed Korean Hanja table (crates/engine/src/korean/hanja.tsv) against the rules msime-dict-build hanja writes it by.
 
 The table is generated from libhangul's hanja.txt, which the sources lock pins, and committed so the engine can embed it. Nothing rebuilds it in CI, so a hand edit or a generator change committed without regenerating would otherwise ship unnoticed. The invariants are checked on every run without network. When the pinned source is already in the dict-builder cache (target/dictionary-sources/hanja/hanja.txt, the --cache path the release workflow uses) and matches the lock's size and SHA-256, the table is also recomputed from it and compared byte for byte; without the cache that part prints a skip line, because fetching 6 MB is not something a contract check should do.
+
+The table is BSD-3-Clause and compiled into the engine every platform ships, so the check also requires each platform's notice channel to name the licence file.
 """
 import hashlib
 import json
@@ -14,6 +16,17 @@ TABLE = ROOT / "crates/engine/src/korean/hanja.tsv"
 LOCK = ROOT / "resources/dictionary-sources.lock.json"
 LICENSE = ROOT / "resources/licenses/libhangul-hanja-BSD-3-Clause.txt"
 CACHE = ROOT / "target/dictionary-sources"
+# BSD-3-Clause clause 2: every binary distribution carries the notice. The table is compiled into the engine, which every platform ships, so each platform's notice channel has to name the licence file on a live (non-comment) line.
+NOTICE_CHANNELS = {
+    "platforms/windows/Collect-Notices.ps1": "Windows: the notice collection the installer ships",
+    "platforms/macos/CMakeLists.txt": "macOS: the input method bundle's Resources/Licenses",
+    "platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt": "macOS: the notice overview",
+    "platforms/linux/CMakeLists.txt": "Linux: the installed notices",
+    "platforms/linux/data/THIRD_PARTY_NOTICES.txt": "Linux: the notice overview",
+    "platforms/android/build-native.sh": "Android: the native notices both APKs package as assets/native-notices",
+    "platforms/ios/project.yml": "iOS: the app's bundled resources",
+    "platforms/harmony/stage-resources.sh": "HarmonyOS: the licences staged into the HAP",
+}
 SOURCE = "hanja/hanja.txt"
 COMMIT = "717409ce61524bb3d8426060a384822f21354c62"
 failures = []
@@ -90,6 +103,9 @@ def main() -> int:
     pinned = [entry for entry in lock["files"] if entry["path"] == SOURCE]
     check(len(pinned) == 1, f"{SOURCE} is not pinned exactly once in the sources lock")
     check(LICENSE.is_file() and "Choe Hwanjin" in LICENSE.read_text(encoding="utf-8"), "the libhangul BSD-3-Clause text is missing from resources/licenses")
+    for channel, description in NOTICE_CHANNELS.items():
+        live = [line for line in (ROOT / channel).read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith("#")]
+        check(any(LICENSE.name in line for line in live), f"{channel} ({description}) does not ship {LICENSE.name}")
     if len(pinned) == 1:
         entry = pinned[0]
         check(f"/libhangul/libhangul/{COMMIT}/data/hanja/hanja.txt" in entry["url"], f"the lock no longer pins libhangul {COMMIT}; update this check together with the table")
