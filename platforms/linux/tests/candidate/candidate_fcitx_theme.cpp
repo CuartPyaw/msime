@@ -451,6 +451,15 @@ int main() {
   assert(host::fcitx_candidate_theme(wechat_dark, true, std::nullopt, std::nullopt) ==
          host::fcitx_candidate_theme(wechat_dark, true));
   assert(host::fcitx_candidate_theme(wechat_dark, true, std::nullopt, 16.0) != host::fcitx_candidate_theme(wechat_dark, true));
+  // The selected row keeps its 6 px corners on any card at least that round, and follows a tighter card the user chose down to square.
+  const auto highlight_at = [&](double radius, bool user_radius = true) {
+    return image_in(host::fcitx_candidate_theme(wechat_dark, true, std::nullopt, radius, std::nullopt, user_radius),
+                    "InputPanel/Highlight");
+  };
+  assert(highlight_at(16.0) == image_in(theme, "InputPanel/Highlight") && highlight_at(6.0) == highlight_at(16.0));
+  assert(highlight_at(3.0) != highlight_at(6.0) && highlight_at(0.0) != highlight_at(3.0));
+  // A skin package's tight radius leaves the highlight at the 6 px it was drawn with before the setting existed.
+  assert(highlight_at(0.0, false) == highlight_at(16.0) && highlight_at(3.0, false) == highlight_at(16.0));
   assert(host::fcitx_png_height(png(48)) == 48);
   assert(!host::fcitx_png_height("GIF89a" + std::string(32, '\0')));
   assert(!host::fcitx_png_height(png(0)));

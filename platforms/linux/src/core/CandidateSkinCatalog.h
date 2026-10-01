@@ -132,4 +132,21 @@ inline std::optional<double> candidate_skin_corner_radius(const nlohmann::json &
   return radius;
 }
 
+// The card radius the user set in the settings (`candidate_corner_radius`, 0-32), or none to leave it to the skin and the host. The shared layer omits the key when it is unset and rejects values out of range; anything else in the file is ignored here rather than trusted.
+inline std::optional<double> candidate_corner_radius_preference(const nlohmann::json &preferences) {
+  if (!preferences.is_object()) return std::nullopt;
+  const auto value = preferences.find("candidate_corner_radius");
+  if (value == preferences.end() || !value->is_number()) return std::nullopt;
+  const auto radius = value->get<double>();
+  if (!std::isfinite(radius) || radius < 0 || radius > 32) return std::nullopt;
+  return radius;
+}
+
+// The card radius Fcitx5 draws: the user's own value wins over the drawn skin's, and with neither the host keeps its design radius.
+inline std::optional<double> candidate_corner_radius(const nlohmann::json &preferences, const nlohmann::json &catalog,
+                                                     std::string_view drawn) {
+  if (const auto radius = candidate_corner_radius_preference(preferences)) return radius;
+  return candidate_skin_corner_radius(catalog, drawn);
+}
+
 }  // namespace msime::linux_host
