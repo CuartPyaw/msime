@@ -186,6 +186,31 @@ pub(super) fn receive_google_callback(
     }
 }
 
+/// The page the browser is left on after the redirect. Every field is a constant from [`answer_callback`], never text from the request, so it is substituted into the template without escaping.
+struct CallbackPage {
+    /// The status badge's colour: `success`, `neutral` or `warning`, a class in the template.
+    tone: &'static str,
+    /// Path data for the badge's 16×16 stroked glyph.
+    icon: &'static str,
+    title: &'static str,
+    message: &'static str,
+}
+
+const CALLBACK_TEMPLATE: &str = include_str!("google_callback.html");
+const CHECK_ICON: &str = "M3.5 8.5l3 3 6-7";
+const DASH_ICON: &str = "M4 8h8";
+const ALERT_ICON: &str = "M8 3.5v5.5M8 12.25v.25";
+
+impl CallbackPage {
+    fn render(&self) -> String {
+        CALLBACK_TEMPLATE
+            .replace("{{tone}}", self.tone)
+            .replace("{{icon}}", self.icon)
+            .replace("{{title}}", self.title)
+            .replace("{{message}}", self.message)
+    }
+}
+
 fn answer_callback(
     mut stream: TcpStream,
     state: &str,
@@ -196,20 +221,49 @@ fn answer_callback(
     let outcome = head.as_deref().map_or(GoogleCallback::Ignored, |head| {
         parse_google_callback(head, state)
     });
-    let (status, message) = match &outcome {
+    let (status, page) = match &outcome {
         // The backend has not exchanged the code yet, so the page cannot claim the sign-in succeeded; the app reports the outcome.
-        GoogleCallback::Code(_) => ("200 OK", "已收到 Google 授权，请返回水杉输入法。"),
-        GoogleCallback::Failed(AccountError::Cancelled) => {
-            ("200 OK", "已取消 Google 登录，请返回水杉输入法。")
-        }
-        GoogleCallback::Failed(_) => ("200 OK", "Google 登录未完成，请返回水杉输入法重试。"),
-        GoogleCallback::Ignored => ("404 Not Found", "页面不存在。"),
+        GoogleCallback::Code(_) => (
+            "200 OK",
+            CallbackPage {
+                tone: "success",
+                icon: CHECK_ICON,
+                title: "已收到 Google 授权",
+                message: "请回到水杉输入法，登录会在那里完成。",
+            },
+        ),
+        GoogleCallback::Failed(AccountError::Cancelled) => (
+            "200 OK",
+            CallbackPage {
+                tone: "neutral",
+                icon: DASH_ICON,
+                title: "已取消 Google 登录",
+                message: "请回到水杉输入法，需要时可以重新登录。",
+            },
+        ),
+        GoogleCallback::Failed(_) => (
+            "200 OK",
+            CallbackPage {
+                tone: "warning",
+                icon: ALERT_ICON,
+                title: "Google 登录未完成",
+                message: "请回到水杉输入法重试。",
+            },
+        ),
+        GoogleCallback::Ignored => (
+            "404 Not Found",
+            CallbackPage {
+                tone: "neutral",
+                icon: DASH_ICON,
+                title: "页面不存在",
+                message: "这个地址只用于接收 Google 登录的回调。",
+            },
+        ),
     };
-    let body = format!(
-        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>水杉输入法</title></head><body style=\"font-family:system-ui,sans-serif;margin:4rem auto;max-width:32rem;text-align:center\"><p>{message}</p></body></html>"
-    );
+    let body = page.render();
+    // The page carries its own styles and an inline SVG and nothing else, so the policy allows exactly that: no script, no request off the loopback.
     let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     // The browser page is a courtesy; the outcome stands even if the browser already went away.

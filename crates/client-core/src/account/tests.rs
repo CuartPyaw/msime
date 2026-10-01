@@ -1446,7 +1446,12 @@ fn google_sign_in_waits_for_the_matching_loopback_redirect() {
                 );
                 assert!(page.starts_with("HTTP/1.1 200 OK\r\n"));
                 assert!(page.contains("Content-Type: text/html; charset=utf-8"));
-                assert!(page.contains("请返回水杉输入法"));
+                assert!(page.contains("已收到 Google 授权"));
+                assert!(page.contains("请回到水杉输入法"));
+                assert!(!page.contains("{{"), "every template placeholder is filled");
+                // The page is self-contained: no script runs and nothing is fetched.
+                assert!(page.contains("Content-Security-Policy: default-src 'none';"));
+                assert!(!page.contains("<script"));
                 // The code has not been exchanged yet, so the page must not claim success.
                 assert!(!page.contains("登录已完成"));
                 assert!(!page.contains("4/0Afixture-code"));
