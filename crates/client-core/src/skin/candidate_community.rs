@@ -945,6 +945,100 @@ pub fn pack_as(
     })
 }
 
+/// Give the installed package `id` under `root`, which has no `preview`, the preview image `bytes` (a PNG or JPEG within [`MAX_PREVIEW_BYTES`]) so it can be shared. The image is written under a name the package does not use yet and `preview` is added as the manifest's first key, leaving every other line as the author wrote it. Returns the image's path in the package.
+///
+/// A decorated package without its own decoration image is refused: the catalog draws its preview in the decoration band, so a preview added to it would change how the skin looks.
+pub fn add_preview(root: &Path, id: &str, bytes: &[u8]) -> Result<String, &'static str> {
+    let summary = catalog::load_package(root, id).map_err(|_| PACKAGE)?;
+    if SERVER_BUILTIN_IDS.contains(&id) || summary.preview.is_some() {
+        return Err(PACKAGE);
+    }
+    if summary.decoration_top_dip > 0.0
+        && summary.decoration_width_dip > 0.0
+        && summary.decoration_image.is_none()
+    {
+        return Err(PACKAGE);
+    }
+    let extension = if magic_matches("image/png", bytes) {
+        "png"
+    } else if magic_matches("image/jpeg", bytes) {
+        "jpg"
+    } else {
+        return Err(IMAGE_INVALID);
+    };
+    if bytes.len() > MAX_PREVIEW_BYTES {
+        return Err(TOO_LARGE);
+    }
+    let directory = root.join(id);
+    let manifest_path = directory.join(MANIFEST_FILE);
+    let input = fs::File::open(&manifest_path).map_err(|_| PACKAGE)?;
+    let original = crate::bounded_io::read_bounded_file_with(
+        input,
+        MAX_MANIFEST_BYTES as u64,
+        || TOO_LARGE,
+        |_| PACKAGE,
+    )?;
+    let text = std::str::from_utf8(&original).map_err(|_| PACKAGE)?;
+    let taken: BTreeSet<String> = referenced_images(&summary)?
+        .iter()
+        .map(|path| path.to_ascii_lowercase())
+        .collect();
+    let name = (1..100)
+        .map(|index| match index {
+            1 => format!("preview.{extension}"),
+            _ => format!("preview-{index}.{extension}"),
+        })
+        .find(|name| {
+            !taken.contains(name)
+                && matches!(
+                    fs::symlink_metadata(directory.join(name)),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                )
+        })
+        .ok_or(STORAGE)?;
+    // A top-level key is valid TOML only before the first table header, so it goes first, after a byte order mark if the file has one.
+    let body = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let bom = &text[..text.len() - body.len()];
+    let manifest = format!("{bom}preview = \"{name}\"\n{body}");
+    if manifest.len() > MAX_MANIFEST_BYTES {
+        return Err(TOO_LARGE);
+    }
+    let image_path = directory.join(&name);
+    let mut image = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&image_path)
+        .map_err(|_| STORAGE)?;
+    let undo_image = || {
+        let _ = fs::remove_file(&image_path);
+    };
+    if image
+        .write_all(bytes)
+        .and_then(|()| image.sync_all())
+        .is_err()
+    {
+        undo_image();
+        return Err(STORAGE);
+    }
+    let staged = directory.join(".skin.toml.preview");
+    if fs::write(&staged, &manifest)
+        .and_then(|()| fs::rename(&staged, &manifest_path))
+        .is_err()
+    {
+        let _ = fs::remove_file(&staged);
+        undo_image();
+        return Err(STORAGE);
+    }
+    match catalog::load_package(root, id) {
+        Ok(updated) if updated.preview.as_deref() == Some(name.as_str()) => Ok(name),
+        _ => {
+            let _ = fs::write(&manifest_path, &original);
+            undo_image();
+            Err(PACKAGE)
+        }
+    }
+}
+
 /// Server `candidateRequestDigest`: SHA-256 over the name, description and manifest, each followed by a NUL, then for each file in byte order of its path the path, a NUL, the hex SHA-256 of its original bytes and a newline. It identifies content by what was uploaded, so it survives the server re-encoding every image. `files` are in standard base64, as a request carries them.
 pub fn request_digest(
     name: &str,

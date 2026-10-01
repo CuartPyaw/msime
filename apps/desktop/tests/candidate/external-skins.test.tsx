@@ -1220,6 +1220,7 @@ test("the theme page opens the candidate publish dialog outside the settings fie
       fileCount: 1,
       size: 4096,
     }),
+    addPreview: vi.fn(),
     publish: vi.fn(),
     rate: vi.fn(),
     unpublish: vi.fn(),

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { errorCode } from "../core/error-code";
 import type { SkinCatalog } from "../skin/external-skins";
+import type { SkinImageReader } from "../skin/skin-image";
 import { CandidateSkinPublishDialog } from "./candidate-skin-publish-dialog";
 import { candidateSkinMessage, communityNeedsSignIn, communityRating } from "./community-helpers";
 import { useCommunityGallery, type CommunityGalleryClient } from "./community-gallery";
@@ -77,6 +78,8 @@ export interface CandidateSkinCommunityClient {
     skinId: string,
     visibility: CandidateSkinVisibility,
   ): Promise<CandidateSkinPackPreview>;
+  /** Saves `bytes`, a PNG or JPEG preview the page drew, into the installed package `skinId`, which has none, and answers with the rescanned catalog. */
+  addPreview(skinId: string, bytes: number[]): Promise<SkinCatalog>;
   /** A package sync already keeps in the library is updated in place, so publishing never leaves a second copy. */
   publish(
     skinId: string,
@@ -189,6 +192,7 @@ export function CommunityCandidateSkinsPage({
   client,
   localSkins,
   openSkinDirectory,
+  readSkinImage,
   onOpenSkinPage,
   onInstalled,
   onLogin,
@@ -197,6 +201,7 @@ export function CommunityCandidateSkinsPage({
   /** The installed packages: the publish choices, and how an install learns it would replace one. */
   localSkins?: () => Promise<SkinCatalog>;
   openSkinDirectory?: () => Promise<void>;
+  readSkinImage?: SkinImageReader;
   /** Opens 主题, where an installed package is enabled; the community page sits outside the settings form and never writes preferences itself. */
   onOpenSkinPage?: () => void;
   /** Called once a package lands in the external skin directory, so a listing of that directory can scan again. */
@@ -548,6 +553,7 @@ export function CommunityCandidateSkinsPage({
           client={client}
           localSkins={localSkins}
           openSkinDirectory={openSkinDirectory}
+          readImage={readSkinImage}
           onClose={() => setPublishOpen(false)}
           onPublished={publishDone}
           onLogin={

@@ -354,6 +354,7 @@ export function SkinSettingsPage() {
           localSkins={client.scanSkinCatalog}
           initialSkinId={publishSkinId}
           openSkinDirectory={client.openSkinDirectory}
+          readImage={client.readSkinImage}
           onClose={() => setPublishSkinId(null)}
           onPublished={(skin) => {
             setPublishSkinId(null);
