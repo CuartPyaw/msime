@@ -790,6 +790,8 @@ function AccountDetailsPage({
   useEffect(() => {
     const generation = ++clientGeneration.current;
     mounted.current = true;
+    googleWaitingRef.current = false;
+    setGoogleWaiting(false);
     setBusy(false);
     return () => {
       mounted.current = false;
@@ -1020,17 +1022,21 @@ function AccountDetailsPage({
 
   const signInWithApple = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       if (!client.appleLogin) throw { code: "account_unavailable" };
       const result = await client.appleLogin();
+      if (!mounted.current || generation !== clientGeneration.current) return;
       if (!result.user) throw { code: "account_unavailable" };
       setUser(result.user);
-      await loadProfile();
+      await loadProfile(generation);
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setNotice("登录成功。");
       onLoginComplete?.();
     });
 
   const signInWithGoogle = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       if (!client.googleLogin) throw { code: "account_unavailable" };
       googleWaitingRef.current = true;
       setGoogleWaiting(true);
@@ -1038,12 +1044,16 @@ function AccountDetailsPage({
       try {
         result = await client.googleLogin();
       } finally {
-        googleWaitingRef.current = false;
-        if (mounted.current) setGoogleWaiting(false);
+        if (mounted.current && generation === clientGeneration.current) {
+          googleWaitingRef.current = false;
+          setGoogleWaiting(false);
+        }
       }
+      if (!mounted.current || generation !== clientGeneration.current) return;
       if (!result.user) throw { code: "account_unavailable" };
       setUser(result.user);
-      await loadProfile();
+      await loadProfile(generation);
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setNotice("登录成功。");
       onLoginComplete?.();
     });
