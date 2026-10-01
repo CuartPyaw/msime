@@ -978,6 +978,72 @@ fn cantonese_is_unavailable_without_its_dictionary() {
 }
 
 #[test]
+fn zhuyin_is_unavailable_without_its_dictionary() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 6;
+    let error = Session::new(&value).err().expect("no zhuyin.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    value.zhuyin_dictionary = dir.path().join("missing.db").to_str().unwrap().to_owned();
+    let error = Session::new(&value).err().expect("missing zhuyin.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    assert!(!dir.path().join("missing.db").exists());
+}
+
+#[test]
+fn zhuyin_command_sixteen_opens_a_list_whose_selection_commits_nothing() {
+    use crate::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("zhuyin.db");
+    let connection = Connection::open(&path).unwrap();
+    connection.execute_batch(SCHEMA).unwrap();
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('ㄋㄧˇ');\
+             INSERT INTO entries VALUES ('ㄋㄧˇ','你',1000),('ㄋㄧˇ','妳',300);",
+        )
+        .unwrap();
+    drop(connection);
+    let mut value = options(dir.path());
+    value.scheme = 6;
+    value.zhuyin_dictionary = path.to_str().unwrap().to_owned();
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"su3");
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.preedit, "你");
+    assert_eq!(snapshot.reading, "你");
+    assert_eq!(snapshot.editing_text, "su3");
+    assert!(!snapshot.candidate_list_open);
+
+    assert!(session.command(Command::ConvertHanja).unwrap().handled);
+    let snapshot = session.snapshot().unwrap();
+    assert!(snapshot.candidate_list_open);
+    assert_eq!(snapshot.candidates, ["你", "妳"]);
+
+    let result = session.select(1).unwrap();
+    assert!(result.handled);
+    assert!(!result.has_commit);
+    let snapshot = session.snapshot().unwrap();
+    assert!(!snapshot.candidate_list_open);
+    assert_eq!(snapshot.preedit, "妳");
+
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert_eq!((result.handled, result.commit.as_str()), (true, "妳"));
+}
+
+#[test]
 fn commit_raw_applies_windows_english_learning_policy() {
     let dir = tempfile::tempdir().unwrap();
     let value = options(dir.path());

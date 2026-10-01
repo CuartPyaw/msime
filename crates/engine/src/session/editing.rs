@@ -210,11 +210,12 @@ impl InputSession {
             | SchemeType::JapaneseRomaji
             | SchemeType::Korean
             | SchemeType::Cantonese
+            | SchemeType::Zhuyin
             | SchemeType::Vietnamese => Vec::new(),
         }
     }
 
-    /// Clamped to the editing text; recomputes the prefix candidates. Korean has no caret inside its open syllable, so the caret stays at the end.
+    /// Clamped to the editing text; recomputes the prefix candidates. Korean has no caret inside its open syllable and Zhuyin none inside its conversion, so the caret stays at the end.
     pub(super) fn set_caret(&mut self, caret: Option<usize>) {
         if self.engine.current_scheme_type().locks_caret()
             && !self.dedicated_english

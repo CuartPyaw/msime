@@ -15,6 +15,9 @@ use crate::user_dictionary::journal::is_user_inserted;
 
 impl InputSession {
     pub(super) fn select_candidate(&mut self, index: usize) -> KeyResult {
+        if let Some(result) = self.select_in_open_list(index) {
+            return result;
+        }
         if !self.has_composition() || index >= self.candidates().len() {
             return KeyResult::unhandled();
         }
@@ -22,6 +25,10 @@ impl InputSession {
     }
 
     pub(super) fn select_candidate_edge(&mut self, index: usize, edge: CandidateEdge) -> KeyResult {
+        // A row of an editor-owned list is a choice for the conversion, not text to commit, so its edge characters are not either.
+        if let Some(result) = self.select_in_open_list(index) {
+            return result;
+        }
         if !self.has_composition() {
             return KeyResult::unhandled();
         }
@@ -40,6 +47,23 @@ impl InputSession {
         self.reset_composition();
         self.chain.reset();
         KeyResult::committed(character)
+    }
+
+    /// Choosing a row of an openable list whose rows stay in the editor (Zhuyin): the row's text replaces its span of the conversion, the list closes and nothing is committed. Unhandled when there is no such row. `None` when no such list is open; the Korean Hanja list commits its row through `commit`.
+    fn select_in_open_list(&mut self, index: usize) -> Option<KeyResult> {
+        if !self.candidate_list_open() || !self.zhuyin_rules_apply() {
+            return None;
+        }
+        let selected = self.engine.select_zhuyin(index);
+        self.update_mixed_candidates();
+        Some(match selected {
+            Ok(true) => {
+                self.online_requests.invalidate();
+                KeyResult::handled()
+            }
+            Ok(false) => KeyResult::unhandled(),
+            Err(error) => KeyResult::handled().with_diagnostic(Some(error.to_string())),
+        })
     }
 
     /// Commit segment by segment until nothing is composing. An open Korean Hanja list is closed first, so finishing (punctuation, leaving the client, a host's finish key) commits the Hangul: only an explicit choice commits a Hanja.
@@ -70,6 +94,16 @@ impl InputSession {
     pub(super) fn commit(&mut self, index: usize) -> KeyResult {
         // A selection made while a caret prefix is decoded leaves prefix mode: the rest of the composition decodes whole again.
         self.caret = None;
+        // A Zhuyin commit is the converted text, whatever the list shows: its rows are choices inside the conversion, made through `select_in_open_list`. The pending syllable is dropped, nothing is learned, and a composition that converted nothing yet commits nothing.
+        if self.zhuyin_rules_apply() {
+            let text = self.engine.take_zhuyin_text();
+            self.reset_composition();
+            self.chain.reset();
+            if text.is_empty() {
+                return KeyResult::handled();
+            }
+            return KeyResult::committed(text);
+        }
         let selected = self.candidates().get(index).cloned();
         // A Korean commit is the chosen Hanja or the Hangul itself, and nothing about it is learned: the rows are keyed by Dubeolsik letters, which every learning path below would read as pinyin. A Vietnamese commit is the displayed word, learned nowhere either.
         // A Cantonese commit is learned nowhere either. A row that covers only the leading syllables commits at once and the letters after it keep composing (`holds_phrase_progress` is false), so there is no phrase being built to hold.

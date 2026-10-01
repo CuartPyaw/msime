@@ -3150,3 +3150,220 @@ fn cantonese_caret_edits_keep_the_shown_syllables() {
     assert_eq!(session.snapshot().editing_text, "ngo i");
     assert_eq!(words(&session), ["我"]);
 }
+
+/// A `zhuyin.db` with the rows the Zhuyin session tests read, written with the shipped schema.
+fn zhuyin_dictionary(directory: &Path) -> PathBuf {
+    use crate::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let path = directory.join("zhuyin.db");
+    let connection = Connection::open(&path).expect("zhuyin.db");
+    connection.execute_batch(SCHEMA).expect("zhuyin schema");
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .expect("zhuyin metadata");
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('ㄋㄧˇ'),('ㄏㄠˇ'),('ㄊㄞˊ'),('ㄨㄢ');\
+             INSERT INTO entries VALUES ('ㄋㄧˇ','你',1000),('ㄋㄧˇ','妳',300),('ㄏㄠˇ','好',2000),('ㄏㄠˇ','郝',10),('ㄋㄧˇ ㄏㄠˇ','你好',500),('ㄊㄞˊ','台',900),('ㄊㄞˊ','臺',400),('ㄨㄢ','彎',500),('ㄨㄢ','灣',300),('ㄊㄞˊ ㄨㄢ','臺灣',800),('ㄊㄞˊ ㄨㄢ','台灣',600);",
+        )
+        .expect("zhuyin rows");
+    path
+}
+
+fn zhuyin_session(fixture: &Fixture) -> Session {
+    fixture.session_with(|options| {
+        options.scheme = SchemeType::Zhuyin;
+        options.zhuyin_dictionary = zhuyin_dictionary(fixture.path());
+    })
+}
+
+#[test]
+fn zhuyin_without_its_dictionary_is_unavailable() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let error = Session::new({
+        let mut options = fixture.options();
+        options.scheme = SchemeType::Zhuyin;
+        options
+    })
+    .err()
+    .expect("no zhuyin.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+
+    let mut session = fixture.session();
+    type_text(&mut session, "nihao");
+    assert!(session.switch_scheme(SchemeType::Zhuyin).is_err());
+    assert_eq!(session.snapshot().scheme, SchemeType::Quanpin);
+    assert_eq!(session.snapshot().preedit, "nihao");
+
+    // With the file in place the switch goes through, and switching away and back opens it again.
+    let mut session = fixture.session_with(|options| {
+        options.zhuyin_dictionary = zhuyin_dictionary(fixture.path());
+    });
+    session.switch_scheme(SchemeType::Zhuyin).unwrap();
+    session.switch_scheme(SchemeType::Quanpin).unwrap();
+    session.switch_scheme(SchemeType::Zhuyin).unwrap();
+    type_text(&mut session, "su3cl3");
+    assert_eq!(session.snapshot().preedit, "你好");
+}
+
+#[test]
+fn zhuyin_composes_and_reports_its_spelling_symbols() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = zhuyin_session(&fixture);
+    // Idle, the tone digits and Space type themselves.
+    assert_eq!(session.snapshot().spelling_symbols, "125890,./;-");
+    assert!(!session.character(b'3', false).handled);
+    assert!(!session.character(b' ', false).handled);
+
+    type_text(&mut session, "su3cl");
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.preedit, "你ㄏㄠ");
+    assert_eq!(snapshot.editing_text, "su3cl");
+    assert_eq!(snapshot.caret_position, 5);
+    assert_eq!(snapshot.spelling_symbols, "1234567890,./;- ");
+    // Nothing is listed until the user opens the list.
+    assert!(snapshot.candidates.is_empty());
+    assert!(!snapshot.candidate_list_open);
+    // A tone digit on the candidate-key route spells.
+    assert!(session.candidate_key(b'3').handled);
+    assert_eq!(session.snapshot().preedit, "你好");
+    // The caret stays at the end.
+    assert!(session.command(Command::MoveLeft).commit.is_some());
+    assert!(session.snapshot().preedit.is_empty());
+}
+
+#[test]
+fn zhuyin_list_selection_pins_without_committing_or_learning() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Zhuyin;
+        options.zhuyin_dictionary = zhuyin_dictionary(fixture.path());
+        options.learning = true;
+        options.personal_context = true;
+    });
+    let journal = table_counts(&fixture.journal());
+    let main = table_counts(&fixture.main_db());
+
+    type_text(&mut session, "su3cl3");
+    assert!(session.command(Command::ConvertHanja).handled);
+    let snapshot = session.snapshot();
+    assert!(snapshot.candidate_list_open);
+    assert_eq!(snapshot.spelling_symbols, "0,./;-");
+    assert_eq!(words(&session), ["你好", "好", "郝"]);
+    // Rows come from the read-only zhuyin.db: none can be pinned, removed or fixed.
+    assert!(!session.pin(1).handled);
+    assert!(!session.remove(0).handled);
+    assert!(!session.fix_position(1, 1).handled);
+
+    // A selection digit with the list open is left for the runtime to select with.
+    let digit = session.character(b'3', false);
+    assert!(!digit.handled && digit.commit.is_none());
+    let space = session.character(b' ', false);
+    assert!(!space.handled && space.commit.is_none());
+
+    let selected = session.select(2);
+    assert!(selected.handled);
+    assert_eq!(selected.commit, None);
+    let snapshot = session.snapshot();
+    assert!(!snapshot.candidate_list_open);
+    assert!(snapshot.candidates.is_empty());
+    assert_eq!(snapshot.preedit, "你郝");
+
+    // The candidate-key route selects too, and the edge route chooses rather than commits.
+    session.command(Command::ConvertHanja);
+    assert!(session.candidate_key(b'2').handled);
+    assert_eq!(session.snapshot().preedit, "你好");
+    session.command(Command::ConvertHanja);
+    let edge = session.select_edge(2, CandidateEdge::FirstHan);
+    assert!(edge.handled && edge.commit.is_none());
+    assert_eq!(session.snapshot().preedit, "你郝");
+    // With the list open CommitCandidate chooses the first row.
+    session.command(Command::ConvertHanja);
+    let first = session.command(Command::CommitCandidate);
+    assert!(first.handled && first.commit.is_none());
+    assert_eq!(session.snapshot().preedit, "你好");
+
+    // With the list closed it commits the converted text.
+    assert_eq!(
+        session.command(Command::CommitCandidate).commit.as_deref(),
+        Some("你好")
+    );
+    assert!(session.snapshot().preedit.is_empty());
+    drop(session);
+    crate::flush_personal_learning();
+    assert_eq!(table_counts(&fixture.journal()), journal);
+    assert_eq!(table_counts(&fixture.main_db()), main);
+}
+
+#[test]
+fn zhuyin_cancel_and_backspace_close_the_list_first() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = zhuyin_session(&fixture);
+    type_text(&mut session, "w96j0 ");
+    assert_eq!(session.snapshot().preedit, "臺灣");
+    session.command(Command::ConvertHanja);
+    assert_eq!(words(&session), ["臺灣", "台灣", "彎", "灣"]);
+    assert!(session.command(Command::Cancel).handled);
+    assert!(!session.snapshot().candidate_list_open);
+    assert_eq!(session.snapshot().preedit, "臺灣");
+    session.command(Command::ConvertHanja);
+    assert!(session.command(Command::Backspace).handled);
+    assert!(!session.snapshot().candidate_list_open);
+    assert_eq!(session.snapshot().preedit, "臺灣");
+    // A phonetic key closes the list and keeps composing.
+    session.command(Command::ConvertHanja);
+    assert!(session.character(b's', false).handled);
+    assert!(!session.snapshot().candidate_list_open);
+    assert_eq!(session.snapshot().preedit, "臺灣ㄋ");
+    assert!(session.command(Command::Backspace).handled);
+    assert_eq!(session.snapshot().preedit, "臺灣");
+    assert!(session.command(Command::Cancel).handled);
+    assert!(session.snapshot().preedit.is_empty());
+    assert!(!session.command(Command::Cancel).handled);
+}
+
+#[test]
+fn zhuyin_enter_shift_punctuation_and_other_keys_commit() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = zhuyin_session(&fixture);
+    // Enter commits the conversion and drops the pending syllable.
+    type_text(&mut session, "su3c");
+    assert_eq!(
+        session.command(Command::CommitRaw).commit.as_deref(),
+        Some("你")
+    );
+    assert!(session.snapshot().preedit.is_empty());
+
+    // A Shift punctuation key commits the text with its full-width mark on either route, even idle.
+    type_text(&mut session, "su3");
+    let marked = session.punctuation(b'<');
+    assert!(marked.handled);
+    assert_eq!(marked.commit.as_deref(), Some("你，"));
+    let idle = session.character(b'?', false);
+    assert!(idle.handled);
+    assert_eq!(idle.commit.as_deref(), Some("？"));
+
+    // A phonetic punctuation key spells on the punctuation route.
+    assert!(session.punctuation(b',').handled);
+    assert_eq!(session.snapshot().preedit, "ㄝ");
+    session.command(Command::Cancel);
+
+    // Other ASCII punctuation finishes the composition ahead of its mark.
+    type_text(&mut session, "su3");
+    let finished = session.punctuation(b'!');
+    assert!(finished.handled);
+    assert!(finished.commit.as_deref().unwrap().starts_with('你'));
+    assert!(session.snapshot().preedit.is_empty());
+
+    // A key the editor does not claim commits the text and goes to the host.
+    type_text(&mut session, "su3");
+    let capital = session.character(b'A', true);
+    assert!(!capital.handled);
+    assert_eq!(capital.commit.as_deref(), Some("你"));
+    assert!(session.snapshot().preedit.is_empty());
+}

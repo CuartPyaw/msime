@@ -480,6 +480,7 @@ impl InputSession {
             SchemeType::JapaneseRomaji
             | SchemeType::Korean
             | SchemeType::Cantonese
+            | SchemeType::Zhuyin
             | SchemeType::Vietnamese => self.raw_with_cases().to_owned(),
             SchemeType::Shuangpin if self.shuangpin_preedit_uses_raw => {
                 with_trailing_separator(if request.raw_segmentation.is_empty() {
@@ -499,8 +500,11 @@ impl InputSession {
         match self.engine.current_scheme_type() {
             SchemeType::Wubi => request.valid,
             SchemeType::JapaneseRomaji => convert_romaji(&request.raw_input).complete,
-            // Hangul, Jyutping and Vietnamese are not pinyin.
-            SchemeType::Korean | SchemeType::Cantonese | SchemeType::Vietnamese => false,
+            // Hangul, Jyutping, bopomofo and Vietnamese are not pinyin.
+            SchemeType::Korean
+            | SchemeType::Cantonese
+            | SchemeType::Zhuyin
+            | SchemeType::Vietnamese => false,
             SchemeType::Shuangpin => {
                 let profile = self.shuangpin_profile();
                 let base = resolve_shuangpin_composition_base(request, profile);
@@ -538,6 +542,7 @@ impl InputSession {
             | SchemeType::JapaneseRomaji
             | SchemeType::Korean
             | SchemeType::Cantonese
+            | SchemeType::Zhuyin
             | SchemeType::Vietnamese => false,
             SchemeType::Shuangpin => {
                 active_shuangpin_helpcode_length(request, self.shuangpin_profile()) > 0

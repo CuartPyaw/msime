@@ -1,4 +1,4 @@
-//! The providers, one per scheme family (`R/providers/provider_registry.cpp`, `pinyin_candidate_provider.cpp`): pinyin (quanpin and shuangpin engines), wubi and Japanese. Korean syllables are the text, so a Korean query answers nothing until the user opens the Hanja list, and then the embedded Hanja table (`korean::hanja`) answers it. Cantonese is answered by `cantonese.db`, which is opened the first time the scheme is activated and then kept for the session.
+//! The providers, one per scheme family (`R/providers/provider_registry.cpp`, `pinyin_candidate_provider.cpp`): pinyin (quanpin and shuangpin engines), wubi and Japanese. Korean syllables are the text, so a Korean query answers nothing until the user opens the Hanja list, and then the embedded Hanja table (`korean::hanja`) answers it. Cantonese is answered by `cantonese.db`, which is opened the first time the scheme is activated and then kept for the session. Zhuyin's editor reads `zhuyin.db` itself while it converts, so the registry only opens that file on activation and hands the connection to the scheme being built; its list rows reach the session through the scheme, never through `query`.
 //!
 //! The registry answers queries and lookups only. The reference also routed `create_word` / `update_weight_by_pinyin_and_word` / `delete_by_pinyin_and_word` through it; here the session writes pins, removals and frequency learning into user_dictionary itself, choosing the dictionary kind from the selected row's scheme (overlays.md §3.3), and phrases through its own canonical-pinyin `QuanpinEngine`, so a second writer path would only diverge from it.
 
@@ -11,6 +11,7 @@ use crate::error::Result;
 use crate::helpcode::SharedKeymap;
 use crate::japanese::JapaneseProvider;
 use crate::korean::hanja;
+use crate::language_dictionary::{self, LanguageDictionary};
 use crate::paths::RuntimePaths;
 use crate::quanpin::QuanpinEngine;
 use crate::shuangpin::profile::profile;
@@ -27,6 +28,10 @@ pub struct ProviderRegistry {
     /// Where `cantonese.db` is; empty when the host has none.
     cantonese_path: PathBuf,
     cantonese: Option<CantoneseDictionary>,
+    /// Where `zhuyin.db` is; empty when the host has none.
+    zhuyin_path: PathBuf,
+    /// `zhuyin.db` opened by `activate` and not yet taken by a Zhuyin scheme.
+    zhuyin: Option<LanguageDictionary>,
 }
 
 impl ProviderRegistry {
@@ -35,6 +40,7 @@ impl ProviderRegistry {
         profile_kind: ShuangpinProfileKind,
         paths: &RuntimePaths,
         cantonese_path: PathBuf,
+        zhuyin_path: PathBuf,
     ) -> Self {
         Self {
             quanpin: QuanpinEngine::new(paths),
@@ -44,15 +50,29 @@ impl ProviderRegistry {
             keymap: None,
             cantonese_path,
             cantonese: None,
+            zhuyin_path,
+            zhuyin: None,
         }
     }
 
-    /// Opens what `scheme` reads before it becomes active: `cantonese.db` for Cantonese, once per session, failing as `CantoneseDictionary::open` does when the file is missing or of an unknown version. Nothing for the other schemes.
+    /// Opens what `scheme` reads before it becomes active: `cantonese.db` for Cantonese, once per session, and `zhuyin.db` for Zhuyin, once per Zhuyin scheme built, failing as `language_dictionary::open_read_only` does when the file is missing or of an unknown version. Nothing for the other schemes.
     pub fn activate(&mut self, scheme: SchemeType) -> Result<()> {
         if scheme == SchemeType::Cantonese && self.cantonese.is_none() {
             self.cantonese = Some(CantoneseDictionary::open(&self.cantonese_path)?);
         }
+        if scheme == SchemeType::Zhuyin && self.zhuyin.is_none() {
+            self.zhuyin = Some(language_dictionary::open_read_only(&self.zhuyin_path)?);
+        }
         Ok(())
+    }
+
+    /// Hands the `zhuyin.db` connection `activate` opened to the Zhuyin scheme about to be built; `None` for any other scheme, and for Zhuyin when it has not been activated since the last one was built.
+    pub fn take_dictionary(&mut self, scheme: SchemeType) -> Option<LanguageDictionary> {
+        if scheme == SchemeType::Zhuyin {
+            self.zhuyin.take()
+        } else {
+            None
+        }
     }
 
     /// The syllable inventory of the open `cantonese.db`; `None` until Cantonese has been activated.
@@ -80,8 +100,8 @@ impl ProviderRegistry {
             SchemeType::JapaneseRomaji => return self.japanese.query(request),
             SchemeType::Korean if request.korean_hanja => return hanja::candidates(request),
             SchemeType::Cantonese => return self.cantonese_candidates(request),
-            // Vietnamese composes its text in the preedit and has no candidates.
-            SchemeType::Korean | SchemeType::Vietnamese => return Vec::new(),
+            // Vietnamese composes its text in the preedit and has no candidates; the Zhuyin list comes from its editor.
+            SchemeType::Korean | SchemeType::Zhuyin | SchemeType::Vietnamese => return Vec::new(),
         };
         for item in &mut candidates {
             item.scheme = request.scheme;
@@ -89,7 +109,7 @@ impl ProviderRegistry {
         candidates
     }
 
-    /// Wubi, Japanese, Korean, Cantonese and Vietnamese never answer a lookup (wubi_candidate_provider.h:19-22; the Japanese one read the dropped `japanese_lexicon`).
+    /// Wubi, Japanese, Korean, Cantonese, Zhuyin and Vietnamese never answer a lookup (wubi_candidate_provider.h:19-22; the Japanese one read the dropped `japanese_lexicon`).
     pub fn find_candidate(&self, scheme: SchemeType, key: &str, value: &str) -> Option<WordItem> {
         match scheme {
             SchemeType::Quanpin => self.quanpin.find_candidate(key, value),
@@ -98,6 +118,7 @@ impl ProviderRegistry {
             | SchemeType::JapaneseRomaji
             | SchemeType::Korean
             | SchemeType::Cantonese
+            | SchemeType::Zhuyin
             | SchemeType::Vietnamese => None,
         }
     }
@@ -112,7 +133,10 @@ impl ProviderRegistry {
             SchemeType::Wubi => self.wubi.reset_cache(),
             SchemeType::JapaneseRomaji => self.japanese.reset_cache(),
             // `cantonese.db` is read-only and its rows are never rewritten, so there is no cache to drop.
-            SchemeType::Korean | SchemeType::Cantonese | SchemeType::Vietnamese => {}
+            SchemeType::Korean
+            | SchemeType::Cantonese
+            | SchemeType::Zhuyin
+            | SchemeType::Vietnamese => {}
         }
     }
 
@@ -133,8 +157,11 @@ impl ProviderRegistry {
                     .cache_dynamic_candidate(&request.raw_input, word, source),
                 _ => false,
             },
-            // Korean, Cantonese and Vietnamese take no online rows.
-            SchemeType::Korean | SchemeType::Cantonese | SchemeType::Vietnamese => false,
+            // Korean, Cantonese, Zhuyin and Vietnamese take no online rows.
+            SchemeType::Korean
+            | SchemeType::Cantonese
+            | SchemeType::Zhuyin
+            | SchemeType::Vietnamese => false,
         }
     }
 
@@ -153,6 +180,7 @@ impl ProviderRegistry {
             | SchemeType::JapaneseRomaji
             | SchemeType::Korean
             | SchemeType::Cantonese
+            | SchemeType::Zhuyin
             | SchemeType::Vietnamese => false,
         }
     }

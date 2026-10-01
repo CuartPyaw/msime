@@ -19,6 +19,8 @@ use super::snapshot::{dump_journal, query_rows, result_json, scrub, snapshot_jso
 
 /// The file name a scenario fixture stages `cantonese.db` under, beside the resource set's own files.
 const CANTONESE_DICTIONARY: &str = "cantonese.db";
+/// The file name a scenario fixture stages `zhuyin.db` under, beside the resource set's own files.
+const ZHUYIN_DICTIONARY: &str = "zhuyin.db";
 
 pub const SCENARIO_ENV: &str = "MSIME_GOLDEN_SCENARIO";
 
@@ -331,6 +333,7 @@ fn scheme_from(name: &str) -> SchemeType {
         "korean" => SchemeType::Korean,
         "cantonese" => SchemeType::Cantonese,
         "vietnamese" => SchemeType::Vietnamese,
+        "zhuyin" => SchemeType::Zhuyin,
         _ => panic!("unknown scheme {name}"),
     }
 }
@@ -445,10 +448,14 @@ impl Scenario {
         });
         let mut options = self.options.clone();
         options.paths = self.paths.clone();
-        // `cantonese.db` ships beside the resource set, so a fixture that stages one hands its path to the session as a host would.
+        // `cantonese.db` and `zhuyin.db` ship beside the resource set, so a fixture that stages one hands its path to the session as a host would.
         let cantonese = self.resources.join(CANTONESE_DICTIONARY);
         if cantonese.exists() {
             options.cantonese_dictionary = cantonese;
+        }
+        let zhuyin = self.resources.join(ZHUYIN_DICTIONARY);
+        if zhuyin.exists() {
+            options.zhuyin_dictionary = zhuyin;
         }
         self.session = Some(Session::new(options).unwrap_or_else(|error| {
             panic!(
@@ -819,7 +826,7 @@ mod tests {
     #[test]
     fn every_scenario_is_selected_in_name_order_without_a_filter() {
         let all = selected_scenarios_from(None);
-        assert_eq!(all.len(), 279);
+        assert_eq!(all.len(), 294);
         let mut sorted = all.clone();
         sorted.sort();
         assert_eq!(all, sorted);

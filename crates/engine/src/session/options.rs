@@ -24,6 +24,8 @@ pub struct SessionOptions {
     pub vietnamese_tone_style: VietnameseToneStyle,
     /// Where `cantonese.db` is; empty when the host has none. Read only when Cantonese is activated, which fails without it.
     pub cantonese_dictionary: PathBuf,
+    /// Where `zhuyin.db` is; empty when the host has none. Read only when Zhuyin is activated, which fails without it.
+    pub zhuyin_dictionary: PathBuf,
     pub helpcode_schema: String,
     /// `autocorrect_type` bits; 0 keeps the user's spelling. Either of transposition and neighbor also enables missing and extra letters, and on inputs of three or more complete syllables offers a sentence that reads one syllable as a typo. Committing the raw letters while a correction is offered turns correction off for that exact input.
     pub autocorrect_types: u32,
@@ -63,6 +65,7 @@ impl SessionOptions {
             vietnamese_input_method: VietnameseInputMethod::Telex,
             vietnamese_tone_style: VietnameseToneStyle::Modern,
             cantonese_dictionary: PathBuf::new(),
+            zhuyin_dictionary: PathBuf::new(),
             helpcode_schema: "lantian".to_owned(),
             autocorrect_types: 0,
             helpcode: true,

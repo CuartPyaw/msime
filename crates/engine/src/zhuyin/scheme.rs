@@ -7,6 +7,7 @@ use super::layout::{self, DACHEN_SYMBOLS, IDLE_SYMBOLS, SHIFT_PUNCTUATION};
 use super::syllable::PendingSyllable;
 use crate::error::Result;
 use crate::language_dictionary::{LanguageDictionary, LanguageEntry};
+use crate::types::{QueryRequest, SchemeType};
 
 /// The non-letter keys the editor still claims while the list is open: the phonetic keys that are not selection digits. Digits 1–9 and Space go to selection.
 pub const LIST_OPEN_SYMBOLS: &str = "0,./;-";
@@ -173,6 +174,26 @@ impl ZhuyinScheme {
         let mut reading = self.converted_text();
         reading.push_str(&self.pending.bopomofo());
         reading
+    }
+
+    /// What the session shows and tests for a composition: the reading, which is empty exactly when nothing is composing.
+    pub fn preedit(&self) -> String {
+        self.reading()
+    }
+
+    /// The request the session keeps for the composition. Nothing is queried with it, since the list rows come from the editor itself; `raw_input` is the typed keys the caret-locked editing text shows and `normalized_segmentation` the reading the snapshot draws.
+    pub fn build_request(&self) -> QueryRequest {
+        let keys = self.editing_text();
+        QueryRequest {
+            scheme: SchemeType::Zhuyin,
+            raw_input: keys.clone(),
+            raw_input_with_cases: keys.clone(),
+            normalized_input: keys.clone(),
+            raw_segmentation: keys,
+            normalized_segmentation: self.reading(),
+            valid: self.is_composing(),
+            ..QueryRequest::default()
+        }
     }
 
     pub fn converted_text(&self) -> String {
