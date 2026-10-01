@@ -16,6 +16,7 @@ use msime_client_core::community::resource_library::{
 };
 use msime_client_core::preferences::TouchKeyboardSkinDesign;
 use msime_client_core::skin::ai::{AiSkinError, AiSkinProposal, BackendAiSkinService};
+use msime_client_core::skin::category::SkinCategory;
 use msime_client_core::skin::community::{
     BackendCommunitySkinService, CommunitySkin, CommunitySkinPage,
 };
@@ -282,9 +283,11 @@ pub async fn community_skin_list(
     offset: usize,
     search: String,
     mine: Option<bool>,
+    // 不传或为 null 时列出全部分类。
+    category: Option<SkinCategory>,
 ) -> Result<CommunitySkinPage, crate::CommandError> {
     service_call(Arc::clone(&state.community), move |service| {
-        service.list(offset, &search, mine.unwrap_or(false))
+        service.list(offset, &search, mine.unwrap_or(false), category)
     })
     .await
 }
@@ -351,10 +354,25 @@ pub async fn community_skin_publish(
     name: String,
     description: String,
     design: TouchKeyboardSkinDesign,
+    // 不传时不发送分类，由服务端归入默认分类。
+    category: Option<SkinCategory>,
 ) -> Result<(), crate::CommandError> {
     let id = community_id(&id)?;
     service_call(Arc::clone(&state.community), move |service| {
-        service.publish(id, &name, &description, &design)
+        service.publish(id, &name, &description, &design, category)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn community_skin_set_category(
+    state: State<'_, MobileCommunityState>,
+    id: String,
+    category: SkinCategory,
+) -> Result<CommunitySkin, crate::CommandError> {
+    let id = community_id(&id)?;
+    service_call(Arc::clone(&state.community), move |service| {
+        service.set_category(id, category)
     })
     .await
 }
