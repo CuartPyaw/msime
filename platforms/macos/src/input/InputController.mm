@@ -264,7 +264,7 @@ static BOOL MSIMECommitCountsAsTyping(id context) {
     return ![counts isKindOfClass:NSNumber.class] || [counts boolValue];
 }
 
-// Whether the Engine takes this character as input in the view's state: View.spelling_symbols lists the non-letter keys the active mode spells with (digits and operators in expression mode, digits in Unicode mode) and, with nothing composed, the keys that open a mode (/ and @). Such a key belongs to the Engine even where this host would otherwise read it as a candidate digit, a paging key or a punctuation shortcut.
+// Whether the Engine takes this character as input in the view's state: View.spelling_symbols lists the non-letter keys the active mode spells with (digits and operators in expression mode, digits in Unicode mode, Zhuyin's bopomofo and tone keys including Space, Cantonese's syllable apostrophe) and, with nothing composed, the keys that open a mode (/ and @). Such a key belongs to the Engine even where this host would otherwise read it as a candidate digit, a paging key or a punctuation shortcut.
 static BOOL MSIMESpellingSymbol(NSDictionary *view, unichar character) {
     NSString *symbols = [view isKindOfClass:NSDictionary.class] ? view[@"spelling_symbols"] : nil;
     if (![symbols isKindOfClass:NSString.class] || character == 0 || character > 0x7F) return NO;
@@ -694,6 +694,15 @@ static BOOL MSIMECandidateListTrigger(NSEvent *event, NSDictionary *view) {
     if ((event.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagShift | NSEventModifierFlagOption |
                                 NSEventModifierFlagCommand)) != NSEventModifierFlagOption) return NO;
     if (!MSIMESchemeTrait(view, msime::mac::scheme::OpensCandidateList)) return NO;
+    id editing = view[@"editing_text"];
+    return [editing isKindOfClass:NSString.class] && [editing length] > 0;
+}
+// Down with no modifier while a Zhuyin conversion composes and its list is closed: libchewing's key for opening the candidate list. It belongs to the input method whatever the arrow navigation binding says, because with the list closed there is no highlight for that binding to move and nothing else to do with the key. Once the list is open Down moves the highlight as in every other list.
+static BOOL MSIMECandidateListDownKey(NSEvent *event, NSDictionary *view) {
+    if (event.type != NSEventTypeKeyDown || event.keyCode != 125) return NO;
+    if (event.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagShift | NSEventModifierFlagOption |
+                               NSEventModifierFlagCommand)) return NO;
+    if (!MSIMESchemeRulesApply(view) || MSIMEViewScheme(view) != msime::mac::scheme::Zhuyin || MSIMECandidateListOpen(view)) return NO;
     id editing = view[@"editing_text"];
     return [editing isKindOfClass:NSString.class] && [editing length] > 0;
 }
@@ -5437,6 +5446,12 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
         if (transition) [self apply:transition];
         return YES;
     }
+    // Down opens a closed Zhuyin list (MSIMECandidateListDownKey). It is decided before the arrow navigation below, which with its binding off would finish the conversion and hand the key to the application.
+    if (MSIMECandidateListDownKey(event, _view)) {
+        NSDictionary *transition = [_session command:MSIME_OPEN_CANDIDATE_LIST error:nil];
+        if (transition) [self apply:transition];
+        return YES;
+    }
     if (event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption)) {
         [self apply:[_session command:MSIME_FINISH_COMPOSITION error:nil]];
         return NO;
@@ -5548,7 +5563,9 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
             return YES;
         }
     }
-    if (_panel.isVisible && event.keyCode == 49 &&
+    // A scheme that spells with Space (Zhuyin's first tone while a syllable is pending) gets it as a character: the key is input, not the selection of a highlighted item.
+    const BOOL spaceIsSpelling = event.keyCode == 49 && MSIMESpellingSymbol(_view, ' ');
+    if (_panel.isVisible && event.keyCode == 49 && !spaceIsSpelling &&
         !(event.modifierFlags & (NSEventModifierFlagShift | NSEventModifierFlagControl |
                                  NSEventModifierFlagOption | NSEventModifierFlagCommand))) {
         // Space commits the highlighted item shown by the panel. Keep the
@@ -5591,8 +5608,10 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     // below. See handleJapaneseConversionKey: for why the two keys cannot be the shared ones.
     if ([self handleJapaneseConversionKey:event client:sender]) return YES;
     // The reference sends `{` down its punctuation path and closes it with `}` (`_GetPairedPunctuationClosingFor`), whether or not a composition is live, and the Linux host does the same. The Engine answers `{` on its ASCII route: while composing it commits the candidate followed by `{`, and idle it leaves the key alone, so the host commits the opening mark itself. The mark is not in MSIMEPunctuationPairs because a symbol candidate that is exactly `{` is not paired by the reference.
-    // A scheme outside the Chinese punctuation table (`uses_chinese_punctuation`: Korean, Vietnamese) ignores the Chinese punctuation switch, so its `{` is the Engine's plain ASCII mark.
-    if ([event.characters isEqualToString:@"{"] && !(MSIMESchemeRulesApply(_view) && !msime::mac::scheme::UsesChinesePunctuation(MSIMEViewScheme(_view))) &&
+    // A scheme outside the Chinese punctuation table (`uses_chinese_punctuation`: Korean, Vietnamese) ignores the Chinese punctuation switch, so its `{` is the Engine's plain ASCII mark. Zhuyin's Shift overlay turns `{` into 『 in the Engine whatever the switches say, so its `{` is the Engine's as well.
+    if ([event.characters isEqualToString:@"{"] &&
+        !(MSIMESchemeRulesApply(_view) && (!msime::mac::scheme::UsesChinesePunctuation(MSIMEViewScheme(_view)) ||
+                                           MSIMEViewScheme(_view) == msime::mac::scheme::Zhuyin)) &&
         !(event.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand)) &&
         _appearance.runtimeChinesePunctuation && _appearance.pairedPunctuation && !_pendingPairedClosing &&
         !MSIMEPairedPunctuationExcludedHost()) {
@@ -5629,7 +5648,7 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
         // With an opened candidate list (the Korean Hanja list) showing, Return chooses the highlighted Hanja, as Space does; only the session knows the highlight, so the command is the candidate one (msime_client.h). Otherwise Return writes the syllable out and breaks the line.
         case 36: case 76: command = MSIMECandidateListOpen(_view) ? MSIME_COMMIT_CANDIDATE : MSIME_COMMIT_RAW; break;
         case 53: [self flushPendingPairedClosing]; _pairedPunctuation.clear(); command = MSIME_CANCEL; break;
-        case 49: command = MSIME_COMMIT_CANDIDATE; break;
+        case 49: if (!spaceIsSpelling) command = MSIME_COMMIT_CANDIDATE; break;
         case 123: command = MSIME_MOVE_LEFT; break;
         case 124: command = MSIME_MOVE_RIGHT; break;
         case 115: command = _panel.isVisible ? MSIME_FIRST_CANDIDATE : MSIME_MOVE_HOME; break;

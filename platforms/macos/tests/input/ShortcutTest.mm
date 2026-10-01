@@ -2474,6 +2474,117 @@ static void TestSchemeTraitsFromView(MSIMEAppearancePreferences *appearance) {
     session.nextTransition = nil;
 }
 
+// Keys a scheme spells with reach the Engine as characters before the host reads them as a candidate digit, a paging key, Space's selection or a paired mark, and Down opens a closed Zhuyin list. The views are what the runtime publishes for each state (design 3.3: Zhuyin's spelling symbols idle, composing and with the list open).
+static void TestSchemeKeyRouting() {
+    NSString *suite = [@"app.msime.test.scheme-key-routing." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *appearance = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    appearance.englishMode = NO;
+    [appearance applySharedCandidatePreferences:@{@"navigation": @{@"minus_equal": @YES, @"arrows": @NO}}];
+    assert([appearance navigationEnabled:@"minus_equal"] && ![appearance navigationEnabled:@"arrows"]);
+    assert(appearance.pairedPunctuation && appearance.runtimeChinesePunctuation);
+    ModeController *controller = [ModeController alloc];
+    ShortcutSession *session = [ShortcutSession new];
+    ShortcutClient *client = [ShortcutClient new];
+    client.document = @"";
+    client.insertions = [NSMutableArray array];
+    HiddenCandidatePanel *panel = [[HiddenCandidatePanel alloc] init];
+    [controller setValue:appearance forKey:@"appearance"];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:client forKey:@"activeClient"];
+    [controller setValue:panel forKey:@"panel"];
+
+    NSEvent *(^key)(unsigned short, NSString *, NSEventModifierFlags) = ^NSEvent *(unsigned short code, NSString *characters, NSEventModifierFlags flags) {
+        return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:0 context:nil
+                              characters:characters charactersIgnoringModifiers:characters isARepeat:NO keyCode:code];
+    };
+    NSDictionary *(^view)(NSNumber *, NSString *, NSString *, BOOL) = ^NSDictionary *(NSNumber *scheme, NSString *editing, NSString *symbols, BOOL listOpen) {
+        NSArray *candidates = listOpen ? @[@{@"text": @"中", @"highlighted": @YES, @"id": @{@"session": @3, @"generation": @9, @"index": @0}}] : @[];
+        return @{@"focused": @YES, @"scheme": scheme, @"local_mode": @"none", @"editing_text": editing, @"caret_position": @(editing.length),
+                 @"spelling_symbols": symbols, @"candidate_list_open": @(listOpen), @"session": @3, @"generation": @9, @"candidates": candidates};
+    };
+    // Sends one key from a view and reports whether the host handed it to the Engine as a character.
+    __block NSUInteger asciiBefore = 0;
+    BOOL (^send)(NSDictionary *, NSEvent *, BOOL) = ^BOOL(NSDictionary *state, NSEvent *event, BOOL panelVisible) {
+        [controller setValue:state forKey:@"view"];
+        panel.requestedVisible = panelVisible;
+        session.nextTransition = @{@"handled": @YES, @"view": state};
+        session.lastCommand = UINT32_MAX;
+        asciiBefore = session.asciiCalls;
+        const BOOL handled = [controller handleEvent:event client:client];
+        return handled && session.asciiCalls == asciiBefore + 1;
+    };
+    NSString *const zhuyinIdle = @"125890,./;-";
+    NSString *const zhuyinComposing = @"1234567890,./;- ";
+    NSString *const zhuyinListOpen = @"0,./;-";
+    const NSUInteger punctuationRoutes = 0;
+
+    // Idle Zhuyin: `,` and `1` are bopomofo, typed into the Engine rather than written as a mark or a digit.
+    assert(send(view(@6, @"", zhuyinIdle, NO), key(43, @",", 0), NO) && session.lastASCII == ',');
+    assert(send(view(@6, @"", zhuyinIdle, NO), key(18, @"1", 0), NO) && session.lastASCII == '1');
+    // With the list open, `-` spells ㄦ instead of turning a page and `0` spells ㄢ instead of picking a row.
+    assert(send(view(@6, @"su3", zhuyinListOpen, YES), key(27, @"-", 0), YES) && session.lastASCII == '-');
+    assert(session.lastCommand != MSIME_PREVIOUS_PAGE);
+    const NSUInteger selectsBefore = session.selectCalls;
+    assert(send(view(@6, @"su3", zhuyinListOpen, YES), key(29, @"0", 0), YES) && session.lastASCII == '0');
+    assert(session.selectCalls == selectsBefore);
+    // Space is the first tone while a syllable is pending, panel or not: a character, not the commit command.
+    for (NSNumber *visible in @[@NO, @YES]) {
+        assert(send(view(@6, @"su", zhuyinComposing, NO), key(49, @" ", 0), visible.boolValue) && session.lastASCII == ' ');
+        assert(session.lastCommand == UINT32_MAX);
+    }
+    // Shift+`{` is the Engine's 『 in Zhuyin, so the host does not open a `{` pair of its own.
+    assert(send(view(@6, @"su3", zhuyinComposing, NO), key(33, @"{", NSEventModifierFlagShift), NO) && session.lastASCII == '{');
+    assert(session.punctuationASCIICalls == punctuationRoutes && client.committed == nil && client.insertions.count == 0);
+
+    // Down opens a closed Zhuyin list whatever the arrow binding says (it is off here) and is never handed to the application.
+    const NSEventModifierFlags arrowFlags = NSEventModifierFlagFunction | NSEventModifierFlagNumericPad;
+    NSString *down = [NSString stringWithFormat:@"%C", (unichar)NSDownArrowFunctionKey];
+    assert(!send(view(@6, @"su3", zhuyinComposing, NO), key(125, down, arrowFlags), NO));
+    assert(session.lastCommand == MSIME_OPEN_CANDIDATE_LIST);
+    [appearance applySharedCandidatePreferences:@{@"navigation": @{@"arrows": @YES}}];
+    assert(!send(view(@6, @"su3", zhuyinComposing, NO), key(125, down, arrowFlags), NO));
+    assert(session.lastCommand == MSIME_OPEN_CANDIDATE_LIST);
+    // With the list open Down moves the highlight as in any list, and with Shift held or nothing composing it is not the list key.
+    appearance.vertical = YES;
+    assert(!send(view(@6, @"su3", zhuyinListOpen, YES), key(125, down, arrowFlags), YES));
+    assert(session.lastCommand == MSIME_NEXT_CANDIDATE);
+    appearance.vertical = NO;
+    send(view(@6, @"su3", zhuyinComposing, NO), key(125, down, arrowFlags | NSEventModifierFlagShift), NO);
+    assert(session.lastCommand != MSIME_OPEN_CANDIDATE_LIST);
+    send(view(@6, @"", zhuyinIdle, NO), key(125, down, arrowFlags), NO);
+    assert(session.lastCommand != MSIME_OPEN_CANDIDATE_LIST);
+    // Down in a scheme without a Down-opened list keeps its arrow meaning.
+    for (NSNumber *scheme in @[@0, @4, @5, @7]) {
+        send(view(scheme, @"abc", @"", NO), key(125, down, arrowFlags), NO);
+        assert(session.lastCommand == MSIME_NEXT_CANDIDATE);
+    }
+    [appearance applySharedCandidatePreferences:@{@"navigation": @{@"arrows": @NO}}];
+
+    // Cantonese: the syllable apostrophe goes to the Engine as input, not to the quote pairing or punctuation routes.
+    assert(send(view(@5, @"ngo", @"'", NO), key(39, @"'", 0), NO) && session.lastASCII == '\'');
+    assert(session.punctuationASCIICalls == punctuationRoutes && session.enginePunctuationCalls == 0 && session.contextualPunctuationCalls == 0);
+    assert(client.insertions.count == 0 && client.committed == nil);
+
+    // Vietnamese keeps the letter's case while composing, with Shift or with Caps Lock.
+    assert(send(view(@7, @"vie", @"", NO), key(9, @"V", NSEventModifierFlagShift), NO) && session.lastASCII == 'V' && session.lastShift);
+    assert(send(view(@7, @"vie", @"", NO), key(9, @"V", NSEventModifierFlagCapsLock), NO) && session.lastASCII == 'V' && !session.lastShift);
+
+    // Quanpin is unchanged: with the panel up a digit picks a row, `-` turns the page and Space commits the candidate.
+    // An ordinary conversion's panel: candidates shown with no opened list, which would make the paging marks punctuation.
+    NSMutableDictionary *quanpin = [view(@0, @"zhong", @"", YES) mutableCopy];
+    quanpin[@"candidate_list_open"] = @NO;
+    [controller setValue:quanpin forKey:@"view"];
+    panel.requestedVisible = YES;
+    asciiBefore = session.asciiCalls;
+    assert([controller handleEvent:key(18, @"1", 0) client:client] && session.asciiCalls == asciiBefore);
+    assert(!send(quanpin, key(27, @"-", 0), YES) && session.lastCommand == MSIME_PREVIOUS_PAGE);
+    assert(!send(quanpin, key(49, @" ", 0), YES) && session.lastCommand == MSIME_COMMIT_CANDIDATE);
+    assert(session.asciiCalls == asciiBefore);
+    session.nextTransition = nil;
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+}
+
 static void TestKeypadOperators(MSIMEAppearancePreferences *appearance) {
     ModeController *controller = [ModeController alloc];
     ShortcutSession *session = [ShortcutSession new];
@@ -8619,6 +8730,7 @@ int main(int argc, char **argv) {
         TestGlossSenseTraditionalOutput(appearance);
         TestSegmentEditingChords(appearance);
         TestSchemeTraitsFromView(appearance);
+        TestSchemeKeyRouting();
         TestBackspaceHoldDoesNotEscapeComposition();
         TestPassthroughKeysAreCounted();
         TestKeyLatencyIsLoggedWithoutTheKey();
