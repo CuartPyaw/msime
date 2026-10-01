@@ -1087,36 +1087,202 @@ function AccountDetailsPage({
         </p>
       )}
       {notice && (
-        <p role="status" className="notice">
+        <p role="status" className={`notice ${account.status}`}>
           {notice}
         </p>
       )}
-      <button
-        type="button"
-        className={`${account.section} ${account.hero} ${account.profileCard}`}
-        disabled={!user || busy}
-        aria-label={user ? "编辑个人资料" : undefined}
-        onClick={() => {
-          if (!user) return;
-          if (mobile && typeof window !== "undefined") {
-            pushMobileSettingsState({ page: "account", accountSubpage: "profile" });
-            setMobileProfilePage(true);
-          } else setEditingProfile(true);
-        }}
-      >
-        <div className={account.avatar("medium")} aria-hidden="true">
-          {user ? preferredAccountName(user).slice(0, 1) : "杉"}
-        </div>
-        <div>
-          <h2 className={account.heading}>{user ? preferredAccountName(user) : "欢迎来到水杉"}</h2>
-          <p className={account.note}>{user ? "水杉账号已登录" : "登录，分享你的键盘设计"}</p>
-        </div>
-        {user && (
+      {user ? (
+        <button
+          type="button"
+          className={`${account.section} ${account.hero} ${account.profileCard}`}
+          disabled={busy}
+          aria-label="编辑个人资料"
+          onClick={() => {
+            if (mobile && typeof window !== "undefined") {
+              pushMobileSettingsState({ page: "account", accountSubpage: "profile" });
+              setMobileProfilePage(true);
+            } else setEditingProfile(true);
+          }}
+        >
+          <div className={account.avatar("medium")} aria-hidden="true">
+            {preferredAccountName(user).slice(0, 1)}
+          </div>
+          <div>
+            <h2 className={account.heading}>{preferredAccountName(user)}</h2>
+            <p className={account.note}>水杉账号已登录</p>
+          </div>
           <span className={account.profileChevron} aria-hidden="true">
             ›
           </span>
-        )}
-      </button>
+        </button>
+      ) : (
+        <section className={`${account.section} ${account.signIn}`}>
+          <div className={account.signInHeader}>
+            <div className={account.avatar("large")} aria-hidden="true">
+              杉
+            </div>
+            <div>
+              <h2 className={account.heading}>
+                {channel === "email"
+                  ? "邮箱登录"
+                  : channel === "phone"
+                    ? "手机号登录"
+                    : "欢迎来到水杉"}
+              </h2>
+              <p className={account.note}>
+                {channel ? "我们会发送一个 6 位验证码完成登录" : "登录，分享你的键盘设计"}
+              </p>
+            </div>
+          </div>
+          {!channel ? (
+            <>
+              <div className={account.signInBody}>
+                {appleAvailable && (
+                  <button
+                    type="button"
+                    className={account.provider}
+                    disabled={busy}
+                    onClick={signInWithApple}
+                  >
+                    使用 Apple 登录
+                  </button>
+                )}
+                {googleAvailable && (
+                  <button
+                    type="button"
+                    className={account.provider}
+                    disabled={busy}
+                    onClick={signInWithGoogle}
+                  >
+                    {googleWaiting ? "正在等待浏览器完成 Google 登录…" : "使用 Google 登录"}
+                  </button>
+                )}
+                {googleWaiting && client.googleCancel && (
+                  <button type="button" className={account.link} onClick={cancelGoogle}>
+                    取消 Google 登录
+                  </button>
+                )}
+                {providers.email && (
+                  <button
+                    type="button"
+                    className={account.provider}
+                    onClick={() => chooseChannel("email")}
+                  >
+                    邮箱登录
+                  </button>
+                )}
+                {providers.phone && (
+                  <button
+                    type="button"
+                    className={account.provider}
+                    onClick={() => chooseChannel("phone")}
+                  >
+                    手机号登录
+                  </button>
+                )}
+                {enabledProviders === 0 && (
+                  <p className={`${account.muted} text-center`}>
+                    当前没有可用的验证码登录方式，请稍后重试。
+                  </p>
+                )}
+              </div>
+              <div className={account.signInFooter}>
+                <button
+                  type="button"
+                  className={account.link}
+                  disabled={busy}
+                  onClick={() =>
+                    void perform(async () => {
+                      const generation = clientGeneration.current;
+                      const value = await client.providers();
+                      if (!mounted.current || generation !== clientGeneration.current) return;
+                      setProviders(value);
+                    })
+                  }
+                >
+                  刷新登录方式
+                </button>
+                <button
+                  type="button"
+                  className={account.link}
+                  disabled={busy}
+                  onClick={clearExpired}
+                >
+                  清除失效登录状态
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className={account.signInBody}>
+              <label className={account.field}>
+                {channel === "email" ? "邮箱地址" : "手机号（含国家区号）"}
+                <input
+                  className={account.input}
+                  aria-label={channel === "email" ? "邮箱地址" : "手机号（含国家区号）"}
+                  type={channel === "email" ? "email" : "tel"}
+                  autoComplete={channel === "email" ? "email" : "tel"}
+                  maxLength={320}
+                  value={target}
+                  disabled={busy}
+                  onChange={(event) => {
+                    setTarget(event.target.value);
+                    setChallenge(null);
+                    setCode("");
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className={challenge ? account.provider : account.submit}
+                disabled={busy || !target.trim() || resendSeconds > 0}
+                onClick={requestCode}
+              >
+                {resendSeconds > 0 ? `${resendSeconds} 秒后可重新发送` : "获取验证码"}
+              </button>
+              {challenge && (
+                <div className={account.code}>
+                  <label className={account.field}>
+                    6 位验证码
+                    <input
+                      className={account.input}
+                      aria-label="6 位验证码"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={code}
+                      disabled={busy}
+                      onChange={(event) =>
+                        setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                      }
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className={account.submit}
+                    disabled={busy || expired || !/^\d{6}$/.test(code)}
+                    onClick={signIn}
+                  >
+                    {expired ? "验证码已过期，请重新获取" : busy ? "正在登录…" : "登录"}
+                  </button>
+                </div>
+              )}
+              <p className={`${account.muted} m-0 text-center`}>
+                验证码只用于本次登录，请勿向他人透露。
+              </p>
+              <div className={account.signInFooter}>
+                <button
+                  type="button"
+                  className={account.link}
+                  disabled={busy}
+                  onClick={() => setChannel(null)}
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
       {appIcon && (
         <AppIconSettingsCard
           client={appIcon}
@@ -1134,7 +1300,7 @@ function AccountDetailsPage({
           </button>
         </section>
       )}
-      {user ? (
+      {user && (
         <>
           {!mobile && (
             <section className={`${account.section} ${account.stack}`}>
@@ -1385,148 +1551,6 @@ function AccountDetailsPage({
             </section>
           )}
         </>
-      ) : (
-        <section className={`${account.section} ${account.stack}`}>
-          <h2 className={account.heading}>
-            {channel === "email" ? "邮箱登录" : channel === "phone" ? "手机号登录" : "登录方式"}
-          </h2>
-          {!channel ? (
-            <>
-              <div className={account.actionRow}>
-                {appleAvailable && (
-                  <button
-                    type="button"
-                    className={account.primary}
-                    disabled={busy}
-                    onClick={signInWithApple}
-                  >
-                    使用 Apple 登录
-                  </button>
-                )}
-                {googleAvailable && (
-                  <button
-                    type="button"
-                    className={account.primary}
-                    disabled={busy}
-                    onClick={signInWithGoogle}
-                  >
-                    {googleWaiting ? "正在等待浏览器完成 Google 登录…" : "使用 Google 登录"}
-                  </button>
-                )}
-                {googleWaiting && client.googleCancel && (
-                  <button type="button" className="secondary" onClick={cancelGoogle}>
-                    取消 Google 登录
-                  </button>
-                )}
-                {providers.email && (
-                  <button
-                    type="button"
-                    className={account.primary}
-                    onClick={() => chooseChannel("email")}
-                  >
-                    邮箱登录
-                  </button>
-                )}
-                {providers.phone && (
-                  <button
-                    type="button"
-                    className={account.primary}
-                    onClick={() => chooseChannel("phone")}
-                  >
-                    手机号登录
-                  </button>
-                )}
-              </div>
-              {enabledProviders === 0 && (
-                <p className={account.muted}>当前没有可用的验证码登录方式，请稍后重试。</p>
-              )}
-              <button
-                type="button"
-                className="secondary"
-                disabled={busy}
-                onClick={() =>
-                  void perform(async () => {
-                    const generation = clientGeneration.current;
-                    const value = await client.providers();
-                    if (!mounted.current || generation !== clientGeneration.current) return;
-                    setProviders(value);
-                  })
-                }
-              >
-                刷新登录方式
-              </button>
-              <button type="button" className="secondary" disabled={busy} onClick={clearExpired}>
-                清除失效登录状态
-              </button>
-            </>
-          ) : (
-            <>
-              <label className={account.field}>
-                {channel === "email" ? "邮箱地址" : "手机号（含国家区号）"}
-                <input
-                  className={account.input}
-                  aria-label={channel === "email" ? "邮箱地址" : "手机号（含国家区号）"}
-                  type={channel === "email" ? "email" : "tel"}
-                  autoComplete={channel === "email" ? "email" : "tel"}
-                  maxLength={320}
-                  value={target}
-                  disabled={busy}
-                  onChange={(event) => {
-                    setTarget(event.target.value);
-                    setChallenge(null);
-                    setCode("");
-                  }}
-                />
-              </label>
-              <div className={account.actionRow}>
-                <button
-                  type="button"
-                  className={account.primary}
-                  disabled={busy || !target.trim() || resendSeconds > 0}
-                  onClick={requestCode}
-                >
-                  {resendSeconds > 0 ? `${resendSeconds} 秒后可重新发送` : "获取验证码"}
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() => setChannel(null)}
-                >
-                  取消
-                </button>
-              </div>
-              {challenge && (
-                <div className={account.code}>
-                  <label className={account.field}>
-                    6 位验证码
-                    <input
-                      className={account.input}
-                      aria-label="6 位验证码"
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      maxLength={6}
-                      value={code}
-                      disabled={busy}
-                      onChange={(event) =>
-                        setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
-                      }
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className={account.primary}
-                    disabled={busy || expired || !/^\d{6}$/.test(code)}
-                    onClick={signIn}
-                  >
-                    {expired ? "验证码已过期，请重新获取" : busy ? "正在登录…" : "登录"}
-                  </button>
-                </div>
-              )}
-              <p className={account.muted}>验证码只用于本次登录，请勿向他人透露。</p>
-            </>
-          )}
-        </section>
       )}
       {mobile && (
         // The design's 我的 groups (dc.html `meGroups`), less the rows with nothing behind them (我的设备, 隐私, 开屏动画) and the ones the 设置 list already holds (词库, 自造词). The account's own settings stay on the profile page behind the card above.
