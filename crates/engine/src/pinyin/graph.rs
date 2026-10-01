@@ -7,7 +7,7 @@ pub const SYLLABLE_GRAPH_PATH_LIMIT: usize = 32;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyllableEdge {
     pub end: usize,
-    pub syllable: String,
+    pub syllable: &'static str,
 }
 
 /// `edges[start]` lists the intact syllables starting at `start`, longest first, pruned to those from which the end is reachable. Empty input or input containing `'` has no edges.
@@ -31,10 +31,7 @@ pub fn build_syllable_graph(pinyin: &str) -> SyllableGraph {
     for start in 0..length {
         for end in (start + 1..=length.min(start + MAX_SYLLABLE_LENGTH)).rev() {
             if let Some(syllable) = intact_piece(&bytes[start..end]) {
-                graph.edges[start].push(SyllableEdge {
-                    end,
-                    syllable: syllable.to_owned(),
-                });
+                graph.edges[start].push(SyllableEdge { end, syllable });
             }
         }
     }
@@ -68,7 +65,7 @@ pub fn enumerate_complete_segmentations(
             return;
         }
         for edge in &graph.edges[position] {
-            current.push(edge.syllable.clone());
+            current.push(edge.syllable.to_owned());
             visit(graph, edge.end, path_limit, current, result);
             current.pop();
             if result.len() >= path_limit {
@@ -119,10 +116,7 @@ mod tests {
         assert_eq!(graph.edges.len(), 5);
         assert!(graph.edges.iter().all(Vec::is_empty));
         let graph = build_syllable_graph("zhonge");
-        let from_start: Vec<_> = graph.edges[0]
-            .iter()
-            .map(|edge| edge.syllable.as_str())
-            .collect();
+        let from_start: Vec<_> = graph.edges[0].iter().map(|edge| edge.syllable).collect();
         // `zhong` is the only syllable at the start (`zhon`, `zho` and `zh` are prefixes), and it reaches `e`.
         assert_eq!(from_start, ["zhong"]);
     }
