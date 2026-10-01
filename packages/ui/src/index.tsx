@@ -461,6 +461,7 @@ import type { CommunitySkinClient } from "./community/community-skins";
 import { communityDestinationView } from "./community/community-destination";
 import type { CommunityResourceClient } from "./community/community-resources";
 import type { CandidateSkinCommunityClient } from "./community/community-candidate-skins";
+import type { CommunityPluginClient } from "./community/community-plugins";
 import { CommunityPage } from "./community/community-page";
 export { useConfirm, type ConfirmRequest } from "./core/confirm";
 export {
@@ -1085,6 +1086,16 @@ export {
   type CommunitySkinPublicationFieldsProps,
 } from "./community/community-skin-publication-fields";
 export { CandidateSkinPublishDialog } from "./community/candidate-skin-publish-dialog";
+export {
+  CommunityPluginPublishDialog,
+  CommunityPluginsPage,
+  communityPluginKinds,
+  type CommunityPlugin,
+  type CommunityPluginClient,
+  type CommunityPluginKind,
+  type CommunityPluginPackPreview,
+  type CommunityPluginPage,
+} from "./community/community-plugins";
 export { CommunityPage, type CommunityPageProps } from "./community/community-page";
 export type { SkinCatalog, ExternalSkin } from "./skin/external-skins";
 import type { SkinImageReader } from "./skin/skin-image";
@@ -1659,6 +1670,8 @@ export interface SettingsClient {
   communityResources?: CommunityResourceClient;
   /** Desktop community commands that publish, install and rate candidate-window skin packages. */
   communityCandidateSkins?: CandidateSkinCommunityClient;
+  /** Desktop community commands that publish, install and rate plugin packs; installs land in the store behind `plugins`. */
+  communityPlugins?: CommunityPluginClient;
   listVoiceCaptureDevices?: VoiceDeviceReader;
   /**
    * The user's own candidate glosses. Windows delivers these as a file dropped in the profile
@@ -2333,7 +2346,10 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
       hasAccount: Boolean(client.account || client.appIcon),
       hasChat: Boolean(client.chat),
       hasCommunity: Boolean(
-        client.communitySkins || client.communityResources || client.communityCandidateSkins,
+        client.communitySkins ||
+        client.communityResources ||
+        client.communityCandidateSkins ||
+        client.communityPlugins,
       ),
       showFloatingToolbar,
       showDeveloperPage,
@@ -3053,6 +3069,8 @@ export function SettingsPage(props: SettingsPageProps) {
                 skins={client.communitySkins}
                 resources={client.communityResources}
                 candidateSkins={client.communityCandidateSkins}
+                plugins={client.communityPlugins}
+                localPlugins={client.plugins?.catalog}
                 localSkins={client.scanSkinCatalog}
                 openSkinDirectory={client.openSkinDirectory}
                 readSkinImage={client.readSkinImage}

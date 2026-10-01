@@ -4,6 +4,11 @@ import type {
   CandidateSkinSyncReport,
   CommunityCandidateSkin,
   CommunityCandidateSkinPage,
+  CommunityPlugin,
+  CommunityPluginClient,
+  CommunityPluginPackPreview,
+  CommunityPluginPage,
+  PluginPackage,
   SkinCatalog,
 } from "@msime/ui";
 
@@ -49,5 +54,32 @@ export function createDesktopCandidateSkinCommunity(invoke: Invoke): CandidateSk
     sync: () => invoke<CandidateSkinSyncReport>("candidate_skin_community_sync"),
     rate: (id, stars) => invoke<{ stars: number }>("candidate_skin_community_rate", { id, stars }),
     unpublish: (id) => invoke<{ deleted: boolean }>("candidate_skin_community_unpublish", { id }),
+  };
+}
+
+/**
+ * The plugin-pack community on the Windows, macOS and Linux Tauri hosts.
+ *
+ * The host packs an installed pack from its own plugins directory and installs downloads into it, so the webview names a pack by kind and id, or a publication by its id, and never passes paths or bytes.
+ */
+export function createDesktopPluginCommunity(invoke: Invoke): CommunityPluginClient {
+  return {
+    list: (offset, search, kind) =>
+      invoke<CommunityPluginPage>("plugin_community_list", { offset, search, kind }),
+    detail: (id) => invoke<CommunityPlugin>("plugin_community_detail", { id }),
+    packPreview: (kind, pluginId) =>
+      invoke<CommunityPluginPackPreview>("plugin_community_pack_preview", { kind, pluginId }),
+    publish: (kind, pluginId, id, name, description) =>
+      invoke<CommunityPlugin>("plugin_community_publish", {
+        kind,
+        pluginId,
+        id,
+        name,
+        description,
+      }),
+    install: (id, kind, pluginId) =>
+      invoke<PluginPackage>("plugin_community_install", { id, kind, pluginId }),
+    rate: (id, stars) => invoke<{ stars: number }>("plugin_community_rate", { id, stars }),
+    delete: (id) => invoke<{ deleted: boolean }>("plugin_community_delete", { id }),
   };
 }

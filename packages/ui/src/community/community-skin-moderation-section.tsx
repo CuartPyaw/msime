@@ -14,6 +14,10 @@ export interface CommunitySkinModerationSectionProps {
   onUnpublish: () => void;
   onCancelUnpublish: () => void;
   confirmationActionsClassName?: string;
+  /** The take-down button's text, for a gallery of something other than skins. */
+  unpublishLabel?: string;
+  /** The take-down confirmation's accessible name. */
+  unpublishConfirmLabel?: string;
 }
 
 /** Shared rating and owned-skin removal controls used by both community skin galleries. */
@@ -30,6 +34,8 @@ export function CommunitySkinModerationSection({
   onUnpublish,
   onCancelUnpublish,
   confirmationActionsClassName,
+  unpublishLabel = "下架这款皮肤",
+  unpublishConfirmLabel = "确认下架皮肤",
 }: CommunitySkinModerationSectionProps) {
   return (
     <>
@@ -62,11 +68,11 @@ export function CommunitySkinModerationSection({
           disabled={actionBusy || unpublishDisabled}
           onClick={onRequestUnpublish}
         >
-          下架这款皮肤
+          {unpublishLabel}
         </button>
       )}
       {confirmUnpublish && (
-        <div className={style.confirmation} role="alertdialog" aria-label="确认下架皮肤">
+        <div className={style.confirmation} role="alertdialog" aria-label={unpublishConfirmLabel}>
           <p>{unpublishMessage}</p>
           <div className={confirmationActionsClassName}>
             <button type="button" className="danger" disabled={actionBusy} onClick={onUnpublish}>

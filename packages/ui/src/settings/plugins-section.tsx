@@ -68,7 +68,7 @@ const MAX_MENTION_TEXT_UTF16 = 199;
 const MAX_MENTION_KEY_BYTES = 64;
 const MENTION_KEY = /^[a-z]+(?:'[a-z]+)*$/;
 
-const kindLabels: Record<PluginKind, string> = {
+export const kindLabels: Record<PluginKind, string> = {
   sound: "音效包",
   music: "音乐包",
   command_table: "指令表",

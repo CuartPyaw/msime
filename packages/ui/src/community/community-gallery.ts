@@ -55,8 +55,9 @@ export function useCommunityGallery<T extends { id: string }>({
     [errorMessage, needsSignIn],
   );
 
+  /** Resolves false only when this request was the latest and failed, which leaves the list as it was; true when it succeeded or a newer request superseded it. */
   const requestList = useCallback(
-    async (query: string, append: boolean, mine = activeMine.current) => {
+    async (query: string, append: boolean, mine = activeMine.current): Promise<boolean> => {
       const generation = ++listGeneration.current;
       const offset = append ? nextOffset.current : 0;
       setListBusy(true);
@@ -64,7 +65,7 @@ export function useCommunityGallery<T extends { id: string }>({
       setSignInRequired(false);
       try {
         const page = await client.list(offset, query, mine);
-        if (generation !== listGeneration.current) return;
+        if (generation !== listGeneration.current) return true;
         setItems((current) => (append ? appendUniqueById(current, page.items) : page.items));
         nextOffset.current = offset + page.items.length;
         if (!append) {
@@ -72,10 +73,12 @@ export function useCommunityGallery<T extends { id: string }>({
           activeMine.current = mine;
         }
         setHasMore(page.has_more);
+        return true;
       } catch (requestError) {
-        if (generation !== listGeneration.current) return;
+        if (generation !== listGeneration.current) return true;
         fail(requestError);
         if (!append) setMineOnly(activeMine.current);
+        return false;
       } finally {
         if (generation === listGeneration.current) setListBusy(false);
       }
