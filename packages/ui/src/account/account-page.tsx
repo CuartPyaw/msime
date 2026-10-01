@@ -470,8 +470,9 @@ function SettingsSyncCard({ client, userId }: { client: SettingsSyncClient; user
   }, []);
 
   const load = async () => {
-    if (busy || !mounted.current) return;
+    if (busy || !mounted.current || actionBusy.current) return;
     const current = generation.current;
+    actionBusy.current = true;
     setBusy(true);
     setMessage("");
     try {
@@ -483,7 +484,10 @@ function SettingsSyncCard({ client, userId }: { client: SettingsSyncClient; user
       if (mounted.current && generation.current === current && !isAccountCancellation(error))
         setMessage(accountMessage(error));
     } finally {
-      if (mounted.current && generation.current === current) setBusy(false);
+      if (mounted.current && generation.current === current) {
+        actionBusy.current = false;
+        setBusy(false);
+      }
     }
   };
 
