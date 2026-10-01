@@ -46,6 +46,13 @@ impl AutocorrectCut {
             .map(|segment| segment.syllable.clone())
             .collect()
     }
+
+    pub fn into_syllables(self) -> Vec<String> {
+        self.segments
+            .into_iter()
+            .map(|segment| segment.syllable)
+            .collect()
+    }
 }
 
 /// QWERTY letter-key neighbours, the generator's finger-movement table (GEN:36-63), indexed by `letter - b'a'`.
@@ -535,6 +542,17 @@ mod tests {
 
     fn reading(cut: &AutocorrectCut) -> String {
         cut.syllables().join("'")
+    }
+
+    #[test]
+    fn into_syllables_consumes_the_cut_segments() {
+        let cut = AutocorrectCut {
+            segments: vec![segment("shang", "sahng", 0, true)],
+            edge_count: 1,
+            weight: TRANSPOSITION_WEIGHT,
+        };
+
+        assert_eq!(cut.into_syllables(), ["shang"]);
     }
 
     /// `autocorrect_cut` of the C++ tests: the best cut's syllables.
