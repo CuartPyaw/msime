@@ -44,7 +44,7 @@ import { CandidateSkinPolicy } from './candidate/CandidateSkinPolicy';
 import { CandidateWheelPolicy } from './candidate/CandidateWheelPolicy';
 import { KeyboardMetrics } from './KeyboardMetrics';
 import {
-  COMBO_IDLE_RESET_MILLIS, FLASH_MILLIS, TypingEffect, TypingEffectPolicy
+  COMBO_IDLE_RESET_MILLIS, TypingEffect, TypingEffectPolicy, TypingEffectSettings
 } from './TypingEffectPolicy';
 import { KeyboardGeometry } from './KeyboardGeometry';
 import {
@@ -391,6 +391,8 @@ struct KeyboardView {
   @State availableWidth: number = 0;
   /** The candidate card's typing-effect flash: its opacity, animated back to 0 after each key. */
   @State effectFlash: number = 0;
+  /** The flash colour an effect pack sets, `undefined` for the candidate accent. */
+  @State effectColor: string | undefined = undefined;
   /** The combo badge's text, empty while there is no combo to show. */
   @State effectBadge: string = '';
   /** Power mode swells the badge on each counted key and lets it settle back. */
@@ -613,24 +615,27 @@ struct KeyboardView {
         this.show(SURFACE_NONE);
       }
     };
-    KeyboardSession.shared.onTypingEffect = (effect: TypingEffect, intensity: number, key: boolean): void => {
-      this.showTypingEffect(effect, intensity, key);
-    };
+    KeyboardSession.shared.onTypingEffect =
+      (effect: TypingEffect, settings: TypingEffectSettings, key: boolean): void => {
+        this.showTypingEffect(effect, settings, key);
+      };
   }
 
   /** Draw one typing-effect answer: flash the candidate card for a key, swell the badge in power mode, and show the combo until it ends. */
-  private showTypingEffect(effect: TypingEffect, intensity: number, key: boolean): void {
+  private showTypingEffect(effect: TypingEffect, settings: TypingEffectSettings, key: boolean): void {
+    const intensity: number = settings.intensity;
     const peak: number = key ? TypingEffectPolicy.flashOpacity(effect, intensity) : 0;
     if (peak > 0) {
+      this.effectColor = settings.color;
       this.effectFlash = peak;
-      this.getUIContext().animateTo({ duration: FLASH_MILLIS, curve: Curve.EaseOut }, (): void => {
+      this.getUIContext().animateTo({ duration: settings.flashMillis, curve: Curve.EaseOut }, (): void => {
         this.effectFlash = 0;
       });
     }
     const scale: number = key ? TypingEffectPolicy.badgeScale(effect, intensity) : 1;
     if (scale > 1) {
       this.effectBadgeScale = scale;
-      this.getUIContext().animateTo({ duration: FLASH_MILLIS * 2, curve: Curve.EaseOut }, (): void => {
+      this.getUIContext().animateTo({ duration: settings.flashMillis * 2, curve: Curve.EaseOut }, (): void => {
         this.effectBadgeScale = 1;
       });
     }
@@ -2044,7 +2049,7 @@ struct KeyboardView {
           .position({ x: 0, y: this.settings.candidateDecorationTopVp })
           .width('100%')
           .height(this.effectCardHeight)
-          .backgroundColor(this.candidateAccentColor())
+          .backgroundColor(this.effectColor ?? this.candidateAccentColor())
           .borderRadius(this.settings.candidateCornerRadiusVp ?? KeyboardMetrics.CANDIDATE_CARD_CORNER_VP)
           .opacity(this.effectFlash)
           .hitTestBehavior(HitTestMode.Transparent)

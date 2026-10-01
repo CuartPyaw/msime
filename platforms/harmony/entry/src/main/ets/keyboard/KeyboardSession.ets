@@ -40,7 +40,8 @@ import { KEY_SOUNDS_OFF, KeySoundPolicy, PluginPreferenceDocument } from './KeyS
 import { MusicPlayer } from './MusicPlayer';
 import { MUSIC_OFF, MusicPolicy } from './MusicPolicy';
 import {
-  TYPING_EFFECT_COMMIT, TYPING_EFFECTS_OFF, TypingEffect, TypingEffectPolicy, TypingEffectSettings
+  ResolvedTypingEffectDocument, TYPING_EFFECT_COMMIT, TYPING_EFFECTS_OFF, TypingEffect, TypingEffectPolicy,
+  TypingEffectSettings
 } from './TypingEffectPolicy';
 import { EnglishCompletions, EnglishReplacement, EnglishSuggestionPolicy }
   from './input/EnglishSuggestionPolicy';
@@ -849,6 +850,12 @@ interface PreparedOptions {
   phrase_preedit?: boolean;
 }
 
+interface TypingEffectSettingsResponse {
+  ok: boolean;
+  value: ResolvedTypingEffectDocument;
+  error: string;
+}
+
 interface PrepareResponse {
   ok: boolean;
   value: PreparedOptions;
@@ -961,7 +968,9 @@ export class KeyboardSession implements HardwareKeyTarget {
   // Key, melody, commit and achievement sounds. Configured off on a phone, which keeps its own key feedback.
   private readonly soundPlayer: KeySoundPlayer = new KeySoundPlayer();
   private readonly musicPlayer: MusicPlayer = new MusicPlayer();
-  /** The typing effect and combo settings; off on a phone, as the sounds are. */
+  /** The typing effect and combo settings the preferences ask for; off on a phone, as the sounds are. */
+  private typingEffectPreferences: TypingEffectSettings = TYPING_EFFECTS_OFF;
+  /** `typingEffectPreferences` with the selected effect pack resolved by host-api: what is drawn. */
   private typingEffects: TypingEffectSettings = TYPING_EFFECTS_OFF;
   /** The focused editor's attributes have arrived, so whether it is a password field is known; background music waits for that. */
   private editorAttributesKnown: boolean = false;
@@ -1078,8 +1087,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   onVoiceInputChanged: ((enabled: boolean) => void) | undefined = undefined;
   /** Lets a desktop panel resize when a vertical candidate page changes height. */
   onCandidateCount: ((count: number) => void) | undefined = undefined;
-  /** Lets a desktop panel flash its candidate card and show the combo for each key and commit handed to the typing effect, with the intensity it is drawn at; `key` is false for a commit, which counts nothing and only reports the combo. */
-  onTypingEffect: ((effect: TypingEffect, intensity: number, key: boolean) => void) | undefined = undefined;
+  /** Lets a desktop panel flash its candidate card and show the combo for each key and commit handed to the typing effect, with the settings it is drawn with (intensity, flash length and colour); `key` is false for a commit, which counts nothing and only reports the combo. */
+  onTypingEffect: ((effect: TypingEffect, settings: TypingEffectSettings, key: boolean) => void) | undefined = undefined;
   /** Lets a desktop panel follow the widest current candidate without measuring ArkUI nodes. */
   onCandidateWidth: ((widthVp: number) => void) | undefined = undefined;
   /** The native host owns panel geometry; the touch view reports its newly requested total height. */
@@ -1448,8 +1457,9 @@ export class KeyboardSession implements HardwareKeyTarget {
         ? KeySoundPolicy.settings(preferences.plugins) : KEY_SOUNDS_OFF, stateRoot);
       this.musicPlayer.configure(KeyboardFormFactor.isDesktop()
         ? MusicPolicy.settings(preferences.plugins) : MUSIC_OFF, stateRoot);
-      this.typingEffects = KeyboardFormFactor.isDesktop()
+      this.typingEffectPreferences = KeyboardFormFactor.isDesktop()
         ? TypingEffectPolicy.settings(preferences.plugins) : TYPING_EFFECTS_OFF;
+      this.typingEffects = this.typingEffectPreferences;
     } catch (error) {
       KeyboardLog.error(`host preparation unreadable: ${describeError(error)}`);
       return false;
@@ -1467,6 +1477,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       }
       this.handle = created.value.session;
       KeyboardLog.info(`session ${this.handle} created`);
+      this.refreshTypingEffects();
       this.schedulePersonalDictionaryDrain();
       this.scheduleDictionarySnapshotPoll();
       return true;
@@ -1581,6 +1592,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.nineKeyMode = nineKey;
     if (attached !== undefined && this.inputClient === attached) {
       this.apply(client.focus(this.handle, true));
+      this.refreshTypingEffects();
       this.applyView(client.setEnglishMode(this.handle, english));
       this.applyView(client.setNineKeyMode(this.handle, nineKey));
     }
@@ -2518,6 +2530,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     });
     if (this.handle !== 0) {
       this.apply(client.focus(this.handle, true));
+      this.refreshTypingEffects();
       this.applyView(client.setEnglishMode(this.handle, this.englishMode));
       this.applyView(client.setNineKeyMode(this.handle, this.nineKeyMode));
     }
@@ -2822,6 +2835,7 @@ export class KeyboardSession implements HardwareKeyTarget {
           this.nineKeyMode = nineKey;
           if (this.inputClient !== undefined) {
             this.apply(client.focus(this.handle, true));
+            this.refreshTypingEffects();
             this.applyView(client.setEnglishMode(this.handle, english));
             this.applyView(client.setNineKeyMode(this.handle, nineKey));
           }
@@ -4945,10 +4959,35 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (effect.tierSound) {
       this.soundPlayer.tierUp(TypingEffectPolicy.tier(effect.count));
     }
-    const listener: ((effect: TypingEffect, intensity: number, key: boolean) => void) | undefined =
+    const listener: ((effect: TypingEffect, settings: TypingEffectSettings, key: boolean) => void) | undefined =
       this.onTypingEffect;
     if (listener !== undefined) {
-      listener(effect, this.typingEffects.intensity, event !== TYPING_EFFECT_COMMIT);
+      listener(effect, this.typingEffects, event !== TYPING_EFFECT_COMMIT);
+    }
+  }
+
+  /** Resolve the selected effect pack through host-api: after the session is created and after each focus-in, which is when host-api looks at the pack again, never per key. Without a pack nothing is asked. */
+  private refreshTypingEffects(): void {
+    const preferences: TypingEffectSettings = this.typingEffectPreferences;
+    if (this.handle === 0 || preferences.pack === '') {
+      this.typingEffects = preferences;
+      return;
+    }
+    try {
+      const answer: TypingEffectSettingsResponse =
+        JSON.parse(client.typingEffectSettings(this.handle)) as TypingEffectSettingsResponse;
+      if (!answer.ok) {
+        KeyboardLog.error(`typing effect settings refused: ${answer.error}`);
+        this.typingEffects = preferences;
+        return;
+      }
+      if (answer.value.issue !== null) {
+        KeyboardLog.error(`effect pack ${preferences.pack} unavailable: ${answer.value.issue}`);
+      }
+      this.typingEffects = TypingEffectPolicy.resolve(preferences, answer.value);
+    } catch (error) {
+      KeyboardLog.error(`typing effect settings unreadable: ${describeError(error)}`);
+      this.typingEffects = preferences;
     }
   }
 

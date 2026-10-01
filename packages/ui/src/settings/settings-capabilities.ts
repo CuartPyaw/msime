@@ -78,8 +78,8 @@ export function settingsCapabilities({
   const showTypingEffects = host?.typing_effects === true;
   // Linux shows the combo count as text in the candidate panel's aux line and draws no flash or sparks, so only the counter switch has an effect there.
   const showTypingEffectStyles = showTypingEffects && !linux;
-  // HarmonyOS draws the built-in styles but does not read an effect pack's parameters yet, so the pack choice stays off there rather than selecting something the keyboard ignores.
-  const showTypingEffectPacks = showTypingEffectStyles && !harmony;
+  // An effect pack only sets a drawn style's parameters, so it is offered wherever a style is.
+  const showTypingEffectPacks = showTypingEffectStyles;
   return {
     nativeVoicePlatform,
     showModeScope,

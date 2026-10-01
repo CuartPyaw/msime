@@ -56,6 +56,8 @@ export interface PluginPreferenceDocument {
   effect_style?: string;
   /** 0-100. */
   effect_intensity?: number;
+  /** The selected effect pack's id, "" or missing for none; host-api resolves it. */
+  effect_pack?: string;
   combo_counter?: boolean;
   combo_tier_sound?: boolean;
 }

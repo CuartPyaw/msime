@@ -277,6 +277,7 @@ import {
 } from "../entry/src/main/ets/keyboard/MusicPolicy";
 import {
   COMBO_IDLE_RESET_MILLIS,
+  FLASH_MILLIS,
   TYPING_EFFECT_COMMIT,
   TYPING_EFFECTS_OFF,
   TypingEffectPolicy,
@@ -11080,6 +11081,79 @@ group("typing effects decode host-api's answer and draw what it asks", () => {
         100,
       ) > TypingEffectPolicy.badgeScale(powerKey, 100),
     "only power mode swells the badge, harder on a tier-up",
+  );
+});
+
+group("an effect pack's parameters replace the preference values once host-api resolves it", () => {
+  const preferences = TypingEffectPolicy.settings({
+    effect_style: "flash",
+    effect_intensity: 40,
+    effect_pack: "neon",
+  });
+  check(
+    preferences.pack === "neon" && TypingEffectPolicy.active(preferences),
+    "a selected pack alone hands keys to host-api, whose answer carries the pack's style",
+  );
+  check(
+    TypingEffectPolicy.active(TypingEffectPolicy.settings({ effect_pack: "neon" })) &&
+      TypingEffectPolicy.settings({ effect_pack: 7 as never }).pack === "",
+    "the pack counts even with the style off, and a non-string id is no pack",
+  );
+  const resolved = TypingEffectPolicy.resolve(preferences, {
+    pack: "neon",
+    issue: null,
+    intensity: 90,
+    colors: ["#FF4060", "#FFB000"],
+    duration_ms: 400,
+  });
+  check(
+    resolved.intensity === 90 &&
+      resolved.flashMillis === 400 &&
+      resolved.color === "#FF4060" &&
+      resolved.comboCounter === preferences.comboCounter,
+    "intensity, flash length and the first colour come from the pack",
+  );
+  const bare = TypingEffectPolicy.resolve(preferences, {
+    pack: "neon",
+    issue: null,
+    intensity: 50,
+    colors: [],
+    duration_ms: null,
+  });
+  check(
+    bare.flashMillis === FLASH_MILLIS && bare.color === undefined,
+    "a pack without duration or colours keeps the host's flash length and the candidate accent",
+  );
+  check(
+    TypingEffectPolicy.resolve(preferences, {
+      pack: "neon",
+      issue: "特效包 neon 不存在",
+      intensity: 50,
+      colors: ["#FF4060"],
+      duration_ms: 900,
+    }) === preferences,
+    "a pack that did not load changes nothing here; host-api answers style off for it",
+  );
+  check(
+    TypingEffectPolicy.resolve(TypingEffectPolicy.settings({ effect_style: "flash" }), {
+      pack: "neon",
+      issue: null,
+      intensity: 90,
+      colors: ["#FF4060"],
+      duration_ms: 400,
+    }).flashMillis === FLASH_MILLIS,
+    "without a pack in the preferences an answer naming one is not applied",
+  );
+  const odd = TypingEffectPolicy.resolve(preferences, {
+    pack: "neon",
+    issue: null,
+    intensity: 500,
+    colors: ["red"],
+    duration_ms: 99999,
+  });
+  check(
+    odd.intensity === 40 && odd.flashMillis === 1500 && odd.color === undefined,
+    "out-of-range values are clamped or ignored rather than drawn",
   );
 });
 

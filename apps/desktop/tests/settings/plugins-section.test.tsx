@@ -738,7 +738,7 @@ test("the 扩展 page offers the typing effects where the host draws them, and o
   expect(within(linux).queryByRole("switch", { name: "升档音" })).toBeNull();
 });
 
-test("effect packs are offered where the host draws them, not on HarmonyOS or Linux", () => {
+test("effect packs are offered where the host draws a style, not on Linux", () => {
   const capabilities = (platform: "macos" | "windows" | "harmony" | "linux") =>
     settingsCapabilities({
       host: { platform, typing_effects: true } as never,
@@ -755,9 +755,8 @@ test("effect packs are offered where the host draws them, not on HarmonyOS or Li
     });
   expect(capabilities("macos").showTypingEffectPacks).toBe(true);
   expect(capabilities("windows").showTypingEffectPacks).toBe(true);
-  // HarmonyOS draws the built-in styles but not an effect pack's parameters yet.
   expect(capabilities("harmony").showTypingEffectStyles).toBe(true);
-  expect(capabilities("harmony").showTypingEffectPacks).toBe(false);
+  expect(capabilities("harmony").showTypingEffectPacks).toBe(true);
   expect(capabilities("linux").showTypingEffectPacks).toBe(false);
 });
 
