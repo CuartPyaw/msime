@@ -45,6 +45,7 @@ export function LinuxSetupPage({
   const [lines, setLines] = useState<LinuxSetupLine[]>([]);
   const log = useRef<HTMLPreElement>(null);
   const mounted = useRef(true);
+  const actionRunning = useRef(false);
   useEffect(
     () => () => {
       mounted.current = false;
@@ -63,7 +64,8 @@ export function LinuxSetupPage({
   }, [lines]);
 
   const start = async () => {
-    if (busy || !mounted.current) return;
+    if (busy || actionRunning.current || !mounted.current) return;
+    actionRunning.current = true;
     setBusy(true);
     setError("");
     setLines([]);
@@ -77,6 +79,7 @@ export function LinuxSetupPage({
     } catch (failure) {
       if (mounted.current) setError(linuxSetupFailureMessage(failure));
     } finally {
+      actionRunning.current = false;
       if (mounted.current) setBusy(false);
     }
   };
