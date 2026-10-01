@@ -53,6 +53,57 @@ test("ignores a duplicate plugin import while the first import is pending", asyn
   await waitFor(() => expect(importPack).toHaveBeenCalledOnce());
 });
 
+test("a plugin removal response from a replaced client cannot update preferences", async () => {
+  let resolveRemove!: () => void;
+  const oldClient = fakeClient({
+    remove: vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRemove = resolve;
+        }),
+    ),
+  });
+  const nextClient = fakeClient();
+  const onChange = vi.fn();
+  const view = render(
+    <PluginsSection
+      client={oldClient}
+      preferences={defaultPluginPreferences}
+      keySound
+      music
+      triggers
+      active
+      onChange={onChange}
+      onError={vi.fn()}
+      confirm={vi.fn(async () => true)}
+    />,
+  );
+  const list = await screen.findByLabelText("已安装的扩展包");
+  fireEvent.click(within(list).getByRole("button", { name: "删除打字机" }));
+  await waitFor(() => expect(oldClient.remove).toHaveBeenCalledWith("sound", "typewriter"));
+
+  view.rerender(
+    <PluginsSection
+      client={nextClient}
+      preferences={defaultPluginPreferences}
+      keySound
+      music
+      triggers
+      active
+      onChange={onChange}
+      onError={vi.fn()}
+      confirm={vi.fn(async () => true)}
+    />,
+  );
+  await screen.findByLabelText("已安装的扩展包");
+  await act(async () => {
+    resolveRemove();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(onChange).not.toHaveBeenCalled();
+});
+
 const pack = (overrides: Partial<PluginPackage> & Pick<PluginPackage, "id" | "kind">) =>
   ({
     name: overrides.id,
