@@ -1758,9 +1758,12 @@ static NSImage *MSIMECandidateLogoImage() {
     _serviceSnapshotView = nil;
 }
 - (NSDictionary *)currentCustomTranslationRequest {
-    if (!_activeClient || !_session || _focusPending || _appearance.englishMode ||
-        (_appearance && !_appearance.candidateTranslations) || (_glossEnabled && !_glossEnabled.boolValue)) return nil;
+    if (!_activeClient || !_session || _focusPending || _appearance.englishMode) return nil;
+    // A `/fy` request (command mode) is the user's explicit ask, so the shared query carries it whatever the candidate translation switches say: one English sentence for the selected service of the user's own, into the query's own target language, with no offline dictionary in front of it. None of the gloss gates below apply to it, so the query is read before them, which costs one call per pass while translations are off.
+    const BOOL candidateTranslations = !(_appearance && !_appearance.candidateTranslations) && !(_glossEnabled && !_glossEnabled.boolValue);
     NSDictionary *query = [self serviceSnapshotQuery];
+    const BOOL command = [query[@"sentence"] isEqual:@YES];
+    if (!candidateTranslations && !command) return nil;
     NSDictionary *config = query[@"niutrans"];
     BOOL niuTrans = [config isKindOfClass:NSDictionary.class] && [config[@"enabled"] isEqual:@YES];
     if (!niuTrans) config = query[@"custom_translation"];
@@ -1773,8 +1776,17 @@ static NSImage *MSIMECandidateLogoImage() {
         (custom && _customTranslationConfig && ![_customTranslationConfig isEqual:config]) ||
         (!niuTrans && !custom && ([_customTranslationConfig[@"enabled"] isEqual:@YES] ||
             (_tencentTranslationConfig && ![_tencentTranslationConfig isEqual:config]))) ||
-        (_glossTargetLanguages && ![_glossTargetLanguages isEqual:MSIMETranslationTargets(query)])) return nil;
+        (!command && _glossTargetLanguages && ![_glossTargetLanguages isEqual:MSIMETranslationTargets(query)])) return nil;
     NSDictionary *view = [self serviceSnapshotView];
+    if (command) {
+        NSArray *sentences = [query[@"candidates"] isKindOfClass:NSArray.class] ? query[@"candidates"] : @[];
+        NSDictionary *sentence = sentences.count == 1 && [sentences.firstObject isKindOfClass:NSDictionary.class] ? sentences.firstObject : nil;
+        NSString *text = [sentence[@"text"] isKindOfClass:NSString.class] ? sentence[@"text"] : nil;
+        NSString *target = [query[@"target_language"] isKindOfClass:NSString.class] ? query[@"target_language"] : nil;
+        if (!text.length || !target.length || ![view[@"generation"] isEqual:query[@"generation"]]) return nil;
+        return @{@"command":@YES, @"target_language":target, @"target_languages":@[target],
+            (niuTrans ? @"niutrans" : custom ? @"custom_translation" : @"tencent_tmt"):config, @"candidates":@[@{@"text":text}]};
+    }
     if ([view[@"scheme"] isEqual:@3] || [view[@"scheme"] isEqual:@(msime::mac::KoreanScheme)] ||
         [view[@"local_mode"] isEqual:@"temporary_japanese"] || ![view[@"generation"] isEqual:query[@"generation"]]) return nil;
     NSDictionary *gloss = [self currentGlossRequest];
@@ -2206,7 +2218,9 @@ static NSImage *MSIMECandidateLogoImage() {
     if ([_customQuery isEqual:query]) return;
     [self detachCustomTranslations];
     _customQuery = query;
-    NSArray<NSString *> *targets = MSIMETranslationTargets(query);
+    // `/fy` translates one English sentence into the query's own target, Chinese, which the candidate target list does not name and the candidate plan refuses; it is its own plan item and is neither read from nor written to the gloss cache.
+    const BOOL command = [query[@"command"] isEqual:@YES];
+    NSArray<NSString *> *targets = command ? query[@"target_languages"] : MSIMETranslationTargets(query);
     NSMutableArray<NSDictionary *> *chunks = [NSMutableArray array];
     NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, NSString *> *> *values = [NSMutableDictionary dictionary];
     MSIMETranslationCache *cache = [MSIMETranslationCache sharedCache];
@@ -2234,14 +2248,15 @@ static NSImage *MSIMECandidateLogoImage() {
             [targetCandidates addObject:candidate];
         }
         if (!targetCandidates.count) continue;
-        NSArray *plan = [MSIMEClientSession customTranslationPlan:@{@"target_language":target,
-            @"candidates":targetCandidates} error:nil];
+        NSArray *plan = command ? @[@{@"text":targetCandidates.firstObject[@"text"], @"key":targetCandidates.firstObject[@"text"],
+            @"source_language":@"en", @"target_language":target}]
+            : [MSIMEClientSession customTranslationPlan:@{@"target_language":target, @"candidates":targetCandidates} error:nil];
         NSMutableArray *pending = [NSMutableArray array];
         NSMutableDictionary *identities = [NSMutableDictionary dictionary];
         for (NSDictionary *item in plan) {
             NSArray *identity = @[scope, target, item[@"source_language"], item[@"target_language"], item[@"key"]];
             NSString *workKey = MSIMETranslationWorkKey(target, item[@"text"]);
-            id value = [cache valueForIdentity:identity];
+            id value = command ? nil : [cache valueForIdentity:identity];
             if (value) {
                 if ([value isKindOfClass:NSString.class]) {
                     NSMutableDictionary *byTarget = values[item[@"text"]];
@@ -2252,15 +2267,15 @@ static NSImage *MSIMECandidateLogoImage() {
             }
             if (tencent || niuTrans) {
                 [pending addObject:item];
-                identities[workKey] = identity;
+                if (!command) identities[workKey] = identity;
                 continue;
             }
             NSDictionary *descriptor = [MSIMEClientSession customTranslationHTTPRequest:@{@"config":query[@"custom_translation"],
                 @"text":item[@"key"], @"source_language":item[@"source_language"], @"target_language":item[@"target_language"]} error:nil];
             if (descriptor) {
                 [pending addObject:@{@"text":item[@"text"], @"request":descriptor}];
-                identities[workKey] = identity;
-            } else {
+                if (!command) identities[workKey] = identity;
+            } else if (!command) {
                 [cache rememberTranslation:nil identity:identity];
             }
         }
@@ -4281,6 +4296,7 @@ static NSString *MSIMESessionUnavailableReason(NSDictionary *options) {
         }
         [self apply:[_session setFocused:YES error:nil]];
         _focusPending = NO;
+        [self refreshTypingEffectSettings];
     }
     [self startPreferencesMonitoring];
 }
@@ -4365,6 +4381,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     if (result && !updateError) {
         if (inputPreferences) [_appearance applySharedInputPreferences:inputPreferences];
         [self applySharedToolbarPreferences:snapshot[@"preferences"]];
+        // After the preferences, which the session's resolved effect refines with the selected pack.
+        [self refreshTypingEffectSettings];
         _view = [session viewWithError:nil] ?: result[@"view"];
         if (_view) {
             MSIMEApplyTransitionWithPreeditStyle(@{@"view": _view}, (id<MSIMETextClient>)_activeClient,
@@ -4761,6 +4779,11 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
 }
 
 // Entering or leaving native full screen moves the foreground application to another space.
+// The session's resolved typing effect for the panel: read after a focus-in and after a preference update, never on a key, since it may read the effect pack's manifest.
+- (void)refreshTypingEffectSettings {
+    [[MSIMETypingEffectPanel sharedPanel] applySettings:_session ? [_session typingEffectSettingsWithError:nil] : nil];
+}
+
 - (void)typingEffectSpaceChanged:(NSNotification *)notification {
     (void)notification;
     if (_activeClient) [self refreshTypingEffectFullscreen];
@@ -4907,7 +4930,10 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
         [self syncCharacterWidth];
         [self refreshFloatingToolbarState];
         _focusPending = _appearance.englishMode;
-        if (!_appearance.englishMode) [self apply:[_session setFocused:YES error:nil]];
+        if (!_appearance.englishMode) {
+            [self apply:[_session setFocused:YES error:nil]];
+            [self refreshTypingEffectSettings];
+        }
     }
     NSUserDefaults *voiceDefaults = NSUserDefaults.standardUserDefaults;
     if (event.type == NSEventTypeKeyDown && event.keyCode == 53) [_voiceOverlay dismissFailure];

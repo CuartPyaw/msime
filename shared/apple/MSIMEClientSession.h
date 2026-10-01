@@ -110,6 +110,8 @@ FOUNDATION_EXPORT NSNotificationName const MSIMEClientSessionDidReplaceSnapshotN
 - (BOOL)setMusicActive:(BOOL)active;
 /// The typing effect of one key or commit to draw (msime_client_typing_effect): event 0-3 the key class, 4 a commit, 5 a backspace by another route, with 0x100 for an auto-repeat and 0x200 to keep the tier-up sound quiet. Answers the packed combo count, tier-up bit and style; 0 when effects and the combo counter are off or the session is closed. Also for the key path; never for a key typed into a secure field.
 - (uint32_t)typingEffect:(uint32_t)event;
+/// The session's resolved typing effect (msime_client_typing_effect_settings): {pack, issue, style, intensity, colors, duration_ms, particles, combo_counter}. It may read the selected effect pack's manifest, so call it after a preference update and after a focus-in, never per key.
+- (nullable NSDictionary<NSString *, id> *)typingEffectSettingsWithError:(NSError **)error;
 - (nullable NSDictionary<NSString *, id> *)setCandidatePageSize:(uint8_t)size error:(NSError **)error;
 - (nullable NSDictionary<NSString *, id> *)updatePreferencesSnapshot:(NSDictionary<NSString *, id> *)snapshot error:(NSError **)error;
 - (nullable NSDictionary<NSString *, id> *)startVoiceWithError:(NSError **)error;
