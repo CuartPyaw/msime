@@ -73,6 +73,8 @@ namespace {
 // 主题目录由共享层发布，这个宿主不存 id 或标题的副本；菜单是这份目录加上运行配置里列出的外部皮肤。
 std::vector<msime::linux_host::ThemeChoice> theme_choices();
 Json configured;
+// Which language dictionaries the configured options name, worked out when they are loaded (msime_ibus_configure) so the key path never looks at the disk.
+msime::linux_host::LanguageDictionaryAvailability configured_dictionaries;
 uint64_t configuration_generation = 0;
 std::atomic<uint64_t> next_client_token{1};
 // Store acceptance is shared by all contexts and survives session recreation.
@@ -1102,12 +1104,12 @@ struct State {
       preferences["learning"] = false;
   }
 };
-// The scheme the Engine runs for this context: the menu's choice or the configured one, given way to the last Chinese scheme as host-api does when Cantonese or Zhuyin has no dictionary installed here (InputSchemeTraits.h). The menus, the indicator and the key rules follow this one, so none of them claims a scheme the user is not typing in.
+// The scheme the Engine runs for this context: the menu's choice or the configured one, given way to the last Chinese scheme as host-api does when Cantonese or Zhuyin has no dictionary installed here (InputSchemes.h). The menus, the indicator and the key rules follow this one, so none of them claims a scheme the user is not typing in.
 std::string effective_scheme(const State &s) {
   const auto &preferences = configured.at("preferences");
   return msime::linux_host::effective_input_scheme(
       s.scheme_override.value_or(preferences.value("scheme", std::string("quanpin"))),
-      preferences.value("last_chinese_scheme", std::string("quanpin")), configured);
+      preferences.value("last_chinese_scheme", std::string("quanpin")), configured_dictionaries);
 }
 // Only the base Chinese schemes are converted: kana, Hangul and Vietnamese are not Chinese text, and Cantonese and Zhuyin are written in traditional characters already (`script_conversion_applies`).
 bool script_conversion_applies(const Json &context) {
@@ -3270,7 +3272,7 @@ void publish_mode(IBusEngine *engine, bool registration) {
                                            std::tuple{"wubi", "Scheme/Wubi", "五笔"},
                                            std::tuple{"cantonese", "Scheme/Cantonese", "粤拼"},
                                            std::tuple{"zhuyin", "Scheme/Zhuyin", "注音"}}) {
-    if (!msime::linux_host::input_scheme_available(value, configured)) continue;
+    if (!msime::linux_host::input_scheme_available(value, configured_dictionaries)) continue;
     auto item = ibus_property_new(
         name, PROP_TYPE_RADIO,
         ibus_text_new_from_static_string(label), "",
@@ -5573,7 +5575,7 @@ void property_activate(IBusEngine *engine, const gchar *name, guint value) {
           : configured.at("preferences").value("last_chinese_scheme", std::string("quanpin"));
       // A scheme this host does not know, or Cantonese and Zhuyin once their dictionary is gone, is saved as the scheme host-api would run instead.
       selected = msime::linux_host::effective_input_scheme(
-          selected, configured.at("preferences").value("last_chinese_scheme", std::string("quanpin")), configured);
+          selected, configured.at("preferences").value("last_chinese_scheme", std::string("quanpin")), configured_dictionaries);
       if (s.scheme_override.value_or(
               configured.at("preferences").value("scheme", "quanpin")) == selected) return;
       const auto directory = configured.value("preferences_directory", std::string{});
@@ -7937,6 +7939,8 @@ void msime_ibus_configure(const std::string &options) {
   if (!next.is_object() || !next.contains("preferences") ||
       !next.at("preferences").is_object())
     throw std::runtime_error("Invalid host preferences");
+  // Every load looks again, unchanged options included: a dictionary installed since the last one is offered from the next reload.
+  configured_dictionaries = msime::linux_host::language_dictionary_availability(next);
   if (next != configured) {
     configured = std::move(next);
     ++configuration_generation;

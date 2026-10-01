@@ -62,23 +62,36 @@ inline bool zhuyin_list_down_key(const nlohmann::json &view) {
   return scheme_rules(view) == scheme::Zhuyin && candidate_list_composition(view) && !opened_candidate_list(view);
 }
 
-// Whether a scheme can run with the HostOptions document `options`: Cantonese and Zhuyin need their dictionary in the `language_dictionaries` directory it names, and host-api falls back from either when it is missing, so offering it would select a scheme that never takes effect. Every other known scheme needs no data beyond the resource set. Mirrors host-api's `LanguageDictionaries::serve`.
-inline bool input_scheme_available(std::string_view id, const nlohmann::json &options) {
-  const std::string_view file = id == "cantonese" ? "cantonese.db" : id == "zhuyin" ? "zhuyin.db" : "";
-  if (file.empty()) return scheme_number(id) >= 0;
-  if (!options.is_object()) return false;
+// Which language dictionaries the `language_dictionaries` directory named by a HostOptions document holds: Cantonese and Zhuyin need theirs, and host-api falls back from either when it is missing, so offering it would select a scheme that never takes effect. Mirrors host-api's `LanguageDictionaries::serve`. This looks at the disk, so a host works it out once whenever it loads the options and keeps the result, keeping file checks off the key path and the scheme steady for the life of a session, as host-api decides it once when the session opens.
+struct LanguageDictionaryAvailability {
+  bool cantonese = false;
+  bool zhuyin = false;
+};
+
+inline LanguageDictionaryAvailability language_dictionary_availability(const nlohmann::json &options) {
+  if (!options.is_object()) return {};
   const auto directory = options.find("language_dictionaries");
-  if (directory == options.end() || !directory->is_string() || directory->get_ref<const std::string &>().empty()) return false;
+  if (directory == options.end() || !directory->is_string() || directory->get_ref<const std::string &>().empty()) return {};
+  const std::filesystem::path root = directory->get<std::string>();
   std::error_code error;
-  return std::filesystem::is_regular_file(std::filesystem::path(directory->get<std::string>()) / file, error);
+  const bool cantonese = std::filesystem::is_regular_file(root / "cantonese.db", error);
+  const bool zhuyin = std::filesystem::is_regular_file(root / "zhuyin.db", error);
+  return {cantonese, zhuyin};
+}
+
+// Whether a scheme can run with these dictionaries: every known scheme but Cantonese and Zhuyin needs no data beyond the resource set.
+inline bool input_scheme_available(std::string_view id, LanguageDictionaryAvailability dictionaries) {
+  if (id == "cantonese") return dictionaries.cantonese;
+  if (id == "zhuyin") return dictionaries.zhuyin;
+  return scheme_number(id) >= 0;
 }
 
 // The scheme the Engine actually runs for this preferences scheme, mirroring host-api's `effective_scheme`: a scheme that cannot run here gives way to the last Chinese scheme when that one can, and to quanpin otherwise. The menus check this one and the indicator shows its mode, so neither claims a scheme the user is not typing in.
 inline std::string effective_input_scheme(std::string_view id, std::string_view last_chinese_scheme,
-                                          const nlohmann::json &options) {
-  if (input_scheme_available(id, options)) return std::string(id);
+                                          LanguageDictionaryAvailability dictionaries) {
+  if (input_scheme_available(id, dictionaries)) return std::string(id);
   const int last = scheme_number(last_chinese_scheme);
-  if (last >= 0 && scheme::IsChinese(last) && input_scheme_available(last_chinese_scheme, options))
+  if (last >= 0 && scheme::IsChinese(last) && input_scheme_available(last_chinese_scheme, dictionaries))
     return std::string(last_chinese_scheme);
   return "quanpin";
 }

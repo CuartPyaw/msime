@@ -620,20 +620,17 @@ public:
   static_assert(kSchemes.size() == msime::linux_host::kInputSchemeIds.size());
   // Whether a scheme can run with the runtime options this context last read: Cantonese and Zhuyin need their language dictionary (core/InputSchemes.h).
   bool schemeAvailable(const char *id) const {
-    return msime::linux_host::input_scheme_available(id, scheme_options_);
+    return msime::linux_host::input_scheme_available(id, scheme_dictionaries_);
   }
   // The scheme the Engine runs for the preferences, after host-api's fallback from a scheme whose data is missing; the indicator and the status file show this one.
   std::string effectiveScheme() const {
     return msime::linux_host::effective_input_scheme(
         scheme_override_.value_or(preferences_.value("scheme", std::string("quanpin"))),
-        preferences_.value("last_chinese_scheme", std::string("quanpin")), scheme_options_);
+        preferences_.value("last_chinese_scheme", std::string("quanpin")), scheme_dictionaries_);
   }
-  // Keeps the part of the runtime options the scheme menu depends on, and lists Cantonese and Zhuyin in that menu only while their dictionary is installed.
+  // Works out from the runtime options just read which language dictionaries are installed, once per read rather than per key, and lists Cantonese and Zhuyin in the scheme menu only while theirs is.
   void noteSchemeOptions(const Json &options) {
-    const auto directory = options.find("language_dictionaries");
-    scheme_options_ = directory != options.end() && directory->is_string()
-                          ? Json{{"language_dictionaries", *directory}}
-                          : Json::object();
+    scheme_dictionaries_ = msime::linux_host::language_dictionary_availability(options);
     refreshSchemeMenu();
   }
   void refreshSchemeMenu();
@@ -3225,8 +3222,8 @@ public:
   std::string dictionary_user_data_;
   std::string resources_;
   std::optional<std::string> scheme_override_;
-  // The `language_dictionaries` entry of the runtime options, which decides whether Cantonese and Zhuyin can run (noteSchemeOptions).
-  Json scheme_options_ = Json::object();
+  // The language dictionaries the runtime options named when this context last read them, which decide whether Cantonese and Zhuyin can run (noteSchemeOptions).
+  msime::linux_host::LanguageDictionaryAvailability scheme_dictionaries_;
   bool caps_lock_ = false;
   std::string mode_indicator_label_;
   std::optional<std::string> shuangpin_profile_override_;

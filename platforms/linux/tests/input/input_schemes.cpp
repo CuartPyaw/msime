@@ -59,32 +59,37 @@ int main() {
   assert(mkdtemp(pattern) != nullptr);
   const fs::path directory = pattern;
   const Json options = {{"language_dictionaries", directory.string()}};
-  const Json no_directory = Json::object();
+  const auto empty = language_dictionary_availability(options);
+  const auto no_directory = language_dictionary_availability(Json::object());
   for (const char *id : {"quanpin", "shuangpin", "wubi", "japanese", "korean", "vietnamese"}) {
-    assert(input_scheme_available(id, options));
+    assert(input_scheme_available(id, empty));
     assert(input_scheme_available(id, no_directory));
   }
-  assert(!input_scheme_available("pinyin", options));
-  assert(!input_scheme_available("cantonese", options));
-  assert(!input_scheme_available("zhuyin", options));
+  assert(!input_scheme_available("pinyin", empty));
+  assert(!input_scheme_available("cantonese", empty));
+  assert(!input_scheme_available("zhuyin", empty));
   assert(!input_scheme_available("cantonese", no_directory));
-  assert(!input_scheme_available("zhuyin", Json{{"language_dictionaries", ""}}));
+  assert(!language_dictionary_availability(Json{{"language_dictionaries", ""}}).zhuyin);
+  assert(!language_dictionary_availability(nullptr).cantonese);
 
   // Without the data the scheme falls back to the last Chinese scheme, or to quanpin when that one cannot run or is not Chinese.
-  assert(effective_input_scheme("cantonese", "wubi", options) == "wubi");
-  assert(effective_input_scheme("zhuyin", "cantonese", options) == "quanpin");
-  assert(effective_input_scheme("zhuyin", "vietnamese", options) == "quanpin");
-  assert(effective_input_scheme("unknown", "shuangpin", options) == "shuangpin");
-  assert(effective_input_scheme("vietnamese", "wubi", options) == "vietnamese");
+  assert(effective_input_scheme("cantonese", "wubi", empty) == "wubi");
+  assert(effective_input_scheme("zhuyin", "cantonese", empty) == "quanpin");
+  assert(effective_input_scheme("zhuyin", "vietnamese", empty) == "quanpin");
+  assert(effective_input_scheme("unknown", "shuangpin", empty) == "shuangpin");
+  assert(effective_input_scheme("vietnamese", "wubi", empty) == "vietnamese");
   assert(effective_input_scheme("korean", "wubi", no_directory) == "korean");
 
   // A directory with the dictionary name is not a dictionary.
   fs::create_directory(directory / "zhuyin.db");
-  assert(!input_scheme_available("zhuyin", options));
   std::ofstream(directory / "cantonese.db") << "db";
-  assert(input_scheme_available("cantonese", options));
-  assert(effective_input_scheme("cantonese", "wubi", options) == "cantonese");
-  assert(effective_input_scheme("zhuyin", "cantonese", options) == "cantonese");
+  // The availability is a snapshot of the disk when the options were read: it does not change until they are read again.
+  assert(!input_scheme_available("cantonese", empty));
+  const auto installed = language_dictionary_availability(options);
+  assert(!input_scheme_available("zhuyin", installed));
+  assert(input_scheme_available("cantonese", installed));
+  assert(effective_input_scheme("cantonese", "wubi", installed) == "cantonese");
+  assert(effective_input_scheme("zhuyin", "cantonese", installed) == "cantonese");
 
   fs::remove_all(directory);
   return 0;
