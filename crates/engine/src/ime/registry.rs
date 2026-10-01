@@ -52,7 +52,8 @@ impl ProviderRegistry {
             SchemeType::Wubi => return self.wubi.query(request),
             SchemeType::JapaneseRomaji => return self.japanese.query(request),
             SchemeType::Korean if request.korean_hanja => return hanja::candidates(request),
-            SchemeType::Korean => return Vec::new(),
+            // Vietnamese composes its text in the preedit and has no candidates.
+            SchemeType::Korean | SchemeType::Vietnamese => return Vec::new(),
         };
         for item in &mut candidates {
             item.scheme = request.scheme;
@@ -60,12 +61,15 @@ impl ProviderRegistry {
         candidates
     }
 
-    /// Wubi, Japanese and Korean never answer a lookup (wubi_candidate_provider.h:19-22; the Japanese one read the dropped `japanese_lexicon`).
+    /// Wubi, Japanese, Korean and Vietnamese never answer a lookup (wubi_candidate_provider.h:19-22; the Japanese one read the dropped `japanese_lexicon`).
     pub fn find_candidate(&self, scheme: SchemeType, key: &str, value: &str) -> Option<WordItem> {
         match scheme {
             SchemeType::Quanpin => self.quanpin.find_candidate(key, value),
             SchemeType::Shuangpin => self.shuangpin.find_candidate(key, value),
-            SchemeType::Wubi | SchemeType::JapaneseRomaji | SchemeType::Korean => None,
+            SchemeType::Wubi
+            | SchemeType::JapaneseRomaji
+            | SchemeType::Korean
+            | SchemeType::Vietnamese => None,
         }
     }
 
@@ -78,7 +82,7 @@ impl ProviderRegistry {
             }
             SchemeType::Wubi => self.wubi.reset_cache(),
             SchemeType::JapaneseRomaji => self.japanese.reset_cache(),
-            SchemeType::Korean => {}
+            SchemeType::Korean | SchemeType::Vietnamese => {}
         }
     }
 
@@ -99,8 +103,8 @@ impl ProviderRegistry {
                     .cache_dynamic_candidate(&request.raw_input, word, source),
                 _ => false,
             },
-            // Korean takes no online rows.
-            SchemeType::Korean => false,
+            // Korean and Vietnamese take no online rows.
+            SchemeType::Korean | SchemeType::Vietnamese => false,
         }
     }
 
@@ -115,7 +119,10 @@ impl ProviderRegistry {
             SchemeType::Shuangpin => self
                 .shuangpin
                 .expand_initial_candidates(request, candidates),
-            SchemeType::Wubi | SchemeType::JapaneseRomaji | SchemeType::Korean => false,
+            SchemeType::Wubi
+            | SchemeType::JapaneseRomaji
+            | SchemeType::Korean
+            | SchemeType::Vietnamese => false,
         }
     }
 }

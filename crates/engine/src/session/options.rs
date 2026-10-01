@@ -6,6 +6,7 @@ use crate::types::{
     FuzzyPinyinOptions, LocalInputMode, LocalModeOptions, MentionEntry, MixedExpressiveOptions,
     SchemeType, SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
 };
+use crate::vietnamese::{InputMethod as VietnameseInputMethod, ToneStyle as VietnameseToneStyle};
 
 /// Everything a session is built with. `learning_undo` is gone with the feature.
 #[derive(Debug, Clone, PartialEq)]
@@ -15,6 +16,10 @@ pub struct SessionOptions {
     pub shuangpin_profile: ShuangpinProfileKind,
     /// Shuangpin preedit shows the typed keys rather than the decoded quanpin.
     pub shuangpin_preedit_uses_raw: bool,
+    /// How the Vietnamese scheme spells marks: Telex letters or VNI digits.
+    pub vietnamese_input_method: VietnameseInputMethod,
+    /// Where the Vietnamese scheme puts the tone on `oa`, `oe` and `uy`.
+    pub vietnamese_tone_style: VietnameseToneStyle,
     pub helpcode_schema: String,
     /// `autocorrect_type` bits; 0 keeps the user's spelling. Either of transposition and neighbor also enables missing and extra letters, and on inputs of three or more complete syllables offers a sentence that reads one syllable as a typo. Committing the raw letters while a correction is offered turns correction off for that exact input.
     pub autocorrect_types: u32,
@@ -51,6 +56,8 @@ impl SessionOptions {
             scheme: SchemeType::Quanpin,
             shuangpin_profile: ShuangpinProfileKind::Xiaohe,
             shuangpin_preedit_uses_raw: true,
+            vietnamese_input_method: VietnameseInputMethod::Telex,
+            vietnamese_tone_style: VietnameseToneStyle::Modern,
             helpcode_schema: "lantian".to_owned(),
             autocorrect_types: 0,
             helpcode: true,

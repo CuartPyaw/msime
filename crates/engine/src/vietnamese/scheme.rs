@@ -1,7 +1,7 @@
 //! Vietnamese key handling: the composition is the raw keystrokes of one word, and the display is those keystrokes run through the `vi` crate's Telex or VNI transform. Backspace removes one keystroke, never one displayed letter, so marks come off the way they went on. The first Esc locks the display to the raw keys (for English words the transform would mangle); the session cancels on the second.
 
 use super::{InputMethod, ToneStyle};
-use crate::types::SchemeKey;
+use crate::types::{QueryRequest, SchemeKey, SchemeType};
 use vi::processor::AccentStyle;
 
 /// VNI's mark keys; they only spell while a word is composing, so an idle digit still types the digit.
@@ -106,6 +106,22 @@ impl VietnameseScheme {
             }
         }
         display
+    }
+
+    /// The keystrokes as the raw input (case kept in `raw_input_with_cases`, so host editing and scratch schemes rebuild the same word) and the display as the segmentation. Valid while a word is composing; no provider answers it.
+    pub fn build_request(&self) -> QueryRequest {
+        let display = self.preedit();
+        QueryRequest {
+            scheme: SchemeType::Vietnamese,
+            raw_input: self.raw.to_ascii_lowercase(),
+            raw_input_with_cases: self.raw.clone(),
+            normalized_input: self.raw.to_ascii_lowercase(),
+            raw_segmentation: self.raw.clone(),
+            normalized_segmentation: display.clone(),
+            segmentation: display,
+            valid: self.is_composing(),
+            ..QueryRequest::default()
+        }
     }
 
     /// Keeps the keys `handle_key` would take, preferring the cased spelling when the host sent one; the raw lock is dropped because the keys changed.
@@ -337,5 +353,19 @@ mod tests {
         assert!(!scheme.is_composing());
         assert!(!scheme.raw_locked());
         assert_eq!(scheme.preedit(), "");
+    }
+
+    #[test]
+    fn request_carries_the_keys_as_raw_input_and_the_display_as_segmentation() {
+        let request = typed(InputMethod::Telex, ToneStyle::Modern, "Vieejt").build_request();
+        assert_eq!(request.scheme, SchemeType::Vietnamese);
+        assert_eq!(request.raw_input, "vieejt");
+        assert_eq!(request.raw_input_with_cases, "Vieejt");
+        assert_eq!(request.normalized_input, "vieejt");
+        assert_eq!(request.raw_segmentation, "Vieejt");
+        assert_eq!(request.segmentation, "Việt");
+        assert_eq!(request.normalized_segmentation, "Việt");
+        assert!(request.valid);
+        assert!(!VietnameseScheme::default().build_request().valid);
     }
 }

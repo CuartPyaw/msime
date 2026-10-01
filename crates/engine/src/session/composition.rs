@@ -477,7 +477,9 @@ impl InputSession {
         };
         match self.engine.current_scheme_type() {
             SchemeType::Wubi => request.raw_input.clone(),
-            SchemeType::JapaneseRomaji | SchemeType::Korean => self.raw_with_cases().to_owned(),
+            SchemeType::JapaneseRomaji | SchemeType::Korean | SchemeType::Vietnamese => {
+                self.raw_with_cases().to_owned()
+            }
             SchemeType::Shuangpin if self.shuangpin_preedit_uses_raw => {
                 with_trailing_separator(if request.raw_segmentation.is_empty() {
                     request.raw_input.clone()
@@ -496,8 +498,8 @@ impl InputSession {
         match self.engine.current_scheme_type() {
             SchemeType::Wubi => request.valid,
             SchemeType::JapaneseRomaji => convert_romaji(&request.raw_input).complete,
-            // Hangul is not pinyin.
-            SchemeType::Korean => false,
+            // Hangul and Vietnamese are not pinyin.
+            SchemeType::Korean | SchemeType::Vietnamese => false,
             SchemeType::Shuangpin => {
                 let profile = self.shuangpin_profile();
                 let base = resolve_shuangpin_composition_base(request, profile);
@@ -531,7 +533,10 @@ impl InputSession {
     pub(super) fn has_active_helpcode(&self) -> bool {
         let request = self.engine.request();
         match self.engine.current_scheme_type() {
-            SchemeType::Wubi | SchemeType::JapaneseRomaji | SchemeType::Korean => false,
+            SchemeType::Wubi
+            | SchemeType::JapaneseRomaji
+            | SchemeType::Korean
+            | SchemeType::Vietnamese => false,
             SchemeType::Shuangpin => {
                 active_shuangpin_helpcode_length(request, self.shuangpin_profile()) > 0
             }

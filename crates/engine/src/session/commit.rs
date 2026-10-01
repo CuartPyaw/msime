@@ -71,8 +71,8 @@ impl InputSession {
         // A selection made while a caret prefix is decoded leaves prefix mode: the rest of the composition decodes whole again.
         self.caret = None;
         let selected = self.candidates().get(index).cloned();
-        // A Korean commit is the chosen Hanja or the Hangul itself, and nothing about it is learned: the rows are keyed by Dubeolsik letters, which every learning path below would read as pinyin.
-        if self.korean_rules_apply() {
+        // A Korean commit is the chosen Hanja or the Hangul itself, and nothing about it is learned: the rows are keyed by Dubeolsik letters, which every learning path below would read as pinyin. A Vietnamese commit is the displayed word, learned nowhere either.
+        if self.korean_rules_apply() || self.vietnamese_rules_apply() {
             let text = selected.map_or_else(|| self.preedit(), |item| item.word);
             self.reset_composition();
             self.chain.reset();

@@ -25,6 +25,9 @@ use crate::types::{
     SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
 };
 use crate::user_dictionary::typo_profile::PersonalTypoProfile;
+use crate::vietnamese::{
+    InputMethod as VietnameseInputMethod, ToneStyle as VietnameseToneStyle, VietnameseScheme,
+};
 
 use registry::ProviderRegistry;
 use scheme::Scheme;
@@ -49,6 +52,8 @@ pub struct ImeSession {
     registry: ProviderRegistry,
     state: CompositionState,
     profile: ShuangpinProfileKind,
+    vietnamese_method: VietnameseInputMethod,
+    vietnamese_style: VietnameseToneStyle,
     wubi_options: WubiInputOptions,
     /// Mixed wubi only: a pinyin candidate was picked out of this composition, so the rest decodes as quanpin until the composition ends (product decision 2026-09-30, the intent of test_wubi_mixed_input_session.cpp:194-212). Cleared by `reset`, `switch_scheme`, turning mixed input off, and an emptied composition.
     pinyin_tail: bool,
@@ -66,10 +71,17 @@ impl ImeSession {
     /// ime_session.cpp:42-49.
     pub fn new(scheme: SchemeType, profile: ShuangpinProfileKind, paths: &RuntimePaths) -> Self {
         let mut session = Self {
-            scheme: Scheme::new(scheme, profile),
+            scheme: Scheme::new(
+                scheme,
+                profile,
+                VietnameseInputMethod::default(),
+                VietnameseToneStyle::default(),
+            ),
             registry: ProviderRegistry::new(profile, paths),
             state: CompositionState::default(),
             profile,
+            vietnamese_method: VietnameseInputMethod::default(),
+            vietnamese_style: VietnameseToneStyle::default(),
             wubi_options: WubiInputOptions::default(),
             pinyin_tail: false,
             autocorrect_types: 0,
@@ -111,7 +123,12 @@ impl ImeSession {
 
     /// A new scheme and an empty state.
     pub fn switch_scheme(&mut self, scheme: SchemeType) {
-        self.scheme = Scheme::new(scheme, self.profile);
+        self.scheme = Scheme::new(
+            scheme,
+            self.profile,
+            self.vietnamese_method,
+            self.vietnamese_style,
+        );
         self.bind_wubi_scheme();
         self.state = CompositionState::default();
         self.pinyin_tail = false;
@@ -190,6 +207,43 @@ impl ImeSession {
         korean.take_committed()
     }
 
+    /// The Telex or VNI method and the tone style Vietnamese spells with. A composing Vietnamese word keeps its keystrokes and is shown again under the new rules.
+    pub fn set_vietnamese_options(
+        &mut self,
+        method: VietnameseInputMethod,
+        style: VietnameseToneStyle,
+    ) {
+        self.vietnamese_method = method;
+        self.vietnamese_style = style;
+        let Scheme::Vietnamese(vietnamese) = &mut self.scheme else {
+            return;
+        };
+        let raw = vietnamese.raw().to_owned();
+        *vietnamese = VietnameseScheme::new(method, style);
+        vietnamese.set_raw_input(&raw, &raw);
+        self.refresh_candidates();
+    }
+
+    /// The first Esc of a Vietnamese word: the display becomes the raw keystrokes. False for every other scheme, with nothing composing, or when the raw keys already show, so the caller cancels instead.
+    pub fn restore_vietnamese_raw(&mut self) -> bool {
+        let Scheme::Vietnamese(vietnamese) = &mut self.scheme else {
+            return false;
+        };
+        if !vietnamese.restore_raw() {
+            return false;
+        }
+        self.refresh_candidates();
+        true
+    }
+
+    /// The non-letter keys the composing Vietnamese word spells with (VNI's digits); empty for every other scheme.
+    pub fn vietnamese_spelling_symbols(&self) -> &'static str {
+        match &self.scheme {
+            Scheme::Vietnamese(vietnamese) => vietnamese.spelling_symbols(),
+            _ => "",
+        }
+    }
+
     /// Whether the active scheme is wubi and its code is exactly four letters.
     pub fn wubi_has_complete_code(&self) -> bool {
         self.scheme
@@ -222,7 +276,12 @@ impl ImeSession {
 
     /// The request a scratch scheme of the current type builds for `raw`, with the session's switches applied.
     fn raw_request(&self, raw: &str, raw_with_cases: &str) -> QueryRequest {
-        let mut scratch = Scheme::new(self.current_scheme_type(), self.profile);
+        let mut scratch = Scheme::new(
+            self.current_scheme_type(),
+            self.profile,
+            self.vietnamese_method,
+            self.vietnamese_style,
+        );
         if let Some(wubi) = scratch.as_wubi_mut() {
             wubi.set_mixed_pinyin_allowed(self.wubi_options.mixed_pinyin);
             wubi.set_extended_length_allowed(self.wubi_options.mixed_pinyin);

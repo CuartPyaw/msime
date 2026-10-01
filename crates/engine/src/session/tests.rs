@@ -2939,3 +2939,36 @@ fn the_translate_command_asks_for_its_english_and_commits_the_answer() {
     assert!(!session.apply_command_translation(&query, "你好"));
     assert_eq!(words(&session), ["hellox"]);
 }
+
+// ---- Vietnamese ----
+
+#[test]
+fn vietnamese_vni_digits_are_spelling_symbols_only_while_a_word_composes() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Vietnamese;
+        options.vietnamese_input_method = crate::vietnamese::InputMethod::Vni;
+    });
+    assert!(session.snapshot().spelling_symbols.is_empty());
+    type_text(&mut session, "a");
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.spelling_symbols, "0123456789");
+    assert!(!snapshot.candidate_list_open);
+    assert!(snapshot.candidates.is_empty());
+    // A blur or scheme switch finishes through `finish`, which commits the word as displayed.
+    session.character(b'1', false);
+    assert_eq!(session.finish(0).commit.as_deref(), Some("á"));
+    assert!(session.snapshot().spelling_symbols.is_empty());
+}
+
+#[test]
+fn vietnamese_dedicated_english_keeps_its_own_rules() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Vietnamese);
+    session.set_dedicated_english(true);
+    type_text(&mut session, "hoaf");
+    assert_eq!(session.snapshot().preedit, "hoaf");
+    // The English composition is discarded at once: no raw-restore step in between.
+    assert!(session.command(Command::Cancel).handled);
+    assert!(session.snapshot().preedit.is_empty());
+}

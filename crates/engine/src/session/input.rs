@@ -102,6 +102,10 @@ impl InputSession {
         engine.set_autocorrect_types(0);
         engine.set_quanpin_helpcode_enabled(true);
         engine.set_shuangpin_helpcode_enabled(true);
+        engine.set_vietnamese_options(
+            options.vietnamese_input_method,
+            options.vietnamese_tone_style,
+        );
         let mut session = Self {
             queries: CandidateQueries::new(&paths, options.shuangpin_profile),
             engine,
@@ -210,6 +214,9 @@ impl InputSession {
         }
         if self.is_korean() {
             return self.handle_korean_character(value);
+        }
+        if self.is_vietnamese() {
+            return self.handle_vietnamese_character(value);
         }
         if !self.has_composition() && self.scheme().opens_local_modes() {
             let entry = if shift_only {
@@ -378,6 +385,54 @@ impl InputSession {
         }
     }
 
+    /// Vietnamese keys: a letter always spells, and a VNI digit spells while a word is composing; both are handled. With nothing composing any other key goes to the host. With a word composing, punctuation stays unhandled without touching it, because the punctuation route commits the word ahead of the mark; any other key commits the word and stays unhandled, so the host inserts the key after the commit.
+    fn handle_vietnamese_character(&mut self, value: u8) -> KeyResult {
+        let spells = value.is_ascii_alphabetic()
+            || self
+                .engine
+                .vietnamese_spelling_symbols()
+                .as_bytes()
+                .contains(&value);
+        if !spells {
+            if !self.has_composition() {
+                self.reset_commit_context();
+                return KeyResult::unhandled();
+            }
+            if value.is_ascii_punctuation() {
+                return KeyResult::unhandled();
+            }
+            return self.commit_vietnamese_composition();
+        }
+        // A long pause before a new word usually means the user moved to another field or application.
+        if !self.has_composition()
+            && self.chain.previous.is_some()
+            && self.chain.paused(self.steady_now())
+        {
+            self.chain.reset();
+        }
+        let key = if value.is_ascii_alphabetic() {
+            SchemeKey::Letter(value)
+        } else {
+            SchemeKey::Symbol(value)
+        };
+        self.engine.handle_key(key);
+        self.update_mixed_candidates();
+        self.online_requests.invalidate();
+        KeyResult::handled()
+    }
+
+    /// The Vietnamese word goes to the host as displayed, and the key that ended it does not: the result is unhandled, so Space, Enter, a caret key or Tab still does its own work after the commit. Nothing is learned.
+    fn commit_vietnamese_composition(&mut self) -> KeyResult {
+        let text = self.preedit();
+        self.reset_composition();
+        self.chain.reset();
+        KeyResult {
+            handled: false,
+            commit: Some(text),
+            diagnostic: None,
+        }
+    }
+
     /// input_session.cpp:294-406.
     pub fn handle_command(&mut self, command: Command) -> KeyResult {
         if !self.has_composition() {
@@ -405,6 +460,24 @@ impl InputSession {
             )
         {
             return self.commit_korean_composition();
+        }
+        // A Vietnamese word has no caret inside it and no list: the commit and caret commands end it as displayed and hand the key back. The first Cancel shows the raw keystrokes instead of the transformed word, and the second takes the shared path and discards it. Backspace removes one keystroke through the shared path.
+        if self.vietnamese_rules_apply() {
+            match command {
+                Command::CommitCandidate
+                | Command::CommitRaw
+                | Command::CommitReading
+                | Command::MoveLeft
+                | Command::MoveRight
+                | Command::MoveHome
+                | Command::MoveEnd
+                | Command::DeleteForward => return self.commit_vietnamese_composition(),
+                Command::Cancel if self.engine.restore_vietnamese_raw() => {
+                    self.update_mixed_candidates();
+                    return KeyResult::handled();
+                }
+                _ => {}
+            }
         }
         match command {
             Command::MoveLeft
@@ -478,6 +551,16 @@ impl InputSession {
 
     /// input_session.cpp:247-258.
     pub fn handle_candidate_key(&mut self, value: u8) -> KeyResult {
+        // A VNI digit spells the composing word; there is no list to select from.
+        if self.vietnamese_rules_apply()
+            && self
+                .engine
+                .vietnamese_spelling_symbols()
+                .as_bytes()
+                .contains(&value)
+        {
+            return self.handle_character(value, false);
+        }
         if !self.has_composition() || !(b'1'..=b'9').contains(&value) {
             // The host inserts the key itself, so the next word no longer follows the last one.
             if !self.has_composition() {
@@ -596,6 +679,9 @@ impl InputSession {
         }
         if self.local_mode != LocalInputMode::None {
             return self.local_mode.spelling_symbols().to_owned();
+        }
+        if self.vietnamese_rules_apply() {
+            return self.engine.vietnamese_spelling_symbols().to_owned();
         }
         if self.has_composition() || !self.scheme().opens_local_modes() {
             return String::new();
@@ -843,6 +929,15 @@ impl InputSession {
         self.is_korean() && self.local_mode == LocalInputMode::None && !self.dedicated_english
     }
 
+    pub(super) fn is_vietnamese(&self) -> bool {
+        self.engine.current_scheme_type() == SchemeType::Vietnamese
+    }
+
+    /// The Vietnamese scheme's own rules are in force: dedicated English and the local modes keep theirs inside it.
+    pub(super) fn vietnamese_rules_apply(&self) -> bool {
+        self.is_vietnamese() && self.local_mode == LocalInputMode::None && !self.dedicated_english
+    }
+
     /// The scheme's openable candidate list is showing: the composing syllable's Hanja in Korean.
     pub(super) fn candidate_list_open(&self) -> bool {
         self.engine
@@ -857,7 +952,10 @@ impl InputSession {
         match self.scheme() {
             SchemeType::Quanpin => self.quanpin_helpcode_enabled,
             SchemeType::Shuangpin => self.shuangpin_helpcode_enabled,
-            SchemeType::Wubi | SchemeType::JapaneseRomaji | SchemeType::Korean => false,
+            SchemeType::Wubi
+            | SchemeType::JapaneseRomaji
+            | SchemeType::Korean
+            | SchemeType::Vietnamese => false,
         }
     }
 

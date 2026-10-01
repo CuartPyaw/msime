@@ -4,6 +4,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
 use msime_engine::assets::USER_JOURNAL;
+use msime_engine::vietnamese::{InputMethod, ToneStyle};
 use msime_engine::{
     CandidateEdge, CandidateSource, Command, FrequencyAdjustmentMode, PersonalDictionaryEntry,
     PersonalDictionaryKind, RuntimePaths, SchemeType, Session, SessionOptions,
@@ -198,6 +199,20 @@ pub fn apply_options(options: &mut SessionOptions, value: &Value) {
                     .unwrap_or_else(|| panic!("unknown shuangpin profile {v}"));
             }
             "shuangpin_preedit_uses_raw" => options.shuangpin_preedit_uses_raw = as_bool(v),
+            "vietnamese_input_method" => {
+                options.vietnamese_input_method = match as_str(v) {
+                    "telex" => InputMethod::Telex,
+                    "vni" => InputMethod::Vni,
+                    other => panic!("unknown vietnamese input method {other}"),
+                };
+            }
+            "vietnamese_tone_style" => {
+                options.vietnamese_tone_style = match as_str(v) {
+                    "modern" => ToneStyle::Modern,
+                    "classic" => ToneStyle::Classic,
+                    other => panic!("unknown vietnamese tone style {other}"),
+                };
+            }
             "helpcode_schema" => options.helpcode_schema = as_str(v).to_owned(),
             "autocorrect_types" => options.autocorrect_types = as_u32(v),
             "helpcode" => options.helpcode = as_bool(v),
@@ -311,6 +326,7 @@ fn scheme_from(name: &str) -> SchemeType {
         "wubi" => SchemeType::Wubi,
         "japanese" => SchemeType::JapaneseRomaji,
         "korean" => SchemeType::Korean,
+        "vietnamese" => SchemeType::Vietnamese,
         _ => panic!("unknown scheme {name}"),
     }
 }
@@ -666,8 +682,11 @@ impl Scenario {
                 Some(json!({"applied": applied}))
             }
             "reopen" => {
-                // A new Session on the same user data: the same generation is re-prepared, which replays the journal.
+                // A new Session on the same user data: the same generation is re-prepared, which replays the journal. An `options` object on the step changes those session options for the new Session (harness-side, for options with no live setter such as the Vietnamese tone style).
                 self.close();
+                if let Some(changed) = step.get("options") {
+                    apply_options(&mut self.options, changed);
+                }
                 self.open();
                 None
             }
@@ -788,7 +807,7 @@ mod tests {
     #[test]
     fn every_scenario_is_selected_in_name_order_without_a_filter() {
         let all = selected_scenarios_from(None);
-        assert_eq!(all.len(), 274);
+        assert_eq!(all.len(), 276);
         let mut sorted = all.clone();
         sorted.sort();
         assert_eq!(all, sorted);
@@ -906,6 +925,20 @@ mod tests {
         assert_eq!(options.english.minimum_prefix, 4);
         assert!(options.expressive.emoji_candidates && !options.expressive.kaomoji_candidates);
         assert!(options.wubi.mixed_pinyin && !options.personal_context);
+    }
+
+    #[test]
+    fn vietnamese_options_map_onto_the_session_fields() {
+        let mut options = SessionOptions::new(RuntimePaths::default());
+        assert_eq!(options.vietnamese_input_method, InputMethod::Telex);
+        assert_eq!(options.vietnamese_tone_style, ToneStyle::Modern);
+        apply_options(
+            &mut options,
+            &json!({"scheme": "vietnamese", "vietnamese_input_method": "vni", "vietnamese_tone_style": "classic"}),
+        );
+        assert_eq!(options.scheme, SchemeType::Vietnamese);
+        assert_eq!(options.vietnamese_input_method, InputMethod::Vni);
+        assert_eq!(options.vietnamese_tone_style, ToneStyle::Classic);
     }
 
     #[test]

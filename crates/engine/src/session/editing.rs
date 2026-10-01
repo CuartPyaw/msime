@@ -16,7 +16,7 @@ pub(super) fn temporary_japanese_preedit(raw: &str) -> String {
 }
 
 impl InputSession {
-    /// Dedicated preedit; `"R" + cased raw` in temporary Japanese; the local preedit; else the cased raw input.
+    /// Dedicated preedit; `"R" + cased raw` in temporary Japanese; the local preedit; the displayed word in Vietnamese; else the cased raw input.
     pub(super) fn editing_text(&self) -> String {
         if self.dedicated_english {
             return self.dedicated_english_preedit.clone();
@@ -25,6 +25,8 @@ impl InputSession {
             LocalInputMode::TemporaryJapanese => {
                 temporary_japanese_preedit(&self.engine.request().raw_input_with_cases)
             }
+            // A Vietnamese word is edited as the text it shows, not as its keystrokes.
+            LocalInputMode::None if self.is_vietnamese() => self.engine.preedit().to_owned(),
             LocalInputMode::None => self.raw_with_cases().to_owned(),
             _ => self.local_preedit.clone(),
         }
@@ -199,7 +201,10 @@ impl InputSession {
             SchemeType::Quanpin => {
                 quanpin_raw_boundaries(raw_with_cases, &self.pinyin_segmentation_with_cases())
             }
-            SchemeType::Wubi | SchemeType::JapaneseRomaji | SchemeType::Korean => Vec::new(),
+            SchemeType::Wubi
+            | SchemeType::JapaneseRomaji
+            | SchemeType::Korean
+            | SchemeType::Vietnamese => Vec::new(),
         }
     }
 

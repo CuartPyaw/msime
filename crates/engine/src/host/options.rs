@@ -156,9 +156,10 @@ pub fn session_options(options: &EngineOptions) -> Result<SessionOptions> {
     let shuangpin_profile = shuangpin_profile(options)?;
     let mode = FrequencyAdjustmentMode::from_name(&options.frequency_mode)
         .ok_or_else(|| EngineError::invalid(diagnostics::UNSUPPORTED_FREQUENCY_MODE))?;
-    VietnameseInputMethod::from_u8(options.vietnamese_input_method)
-        .ok_or_else(|| EngineError::invalid(diagnostics::UNSUPPORTED_VIETNAMESE_METHOD))?;
-    VietnameseToneStyle::from_u8(options.vietnamese_tone_style)
+    let vietnamese_input_method =
+        VietnameseInputMethod::from_u8(options.vietnamese_input_method)
+            .ok_or_else(|| EngineError::invalid(diagnostics::UNSUPPORTED_VIETNAMESE_METHOD))?;
+    let vietnamese_tone_style = VietnameseToneStyle::from_u8(options.vietnamese_tone_style)
         .ok_or_else(|| EngineError::invalid(diagnostics::UNSUPPORTED_VIETNAMESE_TONE_STYLE))?;
     // Only the two user switches; the quanpin dictionary widens them with missing and extra letters per request (`request_autocorrect_mask`), as the C++ did (bridge.cpp:376-378).
     let autocorrect_types = if options.autocorrect_transposition {
@@ -174,6 +175,8 @@ pub fn session_options(options: &EngineOptions) -> Result<SessionOptions> {
     session.scheme = scheme;
     session.shuangpin_profile = shuangpin_profile;
     session.shuangpin_preedit_uses_raw = options.shuangpin_preedit_uses_raw;
+    session.vietnamese_input_method = vietnamese_input_method;
+    session.vietnamese_tone_style = vietnamese_tone_style;
     session.learning = options.learning;
     session.autocorrect_types = autocorrect_types;
     session.fuzzy_pinyin = FuzzyPinyinOptions {
