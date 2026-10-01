@@ -240,7 +240,8 @@ pub fn cut_pinyin_with_corrections(pinyin: &str) -> Vec<Vec<String>> {
         let mut combined = Vec::with_capacity(capacity);
         'product: for head in &merged {
             for tail in &part_paths {
-                let mut path = head.clone();
+                let mut path = Vec::with_capacity(head.len() + tail.len());
+                path.extend_from_slice(head);
                 path.extend_from_slice(tail);
                 combined.push(path);
                 if combined.len() == CORRECTION_PATH_LIMIT {
