@@ -242,6 +242,7 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         local_mention: false,
         command_table: Vec::new(),
         mention_entries: Vec::new(),
+        quick_phrase_table: Vec::new(),
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
@@ -7760,6 +7761,81 @@ fn command_tables_and_mentions_reach_the_engine_from_the_plugins_directory() {
     assert!(!commands.contains(&"张三敬上".to_owned()));
     assert!(local_mode_candidates(handle, b"@ls").contains(&"李四".to_owned()));
     assert!(!local_mode_candidates(handle, b"@zs").contains(&"张三".to_owned()));
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+fn install_phrase_table(root: &std::path::Path, id: &str, phrases: &[(&str, &str)]) {
+    let pack = root.join("state/plugins/phrase_table").join(id);
+    std::fs::create_dir_all(&pack).unwrap();
+    let rows: String = phrases
+        .iter()
+        .map(|(key, text)| format!("[[phrases]]\nkey = \"{key}\"\ntext = \"{text}\"\n"))
+        .collect();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        format!("schema_version = 1\nkind = \"phrase_table\"\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n{rows}"),
+    )
+    .unwrap();
+}
+
+/// K 模式在一个空闲会话里输入 `keys` 后的候选文本，之后取消。
+fn quick_phrase_candidates(handle: u64, keys: &[u8]) -> Vec<String> {
+    let entered = read(msime_client_character(handle, b'K', true));
+    assert_eq!(entered["ok"], true, "{entered}");
+    local_mode_candidates(handle, keys)
+}
+
+/// 启用的短语表在创建时进入 Engine，接在数据库短语之后；设置页改了包，获得焦点时跟上；偏好里换了启用顺序，走普通的偏好更新。
+#[test]
+fn phrase_tables_reach_the_quick_phrase_mode_from_the_plugins_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["resources", "dictionaries"] {
+        let directory = dir.path().join(name);
+        std::fs::create_dir_all(&directory).unwrap();
+        rusqlite::Connection::open(directory.join("msime.db"))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO quick_parases VALUES('dh','电话',10);",
+            )
+            .unwrap();
+    }
+    install_phrase_table(
+        dir.path(),
+        "office",
+        &[("dh", "电话"), ("dhhm", "电话号码")],
+    );
+    install_phrase_table(dir.path(), "home", &[("dh", "家里电话")]);
+    let mut preferences = chinese_preferences();
+    preferences.plugins.phrase_tables = vec!["office".into()];
+    let handle = plugin_host(dir.path(), preferences.clone());
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    assert_eq!(quick_phrase_candidates(handle, b"dh"), ["电话", "电话号码"]);
+
+    install_phrase_table(dir.path(), "office", &[("dh", "办公室电话")]);
+    assert_eq!(read(msime_client_focus(handle, false))["ok"], true);
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    assert_eq!(
+        quick_phrase_candidates(handle, b"dh"),
+        ["电话", "办公室电话"]
+    );
+
+    preferences.plugins.phrase_tables = vec!["home".into(), "office".into()];
+    assert_eq!(update(handle, 1, &preferences)["value"]["deferred"], false);
+    assert_eq!(
+        quick_phrase_candidates(handle, b"dh"),
+        ["电话", "家里电话", "办公室电话"]
+    );
+
+    // K 模式关闭时不读任何短语表。
+    preferences.local_modes.quick_phrase = false;
+    assert_eq!(update(handle, 2, &preferences)["value"]["deferred"], false);
+    SESSIONS.with(|sessions| {
+        assert!(sessions.borrow()[&handle]
+            .options
+            .quick_phrase_table
+            .is_empty());
+    });
     assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }
 

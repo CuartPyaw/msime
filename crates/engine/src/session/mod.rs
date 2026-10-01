@@ -20,7 +20,7 @@ use crate::error::{EngineError, Result};
 use crate::nine_key::NineKeySession;
 use crate::types::{
     CandidateEdge, CandidateSource, Command, CommandTableEntry, CommandTranslationQuery, KeyResult,
-    LocalInputMode, MentionEntry, OnlineQuery, SchemeType,
+    LocalInputMode, MentionEntry, OnlineQuery, QuickPhraseEntry, SchemeType,
 };
 
 pub use clock::Clock;
@@ -253,6 +253,11 @@ impl Session {
     /// Replace the `/` mode's command table; rows it cannot use are dropped. A diagnostic only if the open command list could not be refreshed.
     pub fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Option<String> {
         self.input.set_command_table(table)
+    }
+
+    /// 替换 K 模式的宿主短语表；用不了的行被丢弃。只有打开的 K 模式列表刷新失败时才返回诊断。
+    pub fn set_quick_phrase_table(&mut self, table: &[QuickPhraseEntry]) -> Option<String> {
+        self.input.set_quick_phrase_table(table)
     }
 
     /// Replace the `@` mode's list; entries it cannot use are dropped.

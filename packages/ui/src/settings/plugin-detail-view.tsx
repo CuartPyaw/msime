@@ -4,6 +4,7 @@ import * as controls from "../core/platform-controls-style";
 import * as settings from "./settings-style";
 import {
   MAX_COMMAND_TABLES,
+  MAX_PHRASE_TABLES,
   withPackSelected,
   DEFAULT_MELODY_PACK,
   DEFAULT_SOUND_PACK,
@@ -15,10 +16,12 @@ import {
   kindLabels,
   missingReason,
   missingTitle,
+  packKindLabel,
+  PHRASE_PREVIEW_ROWS,
   type MissingSelection,
 } from "./plugin-catalog-helpers";
 import { PluginViewHeader } from "./plugin-view-header";
-import type { PluginPackage } from "./plugin-types";
+import type { PluginPackage, PluginSettingsPage } from "./plugin-types";
 
 /** A row whose trailing edge is a read-only value rather than a control. */
 function InfoRow({ title, children }: { title: string; children: ReactNode }) {
@@ -46,9 +49,14 @@ export interface PluginDetailViewProps {
   triggers: boolean;
   /** The host draws an installed effect pack: `typingEffects && effectStyles && effectPacks`. */
   effectPacks: boolean;
+  /** 快捷短语（K 模式）是否打开：`local_modes.quick_phrase`。 */
+  quickPhraseMode: boolean;
   working: boolean;
   onChange: (preferences: PluginPreferences) => void;
   onCommandTable: (id: string, enabled: boolean) => void;
+  onPhraseTable: (id: string, enabled: boolean) => void;
+  /** 打开设置里的另一页；宿主没有页面导航时为空，链接不显示。 */
+  onOpenPage?: (page: PluginSettingsPage) => void;
   onRemove: (pack: PluginPackage) => void;
   onBack: () => void;
 }
@@ -61,9 +69,12 @@ export function PluginDetailView({
   music,
   triggers,
   effectPacks,
+  quickPhraseMode,
   working,
   onChange,
   onCommandTable,
+  onPhraseTable,
+  onOpenPage,
   onRemove,
   onBack,
 }: PluginDetailViewProps) {
@@ -72,11 +83,7 @@ export function PluginDetailView({
     <>
       <PluginViewHeader title={pack.name} onBack={onBack} />
       <GroupList title="信息">
-        <InfoRow title="类型">
-          {pack.kind === "sound" && pack.mode === "sequence"
-            ? "音效包 · 按键旋律"
-            : kindLabels[pack.kind]}
-        </InfoRow>
+        <InfoRow title="类型">{packKindLabel(pack)}</InfoRow>
         <InfoRow title="版本">{pack.version}</InfoRow>
         {pack.author && <InfoRow title="作者">{pack.author}</InfoRow>}
         <InfoRow title="许可证">{pack.license}</InfoRow>
@@ -92,9 +99,12 @@ export function PluginDetailView({
           music={music}
           triggers={triggers}
           effectPacks={effectPacks}
+          quickPhraseMode={quickPhraseMode}
           onSelect={select}
           onChange={onChange}
           onCommandTable={onCommandTable}
+          onPhraseTable={onPhraseTable}
+          onOpenPage={onOpenPage}
         />
       </GroupList>
       {!pack.builtin && (
@@ -116,8 +126,22 @@ export function PluginDetailView({
   );
 }
 
-/** The kind-specific content: a music pack's tracks, a command table's commands, an effect pack's style and parameters. */
+/** 各类型自己的内容：音乐包的曲目、指令表的指令、特效包的样式和参数、短语表的行数与前几行。 */
 function PackContent({ pack }: { pack: PluginPackage }) {
+  if (pack.kind === "phrase_table") {
+    const phrases = pack.phrases ?? [];
+    const shown = phrases.slice(0, PHRASE_PREVIEW_ROWS);
+    return (
+      <GroupList title={`短语（${phrases.length}）`}>
+        {shown.map((phrase, index) => (
+          <Row key={`${index}/${phrase.key}`} title={phrase.key} description={phrase.text} />
+        ))}
+        {phrases.length > shown.length && (
+          <p className={settings.groupNote}>只显示前 {PHRASE_PREVIEW_ROWS} 条。</p>
+        )}
+      </GroupList>
+    );
+  }
   if (pack.kind === "music") {
     const tracks = pack.tracks ?? [];
     return (
@@ -180,9 +204,12 @@ function PackActions({
   music,
   triggers,
   effectPacks,
+  quickPhraseMode,
   onSelect,
   onChange,
   onCommandTable,
+  onPhraseTable,
+  onOpenPage,
 }: {
   pack: PluginPackage;
   preferences: PluginPreferences;
@@ -190,9 +217,12 @@ function PackActions({
   music: boolean;
   triggers: boolean;
   effectPacks: boolean;
+  quickPhraseMode: boolean;
   onSelect: () => void;
   onChange: (preferences: PluginPreferences) => void;
   onCommandTable: (id: string, enabled: boolean) => void;
+  onPhraseTable: (id: string, enabled: boolean) => void;
+  onOpenPage?: (page: PluginSettingsPage) => void;
 }) {
   switch (pack.kind) {
     case "sound": {
@@ -294,6 +324,40 @@ function PackActions({
         </Row>
       );
     }
+    case "phrase_table": {
+      if (!triggers) return <ActionBlock note="这台设备不支持快捷短语插件。" />;
+      const position = preferences.phrase_tables.indexOf(pack.id);
+      const full = position < 0 && preferences.phrase_tables.length >= MAX_PHRASE_TABLES;
+      return (
+        <>
+          <Row
+            title="启用"
+            description={
+              position >= 0
+                ? `第 ${position + 1} 位。同一编码下靠前的表先列出。`
+                : full
+                  ? `最多启用 ${MAX_PHRASE_TABLES} 个短语表。`
+                  : "启用后排在已启用的短语表之后。"
+            }
+          >
+            <Switch
+              checked={position >= 0}
+              disabled={full}
+              onChange={(enabled) => onPhraseTable(pack.id, enabled)}
+            />
+          </Row>
+          {!quickPhraseMode && (
+            <ActionBlock note="快捷短语（K 模式）已关闭。在「输入 → 实用功能」打开后，按 Shift+K 再输入编码即可用到短语表。">
+              {onOpenPage && (
+                <button type="button" className="secondary" onClick={() => onOpenPage("input")}>
+                  前往输入设置
+                </button>
+              )}
+            </ActionBlock>
+          )}
+        </>
+      );
+    }
   }
 }
 
@@ -311,7 +375,11 @@ export function MissingPluginView({
 }) {
   const label = kindLabels[entry.kind];
   const action =
-    entry.kind === "sound" ? "改回默认" : entry.kind === "command_table" ? "移除" : "不再使用";
+    entry.kind === "sound"
+      ? "改回默认"
+      : entry.kind === "command_table" || entry.kind === "phrase_table"
+        ? "移除"
+        : "不再使用";
   const note = entry.mismatched
     ? `设置里${entry.uses.join("、")}是「${entry.id}」，${missingReason(entry)}。可以${action}，或者在「我的插件」里打开另一个${label}。`
     : `设置里${entry.uses.join("、")}是「${entry.id}」，但这个${label}已不在本机，可能被删除或无法载入。可以重新导入它，或者${action}。`;

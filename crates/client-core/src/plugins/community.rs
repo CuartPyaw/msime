@@ -29,13 +29,14 @@ use std::time::Duration;
 use uuid::Uuid;
 
 /// The kinds the library accepts. An effect pack is a few parameters for a style built into every host, so there is nothing in it worth sharing as a file.
-pub const PUBLISHABLE_KINDS: [PluginKind; 3] = [
+pub const PUBLISHABLE_KINDS: [PluginKind; 4] = [
     PluginKind::Sound,
     PluginKind::Music,
     PluginKind::CommandTable,
+    PluginKind::PhraseTable,
 ];
 /// 向服务端声明本客户端能安装的新插件类型（`sound`、`music`、`command_table`、`effect` 之外的）。服务端只把冻结的旧类型集合与这里声明的类型返回给列表和详情请求，因此不带声明的已发布客户端永远不会收到它不认识的类型。每支持一种新类型就把它追加进来；`kinds_declaration_lists_the_new_publishable_kinds` 测试保证它与 [`PUBLISHABLE_KINDS`] 一致。
-pub(crate) const KINDS_DECLARATION: &str = "kinds=";
+pub(crate) const KINDS_DECLARATION: &str = "kinds=phrase_table";
 /// Largest archive the server stores for one pack.
 pub const MAX_COMMUNITY_ARCHIVE_BYTES: usize = 8 * 1024 * 1024;
 /// Largest offset the server pages to.

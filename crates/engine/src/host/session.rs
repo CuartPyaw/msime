@@ -14,7 +14,7 @@ use crate::local::database::LocalDatabaseLease;
 use crate::pinyin::segment::is_complete_pinyin_input;
 use crate::types::{
     CandidateEdge, CandidateSource, CommandTableEntry, CommandTranslationQuery, KeyResult,
-    LocalInputMode, MentionEntry, OnlineQuery, SchemeType, ShuangpinProfileKind,
+    LocalInputMode, MentionEntry, OnlineQuery, QuickPhraseEntry, SchemeType, ShuangpinProfileKind,
 };
 use crate::user_dictionary::ngram_store::flush_journal;
 use crate::user_dictionary::removal::learn_entered_english_word;
@@ -277,6 +277,14 @@ impl Session {
     /// Replace the `/` mode's command table live; `EngineOptions::command_table` is what a rebuilt session starts with.
     pub fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Result<()> {
         match self.inner.set_command_table(table) {
+            Some(diagnostic) => Err(EngineError::failed(&diagnostic)),
+            None => Ok(()),
+        }
+    }
+
+    /// 实时替换 K 模式的宿主短语表；重建的会话从 `EngineOptions::quick_phrase_table` 开始。
+    pub fn set_quick_phrase_table(&mut self, table: &[QuickPhraseEntry]) -> Result<()> {
+        match self.inner.set_quick_phrase_table(table) {
             Some(diagnostic) => Err(EngineError::failed(&diagnostic)),
             None => Ok(()),
         }

@@ -26,8 +26,8 @@ use crate::shuangpin::profile::profile;
 use crate::shuangpin::ShuangpinProfile;
 use crate::types::{
     CandidateSource, Command, CommandTableEntry, EnglishInputOptions, FrequencyAdjustmentOptions,
-    KeyResult, LocalInputMode, LocalModeOptions, MentionEntry, MixedExpressiveOptions, SchemeKey,
-    SchemeType, ShuangpinProfileKind, WordItem, WubiInputOptions,
+    KeyResult, LocalInputMode, LocalModeOptions, MentionEntry, MixedExpressiveOptions,
+    QuickPhraseEntry, SchemeKey, SchemeType, ShuangpinProfileKind, WordItem, WubiInputOptions,
 };
 use crate::user_dictionary::ngram_store::PersonalNgramStore;
 use crate::user_dictionary::removal::learn_entered_english_word;
@@ -180,6 +180,9 @@ impl InputSession {
         session.set_local_mode_options(options.local_modes);
         session.queries.set_command_table(&options.command_table);
         session.queries.set_mentions(&options.mention_entries);
+        session
+            .queries
+            .set_quick_phrase_table(&options.quick_phrase_table);
         session.expressive_options = options.expressive;
         session.set_wubi_input_options(options.wubi);
         session.set_personal_context_enabled(options.personal_context);
@@ -837,6 +840,14 @@ impl InputSession {
     pub fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Option<String> {
         self.queries.set_command_table(table);
         (self.local_mode == LocalInputMode::Command)
+            .then(|| self.update_local_candidates())
+            .flatten()
+    }
+
+    /// 替换 K 模式的宿主短语表；K 模式打开时刷新屏幕上的列表。
+    pub fn set_quick_phrase_table(&mut self, table: &[QuickPhraseEntry]) -> Option<String> {
+        self.queries.set_quick_phrase_table(table);
+        (self.local_mode == LocalInputMode::QuickPhrase)
             .then(|| self.update_local_candidates())
             .flatten()
     }

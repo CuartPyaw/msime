@@ -1,8 +1,8 @@
-//! Plugin packs: sound packs, background music, command tables and typing-effect parameters, as validated data.
+//! 插件包：音效包、背景音乐、指令表、打字特效参数、短语表、辅助码表、单词本和符号集，全部是经过校验的数据。
 //!
 //! Nothing in a pack runs. The kinds are a closed set, each with a fixed manifest shape that this module parses in full, and a pack that asks for any permission is refused, so a third party can supply samples, tracks and text templates and nothing else. Hosts play the audio, hand the command rows to the Engine and draw their own built-in effects with an effect pack's parameters; all of them only ever see a pack this module has accepted.
 //!
-//! A pack lives in `<root>/<kind>/<id>/`, where `root` is the `plugins` directory under the host's state root and `kind` is `sound`, `music`, `command_table` or `effect`. The directory holds `plugin.toml` and the flat files it names, plus optional text notices, and nothing else: no subdirectories, no symbolic links, no file the manifest does not account for. Built-in sound packs ship inside each platform's bundle rather than under `root`, in a directory the host names (`resources/sound-packs` in the repository), and are listed beside the installed ones.
+//! 一个包放在 `<root>/<kind>/<id>/`：`root` 是宿主状态根目录下的 `plugins` 目录，`kind` 是 `PluginKind::as_str` 给出的名字（`sound`、`music`、`command_table`、`effect`、`phrase_table` 等）。目录里只有 `plugin.toml`、清单点名的平铺文件（音频或数据文件）和可选的说明文本，别的一律没有：没有子目录、没有符号链接、没有清单不认账的文件。内置音效包随各平台的安装包分发，不在 `root` 下，而在宿主指定的目录里（仓库中是 `resources/sound-packs`），与已安装的包并列列出。
 //!
 //! `mentions.json` beside the kind directories is the @ mode's name list, kept by `mentions`. It lives here rather than in the preferences document because that document is the one hosts copy and account sync reads from, and a contact list belongs to neither.
 
@@ -13,6 +13,7 @@ mod failure;
 mod import;
 pub mod mentions;
 pub mod music_pack;
+pub mod phrase_table;
 pub mod sound_pack;
 
 pub use failure::{remove_named, PluginFailure};
@@ -81,10 +82,18 @@ pub enum PluginKind {
     CommandTable,
     /// Parameters for one of the hosts' built-in typing effects: a style and a few bounded hints, no files.
     Effect,
+    /// K 模式的短语：编码和文本，全部写在清单里。
+    PhraseTable,
 }
 
 impl PluginKind {
-    pub const ALL: [Self; 4] = [Self::Sound, Self::Music, Self::CommandTable, Self::Effect];
+    pub const ALL: [Self; 5] = [
+        Self::Sound,
+        Self::Music,
+        Self::CommandTable,
+        Self::Effect,
+        Self::PhraseTable,
+    ];
 
     /// The manifest's `kind` and the directory under the plugins root.
     pub fn as_str(self) -> &'static str {
@@ -93,6 +102,7 @@ impl PluginKind {
             Self::Music => "music",
             Self::CommandTable => "command_table",
             Self::Effect => "effect",
+            Self::PhraseTable => "phrase_table",
         }
     }
 
@@ -106,7 +116,7 @@ pub fn is_builtin(kind: PluginKind, id: &str) -> bool {
     match kind {
         PluginKind::Sound => BUILTIN_SOUND_PACKS.contains(&id),
         PluginKind::Music => BUILTIN_MUSIC_PACKS.contains(&id),
-        PluginKind::CommandTable | PluginKind::Effect => false,
+        PluginKind::CommandTable | PluginKind::Effect | PluginKind::PhraseTable => false,
     }
 }
 
@@ -168,6 +178,7 @@ impl PluginSummary {
             PluginContent::Music(_) => PluginKind::Music,
             PluginContent::CommandTable(_) => PluginKind::CommandTable,
             PluginContent::Effect(_) => PluginKind::Effect,
+            PluginContent::PhraseTable(_) => PluginKind::PhraseTable,
         }
     }
 }
@@ -179,6 +190,7 @@ pub enum PluginContent {
     Music(music_pack::MusicPack),
     CommandTable(command_table::CommandTable),
     Effect(effect_pack::EffectPack),
+    PhraseTable(phrase_table::PhraseTable),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -416,6 +428,7 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
         PluginKind::Music => &music_pack::MANIFEST_KEYS,
         PluginKind::CommandTable => &command_table::MANIFEST_KEYS,
         PluginKind::Effect => &effect_pack::MANIFEST_KEYS,
+        PluginKind::PhraseTable => &phrase_table::MANIFEST_KEYS,
     };
     if let Some(key) = table
         .keys()
@@ -441,6 +454,11 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
         ),
         PluginKind::Effect => (
             PluginContent::Effect(effect_pack::parse(table)?),
+            Vec::new(),
+            AudioLimits::NONE,
+        ),
+        PluginKind::PhraseTable => (
+            PluginContent::PhraseTable(phrase_table::parse(table)?),
             Vec::new(),
             AudioLimits::NONE,
         ),

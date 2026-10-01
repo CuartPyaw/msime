@@ -79,6 +79,10 @@ pub trait InputEngine {
     fn set_command_table(&mut self, _table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
         Ok(())
     }
+    /// 替换 K 模式的宿主短语表。没有这个模式的引擎忽略它。
+    fn set_quick_phrase_table(&mut self, _table: &[QuickPhraseEntry]) -> Result<(), RuntimeError> {
+        Ok(())
+    }
     /// Replace the `@` mode's name list. Engines without the mode ignore it.
     fn set_mention_entries(&mut self, _entries: &[MentionEntry]) -> Result<(), RuntimeError> {
         Ok(())
@@ -240,6 +244,10 @@ impl InputEngine for Session {
     }
     fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
         Session::set_command_table(self, table).map_err(|e| RuntimeError::Engine(e.to_string()))
+    }
+    fn set_quick_phrase_table(&mut self, table: &[QuickPhraseEntry]) -> Result<(), RuntimeError> {
+        Session::set_quick_phrase_table(self, table)
+            .map_err(|e| RuntimeError::Engine(e.to_string()))
     }
     fn set_mention_entries(&mut self, entries: &[MentionEntry]) -> Result<(), RuntimeError> {
         Session::set_mention_entries(self, entries).map_err(|e| RuntimeError::Engine(e.to_string()))

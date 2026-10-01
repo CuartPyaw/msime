@@ -39,7 +39,7 @@ use msime_client_core::preferences::TouchKeyboardLayout;
 use msime_engine::host::{
     local_mode_counts_as_typing, CandidateEdge, Command, CommandTableEntry,
     CommandTranslationQuery, EngineResult, EngineSnapshot, MentionEntry, OnlineQuerySnapshot,
-    Session,
+    QuickPhraseEntry, Session,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

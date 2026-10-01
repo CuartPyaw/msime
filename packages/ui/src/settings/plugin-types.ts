@@ -1,9 +1,12 @@
 import type { EffectStyle } from "./plugin-preferences";
 
 /** Mirrors `client-core::plugins::PluginKind`. */
-export type PluginKind = "sound" | "music" | "command_table" | "effect";
+export type PluginKind = "sound" | "music" | "command_table" | "effect" | "phrase_table";
 
 export type PluginCommand = { trigger: string; title: string; template: string };
+
+/** 短语表的一行：`client-core::plugins::phrase_table::PhraseRow`。 */
+export type PluginPhrase = { key: string; text: string };
 
 /** One pack as `client-core::plugins::scan` lists it: the manifest's fields, with the content of its kind flattened in. */
 export type PluginPackage = {
@@ -22,6 +25,8 @@ export type PluginPackage = {
   tracks?: string[];
   /** Command tables. */
   commands?: PluginCommand[];
+  /** 短语表。 */
+  phrases?: PluginPhrase[];
   /** Effect packs: `client-core::plugins::effect_pack::EffectPack`, never `off`. */
   style?: EffectStyle;
   intensity?: number;
@@ -29,6 +34,9 @@ export type PluginPackage = {
   duration_ms?: number | null;
   particles?: number | null;
 };
+
+/** 插件详情可以链接过去的设置页：辅助码和实用功能都在「输入」页。 */
+export type PluginSettingsPage = "input" | "vocabulary";
 
 /** A folder under the plugins directory that is not a loadable pack, and why. */
 export type PluginIssue = { kind: PluginKind; folder: string; reason: string };

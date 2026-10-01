@@ -6,7 +6,8 @@ use crate::paths::RuntimePaths;
 use crate::types::{
     CandidateSource, CommandTableEntry, EnglishInputOptions, FrequencyAdjustmentOptions,
     FuzzyPinyinOptions, LocalInputMode, LocalModeOptions, MentionEntry, MixedExpressiveOptions,
-    SchemeType, SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
+    QuickPhraseEntry, SchemeType, SentenceAssociationOptions, ShuangpinProfileKind, WordItem,
+    WubiInputOptions,
 };
 use crate::vietnamese::{InputMethod as VietnameseInputMethod, ToneStyle as VietnameseToneStyle};
 
@@ -52,6 +53,8 @@ pub struct SessionOptions {
     pub command_table: Vec<CommandTableEntry>,
     /// The `@` mode's names and places; `Session::set_mention_entries` replaces it live.
     pub mention_entries: Vec<MentionEntry>,
+    /// K 模式在数据库行之后追加的宿主短语；`Session::set_quick_phrase_table` 可以实时替换。
+    pub quick_phrase_table: Vec<QuickPhraseEntry>,
 }
 
 impl SessionOptions {
@@ -85,6 +88,7 @@ impl SessionOptions {
             rescoring_context: String::new(),
             command_table: Vec::new(),
             mention_entries: Vec::new(),
+            quick_phrase_table: Vec::new(),
         }
     }
 }

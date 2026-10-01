@@ -1547,3 +1547,134 @@ fn data_files_are_checked_by_name_size_and_extension_not_as_notices() {
         "empty.txt 为空或太大"
     );
 }
+
+/// `tests/fixtures/plugin-packs` 下的共享 fixture 包：`valid/<kind>-<case>` 必须通过、类型与目录名前缀一致；`invalid/<kind>-<case>` 必须因为下表写的原因被拒绝。后端（msime-cloud）的 Go 校验器在自己的测试里放一份相同内容的 fixture，两边对同一批包给出同样的接受与拒绝。
+fn fixture_packs() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/plugin-packs")
+}
+
+/// 每个 invalid fixture 被拒绝的原因。
+const FIXTURE_REFUSALS: &[(&str, &str)] = &[
+    ("phrase_table-blank-text", "短语 dh 的文本为空或太长"),
+    ("phrase_table-duplicate", "短语 dh 的「电话」重复了"),
+    ("phrase_table-empty", "短语表的条数不在允许范围内"),
+    ("phrase_table-long-key", "必须是 1 到 32 个小写字母"),
+    ("phrase_table-long-text", "短语 dh 的文本为空或太长"),
+    ("phrase_table-missing", "短语表缺少 phrases"),
+    (
+        "phrase_table-newline-in-text",
+        "短语 dh 的文本含有换行、制表符等控制字符",
+    ),
+    ("phrase_table-non-string-text", "每条短语都需要 text"),
+    (
+        "phrase_table-permissions",
+        "插件不能申请权限，permissions 必须为空",
+    ),
+    (
+        "phrase_table-tab-in-text",
+        "短语 dh 的文本含有换行、制表符等控制字符",
+    ),
+    (
+        "phrase_table-unknown-row-key",
+        "a phrase 里有未知的键 weight",
+    ),
+    (
+        "phrase_table-unknown-top-key",
+        "plugin.toml 里有未知的键 commands",
+    ),
+    (
+        "phrase_table-unnamed-data-file",
+        "table.tsv 没有在 plugin.toml 里用到",
+    ),
+    (
+        "phrase_table-uppercase-key",
+        "短语编码 Dh 必须是 1 到 32 个小写字母",
+    ),
+];
+
+fn fixture_cases(group: &str) -> Vec<(String, PathBuf)> {
+    let mut cases: Vec<_> = fs::read_dir(fixture_packs().join(group))
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (entry.file_name().into_string().unwrap(), entry.path())
+        })
+        .collect();
+    cases.sort();
+    cases
+}
+
+#[test]
+fn shared_fixture_packs_are_accepted_and_refused_as_listed() {
+    for (case, path) in fixture_cases("valid") {
+        let summary = validate(&path).unwrap_or_else(|error| panic!("{case}: {error}"));
+        let kind = case.split_once('-').unwrap().0;
+        assert_eq!(summary.kind().as_str(), kind, "{case}");
+    }
+    let invalid = fixture_cases("invalid");
+    let names: Vec<&str> = invalid.iter().map(|(case, _)| case.as_str()).collect();
+    let listed: Vec<&str> = FIXTURE_REFUSALS.iter().map(|(case, _)| *case).collect();
+    assert_eq!(
+        names, listed,
+        "每个 invalid fixture 都要在 FIXTURE_REFUSALS 里写明原因"
+    );
+    for ((case, path), (_, reason)) in invalid.iter().zip(FIXTURE_REFUSALS) {
+        match validate(path) {
+            Err(PluginError::Invalid(actual)) => {
+                assert!(actual.contains(reason), "{case}: {actual}")
+            }
+            other => panic!("{case}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn phrase_tables_hold_bounded_rows_and_merge_in_priority_order() {
+    let root = tempdir().unwrap();
+    let install = |id: &str, rows: &str| {
+        let pack = kind_directory(root.path(), PluginKind::PhraseTable).join(id);
+        fs::create_dir_all(&pack).unwrap();
+        fs::write(
+            pack.join(MANIFEST_FILE),
+            format!("schema_version = 1\nkind = 'phrase_table'\nid = '{id}'\nname = '短语'\nversion = '1'\nlicense = 'CC0-1.0'\n{rows}"),
+        )
+        .unwrap();
+    };
+    let row = |key: &str, text: &str| format!("[[phrases]]\nkey = '{key}'\ntext = '{text}'\n");
+    install("office", &(row("dh", "电话") + &row("yx", "邮箱")));
+    install("home", &(row("dh", "电话") + &row("dz", "地址")));
+    // 2000 行可以，2001 行不行。
+    let many = |count: usize| {
+        (0..count)
+            .map(|index| row("zz", &index.to_string()))
+            .collect::<String>()
+    };
+    install("full", &many(phrase_table::MAX_PHRASES));
+    install("over", &many(phrase_table::MAX_PHRASES + 1));
+    assert!(load_package(root.path(), None, PluginKind::PhraseTable, "full").is_ok());
+    assert_eq!(
+        reason(root.path(), PluginKind::PhraseTable, "over"),
+        "短语表的条数不在允许范围内"
+    );
+
+    let rows: Vec<_> = phrase_table::enabled_phrases(
+        root.path(),
+        &["home".into(), "missing".into(), "office".into()],
+    )
+    .into_iter()
+    .map(|row| (row.key, row.text))
+    .collect();
+    assert_eq!(
+        rows,
+        [
+            ("dh".to_owned(), "电话".to_owned()),
+            ("dz".to_owned(), "地址".to_owned()),
+            ("dh".to_owned(), "电话".to_owned()),
+            ("yx".to_owned(), "邮箱".to_owned()),
+        ]
+    );
+    let summary = load_package(root.path(), None, PluginKind::PhraseTable, "office").unwrap();
+    let json = serde_json::to_value(&summary).unwrap();
+    assert_eq!(json["kind"], "phrase_table");
+    assert_eq!(json["phrases"][1]["text"], "邮箱");
+}

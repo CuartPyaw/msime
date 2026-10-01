@@ -20,6 +20,7 @@ export function PluginsSettingsPage({ hidden = false }: { hidden?: boolean }) {
     showTypingEffects,
     showTypingEffectStyles,
     showTypingEffectPacks,
+    selectPage,
   } = useSettingsForm();
   const { onPreferencesChange } = createSettingsDraftActions({ setDraft });
   return (
@@ -34,6 +35,8 @@ export function PluginsSettingsPage({ hidden = false }: { hidden?: boolean }) {
           typingEffects={showTypingEffects}
           effectStyles={showTypingEffectStyles}
           effectPacks={showTypingEffectPacks}
+          quickPhraseMode={draft.local_modes?.quick_phrase ?? true}
+          onOpenPage={selectPage}
           active={page === "plugins" && !hidden}
           onChange={(plugins) => onPreferencesChange({ plugins })}
           onError={setError}

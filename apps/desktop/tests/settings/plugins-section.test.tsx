@@ -1279,3 +1279,64 @@ test("the 插件 page is not offered on a phone or a host that backs none of it"
   await settingsFormReady();
   expect(screen.queryByRole("button", { name: "插件" })).toBeNull();
 });
+
+test("a phrase table shows its rows and is enabled in priority order", async () => {
+  const phrases = Array.from({ length: 25 }, (_, index) => ({
+    key: `k${String.fromCharCode(97 + (index % 26))}`,
+    text: `短语${index}`,
+  }));
+  const client = fakeClient({
+    catalog: vi.fn(async () => ({
+      packages: [
+        ...catalog.packages,
+        pack({ id: "office", kind: "phrase_table", name: "办公短语", phrases }),
+      ],
+      issues: [],
+    })),
+  });
+  const onOpenPage = vi.fn();
+  const { onChange } = renderSection(
+    { client, quickPhraseMode: false, onOpenPage },
+    { ...defaultPluginPreferences, phrase_tables: ["home"] },
+  );
+  await openPack("办公短语");
+  expect(screen.getByText("短语表")).toBeTruthy();
+  expect(screen.getByText("短语（25）")).toBeTruthy();
+  expect(screen.getByText("短语0")).toBeTruthy();
+  expect(screen.getByText("短语19")).toBeTruthy();
+  expect(screen.queryByText("短语20")).toBeNull();
+  expect(screen.getByText("只显示前 20 条。")).toBeTruthy();
+  fireEvent.click(screen.getByRole("switch", { name: "启用" }));
+  expect(onChange).toHaveBeenLastCalledWith({
+    ...defaultPluginPreferences,
+    phrase_tables: ["home", "office"],
+  });
+  // K 模式关闭时提示，并能跳到输入页。
+  expect(screen.getByText(/快捷短语（K 模式）已关闭/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "前往输入设置" }));
+  expect(onOpenPage).toHaveBeenCalledWith("input");
+});
+
+test("an enabled phrase table that is gone is listed as missing and can be dropped", async () => {
+  const { onChange } = renderSection(
+    {},
+    { ...defaultPluginPreferences, phrase_tables: ["gone", "other"] },
+  );
+  const list = await screen.findByLabelText("已安装的插件");
+  fireEvent.click(await within(list).findByRole("button", { name: "gone（未找到）" }));
+  fireEvent.click(screen.getByRole("button", { name: "移除" }));
+  expect(onChange).toHaveBeenLastCalledWith({
+    ...defaultPluginPreferences,
+    phrase_tables: ["other"],
+  });
+  expect(
+    withPackSelected(defaultPluginPreferences, { kind: "phrase_table", id: "a" }).phrase_tables,
+  ).toEqual(["a"]);
+  expect(
+    withoutRemovedPack(
+      { ...defaultPluginPreferences, phrase_tables: ["a", "b"] },
+      "phrase_table",
+      "a",
+    ).phrase_tables,
+  ).toEqual(["b"]);
+});

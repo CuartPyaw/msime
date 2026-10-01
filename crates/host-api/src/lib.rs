@@ -387,7 +387,7 @@ impl HostSession {
         let plugin_tables = plugin_tables::PluginTables::stamp(
             plugin_root,
             &options,
-            &snapshot.preferences.plugins.command_tables,
+            &snapshot.preferences.plugins,
         );
         plugin_tables.fill(&self.plugin_tables, plugin_root, &mut options);
         options.sentence_association =
@@ -473,14 +473,10 @@ impl HostSession {
         Ok(fallback)
     }
 
-    /// Bring the `/` command table and the `@` name list up to date with the plugins directory, for a field that just gained focus: the settings page may have imported a table or edited the names since. Reads nothing when no file moved.
+    /// 输入框获得焦点时，让 `/` 指令表、K 模式短语表和 `@` 名单跟上插件目录：设置页可能刚导入了表或改了名单。没有文件变动时什么都不读。
     fn refresh_plugin_tables(&mut self) -> Result<(), String> {
         let root = self.plugin_roots.installed.as_deref();
-        let tables = plugin_tables::PluginTables::stamp(
-            root,
-            &self.options,
-            &self.applied.plugins.command_tables,
-        );
+        let tables = plugin_tables::PluginTables::stamp(root, &self.options, &self.applied.plugins);
         if tables.commands_differ(&self.plugin_tables) {
             let table = tables.command_table(root);
             self.runtime
@@ -494,6 +490,13 @@ impl HostSession {
                 .set_mention_entries(&entries)
                 .map_err(|e| e.to_string())?;
             self.options.mention_entries = entries;
+        }
+        if tables.phrases_differ(&self.plugin_tables) {
+            let table = tables.quick_phrase_table(root);
+            self.runtime
+                .set_quick_phrase_table(&table)
+                .map_err(|e| e.to_string())?;
+            self.options.quick_phrase_table = table;
         }
         self.plugin_tables = tables;
         Ok(())
@@ -803,6 +806,7 @@ impl HostOptions {
             local_mention: self.preferences.local_modes.mention,
             command_table: Vec::new(),
             mention_entries: Vec::new(),
+            quick_phrase_table: Vec::new(),
             sentence_association: engine_sentence_association(
                 &self.preferences.sentence_association,
             ),

@@ -10,6 +10,7 @@ import type {
   PluginClient,
   PluginKind,
   PluginPackage,
+  PluginSettingsPage,
 } from "./plugin-types";
 import { PluginListView } from "./plugin-list-view";
 import { MissingPluginView, PluginDetailView } from "./plugin-detail-view";
@@ -24,6 +25,8 @@ export type {
   PluginIssue,
   PluginKind,
   PluginPackage,
+  PluginPhrase,
+  PluginSettingsPage,
 } from "./plugin-types";
 export { kindLabels, pluginErrorMessage } from "./plugin-catalog-helpers";
 export { MAX_MENTIONS, mentionListIssue } from "./plugin-mentions-view";
@@ -44,6 +47,10 @@ export interface PluginsSectionProps {
   effectStyles?: boolean;
   /** The host draws an installed effect pack's style and parameters (`msime_client_typing_effect_settings`); only read where `effectStyles` is true. */
   effectPacks?: boolean;
+  /** 快捷短语（K 模式）是否打开：`local_modes.quick_phrase`；关闭时短语表详情提示去打开。 */
+  quickPhraseMode?: boolean;
+  /** 打开设置里的另一页（输入、背单词）；没有时详情里不显示这些链接。 */
+  onOpenPage?: (page: PluginSettingsPage) => void;
   /** Loads the catalog and the name list each time this turns true, so a pack copied in by hand shows up on the next visit. Turning false also closes any open view, so the next visit starts at the list. */
   active: boolean;
   onChange: (preferences: PluginPreferences) => void;
@@ -76,6 +83,8 @@ export function PluginsSection({
   typingEffects = false,
   effectStyles = false,
   effectPacks = false,
+  quickPhraseMode = true,
+  onOpenPage,
   active,
   onChange,
   onError,
@@ -172,14 +181,14 @@ export function PluginsSection({
     setView(listView);
   };
 
-  const { command_tables } = preferences;
+  const { command_tables, phrase_tables } = preferences;
   const effectPacksDrawn = typingEffects && effectStyles && effectPacks;
   const packsListed = Boolean(client) && catalogState === "loaded";
   // The pack kinds the host acts on: only their selections are reported missing or marked in use.
   const actedKinds = new Set<PluginKind>([
     ...(keySound ? (["sound"] as const) : []),
     ...(music ? (["music"] as const) : []),
-    ...(triggers ? (["command_table"] as const) : []),
+    ...(triggers ? (["command_table", "phrase_table"] as const) : []),
     ...(effectPacksDrawn ? (["effect"] as const) : []),
   ]);
   // Selections naming a pack that is gone, for each kind the host acts on, listed so they can be dropped.
@@ -265,6 +274,14 @@ export function PluginsSection({
         : command_tables.filter((table) => table !== id),
     });
 
+  const setPhraseTable = (id: string, enabled: boolean) =>
+    onChange({
+      ...preferences,
+      phrase_tables: enabled
+        ? [...phrase_tables.filter((table) => table !== id), id]
+        : phrase_tables.filter((table) => table !== id),
+    });
+
   const mentionIssue = mentionListIssue(mentions);
   const mentionsDirty = JSON.stringify(mentions) !== JSON.stringify(savedMentions);
   mentionsDirtyRef.current = mentionsDirty;
@@ -300,9 +317,12 @@ export function PluginsSection({
             music={music}
             triggers={triggers}
             effectPacks={effectPacksDrawn}
+            quickPhraseMode={quickPhraseMode}
             working={working}
             onChange={onChange}
             onCommandTable={setCommandTable}
+            onPhraseTable={setPhraseTable}
+            onOpenPage={onOpenPage}
             onRemove={(target) => void removePack(target)}
             onBack={backToList}
           />

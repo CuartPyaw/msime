@@ -3393,3 +3393,35 @@ fn zhuyin_enter_shift_punctuation_and_other_keys_commit() {
     assert_eq!(capital.commit.as_deref(), Some("你"));
     assert!(session.snapshot().preedit.is_empty());
 }
+
+/// K 模式先列数据库里的短语，再接上宿主短语表里编码匹配的行；文本重复的不再列出。短语表可以在 K 模式打开时实时替换。
+#[test]
+fn quick_phrase_mode_appends_the_host_table_after_the_database_rows() {
+    let fixture = Fixture::new(
+        "CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);\
+INSERT INTO quick_parases VALUES('dh','电话',10);",
+    );
+    let phrase = |key: &str, text: &str| crate::types::QuickPhraseEntry {
+        key: key.into(),
+        text: text.into(),
+    };
+    let mut session = fixture.session_with(|options| {
+        options.quick_phrase_table = vec![phrase("dh", "电话"), phrase("dhhm", "电话号码")];
+    });
+    assert!(session.character(b'K', true).handled);
+    type_text(&mut session, "dh");
+    assert_eq!(words(&session), ["电话", "电话号码"]);
+    assert!(session
+        .snapshot()
+        .candidates
+        .iter()
+        .all(|row| row.source == CandidateSource::QuickPhrase));
+
+    assert_eq!(
+        session.set_quick_phrase_table(&[phrase("dhh", "大户号")]),
+        None
+    );
+    assert_eq!(words(&session), ["电话", "大户号"]);
+    assert_eq!(session.set_quick_phrase_table(&[]), None);
+    assert_eq!(words(&session), ["电话"]);
+}

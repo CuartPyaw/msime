@@ -1,4 +1,5 @@
 import type { Preferences } from "../index";
+import type { PluginKind } from "./plugin-types";
 
 /** Mirrors `client-core::preferences::KeySoundMode`. */
 export type KeySoundMode = "keys" | "melody";
@@ -105,13 +106,19 @@ export function pluginPreferences(draft?: Pick<Preferences, "plugins">): PluginP
 }
 
 /**
- * The section after a pack was removed from disk: a selection naming it falls back to what a fresh profile selects (no effect pack, for an effect pack), and an enabled command table naming it is dropped, so the document never points at a pack that is gone.
+ * 包从磁盘删除之后的设置：选中它的选择回到新档案的默认值（特效包回到无），启用它的指令表或短语表被移除，文档不会指向一个已经不在的包。
  */
 export function withoutRemovedPack(
   preferences: PluginPreferences,
-  kind: "sound" | "music" | "command_table" | "effect",
+  kind: PluginKind,
   id: string,
 ): PluginPreferences {
+  if (kind === "phrase_table") {
+    return {
+      ...preferences,
+      phrase_tables: preferences.phrase_tables.filter((table) => table !== id),
+    };
+  }
   if (kind === "effect") {
     return preferences.effect_pack === id ? { ...preferences, effect_pack: "" } : preferences;
   }
@@ -136,11 +143,11 @@ export function withoutRemovedPack(
   };
 }
 
-/** The section with a pack made the current one of its kind: a key sound pack becomes the pack keys, commits and achievements play from, a melody pack the melody, an effect pack the effect, a music pack the music (whether music plays stays as it was), and a command table is enabled after the ones already enabled. */
+/** 把一个包设为它所属类型的当前选择：按键音效包成为按键、上屏和成就音效的来源，旋律包成为旋律，特效包成为特效，音乐包成为音乐（是否播放不变），指令表和短语表启用在已启用的之后。 */
 export function withPackSelected(
   preferences: PluginPreferences,
   pack: {
-    kind: "sound" | "music" | "command_table" | "effect";
+    kind: PluginKind;
     id: string;
     mode?: "keys" | "sequence";
   },
@@ -158,5 +165,9 @@ export function withPackSelected(
       return preferences.command_tables.includes(pack.id)
         ? preferences
         : { ...preferences, command_tables: [...preferences.command_tables, pack.id] };
+    case "phrase_table":
+      return preferences.phrase_tables.includes(pack.id)
+        ? preferences
+        : { ...preferences, phrase_tables: [...preferences.phrase_tables, pack.id] };
   }
 }
