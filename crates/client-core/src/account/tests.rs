@@ -898,6 +898,29 @@ fn dictionary_snapshot_file_restore_rejects_symlink() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn dictionary_snapshot_file_restore_rejects_symlinked_parent() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let linked = directory.path().join("linked");
+    symlink(target.path(), &linked).unwrap();
+    let snapshot = linked.join("snapshot.ndjson");
+    std::fs::write(
+        target.path().join("snapshot.ndjson"),
+        b"synthetic snapshot\n",
+    )
+    .unwrap();
+    let client = BackendAccountClient::loopback("http://127.0.0.1:9").unwrap();
+
+    assert_eq!(
+        client.restore_dictionary_snapshot_file(&snapshot, 7, &token(b'a')),
+        Err(AccountError::Invalid)
+    );
+}
+
 #[test]
 fn dictionary_snapshot_file_restore_rejects_nonadvancing_response() {
     let body = serde_json::json!({ "revision": 7, "reset": true }).to_string();
