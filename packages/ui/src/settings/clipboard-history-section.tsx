@@ -1,6 +1,13 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as settings from "./settings-style";
 import { GroupList, Row, Switch } from "../core/platform-controls";
+import {
+  CLOUD_CLIPBOARD_MAX_UTF16,
+  cloudClipboardAvailabilityNote,
+  cloudClipboardFailure,
+  type CloudClipboardAvailability,
+  type CloudClipboardRequest,
+} from "./cloud-clipboard-send";
 
 export type ClipboardHistoryEntry = { text: string; timestampMs: number; pinned: boolean };
 
@@ -22,6 +29,8 @@ export interface ClipboardHistorySectionProps {
   ios: boolean;
   onToggle: (enabled: boolean) => void;
   onError: (message: string) => void;
+  /** Present while the page is shown on a host that offers the cloud clipboard; each history entry then gets a 发到云剪贴板 action. Nothing is uploaded unless the user picks an entry. */
+  cloudRequest?: CloudClipboardRequest;
   children?: ReactNode;
 }
 
@@ -35,10 +44,63 @@ export function ClipboardHistorySection({
   ios,
   onToggle,
   onError,
+  cloudRequest,
   children,
 }: ClipboardHistorySectionProps) {
   const [entries, setEntries] = useState<ClipboardHistoryEntry[]>([]);
   const [clearArmed, setClearArmed] = useState(false);
+  const [cloud, setCloud] = useState<CloudClipboardAvailability>("checking");
+  const [cloudNotice, setCloudNotice] = useState("");
+  const [sending, setSending] = useState(false);
+  const cloudRevision = useRef(0);
+  const historyShown = historyEnabled && Boolean(client?.list);
+
+  // The account state and the server's enabled flag are read once each time the page is opened with the history showing; there is no polling.
+  useEffect(() => {
+    const revision = ++cloudRevision.current;
+    setCloud("checking");
+    setCloudNotice("");
+    setSending(false);
+    if (!cloudRequest || !historyShown) return;
+    cloudRequest({ operation: "list", search: "" }).then(
+      (result) => {
+        if (revision === cloudRevision.current)
+          setCloud(result.enabled === false ? "disabled" : "ready");
+      },
+      (error: unknown) => {
+        if (revision === cloudRevision.current) setCloud(cloudClipboardFailure(error));
+      },
+    );
+    return () => {
+      cloudRevision.current++;
+    };
+  }, [cloudRequest, historyShown]);
+
+  const sendToCloud = async (text: string) => {
+    if (!cloudRequest || cloud !== "ready" || sending) return;
+    if (text.length > CLOUD_CLIPBOARD_MAX_UTF16) {
+      setCloudNotice(`这条记录超过 ${CLOUD_CLIPBOARD_MAX_UTF16} 个 UTF-16 单元，无法发到云剪贴板`);
+      return;
+    }
+    const revision = cloudRevision.current;
+    setSending(true);
+    setCloudNotice("正在发到云剪贴板…");
+    try {
+      await cloudRequest({ operation: "add", text });
+      if (revision === cloudRevision.current) setCloudNotice("已发到云剪贴板");
+    } catch (error) {
+      if (revision !== cloudRevision.current) return;
+      if (cloudClipboardFailure(error) === "signed_out") {
+        setCloud("signed_out");
+        setCloudNotice("");
+      } else {
+        setCloudNotice("发到云剪贴板失败，请稍后重试");
+      }
+    } finally {
+      if (revision === cloudRevision.current) setSending(false);
+    }
+  };
+  const cloudNote = cloudRequest ? cloudNotice || cloudClipboardAvailabilityNote(cloud) : undefined;
 
   useEffect(() => {
     let active = true;
@@ -135,6 +197,11 @@ export function ClipboardHistorySection({
       </GroupList>
       {historyEnabled && client?.list && (
         <GroupList title="历史记录">
+          {cloudNote && (
+            <p className={settings.groupNote} role="status">
+              {cloudNote}
+            </p>
+          )}
           <div className={settings.clipboardList} aria-label="剪贴板历史">
             {entries.length === 0 ? (
               <p className={settings.clipboardEmpty}>暂无历史记录</p>
@@ -158,6 +225,16 @@ export function ClipboardHistorySection({
                         onClick={() => void client.copy!(entry.text)}
                       >
                         重新复制
+                      </button>
+                    )}
+                    {cloudRequest && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={cloud !== "ready" || sending}
+                        onClick={() => void sendToCloud(entry.text)}
+                      >
+                        发到云剪贴板
                       </button>
                     )}
                     {client.setPinned && (
