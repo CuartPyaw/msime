@@ -15,9 +15,8 @@ import * as style from "./community-style";
 import { CommunitySkinPublicationFields } from "./community-skin-publication-fields";
 import { CommunityErrorAlert } from "./community-error-alert";
 import { CommunityDialogHeader } from "./community-dialog";
+import { CommunitySkinCategorySelect } from "./community-skin-category";
 import {
-  candidateSkinCategories,
-  candidateSkinCategoryLabels,
   type CandidateSkinCategory,
   type CandidateSkinCommunityClient,
   type CandidateSkinPackPreview,
@@ -517,26 +516,16 @@ export function CandidateSkinPublishDialog({
               }}
               onAgreedChange={setAgreed}
             />
-            <label className={style.field}>
-              分类
-              <select
-                className={style.fieldControl}
-                aria-label="发布分类"
-                value={category}
-                disabled={busy}
-                onChange={(event) => {
-                  // 分类也是这次发布的内容，换了分类就是另一次发布，不能沿用上一次的发布 id。
-                  setPublicationId(randomUuid());
-                  setCategory(event.target.value as CandidateSkinCategory);
-                }}
-              >
-                {candidateSkinCategories.map((item) => (
-                  <option key={item} value={item}>
-                    {candidateSkinCategoryLabels[item]}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <CommunitySkinCategorySelect
+              ariaLabel="发布分类"
+              value={category}
+              disabled={busy}
+              onChange={(next) => {
+                // 分类也是这次发布的内容，换了分类就是另一次发布，不能沿用上一次的发布 id。
+                setPublicationId(randomUuid());
+                setCategory(next);
+              }}
+            />
             <p className={style.warning}>{publishWarning}</p>
           </>
         )}

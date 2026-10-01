@@ -3063,6 +3063,7 @@ test("mobile hosts use Apple-style primary navigation and retain secondary setti
           rate: vi.fn(),
           publish: vi.fn(),
           unpublish: vi.fn(),
+          setCategory: vi.fn(),
           finishTrial: vi.fn(),
         },
         communityResources: {

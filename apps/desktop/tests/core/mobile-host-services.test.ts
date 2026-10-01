@@ -35,16 +35,35 @@ test("Android and iOS share Tauri account, community, AI and skin services", asy
     expect(services.mobileKeyboardFeedback).toBeDefined();
   }
 
-  await android.communitySkins?.list(0, "杉");
-  await ios.communitySkins?.list(0, "杉", true);
+  await android.communitySkins?.list(0, "杉", false, null);
+  await ios.communitySkins?.list(0, "杉", true, "acg");
   expect(androidDependencies.invokeMock).toHaveBeenCalledWith("community_skin_list", {
     offset: 0,
     search: "杉",
+    mine: false,
+    category: null,
   });
   expect(iosDependencies.invokeMock).toHaveBeenCalledWith("community_skin_list", {
     offset: 0,
     search: "杉",
     mine: true,
+    category: "acg",
+  });
+
+  // 发布带上分类，作者修改分类走单独的命令。
+  const id = "10000000-0000-4000-8000-000000000001";
+  await android.communitySkins?.publish(id, "晨雾", "", {} as never, "guofeng");
+  expect(androidDependencies.invokeMock).toHaveBeenCalledWith("community_skin_publish", {
+    id,
+    name: "晨雾",
+    description: "",
+    design: {},
+    category: "guofeng",
+  });
+  await ios.communitySkins?.setCategory(id, "food");
+  expect(iosDependencies.invokeMock).toHaveBeenCalledWith("community_skin_set_category", {
+    id,
+    category: "food",
   });
 });
 

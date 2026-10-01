@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { errorCode } from "../core/error-code";
 import type { SkinCatalog } from "../skin/external-skins";
 import type { SkinImageReader } from "../skin/skin-image";
@@ -18,6 +18,15 @@ import {
   type CommunityReportReason,
 } from "./community-report";
 import { CommunitySkinCardMetrics } from "./community-skin-card-metrics";
+import {
+  CommunitySkinCategoryFilter,
+  CommunitySkinCategorySelect,
+  communitySkinCategories,
+  communitySkinCategoryLabel,
+  communitySkinCategoryLabels,
+  useCommunitySkinCategoryFilter,
+  type CommunitySkinCategory,
+} from "./community-skin-category";
 
 /** The server's license columns; each is `""` when the manifest leaves it out. */
 export type CommunityCandidateSkinLicense = {
@@ -29,44 +38,10 @@ export type CommunityCandidateSkinLicense = {
 /** Who can see a package: everyone in the gallery, or only its owner, whose library sync keeps private packages in. */
 export type CandidateSkinVisibility = "public" | "private";
 
-/** 发布分类，与服务端的固定 id 一致；只是发布元数据，不写进 skin.toml。 */
-export type CandidateSkinCategory =
-  | "nature"
-  | "guofeng"
-  | "acg"
-  | "cute"
-  | "food"
-  | "tech"
-  | "minimal"
-  | "other";
-
-/** 全部分类，顺序即筛选按钮和发布表单选项的顺序。 */
-export const candidateSkinCategories: readonly CandidateSkinCategory[] = [
-  "nature",
-  "guofeng",
-  "acg",
-  "cute",
-  "food",
-  "tech",
-  "minimal",
-  "other",
-];
-
-export const candidateSkinCategoryLabels: Record<CandidateSkinCategory, string> = {
-  nature: "自然",
-  guofeng: "国风",
-  acg: "二次元",
-  cute: "可爱",
-  food: "美食",
-  tech: "科技夜色",
-  minimal: "简约",
-  other: "其他",
-};
-
-/** 条目的分类名称；早于分类功能的服务端不返回分类，此时为 `""`。宿主已把未知的新分类读作 `other`。 */
-function categoryLabel(category: CandidateSkinCategory | undefined): string {
-  return category ? (candidateSkinCategoryLabels[category] ?? "") : "";
-}
+/** 候选窗皮肤的发布分类，与社区键盘皮肤共用；只是发布元数据，不写进 skin.toml。 */
+export type CandidateSkinCategory = CommunitySkinCategory;
+export const candidateSkinCategories = communitySkinCategories;
+export const candidateSkinCategoryLabels = communitySkinCategoryLabels;
 
 export type CommunityCandidateSkin = {
   id: string;
@@ -244,7 +219,8 @@ function CommunityCandidateSkinCard({
       />
       <strong className={style.cardTitle}>{skin.name}</strong>
       <span className={style.cardAuthor}>
-        {categoryLabel(skin.category) && `${categoryLabel(skin.category)} · `}
+        {communitySkinCategoryLabel(skin.category) &&
+          `${communitySkinCategoryLabel(skin.category)} · `}
         {skin.owned ? "我的作品" : skin.author}
         {skin.visibility === "private" && " · 私有"}
         {skin.owned && skin.moderation === "removed" && " · 已下架"}
@@ -282,14 +258,12 @@ export function CommunityCandidateSkinsPage({
   onInstalled?: () => void;
   onLogin?: () => void;
 }) {
-  // 分页 hook 只认 offset、搜索词和范围；分类通过 ref 随请求带上，这样「加载更多」追加的页沿用第一页的分类。
-  const categoryFilter = useRef<CandidateSkinCategory | null>(null);
-  // 只有第一页请求成功后，分类才与当前列表建立关系；请求中的分类不能作为失败回退目标。
-  const activeCategory = useRef<CandidateSkinCategory | null>(null);
+  const categoryFilter = useCommunitySkinCategoryFilter();
+  const categoryRequest = categoryFilter.request;
   const galleryClient = useMemo<CommunityGalleryClient<CommunityCandidateSkin>>(
     () => ({
       list: async (offset, search, mine) => {
-        const page = await client.list(offset, search, mine ?? false, categoryFilter.current);
+        const page = await client.list(offset, search, mine ?? false, categoryRequest.current);
         return { items: page.skins, has_more: page.has_more };
       },
       detail: client.detail,
@@ -304,7 +278,7 @@ export function CommunityCandidateSkinsPage({
           client.report!(id, reason, detail),
       }),
     }),
-    [client],
+    [client, categoryRequest],
   );
   const gallery = useCommunityGallery({
     client: galleryClient,
@@ -339,22 +313,8 @@ export function CommunityCandidateSkinsPage({
   const [installed, setInstalled] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
-  const [category, setCategory] = useState<CandidateSkinCategory | null>(null);
-
-  const changeCategory = async (next: CandidateSkinCategory | null) => {
-    const previous = activeCategory.current;
-    if (next === previous) return;
-    categoryFilter.current = next;
-    setCategory(next);
-    // 新分类从第一页读起；第一页失败时列表和 offset 仍是旧分类的，分类也跟着退回，否则「加载更多」会在旧分类的 offset 上追加新分类的页。
-    const listed = await requestList(activeSearch, false);
-    if (listed && categoryFilter.current === next) {
-      activeCategory.current = next;
-    } else if (!listed && categoryFilter.current === next) {
-      categoryFilter.current = previous;
-      setCategory(previous);
-    }
-  };
+  const changeCategory = (next: CandidateSkinCategory | null) =>
+    categoryFilter.change(next, () => requestList(activeSearch, false));
 
   // One read per package per client: a card and its detail view share the image rather than fetching it twice. The cache belongs to the client, so a replaced client never answers with the previous one's image.
   const loadPreview = useMemo<PreviewLoader>(() => {
@@ -466,7 +426,7 @@ export function CommunityCandidateSkinsPage({
 
   if (selected) {
     const license = licenseLine(selected.license);
-    const selectedCategory = categoryLabel(selected.category);
+    const selectedCategory = communitySkinCategoryLabel(selected.category);
     return (
       <div className={style.page}>
         <button
@@ -574,24 +534,12 @@ export function CommunityCandidateSkinsPage({
             </button>
           )}
           {selected.owned && (
-            <label className={style.field}>
-              分类
-              <select
-                className={style.fieldControl}
-                aria-label="修改分类"
-                value={selected.category ?? "other"}
-                disabled={actionBusy || detailBusy}
-                onChange={(event) =>
-                  void changeOwnCategory(event.target.value as CandidateSkinCategory)
-                }
-              >
-                {candidateSkinCategories.map((item) => (
-                  <option key={item} value={item}>
-                    {candidateSkinCategoryLabels[item]}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <CommunitySkinCategorySelect
+              ariaLabel="修改分类"
+              value={selected.category ?? "other"}
+              disabled={actionBusy || detailBusy}
+              onChange={(next) => void changeOwnCategory(next)}
+            />
           )}
           <CommunitySkinModerationSection
             owned={selected.owned}
@@ -645,27 +593,11 @@ export function CommunityCandidateSkinsPage({
           )}
         </div>
       </div>
-      <div className={style.kindFilter} role="group" aria-label="候选窗皮肤分类">
-        <button
-          type="button"
-          className={category === null ? "primary" : "secondary"}
-          aria-pressed={category === null}
-          onClick={() => void changeCategory(null)}
-        >
-          全部
-        </button>
-        {candidateSkinCategories.map((item) => (
-          <button
-            key={item}
-            type="button"
-            className={category === item ? "primary" : "secondary"}
-            aria-pressed={category === item}
-            onClick={() => void changeCategory(item)}
-          >
-            {candidateSkinCategoryLabels[item]}
-          </button>
-        ))}
-      </div>
+      <CommunitySkinCategoryFilter
+        ariaLabel="候选窗皮肤分类"
+        value={categoryFilter.category}
+        onChange={(next) => void changeCategory(next)}
+      />
       {errorAlert}
       {actionNotice && (
         <p role="status" className={style.actionNotice}>
