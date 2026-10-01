@@ -274,26 +274,32 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
   }
 
   async function retryDictionaryFailure(requestId: string) {
+    const generation = clientGeneration.current;
     const retry = client.dictionary?.retry;
     if (!retry) return;
     await runPhraseAction(
-      async () => {
+      async (isCurrent) => {
         await retry(requestId);
+        if (!isCurrent()) return;
         await loadPhrases(dictionaryKind, phrasePage.offset);
       },
       () => "词条重试失败，请稍后重试。",
+      generation,
     );
   }
 
   async function dismissDictionaryFailure(requestId: string) {
+    const generation = clientGeneration.current;
     const dismissFailure = client.dictionary?.dismissFailure;
     if (!dismissFailure) return;
     await runPhraseAction(
-      async () => {
+      async (isCurrent) => {
         await dismissFailure(requestId);
+        if (!isCurrent()) return;
         await loadPhrases(dictionaryKind, phrasePage.offset);
       },
       () => "移除失败记录失败，请稍后重试。",
+      generation,
     );
   }
 
