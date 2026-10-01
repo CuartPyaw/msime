@@ -1,6 +1,9 @@
 //! The process's player: one thread that owns the kira mixer, and the queue sessions post to.
 
-use super::{decibels, decode, Event, KeyClass, Melody, PluginRoots, SessionSound, SoundSettings};
+use super::effect::TIER_SEMITONES;
+use super::{
+    decibels, decode, Event, KeyClass, Melody, PackStamp, PluginRoots, SessionSound, SoundSettings,
+};
 use kira::backend::Backend;
 use kira::sound::static_sound::StaticSoundData;
 use kira::sound::streaming::{StreamingSoundData, StreamingSoundHandle};
@@ -167,19 +170,21 @@ struct MelodySamples {
     advance: SequenceAdvance,
 }
 
-/// What `Samples` are decoded from: the key pack when a key, commit or achievement sound uses it, and the melody pack when keys play the melody.
+/// What `Samples` are decoded from: the key pack when a key, commit, achievement or tier-up sound uses it, and the melody pack when keys play the melody. Each carries its manifest's stamp, so a pack imported again under the same id is decoded again and a removed one is dropped.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Selection {
     roots: PluginRoots,
-    pack: Option<String>,
-    melody_pack: Option<String>,
+    pack: Option<(String, PackStamp)>,
+    melody_pack: Option<(String, PackStamp)>,
 }
 
 impl Selection {
     pub(super) fn of(settings: &SoundSettings) -> Option<Self> {
-        let pack = ((settings.key && !settings.melody) || settings.commit || settings.achievements)
-            .then(|| settings.pack.clone());
-        let melody_pack = (settings.key && settings.melody).then(|| settings.melody_pack.clone());
+        let pack = settings
+            .uses_key_pack()
+            .then(|| (settings.pack.clone(), settings.stamps.pack));
+        let melody_pack = (settings.key && settings.melody)
+            .then(|| (settings.melody_pack.clone(), settings.stamps.melody_pack));
         (pack.is_some() || melody_pack.is_some()).then(|| Self {
             roots: settings.roots.clone(),
             pack,
@@ -216,7 +221,7 @@ pub(super) fn load(selection: &Selection) -> Result<Samples, String> {
         Ok(data)
     };
     let mut samples = Samples::default();
-    if let Some(id) = &selection.pack {
+    if let Some((id, _)) = &selection.pack {
         let (directory, pack) = sound_pack(&selection.roots, id)?;
         for class in KeyClass::ALL {
             if let Some(name) = pack.key_sample(class.name()) {
@@ -230,7 +235,7 @@ pub(super) fn load(selection: &Selection) -> Result<Samples, String> {
             samples.achievement = Some(sample(&directory, name)?);
         }
     }
-    if let Some(id) = &selection.melody_pack {
+    if let Some((id, _)) = &selection.melody_pack {
         let (directory, pack) = sound_pack(&selection.roots, id)?;
         let sequence = pack
             .sequence
@@ -351,7 +356,7 @@ where
             Request::Event(Event::Music(active), _) => self.music.active = active,
             Request::Event(event, at) => {
                 let now = Instant::now();
-                if matches!(event, Event::Key(_) | Event::Commit)
+                if matches!(event, Event::Key(_) | Event::Commit | Event::TierUp(_))
                     && now.saturating_duration_since(at) > STALE
                 {
                     return;
@@ -391,9 +396,17 @@ where
         }
         let previous = std::mem::replace(&mut self.settings, settings);
         let settings = Arc::clone(&self.settings);
-        if (previous.music, &previous.music_pack, &previous.roots)
-            != (settings.music, &settings.music_pack, &settings.roots)
-        {
+        if (
+            previous.music,
+            &previous.music_pack,
+            &previous.roots,
+            previous.stamps.music_pack,
+        ) != (
+            settings.music,
+            &settings.music_pack,
+            &settings.roots,
+            settings.stamps.music_pack,
+        ) {
             let track = self.music.reset();
             self.retire(track);
         } else if previous.music_volume != settings.music_volume {
@@ -455,6 +468,15 @@ where
             }
             Event::Achievement if settings.achievements => {
                 sounds.extend(samples.achievement.clone());
+            }
+            Event::TierUp(tier) if settings.tier_sound() => {
+                let semitones = f64::from(tier.saturating_mul(TIER_SEMITONES));
+                sounds.extend(
+                    samples
+                        .commit
+                        .clone()
+                        .map(|sample| sample.playback_rate(Semitones(semitones))),
+                );
             }
             _ => {}
         }

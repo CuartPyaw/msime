@@ -145,6 +145,8 @@ pub extern "C" fn msime_client_focus(handle: u64, focused: bool) -> *mut c_char 
                 msime_engine::flush_personal_learning();
             } else {
                 session.refresh_plugin_tables()?;
+                // The settings page may have imported the pack in use again, or removed it, since this session last looked.
+                session.sound.restamp();
             }
             let result = session.runtime.focus(focused).map_err(|e| e.to_string())?;
             let result = session.complete_transition(result);

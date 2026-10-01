@@ -370,6 +370,7 @@ mod playback {
             music: false,
             music_pack: String::new(),
             music_volume: 30,
+            ..SoundSettings::default()
         }
     }
 
@@ -483,6 +484,121 @@ mod playback {
             rate(0.0),
             "a pause starts the tune again"
         );
+    }
+
+    /// Install `typewriter` under `state` with `sample`, one of the default pack's files, as its key and commit sample.
+    fn install_typewriter(state: &Path, sample: &str, name: &str) {
+        let pack = state.join("plugins/sound/typewriter");
+        if pack.exists() {
+            std::fs::remove_dir_all(&pack).unwrap();
+        }
+        std::fs::create_dir_all(&pack).unwrap();
+        std::fs::copy(
+            builtin_sounds().join("default").join(sample),
+            pack.join("key.wav"),
+        )
+        .unwrap();
+        std::fs::write(
+            pack.join("plugin.toml"),
+            format!("schema_version = 1\nkind = \"sound\"\nid = \"typewriter\"\nname = \"{name}\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n[sounds]\ndefault = \"key.wav\"\ncommit = \"key.wav\"\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_pack_imported_again_or_removed_is_not_played_from_the_cache() {
+        let state = tempfile::tempdir().unwrap();
+        install_typewriter(state.path(), "key.wav", "Typewriter");
+        let (sender, receiver) = sync_channel(8);
+        let mut worker = Worker::new(sender);
+        let mut settings = SoundSettings {
+            roots: PluginRoots::new(state.path().to_str(), None, ""),
+            key: true,
+            pack: "typewriter".into(),
+            volume: 50,
+            ..SoundSettings::default()
+        };
+        settings.stamps = settings.stamp_packs();
+        assert!(settings.stamps.pack.is_some());
+        assert!(settings.stamps.melody_pack.is_none() && settings.stamps.music_pack.is_none());
+        worker.configure(Arc::new(settings.clone()));
+        settle(&mut worker, &receiver, 1, false);
+        let now = Instant::now();
+        assert_eq!(
+            frames(&worker.sounds_for(Event::Key(KeyClass::Default), now)),
+            [2_425]
+        );
+
+        // Nothing moved: the same settings decode nothing again.
+        let restamped = SoundSettings {
+            stamps: settings.stamp_packs(),
+            ..settings.clone()
+        };
+        assert_eq!(restamped, settings);
+
+        // Imported again under the same id with another sample: the next stamp differs and the new file is decoded.
+        install_typewriter(state.path(), "space.wav", "Typewriter 2");
+        let mut settings = SoundSettings {
+            stamps: settings.stamp_packs(),
+            ..settings
+        };
+        worker.configure(Arc::new(settings.clone()));
+        settle(&mut worker, &receiver, 1, false);
+        assert_eq!(
+            frames(&worker.sounds_for(Event::Key(KeyClass::Default), now)),
+            [3_969]
+        );
+
+        // Removed: the cached samples are dropped and keys fall silent rather than playing a pack that is gone.
+        std::fs::remove_dir_all(state.path().join("plugins/sound/typewriter")).unwrap();
+        settings.stamps = settings.stamp_packs();
+        assert!(settings.stamps.pack.is_none());
+        worker.configure(Arc::new(settings));
+        settle(&mut worker, &receiver, 1, false);
+        assert!(worker
+            .sounds_for(Event::Key(KeyClass::Default), now)
+            .is_empty());
+    }
+
+    #[test]
+    fn a_tier_up_plays_the_commit_sample_higher_each_tier() {
+        let (sender, receiver) = sync_channel(8);
+        let mut worker = Worker::new(sender);
+        // Only the combo uses the key pack, which is still loaded for it.
+        let settings = SoundSettings {
+            roots: builtin_roots(),
+            pack: "default".into(),
+            volume: 50,
+            combo_counter: true,
+            combo_tier_sound: true,
+            ..SoundSettings::default()
+        };
+        assert!(settings.wanted() && settings.uses_key_pack());
+        worker.configure(Arc::new(settings.clone()));
+        settle(&mut worker, &receiver, 1, false);
+        let now = Instant::now();
+        assert!(
+            worker.sounds_for(Event::Commit, now).is_empty(),
+            "the commit sound is off"
+        );
+        let rate = |semitones: f64| Parameter::<PlaybackRate>::from(Semitones(semitones));
+        for (tier, semitones) in [(1, 3.0), (2, 6.0), (3, 9.0), (4, 12.0)] {
+            let sounds = worker.sounds_for(Event::TierUp(tier), now);
+            assert_eq!(frames(&sounds), [14_112]);
+            assert_eq!(sounds[0].settings.playback_rate, rate(semitones));
+            assert_eq!(
+                sounds[0].settings.volume,
+                Parameter::from(Decibels(decibels(50)))
+            );
+        }
+        let quiet = SoundSettings {
+            combo_tier_sound: false,
+            commit: true,
+            ..settings
+        };
+        assert!(!quiet.tier_sound());
+        worker.configure(Arc::new(quiet));
+        assert!(worker.sounds_for(Event::TierUp(1), now).is_empty());
     }
 
     #[test]

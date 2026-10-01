@@ -15,19 +15,25 @@
 )]
 
 use msime_client_core::plugins::{
-    self, music_pack, sound_pack, PluginContent, PluginKind, PluginSummary,
+    self, music_pack, sound_pack, EffectStyle, PluginContent, PluginKind, PluginSummary,
+    MANIFEST_FILE,
 };
 use msime_client_core::preferences::{KeySoundMode, PluginPreferences};
 use serde_json::{json, Value};
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 #[cfg(not(any(target_os = "ios", target_os = "android", target_env = "ohos")))]
 mod decode;
+mod effect;
 #[cfg(not(any(target_os = "ios", target_os = "android", target_env = "ohos")))]
 mod player;
+
+pub(crate) use effect::typing_effect;
+use effect::Combo;
 
 /// The key classes a host reports, numbered as `msime_client_key_sound` takes them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +68,8 @@ pub(crate) enum Event {
     Key(KeyClass),
     Commit,
     Achievement,
+    /// A combo reached the tier with this index into `plugins::COMBO_MILESTONES`: the key pack's commit sample, pitched up by the tier.
+    TierUp(u8),
     /// Whether the input method is the active one in a field that may hear music: false when it loses activation or the focused field is a secure one.
     Music(bool),
 }
@@ -100,9 +108,19 @@ impl PluginRoots {
         }
     }
 
-    /// A validated pack of `kind` by client-core's rules. Only a built-in sound pack resolves without a state root: every other pack is only ever installed under it, and looking one up without it would read `<kind>/<id>` against the working directory and hand back relative paths.
+    /// The manifest a pack of `kind` would be loaded from, without checking anything: a built-in id names the bundle's copy, any other id the installed one. `None` where `load` would refuse for want of a root.
+    fn manifest(&self, kind: PluginKind, id: &str) -> Option<PathBuf> {
+        let directory = if plugins::is_builtin(kind, id) {
+            self.builtin_sounds.clone()?
+        } else {
+            plugins::kind_directory(self.installed.as_deref()?, kind)
+        };
+        Some(directory.join(id).join(MANIFEST_FILE))
+    }
+
+    /// A validated pack of `kind` by client-core's rules. Only a built-in sound or music pack resolves without a state root: every other pack is only ever installed under it, and looking one up without it would read `<kind>/<id>` against the working directory and hand back relative paths.
     pub(crate) fn load(&self, kind: PluginKind, id: &str) -> Result<PluginSummary, String> {
-        let builtin = kind == PluginKind::Sound && plugins::BUILTIN_SOUND_PACKS.contains(&id);
+        let builtin = plugins::is_builtin(kind, id);
         let installed = match self.installed.as_deref() {
             Some(installed) => installed,
             None if builtin => Path::new(""),
@@ -110,6 +128,26 @@ impl PluginRoots {
         };
         plugins::load_package(installed, self.builtin_sounds.as_deref(), kind, id)
     }
+}
+
+/// What a pack's manifest looked like when its settings were taken: its modification time, length and (on Unix) inode, or `None` when there was none. Importing a pack again writes a new manifest and removing it takes the manifest away, so a changed stamp is how a session notices either without reading the pack.
+pub(crate) type PackStamp = Option<(Option<SystemTime>, u64, u64)>;
+
+fn stamp(path: Option<PathBuf>) -> PackStamp {
+    let metadata = std::fs::symlink_metadata(path?).ok()?;
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&metadata);
+    #[cfg(not(unix))]
+    let inode = 0;
+    Some((metadata.modified().ok(), metadata.len(), inode))
+}
+
+/// The stamps of the packs the settings play from, taken only for a pack in use, so changing a pack nobody plays reloads nothing.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PackStamps {
+    pub pack: PackStamp,
+    pub melody_pack: PackStamp,
+    pub music_pack: PackStamp,
 }
 
 /// The effect and music settings of one preference document, with where their packs are.
@@ -128,11 +166,16 @@ pub(crate) struct SoundSettings {
     pub music: bool,
     pub music_pack: String,
     pub music_volume: u8,
+    /// The typing effect; `Off` with `combo_counter` off answers every typing-effect call with 0.
+    pub effect_style: EffectStyle,
+    pub combo_counter: bool,
+    pub combo_tier_sound: bool,
+    pub stamps: PackStamps,
 }
 
 impl SoundSettings {
     pub(crate) fn new(preferences: &PluginPreferences, roots: &PluginRoots) -> Self {
-        Self {
+        let mut settings = Self {
             roots: roots.clone(),
             key: preferences.key_sound.enabled,
             melody: preferences.key_sound.mode == KeySoundMode::Melody,
@@ -144,12 +187,44 @@ impl SoundSettings {
             music: preferences.music.enabled && !preferences.music.pack.is_empty(),
             music_pack: preferences.music.pack.clone(),
             music_volume: preferences.music.volume,
+            effect_style: preferences.effect_style,
+            combo_counter: preferences.combo_counter,
+            combo_tier_sound: preferences.combo_tier_sound,
+            stamps: PackStamps::default(),
+        };
+        settings.stamps = settings.stamp_packs();
+        settings
+    }
+
+    /// Stamp the manifests of the packs in use. A few `stat`s; never called on the key path.
+    pub(crate) fn stamp_packs(&self) -> PackStamps {
+        let manifest = |used: bool, kind: PluginKind, id: &str| {
+            stamp(used.then(|| self.roots.manifest(kind, id)).flatten())
+        };
+        PackStamps {
+            pack: manifest(self.uses_key_pack(), PluginKind::Sound, &self.pack),
+            melody_pack: manifest(
+                self.key && self.melody,
+                PluginKind::Sound,
+                &self.melody_pack,
+            ),
+            music_pack: manifest(self.music, PluginKind::Music, &self.music_pack),
         }
+    }
+
+    /// Whether anything plays from the key pack: its key samples, its commit sample (the commit sound and the combo's tier-up), or its achievement jingle.
+    pub(crate) fn uses_key_pack(&self) -> bool {
+        (self.key && !self.melody) || self.commit || self.achievements || self.tier_sound()
+    }
+
+    /// Whether a combo reaching a new tier plays the tier-up sound.
+    pub(crate) fn tier_sound(&self) -> bool {
+        self.combo_counter && self.combo_tier_sound
     }
 
     /// Whether the player has anything to do. Nothing starts it until this holds, and it lets the audio device go once this stops holding.
     pub(crate) fn wanted(&self) -> bool {
-        self.key || self.commit || self.achievements || self.music
+        self.key || self.commit || self.achievements || self.music || self.tier_sound()
     }
 
     /// Whether a commit makes a sound: its own sample, or the next note of a melody that advances on commits (only the pack knows which, so any melody counts here).
@@ -165,11 +240,13 @@ static LATEST: Mutex<Option<(Arc<SoundSettings>, u64)>> = Mutex::new(None);
 /// `LATEST`'s achievement switch, read without the lock by every statistics record.
 static ACHIEVEMENTS: AtomicBool = AtomicBool::new(false);
 
-/// A session's settings and the generation that names them.
+/// A session's settings and the generation that names them, with the session's combo.
 #[derive(Clone, Debug)]
 pub(crate) struct SessionSound {
     settings: Arc<SoundSettings>,
     generation: u64,
+    /// In a `Cell` because the key path reaches the session through a shared borrow (`with_sound`); a session lives on one thread, so this is neither a lock nor shared with any other session.
+    combo: Cell<Combo>,
 }
 
 impl SessionSound {
@@ -177,15 +254,30 @@ impl SessionSound {
         let sound = Self {
             settings: Arc::new(settings),
             generation: GENERATIONS.fetch_add(1, Ordering::Relaxed),
+            combo: Cell::default(),
         };
         sound.publish();
         sound
     }
 
-    /// Take the settings of a newer preference document. The generation only moves when they differ, so a change to an unrelated preference never reloads a pack.
+    /// Take the settings of a newer preference document. The generation only moves when they differ, so a change to an unrelated preference never reloads a pack. The combo carries over.
     pub(crate) fn update(&mut self, settings: SoundSettings) {
         if *self.settings != settings {
+            let combo = self.combo.get();
             *self = Self::new(settings);
+            self.combo.set(combo);
+        }
+    }
+
+    /// Stamp the packs in use again, for a field that just gained focus: the settings page may have imported a pack again or removed it since. When a stamp moved the settings take a new generation and a running player is told at once, so it decodes the new files or falls silent instead of playing what it cached.
+    pub(crate) fn restamp(&mut self) {
+        let stamps = self.settings.stamp_packs();
+        if stamps != self.settings.stamps {
+            self.update(SoundSettings {
+                stamps,
+                ..(*self.settings).clone()
+            });
+            sync(self);
         }
     }
 
@@ -214,6 +306,14 @@ pub(crate) fn commit(sound: &SessionSound) -> bool {
     deliver(sound, Event::Commit)
 }
 
+/// Queue the tier-up sound of a combo that reached tier `tier`.
+pub(crate) fn tier_up(sound: &SessionSound, tier: u8) -> bool {
+    if !sound.settings.tier_sound() {
+        return false;
+    }
+    deliver(sound, Event::TierUp(tier))
+}
+
 /// Tell the player whether music may play now. A running player hears it even while music is off, so music switched on later starts only once the host says the input method is active; with nothing switched on, no player is started for it.
 pub(crate) fn music_active(sound: &SessionSound, active: bool) -> bool {
     deliver(sound, Event::Music(active))
@@ -240,6 +340,7 @@ pub(crate) fn achievement() -> bool {
         &SessionSound {
             settings,
             generation,
+            combo: Cell::default(),
         },
         Event::Achievement,
     )

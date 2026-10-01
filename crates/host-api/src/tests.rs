@@ -7207,7 +7207,18 @@ fn plugins_boundary_lists_imports_removes_and_keeps_the_name_list() {
             .into_iter()
             .collect()
     };
-    assert_eq!(ids(&catalog), ["default", "twinkle"], "the built-in packs");
+    // Every built-in pack, sound and music alike, in the catalog's id order, with `extra` among them.
+    let builtins = |extra: &[&str]| -> Vec<String> {
+        msime_client_core::plugins::BUILTIN_SOUND_PACKS
+            .iter()
+            .chain(msime_client_core::plugins::BUILTIN_MUSIC_PACKS.iter())
+            .chain(extra)
+            .map(|id| (*id).to_owned())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    };
+    assert_eq!(ids(&catalog), builtins(&[]), "the built-in packs");
 
     let source = picked.path().join("rain");
     std::fs::rename(installed_music_pack(picked.path(), "rain"), &source).unwrap();
@@ -7218,7 +7229,7 @@ fn plugins_boundary_lists_imports_removes_and_keeps_the_name_list() {
     assert!(state.path().join("plugins/music/rain/rain.wav").is_file());
     assert_eq!(
         ids(&call(json!({"operation": "catalog"}))),
-        ["default", "rain", "twinkle"]
+        builtins(&["rain"])
     );
 
     // Refusals carry the desktop shell's codes, and the rule a pack broke as the detail.
@@ -7247,10 +7258,7 @@ fn plugins_boundary_lists_imports_removes_and_keeps_the_name_list() {
     );
     let removed = call(json!({"operation": "remove", "kind": "music", "id": "rain"}));
     assert_eq!(removed, json!({"ok": true, "value": null}));
-    assert_eq!(
-        ids(&call(json!({"operation": "catalog"}))),
-        ["default", "twinkle"]
-    );
+    assert_eq!(ids(&call(json!({"operation": "catalog"}))), builtins(&[]));
 
     assert_eq!(
         call(json!({"operation": "load_mentions"}))["value"],

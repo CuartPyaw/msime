@@ -31,6 +31,22 @@ pub extern "C" fn msime_client_key_sound(handle: u64, key_class: u32) -> bool {
     with_sound(handle, |sound| key_sound::key(sound, class))
 }
 
+/// The typing effect of one key or commit, packed into one integer; `include/msime_client.h` documents the event codes and the bits. 0 for an unknown handle, a wrong thread or a reentrant call, and after a panic, which must not cross the C boundary.
+#[no_mangle]
+pub extern "C" fn msime_client_typing_effect(handle: u64, event: u32) -> u32 {
+    catch_unwind(AssertUnwindSafe(|| {
+        SESSIONS.with(|sessions| {
+            let Ok(sessions) = sessions.try_borrow() else {
+                return 0;
+            };
+            sessions.get(&handle).map_or(0, |session| {
+                key_sound::typing_effect(&session.sound, event, std::time::Instant::now())
+            })
+        })
+    }))
+    .unwrap_or(0)
+}
+
 /// Queue the sound of a commit: the key pack's commit sample, the melody's next note when it advances on commits, or both.
 #[no_mangle]
 pub extern "C" fn msime_client_commit_sound(handle: u64) -> bool {
