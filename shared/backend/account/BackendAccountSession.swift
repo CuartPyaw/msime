@@ -411,11 +411,9 @@ actor BackendAccountSession {
     refreshing?.cancel(); refreshing = nil
     saved = nil; loaded = true
     // Under the lock, so a refresh another process has in flight cannot write its tokens back after this clear.
-    do { try await refreshLock.run { try await self.clearStorage() } }
-    catch let failure as BackendAccountClient.Failure where failure.status == 0 {
-      // The lock could not be taken. Clearing can only remove the session, so it still happens rather than leaving the user signed in.
-      try storage.clear()
-    }
+    // If the lock cannot be taken, leave the stored session untouched: an in-flight refresh may still
+    // publish its result, and an unlocked clear would let that result resurrect the signed-out session.
+    try await refreshLock.run { try await self.clearStorage() }
   }
   private func clearStorage() throws { try storage.clear() }
   func logout(all: Bool = false) async throws {
