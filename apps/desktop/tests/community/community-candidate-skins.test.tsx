@@ -413,13 +413,12 @@ test("publish dialog: a missing license is chosen in the dialog and written for 
       onPublished={vi.fn()}
     />,
   );
-  expect(await screen.findByText(/公开发布需要说明别人可以怎样使用/)).not.toBeNull();
+  expect(await screen.findByText(/公开发布需要注明别人可以怎样使用/)).not.toBeNull();
   expect(packPreview).toHaveBeenCalledWith("ink-wash", "public");
   expect(screen.queryByRole("textbox", { name: "发布皮肤名称" })).toBeNull();
   expect(screen.queryByRole("button", { name: "公开发布" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
-  expect(openSkinDirectory).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole("button", { name: "使用此授权" }));
+  expect(screen.queryByRole("button", { name: "打开目录" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "使用此授权并继续" }));
   await waitFor(() =>
     expect(communityClient.addLicense).toHaveBeenCalledWith("ink-wash", "CC-BY-4.0"),
   );
@@ -442,7 +441,7 @@ test("publish dialog: a license of the author's own is trimmed, bounded, and a f
     />,
   );
   fireEvent.click(await screen.findByRole("radio", { name: "其他" }));
-  const write = screen.getByRole("button", { name: "使用此授权" }) as HTMLButtonElement;
+  const write = screen.getByRole("button", { name: "使用此授权并继续" }) as HTMLButtonElement;
   expect(write.disabled).toBe(true);
   const custom = screen.getByRole("textbox", { name: "其他素材授权" });
   fireEvent.change(custom, { target: { value: "猫".repeat(41) } });
