@@ -219,7 +219,7 @@ ANDROID_SDK_ROOT=<SDK绝对路径> bash platforms/android/build-native.sh arm64-
 ANDROID_SDK_ROOT=<SDK绝对路径> bash platforms/android/build-native.sh x86_64
 ```
 
-可用 `MSIME_VCPKG_ROOT`、`MSIME_ANDROID_NDK` 指定绝对路径。脚本校验固定版本后安装锁定依赖，构建 release Rust 宿主和 C++ JNI，SQLite 静态链接进宿主库；产物为 `target/android/jniLibs/<abi>/{libmsime_host_api.so,libmsime_android.so,libc++_shared.so}`。验证脚本检查 ELF 架构、16 KB LOAD 对齐、动态依赖白名单与宿主/JNI 导出。NDK 和 vcpkg 声明复制到 `target/android/notices/<abi>`，正式分发还需汇总 Rust/Engine 与词库许可材料。
+可用 `MSIME_VCPKG_ROOT`、`MSIME_ANDROID_NDK` 指定绝对路径。脚本校验固定版本后安装锁定依赖，构建 release Rust 宿主和 C++ JNI，SQLite 静态链接进宿主库；产物为 `target/android/jniLibs/<abi>/{libmsime_host_api.so,libmsime_android.so,libc++_shared.so}`。验证脚本检查 ELF 架构、16 KB LOAD 对齐、动态依赖白名单与宿主/JNI 导出。NDK 和 vcpkg 声明，以及 Engine 内置韩语汉字表的 libhangul BSD-3-Clause 声明（`libhangul-hanja.txt`）复制到 `target/android/notices/<abi>`，两条打包路径都把它们放进 `assets/native-notices/`；正式分发还需汇总 Rust/Engine 与词库许可材料。
 
 提供 arm64-v8a 与 x86_64 两条构建路径；不提供 32 位 ABI，也没有 Windows 构建脚本。原生库本身不是 APK，需用下述脚本打包。
 

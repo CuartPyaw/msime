@@ -267,7 +267,10 @@ kaikki 每周覆盖同一个 URL，所以能复现构建的是 `filtered_input`�
 | 位置 | 覆盖范围 |
 | --- | --- |
 | `platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt` | macOS 客户端内嵌组件的完整通知 |
-| `platforms/ios/SharedResources/MLKit-NOTICES.txt`、`MLKit-Dependencies.txt` | iOS 的 ML Kit 依赖通知 |
+| `platforms/linux/data/THIRD_PARTY_NOTICES.txt` | Linux 安装到 `${CMAKE_INSTALL_DATADIR}/doc/msime-client/` 的组件总览，许可证全文由 `platforms/linux/CMakeLists.txt` 的 `MSIME_NOTICE_SOURCES` 一并安装 |
+| `platforms/ios/SharedResources/MLKit-NOTICES.txt`、`MLKit-Dependencies.txt` | iOS 的 ML Kit 依赖通知；编进引擎的韩语汉字表的 `libhangul-hanja-BSD-3-Clause.txt` 由 `platforms/ios/project.yml` 作为 App 资源打包 |
+| Android APK 的 `assets/native-notices/` | `platforms/android/build-native.sh` 收集的原生依赖声明，含编进引擎的韩语汉字表的 libhangul BSD-3-Clause 声明；两条打包路径都放进 APK |
+| HarmonyOS HAP 的 `resfile/licenses/` | `platforms/harmony/stage-resources.sh` 暂存的编进引擎的韩语汉字表的 libhangul BSD-3-Clause 声明 |
 | `apps/desktop/src-tauri/gen/android/gradle/LICENSE-2.0.txt`、同目录 `NOTICE.md` | Android Gradle 模板的 Apache-2.0 文本与来源说明 |
 | `platforms/windows/Notices.md` | Windows 通知生成器的用法与限制；产物由 `Collect-Notices.ps1` 生成 |
 
