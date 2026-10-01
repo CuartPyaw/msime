@@ -31,13 +31,13 @@ public final class AccountIdentity {
     /**
      * Registers this device's anonymous account with the backend on a background thread, so a new install has one before any feature asks for it.
      *
-     * <p>A saved session makes this a local read; a refused or failed request is left for the next start or for the first feature that needs a token. Only the locally generated subject and secret are sent, never input.
+     * <p>A saved session, even an expired one, makes this a local read; a refused or failed request is left for the next start or for the first feature that needs a token. Only the locally generated subject and secret are sent, never input.
      */
     public static void register(Context context) {
         Context application = context.getApplicationContext();
         new Thread(() -> {
             try {
-                new BackendAnonymousAccount(application).accessToken();
+                new BackendAnonymousAccount(application).ensureRegistered();
             } catch (Exception | LinkageError ignored) {
                 // Retried on the next start or by the first feature that needs a token.
             }

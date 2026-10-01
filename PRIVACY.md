@@ -88,9 +88,9 @@ macOS 26 及以上在没有选择任何服务时（候选翻译开启，小牛�
 匿名账号在六个平台上都是安装后自动注册的：本机随机生成一个标识（`msime-` 加 16 位）和一个 48 位口令，先保存在本机，再向 `/v1/auth/challenges` 与 `/v1/auth/login` 换取令牌。只发送这两个随机值，不含输入内容、设备信息或系统账号。网络失败不影响输入，下次启动重试；已有登录或匿名会话时只读本机文件，不再发请求。各平台的时机：
 
 - Linux：Debian `postinst` 为可联系的登录用户注册；手工安装或当时网络不可用时，`msime-linux-setup` 会在首次配置时重试。身份和令牌由 `msime-linux-online-provider` 保存在用户配置目录的 `anonymous-account.json` 与 `anonymous-session.json`，两个文件均为当前用户专用权限，不进入设置页或输入法进程。
-- Windows：Server 首次以 `--production` 启动时（安装程序完成页会拉起它），保存在 Server 的状态目录，即安装时选择的数据目录。
-- macOS：输入法首次激活时（`MSIMEEnsureAnonymousAccount`）；iOS：应用首次启动时。两者都存于 App Group 容器，键盘与应用共用。
-- Android：应用首次打开时（`AccountIdentity.register`），存于应用私有存储。
+- Windows：Server 首次以 `--production` 启动时（安装程序完成页会拉起它），按 Windows 用户分别保存在 `%LOCALAPPDATA%\MSIME\account`，不放进全机共用、所有用户都可写的数据目录。
+- macOS：输入法首次激活时（`MSIMEEnsureAnonymousAccount`）；iOS：应用首次启动时，已存有登录或匿名会话（即使已过期）就不发请求。两者都存于 App Group 容器，键盘与应用共用。
+- Android：应用首次打开时（`AccountIdentity.register`），已存有匿名会话（即使已过期）就不发请求，存于应用私有存储。
 - HarmonyOS：应用首次启动或键盘首次加载时，存于应用的 `files/state` 目录。
 
 Windows 与 HarmonyOS 目前只注册，不用这个账号发送任何内容。候选翻译在选择了「水杉账号」时才发送（macOS 与 Linux 新装默认选中），见[候选翻译](#候选翻译macos-与-linux-新装默认用水杉账号)；Android 浏览社区皮肤与词库目录时，也会带上匿名账号的令牌（`platforms/android/java/app/msime/android/community/CommunityCatalog.java`），取不到照常列出目录。凭据存放在系统密钥库：macOS/iOS 用 Keychain（`crates/host-macos/native/account.mm`、`crates/tauri-mobile-platform/ios/Sources/MobilePlatformPlugin.swift`），Android 用 Keystore 加密后落盘。

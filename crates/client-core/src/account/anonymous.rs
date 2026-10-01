@@ -92,9 +92,8 @@ impl AccountSessionStorage for AnonymousSessionStorage {
 
 /// Registers the device's anonymous account under `directory` unless it already has a session there. Blocks on the network: call it off the thread that handles input. Safe to call on every start; once registered it only reads the session file.
 pub fn ensure_anonymous_account(directory: &Path) -> Result<(), AccountError> {
-    let storage = AnonymousSessionStorage::new(directory);
     // Checked before building the HTTP client, so a start after registration costs one file read.
-    if storage.load()?.is_some() {
+    if has_session(directory) {
         return Ok(());
     }
     ensure_anonymous_account_with(BackendAccountClient::new()?, directory)
@@ -105,14 +104,18 @@ pub(super) fn ensure_anonymous_account_with<A: AccountApi>(
     directory: &Path,
 ) -> Result<(), AccountError> {
     std::fs::create_dir_all(directory).map_err(|_| AccountError::Storage)?;
-    let storage = AnonymousSessionStorage::new(directory);
-    if storage.load()?.is_some() {
+    if has_session(directory) {
         return Ok(());
     }
     let identity = anonymous_identity(directory)?;
-    BackendAccountSession::new(api, storage)
+    BackendAccountSession::new(api, AnonymousSessionStorage::new(directory))
         .sign_in_anonymous(&identity.subject, &identity.secret)
         .map(|_| ())
+}
+
+/// Whether a readable session is saved. One that cannot be read is replaced by signing in again with the saved identity, which loses nothing: the session is only tokens the backend reissues for that identity.
+fn has_session(directory: &Path) -> bool {
+    matches!(AnonymousSessionStorage::new(directory).load(), Ok(Some(_)))
 }
 
 /// The saved identity, or a new one. A new identity is published with no-clobber, so two processes starting together (HarmonyOS runs the app and the keyboard separately) end up with the one that landed first rather than registering two accounts.
@@ -323,6 +326,20 @@ mod tests {
             anonymous_identity(dir.path()).unwrap().subject,
             theirs.subject
         );
+    }
+
+    #[test]
+    fn an_unreadable_session_is_replaced_by_signing_in_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let api = RegisteringApi::default();
+        ensure_anonymous_account_with(api.clone(), dir.path()).unwrap();
+        std::fs::write(dir.path().join(ANONYMOUS_SESSION_FILE), b"not json").unwrap();
+        ensure_anonymous_account_with(api.clone(), dir.path()).unwrap();
+        assert_eq!(api.logins.lock().unwrap().len(), 2);
+        assert!(AnonymousSessionStorage::new(dir.path())
+            .load()
+            .unwrap()
+            .is_some());
     }
 
     #[test]
