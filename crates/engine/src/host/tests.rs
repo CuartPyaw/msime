@@ -1249,8 +1249,18 @@ fn session_options_map_every_host_field() {
     value.sentence_association.neural_keyboard = true;
     value.rescoring_context = "上文".into();
     value.sentence_alternatives = false;
+    value.vietnamese_input_method = 1;
+    value.vietnamese_tone_style = 1;
     let mapped = super::options::session_options(&value).unwrap();
     assert_eq!(mapped.paths.dictionaries, Path::new(&value.dictionaries));
+    assert_eq!(
+        mapped.vietnamese_input_method,
+        crate::vietnamese::InputMethod::Vni
+    );
+    assert_eq!(
+        mapped.vietnamese_tone_style,
+        crate::vietnamese::ToneStyle::Classic
+    );
     assert_eq!(mapped.scheme, crate::SchemeType::Shuangpin);
     assert_eq!(
         mapped.shuangpin_profile,
