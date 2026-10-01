@@ -197,7 +197,7 @@ test("mobile statistic tabs use Apple chart shapes", async () => {
   await screen.findByRole("heading", { name: /每日趋势/ });
   expect(screen.getByRole("img", { name: "每日输入趋势折线图" })).toBeTruthy();
   fireEvent.click(screen.getByRole("tab", { name: "类型" }));
-  expect(screen.getByRole("img", { name: "字符类型饼图" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: "字符类型环形图" })).toBeTruthy();
   fireEvent.click(screen.getByRole("tab", { name: "模式" }));
   expect(screen.getByRole("img", { name: "语言模式环形图" })).toBeTruthy();
   fireEvent.click(screen.getByRole("tab", { name: "方案" }));
