@@ -284,25 +284,27 @@ export function ExternalSkinCard({
         data-decoration-align={skin.decorationAlign ?? "right"}
         aria-hidden="true"
       >
-        <div className={settings.skinPreviewStage} data-skin-stage="">
-          <SkinCandidatePreview
-            orientation="horizontal"
-            decorated={decorated}
-            image={decodeFailed ? undefined : image?.url}
-            onImageError={onImageError}
-            background={background.drawn}
-            onBackgroundError={background.onError}
-          />
-        </div>
-        <div className={settings.skinPreviewStage} data-skin-stage="">
-          <SkinCandidatePreview
-            orientation="vertical"
-            decorated={decorated}
-            image={decodeFailed ? undefined : image?.url}
-            onImageError={onImageError}
-            background={background.drawn}
-            onBackgroundError={background.onError}
-          />
+        <div className={settings.skinCandidateStages}>
+          <div className={settings.skinPreviewStage} data-skin-stage="">
+            <SkinCandidatePreview
+              orientation="horizontal"
+              decorated={decorated}
+              image={decodeFailed ? undefined : image?.url}
+              onImageError={onImageError}
+              background={background.drawn}
+              onBackgroundError={background.onError}
+            />
+          </div>
+          <div className={settings.skinPreviewStage} data-skin-stage="">
+            <SkinCandidatePreview
+              orientation="vertical"
+              decorated={decorated}
+              image={decodeFailed ? undefined : image?.url}
+              onImageError={onImageError}
+              background={background.drawn}
+              onBackgroundError={background.onError}
+            />
+          </div>
         </div>
         {toolbarPreview && (
           <div className={settings.skinPreviewStage} data-skin-stage="">

@@ -184,11 +184,13 @@ export function SkinSettingsPage() {
                   }
                   aria-hidden="true"
                 >
-                  <div className={settings.skinPreviewStage} data-skin-stage="">
-                    <SkinCandidatePreview orientation="horizontal" />
-                  </div>
-                  <div className={settings.skinPreviewStage} data-skin-stage="">
-                    <SkinCandidatePreview orientation="vertical" />
+                  <div className={settings.skinCandidateStages}>
+                    <div className={settings.skinPreviewStage} data-skin-stage="">
+                      <SkinCandidatePreview orientation="horizontal" />
+                    </div>
+                    <div className={settings.skinPreviewStage} data-skin-stage="">
+                      <SkinCandidatePreview orientation="vertical" />
+                    </div>
                   </div>
                   {/* A touch host has no floating toolbar; the theme's other surface there is the keyboard, which the 键盘 page used to show a second set of these cards for. */}
                   {mobilePlatform ? (
