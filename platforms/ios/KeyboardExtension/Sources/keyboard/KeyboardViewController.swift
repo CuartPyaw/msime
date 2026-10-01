@@ -1762,7 +1762,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       return
     }
 
-    // Korean has no candidates to number. A digit ends the open syllable, which comes back as the commit of an unhandled key, and is then typed after it.
+    // Korean digits go to the session as characters. With the Hanja list open a digit 1-9 chooses from its page and comes back handled with the Hanja as the commit; otherwise the digit ends the open syllable, which comes back as the commit of an unhandled key, and is then typed after it.
     if typesKorean, symbol.count == 1, symbol >= "0", symbol <= "9" {
       let snapshot = session.handleCharacter(symbol)
       render(snapshot)

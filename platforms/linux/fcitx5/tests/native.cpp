@@ -2188,7 +2188,7 @@ int main(int argc, char **argv) {
       require(press(FcitxKey_d) && press(FcitxKey_k) && press(FcitxKey_s), "Korean letters compose");
       require(state->view_.at("scheme") == 4 && preedit() == "안" && ic.committed == before,
               "the syllable is drawn inline while it composes");
-      require(state->view_.at("candidates").empty(), "Korean offers no candidates");
+      require(state->view_.at("candidates").empty(), "Korean offers no candidates before the Hanja key");
       require(ic.inputPanel().clientPreedit().cursor() == static_cast<int>(std::string("안").size()),
               "the caret follows the syllable");
       require(press(FcitxKey_s) && ic.committed == before + "안" && preedit() == "ㄴ",
