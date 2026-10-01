@@ -119,6 +119,7 @@ function MobileAccountProfilePage({
   const [copied, setCopied] = useState(false);
   const mounted = useRef(true);
   const clientGeneration = useRef(0);
+  const actionRunning = useRef(false);
   const normalizedName = name.trim();
   const validName =
     Boolean(normalizedName) &&
@@ -128,6 +129,7 @@ function MobileAccountProfilePage({
   useEffect(() => {
     const generation = ++clientGeneration.current;
     mounted.current = true;
+    actionRunning.current = false;
     setBusy(false);
     return () => {
       mounted.current = false;
@@ -136,17 +138,23 @@ function MobileAccountProfilePage({
   }, [client]);
 
   const perform = async (operation: () => Promise<void>) => {
+    if (actionRunning.current) return;
     const generation = clientGeneration.current;
-    await runAccountOperation(
-      {
-        busy,
-        isCurrent: () => mounted.current && generation === clientGeneration.current,
-        setBusy,
-        setError,
-        setNotice,
-      },
-      operation,
-    );
+    actionRunning.current = true;
+    try {
+      await runAccountOperation(
+        {
+          busy,
+          isCurrent: () => mounted.current && generation === clientGeneration.current,
+          setBusy,
+          setError,
+          setNotice,
+        },
+        operation,
+      );
+    } finally {
+      if (generation === clientGeneration.current) actionRunning.current = false;
+    }
   };
   const rename = () =>
     void perform(async () => {
