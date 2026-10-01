@@ -3,6 +3,9 @@
 //! Both targets used to carry their own copy of these commands, identical apart from the account storage type the services authenticate through. The services live in [`MobileCommunityState`], which each target's setup manages next to its own account state; the session they share is the target's account session.
 
 use msime_client_core::account::{AccountError, BackendAccountClient, BackendAccountSession};
+use msime_client_core::community::report::{
+    BackendCommunityReportService, CommunityReport, CommunityReportKind, CommunityReportReason,
+};
 use msime_client_core::community::resource::{
     BackendCommunityResourceService, CommunityResource, CommunityResourceApplication,
     CommunityResourceContent, CommunityResourceKind, CommunityResourcePage,
@@ -35,16 +38,18 @@ type CommunityService = BackendCommunitySkinService<BackendAccountClient, Mobile
 type CommunityResourceService =
     BackendCommunityResourceService<BackendAccountClient, MobileStorage>;
 type AiSkinService = BackendAiSkinService<BackendAccountClient, MobileStorage>;
+type CommunityReportService = BackendCommunityReportService<BackendAccountClient, MobileStorage>;
 
 pub(crate) struct MobileCommunityState {
     community: Arc<CommunityService>,
     resources: Arc<CommunityResourceService>,
     ai_skin: Arc<AiSkinService>,
+    reports: Arc<CommunityReportService>,
     ai_skin_requests: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 impl MobileCommunityState {
-    /// Builds the three services over the account session. `client` is the one the session was built with; the resource and AI skin services each get a client of their own.
+    /// Builds the four services over the account session. `client` is the one the session was built with; the resource, AI skin and report services each get a client of their own.
     pub(crate) fn new(
         client: BackendAccountClient,
         session: &Arc<Session>,
@@ -61,10 +66,15 @@ impl MobileCommunityState {
             BackendAccountClient::new()?,
             Arc::clone(session),
         ));
+        let reports = Arc::new(BackendCommunityReportService::new(
+            BackendAccountClient::new()?,
+            Arc::clone(session),
+        ));
         Ok(Self {
             community,
             resources,
             ai_skin,
+            reports,
             ai_skin_requests: Arc::new(Mutex::new(HashMap::new())),
         })
     }
@@ -82,6 +92,9 @@ fn community_error(error: AccountError) -> crate::CommandError {
             AccountError::Storage => "community_storage",
             AccountError::Conflict => "community_conflict",
             AccountError::Unavailable => "community_unavailable",
+            AccountError::BlockedContent => "community_blocked_content",
+            AccountError::ScreeningUnavailable => "community_screening_unavailable",
+            AccountError::Banned => "community_account_banned",
         },
     }
 }
@@ -268,9 +281,10 @@ pub async fn community_skin_list(
     state: State<'_, MobileCommunityState>,
     offset: usize,
     search: String,
+    mine: Option<bool>,
 ) -> Result<CommunitySkinPage, crate::CommandError> {
     service_call(Arc::clone(&state.community), move |service| {
-        service.list(offset, &search)
+        service.list(offset, &search, mine.unwrap_or(false))
     })
     .await
 }
@@ -491,4 +505,24 @@ pub async fn community_resource_remove_reply(
     let id = community_id(&id)?;
     let library = library.inner().clone();
     storage_call(move || library.remove(id), resource_library_error).await
+}
+
+/// Files one report on another user's skin, dictionary or reply template. `reason` is the label of one of [`CommunityReportReason::ALL`]; anything else, a malformed id or a detail past the limit is `community_invalid`.
+#[tauri::command]
+pub async fn community_report(
+    state: State<'_, MobileCommunityState>,
+    kind: CommunityReportKind,
+    id: String,
+    reason: String,
+    detail: Option<String>,
+) -> Result<(), crate::CommandError> {
+    let item_id = community_id(&id)?;
+    let reason = CommunityReportReason::from_label(&reason).ok_or(crate::CommandError {
+        code: "community_invalid",
+    })?;
+    service_call(Arc::clone(&state.reports), move |service| {
+        let report = CommunityReport::new(kind, item_id, reason, detail.as_deref().unwrap_or(""))?;
+        service.report(&report)
+    })
+    .await
 }

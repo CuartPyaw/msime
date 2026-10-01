@@ -454,6 +454,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
     DiagnosticLog.shared.write("focus_in")
+    KeyboardUsageReporting.presented(fullAccess: hasFullAccess)
     do { try session.resumeDictionarySession() }
     catch {
       DiagnosticLog.shared.write("dictionary_resume_failed")
@@ -565,6 +566,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
     DiagnosticLog.shared.write("focus_out")
+    KeyboardUsageReporting.dismissed()
     replyModel.setText("")
     handwriting.deactivate()
     snapshotWorker.stop()

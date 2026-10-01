@@ -713,6 +713,7 @@ fn item() -> CandidateSkinItem {
         visibility: CandidateSkinVisibility::Public,
         updated_at: "2026-09-30T00:00:00Z".into(),
         request_sha256: String::new(),
+        moderation: None,
         category: Some(CandidateSkinCategory::Nature),
     }
 }
@@ -1101,7 +1102,7 @@ fn transport_lists_with_scope_and_encoded_search() {
     assert_eq!(page.skins, vec![item()]);
     let (head, _) = received.recv().unwrap();
     assert!(head.starts_with(
-        "GET /v1/community/candidate-skins?offset=20&q=%E6%A8%B1%20%E8%8A%B1&scope=mine&fields=sync&include=category HTTP/1.1"
+        "GET /v1/community/candidate-skins?offset=20&q=%E6%A8%B1%20%E8%8A%B1&scope=mine&fields=sync&fields=moderation&include=category HTTP/1.1"
     ));
     assert!(head.contains("authorization: Bearer "));
 }

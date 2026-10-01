@@ -1,13 +1,18 @@
 package app.msime.android.home;
 
+import android.content.Context;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
+import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -17,8 +22,10 @@ import app.msime.android.CommunityRequest;
 import app.msime.android.R;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.snackbar.Snackbar;
 import com.google.android.material.textfield.TextInputEditText;
+import com.google.android.material.textfield.TextInputLayout;
 import java.nio.file.Paths;
 
 /**
@@ -196,7 +203,64 @@ public final class CommunityFragment extends Fragment {
 
     private void open(CommunityCatalog.Item item) {
         CommunitySkinSheet.show(requireContext(), item, nineKey,
-            CommunitySkinSheet.installable(item) ? () -> install(item) : null);
+            CommunitySkinSheet.installable(item) ? () -> install(item) : null,
+            () -> report(item));
+    }
+
+    /** 举报：one of the fixed reasons and an optional detail, sent with this device's account (the anonymous one counts). */
+    private void report(CommunityCatalog.Item item) {
+        Context context = requireContext();
+        int padding = ListRows.dp(context, 20);
+        LinearLayout form = new LinearLayout(context);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(padding, ListRows.dp(context, 8), padding, 0);
+        RadioGroup reasons = new RadioGroup(context);
+        for (String reason : CommunityRequest.REPORT_REASONS) {
+            RadioButton choice = new RadioButton(context);
+            choice.setId(View.generateViewId());
+            choice.setText(reason);
+            choice.setTag(reason);
+            reasons.addView(choice);
+        }
+        form.addView(reasons);
+        TextInputLayout detailField = new TextInputLayout(context);
+        detailField.setHint("补充说明（可选）");
+        detailField.setCounterEnabled(true);
+        detailField.setCounterMaxLength(CommunityRequest.MAX_REPORT_DETAIL);
+        TextInputEditText detail = new TextInputEditText(detailField.getContext());
+        detail.setMaxLines(4);
+        detailField.addView(detail);
+        form.addView(detailField);
+
+        AlertDialog dialog = new MaterialAlertDialogBuilder(context)
+            .setTitle("举报「" + item.name() + "」")
+            .setView(form)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("提交", null)
+            .create();
+        dialog.setOnShowListener(ignored -> {
+            View submit = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            submit.setEnabled(false);
+            reasons.setOnCheckedChangeListener((group, checked) -> submit.setEnabled(checked != -1));
+            submit.setOnClickListener(clicked -> {
+                View checked = reasons.findViewById(reasons.getCheckedRadioButtonId());
+                String reason = checked == null ? "" : String.valueOf(checked.getTag());
+                String text = detail.getText() == null ? "" : detail.getText().toString().trim();
+                if (!CommunityRequest.validReport(reason, text)) {
+                    detailField.setError("最多 " + CommunityRequest.MAX_REPORT_DETAIL + " 字");
+                    return;
+                }
+                dialog.dismiss();
+                HostTask.run(this, worker -> new CommunityCatalog(worker).report(item, reason, text),
+                    failure -> {
+                        View view = getView();
+                        if (view == null) return;
+                        Snackbar.make(view, failure == null || failure.isEmpty()
+                            ? "已收到举报，管理员会尽快处理。" : failure, Snackbar.LENGTH_LONG).show();
+                    });
+            });
+        });
+        dialog.show();
     }
 
     private void install(CommunityCatalog.Item item) {

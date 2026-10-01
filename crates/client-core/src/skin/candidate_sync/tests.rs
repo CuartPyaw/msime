@@ -125,6 +125,7 @@ impl Library {
             visibility: row.visibility,
             updated_at: row.updated_at.clone(),
             request_sha256: row.digest.clone(),
+            moderation: None,
             category: row.category,
         })
     }

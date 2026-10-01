@@ -35,6 +35,8 @@ bzip2 = "0.6"
 pinyin = { version = "0.11", default-features = false, features = ["plain", "heteronym"] }
 # Plugin packs picked as a .zip archive. Only the flate2 deflate backend: stored and deflated members are what every archiver writes, and flate2 is already here.
 zip = { version = "8.6", default-features = false, features = ["deflate-flate2"] }
+# Notice bodies are simple Markdown; HarmonyOS's RichText gets HTML rendered here (raw HTML escaped, unsafe links dropped). Only the HTML writer: the default `getopts` feature is for the crate's command-line binary.
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 
 [dev-dependencies]
 

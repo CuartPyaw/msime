@@ -97,6 +97,7 @@ import { SettingsFormFooter } from "./settings/settings-form-footer";
 import { SettingsPageStatus } from "./settings/settings-page-status";
 import type { InputSourceStartupStatus } from "./settings/input-source-startup-notice";
 import { SettingsFormFrame } from "./settings/settings-form-frame";
+import { NoticeBanner, type NoticesClient } from "./settings/notice-banner";
 import { WindowTitlebar } from "./settings/window-titlebar";
 import { useProviderCredentials } from "./settings/use-provider-credentials";
 import { useFeedbackReport } from "./settings/use-feedback-report";
@@ -202,6 +203,12 @@ export {
   type UseSettingsDictionaryStateOptions,
 } from "./settings/use-settings-dictionary-state";
 export { SettingsFormFrame, type SettingsFormFrameProps } from "./settings/settings-form-frame";
+export {
+  NoticeBanner,
+  noticeBodyHtml,
+  type AppNotice,
+  type NoticesClient,
+} from "./settings/notice-banner";
 export { SettingsInputPage, type SettingsInputPageProps } from "./settings/settings-input-page";
 export {
   settingsPageCatalog,
@@ -769,7 +776,11 @@ export {
   CloudCandidatesSection,
   type CloudCandidatesSectionProps,
 } from "./settings/cloud-candidates-section";
-export { TelemetrySection, type TelemetrySectionProps } from "./settings/telemetry-section";
+export {
+  TelemetrySection,
+  usageReportingDescription,
+  type TelemetrySectionProps,
+} from "./settings/telemetry-section";
 export { WubiSection, type WubiPreferences, type WubiSectionProps } from "./settings/wubi-section";
 export {
   InputModeSection,
@@ -1075,6 +1086,17 @@ export {
   type CommunityGalleryOptions,
   type CommunityGalleryPage,
 } from "./community/community-gallery";
+export {
+  CommunityRemovedBadge,
+  CommunityReportSection,
+  communityReportDetailLimit,
+  communityReportReasons,
+  communityReportedNotice,
+  type CommunityModeration,
+  type CommunityReportKind,
+  type CommunityReportReason,
+  type CommunityReportSectionProps,
+} from "./community/community-report";
 export {
   CommunityErrorAlert,
   type CommunityErrorAlertProps,
@@ -1392,8 +1414,8 @@ export type Preferences = {
   translation_secondary_language?: "en" | "fr" | "ja" | "es" | "ru" | "de" | "ko" | null;
   /** The user explicitly chose the MSIME account (api.msime.app) for candidate translations; absent means not chosen. */
   translation_account?: boolean;
-  /** Anonymous start and crash events; off by default and honoured only by the Windows Server. */
-  telemetry_enabled?: boolean;
+  /** Anonymous usage reporting (daily activity, session ends, crash summaries) read by every host; absent means on, the default. */
+  usage_reporting?: boolean;
   floating_toolbar?: FloatingToolbarPreferences;
   mixed_input?: MixedInputPreferences;
   fuzzy_pinyin?: FuzzyPinyinPreferences;
@@ -1775,6 +1797,8 @@ export interface SettingsClient {
   openPreferencesDirectory?: () => Promise<void>;
   readAppVersion?: () => Promise<string>;
   openExternalUrl?: (url: string) => Promise<void>;
+  /** The console's app notices; the host fetches and caches the feed and remembers dismissals. Absent shows none. */
+  notices?: NoticesClient;
   /** macOS opens the versioned third-party notices shipped with the app bundle. */
   openThirdPartyLicenses?: () => Promise<void>;
   /** macOS keeps the native shuangpin keymap panel preference outside shared Engine preferences. */
@@ -3043,6 +3067,9 @@ export function SettingsPage(props: SettingsPageProps) {
               onOpenSettings={statusActions.onOpenSettings}
               onDismiss={statusActions.onDismiss}
             />
+            {client.notices && (
+              <NoticeBanner client={client.notices} openExternalUrl={openExternalUrl} />
+            )}
             {client.home && draft && page === "home" && (
               <HomePage
                 preferences={draft}

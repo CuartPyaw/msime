@@ -157,6 +157,55 @@ function validCommunityScope(value: unknown): value is string {
 }
 
 /**
+ * The reasons a report offers, in dialog order, each the exact label sent to the server. The same fixed list as client-core's `CommunityReportReason`.
+ */
+export const COMMUNITY_REPORT_REASONS: readonly string[] = [
+  "侵权/抄袭",
+  "色情低俗",
+  "违法违规",
+  "垃圾广告",
+  "恶意插件",
+  "其他",
+];
+const MAX_REPORT_DETAIL = 1000;
+
+/**
+ * The moderation state the server adds to the user's own items when asked with `fields=moderation`. Optional: other users' items, and servers that predate it, leave it out.
+ */
+function validModeration(value: unknown): boolean {
+  return value === undefined || value === "approved" || value === "pending" || value === "removed";
+}
+
+/** A detail path's item id, without the query `fields=moderation` adds. */
+function detailId(path: string, prefix: string): string {
+  const rest = path.slice(prefix.length);
+  const query = rest.indexOf("?");
+  return query === -1 ? rest : rest.slice(0, query);
+}
+
+/** The service's error code, from `{"error":{"code":...}}`. */
+function errorCode(body: string): string | undefined {
+  const parsed = parseJson(body);
+  const value = parsed === null ? undefined : parsed.error;
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const code = (value as Action).code;
+    return typeof code === "string" ? code : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A refusal the user can act on, told apart by the error code in the body rather than by the status alone: content screening (422 `blocked_content`: the text has to change, the service is up), screening that is down for now (503 `screening_unavailable`) and a banned account (403 `account_banned`).
+ */
+function communityRefusal(status: number, body: string): string | null {
+  const code = errorCode(body);
+  if (status === 422 && code === "blocked_content") return "community_blocked_content";
+  if (status === 503 && code === "screening_unavailable") return "community_screening_unavailable";
+  if (status === 403 && code === "account_banned") return "community_account_banned";
+  return null;
+}
+
+/**
  * What a resource may carry, which depends on what it is.
  *
  * A reply is a prompt and nothing else; a dictionary is between one and 128 entries and no prompt.
@@ -334,7 +383,8 @@ function validCommunitySkinResponse(value: unknown, expectedId?: string): boolea
     Number.isFinite(skin.rating_average) &&
     skin.rating_average >= 0 &&
     skin.rating_average <= 5 &&
-    (skin.rating_count !== 0 || skin.rating_average === 0)
+    (skin.rating_count !== 0 || skin.rating_average === 0) &&
+    validModeration(skin.moderation)
   );
 }
 
@@ -361,7 +411,7 @@ function validateCommunitySkinResponse(path: string, value: unknown): boolean {
   }
   const detailPrefix = "/v1/community/skins/";
   if (path.startsWith(detailPrefix)) {
-    const id = path.slice(detailPrefix.length);
+    const id = detailId(path, detailPrefix);
     return validResourceUuid(id) && validCommunitySkinResponse(value, id);
   }
   return true;
@@ -399,7 +449,8 @@ function validCommunityResourceResponse(
     resource.rating_average < 0 ||
     resource.rating_average > 5 ||
     (resource.rating_count === 0 && resource.rating_average !== 0) ||
-    !validResourceContent(resource.kind, resource.content)
+    !validResourceContent(resource.kind, resource.content) ||
+    !validModeration(resource.moderation)
   ) {
     return false;
   }
@@ -430,7 +481,7 @@ function validateCommunityResourceResponse(path: string, value: unknown): boolea
   }
   const detailPrefix = "/v1/community/resources/";
   if (path.startsWith(detailPrefix)) {
-    const id = path.slice(detailPrefix.length);
+    const id = detailId(path, detailPrefix);
     return validResourceUuid(id) && validCommunityResourceResponse(value, undefined, id);
   }
   return true;
@@ -1185,20 +1236,29 @@ export class AccountCloudBridge {
   private async community(action: Action): Promise<string> {
     const operation = action.community_operation;
     if (operation === "list") {
+      // 我的作品 is the one scope besides the public gallery; it is about the signed-in user, so it needs the session, and it asks for each item's moderation state so a removed skin can carry its 已下架 badge.
+      const mine = action.scope === "mine";
       if (
+        (action.scope !== undefined && action.scope !== "" && !mine) ||
         !this.boundedNumber(action.offset, 0, 1000000) ||
         !validString(action.search, MAX_COMMUNITY_SEARCH, true)
       ) {
         return error("community_invalid");
       }
       const path =
-        `/v1/community/skins?offset=${action.offset}&q=` + `${encodeURIComponent(action.search)}`;
-      return await this.communityRequest("GET", path, false);
+        `/v1/community/skins?${mine ? "scope=mine&fields=moderation&" : ""}offset=${action.offset}&q=` +
+        `${encodeURIComponent(action.search)}`;
+      return await this.communityRequest("GET", path, mine);
     }
     if (operation === "detail") {
       if (!validUuid(action.id)) return error("community_invalid");
-      return await this.communityRequest("GET", `/v1/community/skins/${action.id}`, false);
+      return await this.communityRequest(
+        "GET",
+        `/v1/community/skins/${action.id}?fields=moderation`,
+        false,
+      );
     }
+    if (operation === "report") return await this.report("skins", action);
     if (operation === "download") {
       if (!validUuid(action.id)) return error("community_invalid");
       return await this.communityRequest("POST", `/v1/community/skins/${action.id}/download`, true);
@@ -1235,6 +1295,32 @@ export class AccountCloudBridge {
       return await this.communityRequest("DELETE", `/v1/community/skins/${action.id}`, true);
     }
     return error("community_invalid");
+  }
+
+  /**
+   * Reports another user's item to the moderators: `{id, reason, detail?}`, with `reason` one of `COMMUNITY_REPORT_REASONS`.
+   *
+   * Needs a session; the device's anonymous account counts. Reporting the same item again is accepted without a second record, so a retry is harmless.
+   */
+  private async report(kind: string, action: Action): Promise<string> {
+    const detail = action.detail ?? "";
+    if (
+      !validUuid(action.id) ||
+      typeof action.reason !== "string" ||
+      !COMMUNITY_REPORT_REASONS.includes(action.reason) ||
+      !validCommunityText(detail, 0, MAX_REPORT_DETAIL, true)
+    ) {
+      return error("community_invalid");
+    }
+    const body: Record<string, unknown> = { kind, item_id: action.id, reason: action.reason };
+    if (detail.trim() !== "") body.detail = detail;
+    return await this.communityRequest(
+      "POST",
+      "/v1/community/reports",
+      true,
+      body,
+      (value) => value.reported === true,
+    );
   }
 
   /**
@@ -1281,7 +1367,7 @@ export class AccountCloudBridge {
       }
     }
     if (response.status < 200 || response.status >= 300) {
-      return error(communityStatus(response.status));
+      return error(communityRefusal(response.status, response.body) ?? communityStatus(response.status));
     }
     const value = parseJson(response.body, communityResponseLimit(path));
     if (value === null && response.body.length > 0) return error("community_unavailable");
@@ -1327,14 +1413,24 @@ export class AccountCloudBridge {
       }
       // A scope other than "all" is a question about the signed-in user, so it needs the session
       // rather than merely benefiting from it.
+      // 我的作品 also asks for each item's moderation state, so a removed one can carry its 已下架 badge.
       const path =
         `/v1/community/resources?kind=${kind}&scope=${scope}` +
+        `${scope === "mine" ? "&fields=moderation" : ""}` +
         `&q=${encodeURIComponent(action.search)}&offset=${action.offset}`;
       return await this.communityRequest("GET", path, scope !== "");
     }
     if (operation === "detail") {
       if (!validUuid(action.id)) return error("community_invalid");
-      return await this.communityRequest("GET", `/v1/community/resources/${action.id}`, false);
+      return await this.communityRequest(
+        "GET",
+        `/v1/community/resources/${action.id}?fields=moderation`,
+        false,
+      );
+    }
+    if (operation === "report") {
+      if (!validCommunityKind(action.kind)) return error("community_invalid");
+      return await this.report(action.kind === "dictionary" ? "dictionaries" : "replies", action);
     }
     if (operation === "publish") {
       const name = action.name;
@@ -1878,6 +1974,10 @@ export class AccountCloudBridge {
     );
     if (generation !== this.generation) return { error: "account_cancelled" };
     if (response.status !== 401 && response.status !== 403) return { response, token };
+    // A banned account is refused for what it is, not for a stale token: refreshing would only be refused again, and the caller needs the reason.
+    if (response.status === 403 && errorCode(response.body) === "account_banned") {
+      return { response, token };
+    }
     credential = await this.credential(token);
     if (credential.token === undefined)
       return { error: credential.error ?? "account_unauthorized" };
