@@ -159,3 +159,50 @@ test("a learning reset response from a replaced dictionary client is ignored", a
 
   expect(result.current.phrases).toEqual([existing]);
 });
+
+test("a phrase save response from a replaced dictionary client is ignored", async () => {
+  let resolve!: () => void;
+  const pending = new Promise<void>((accept) => {
+    resolve = accept;
+  });
+  const oldClient: DictionaryManagerClient = {
+    dictionary: {
+      list: vi.fn().mockResolvedValue({ entries: [], has_more: false }),
+      edit: vi.fn().mockReturnValue(pending),
+    },
+  };
+  const nextClient: DictionaryManagerClient = {
+    dictionary: {
+      list: vi.fn().mockResolvedValue({ entries: [], has_more: false }),
+      edit: vi.fn().mockResolvedValue(undefined),
+    },
+  };
+  const { result, rerender } = renderHook(
+    ({ client }) => useDictionaryManager({ client, confirm: vi.fn() }),
+    { initialProps: { client: oldClient } },
+  );
+  act(() =>
+    result.current.setPhraseForm({
+      key: "shortcut",
+      value: "新词条",
+      weight: 1,
+      previous: null,
+    }),
+  );
+
+  let pendingSave!: Promise<void>;
+  act(() => {
+    pendingSave = result.current.savePhrase();
+  });
+  await waitFor(() => expect(result.current.phraseBusy).toBe(true));
+  rerender({ client: nextClient });
+  resolve();
+  await act(async () => pendingSave);
+
+  expect(result.current.phraseForm).toEqual({
+    key: "shortcut",
+    value: "新词条",
+    weight: 1,
+    previous: null,
+  });
+});

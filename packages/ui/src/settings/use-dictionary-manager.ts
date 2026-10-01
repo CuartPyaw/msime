@@ -175,6 +175,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
 
   async function savePhrase() {
     if (!client.dictionary || !phraseForm || !mounted.current) return;
+    const generation = clientGeneration.current;
     const bundled = phraseForm.previous?.source === "bundled" ? phraseForm.previous : null;
     const replacement: DictionaryEntry = bundled
       ? { ...bundled, weight: phraseForm.weight }
@@ -197,11 +198,11 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
         replacement,
         randomRequestId(phraseForm.previous ? "ui-edit" : "ui-add"),
       );
-      if (!mounted.current) return;
+      if (!mounted.current || clientGeneration.current !== generation) return;
       setPhraseForm(null);
       await loadPhrases(dictionaryKind, phraseForm.previous ? phrasePage.offset : 0);
     } catch (error) {
-      if (mounted.current)
+      if (mounted.current && clientGeneration.current === generation)
         setPhraseError(
           dictionaryErrorMessage(
             error,
@@ -210,7 +211,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
           ),
         );
     } finally {
-      if (mounted.current) setPhraseBusy(false);
+      if (mounted.current && clientGeneration.current === generation) setPhraseBusy(false);
     }
   }
 
