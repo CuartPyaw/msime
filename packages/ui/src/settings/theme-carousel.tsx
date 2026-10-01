@@ -1,10 +1,10 @@
 import { Children, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import * as settings from "./settings-style";
 
-/** The most dots the nav shows. With more themes than this - every installed skin is a slide - the dots are a window that follows the current slide, so the nav row keeps its width however many skins there are. */
+/** 导航最多显示的圆点数。每个已安装的皮肤都是一张卡片，主题多于这个数时，圆点改为跟随当前卡片的一段窗口，导航行的宽度不随皮肤数量增长。 */
 export const MAX_CAROUSEL_DOTS = 9;
 
-/** The first slide of the window of dots around `index`, keeping the window inside the slides. */
+/** `index` 附近那段圆点窗口的第一张卡片，窗口始终落在卡片范围之内。 */
 export function carouselDotWindowStart(
   index: number,
   count: number,
@@ -97,7 +97,7 @@ export function ThemeCarousel({ labels, selectedIndex, children }: ThemeCarousel
         <div className={settings.themeCarouselDots}>
           {labels.slice(windowStart, windowStart + MAX_CAROUSEL_DOTS).map((label, offset) => {
             const slide = windowStart + offset;
-            // The end dots of a window that does not reach the first or last slide are drawn smaller, to say there are more themes past them.
+            // 窗口没有到达第一张或最后一张时，两端的圆点画小一号，提示外面还有主题。
             const edge =
               (offset === 0 && windowStart > 0) ||
               (offset === MAX_CAROUSEL_DOTS - 1 && windowStart + MAX_CAROUSEL_DOTS < labels.length);
