@@ -6,6 +6,7 @@ The table is generated from libhangul's hanja.txt, which the sources lock pins, 
 import hashlib
 import json
 import sys
+import unicodedata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,11 +28,15 @@ def syllable(character: str) -> bool:
     return len(character) == 1 and 0xAC00 <= ord(character) <= 0xD7A3
 
 
+# The twelve unified ideographs of the CJK Compatibility Ideographs block, which NFC leaves alone; crates/dict-builder/src/hanja.rs `UNIFIED_IN_COMPATIBILITY_BLOCK`, restated.
+UNIFIED_IN_COMPATIBILITY_BLOCK = {0xFA0E, 0xFA0F, 0xFA11, 0xFA13, 0xFA14, 0xFA1F, 0xFA21, 0xFA23, 0xFA24, 0xFA27, 0xFA28, 0xFA29}
+
+
 def kept_hanja(character: str) -> bool:
     if len(character) != 1:
         return False
     point = ord(character)
-    return 0x4E00 <= point <= 0x9FFF or 0x3400 <= point <= 0x4DBF
+    return 0x4E00 <= point <= 0x9FFF or 0x3400 <= point <= 0x4DBF or point in UNIFIED_IN_COMPATIBILITY_BLOCK
 
 
 def generate(source: str) -> str:
@@ -56,6 +61,8 @@ def main() -> int:
         print(f"FAIL: {TABLE.relative_to(ROOT)} is missing")
         return 1
     table = TABLE.read_text(encoding="utf-8")
+    without_decomposition = {point for point in range(0xF900, 0xFB00) if unicodedata.category(chr(point)) == "Lo" and not unicodedata.decomposition(chr(point))}
+    check(without_decomposition == UNIFIED_IN_COMPATIBILITY_BLOCK, "the unified ideographs of the compatibility block no longer match the code points NFC leaves alone")
     check(table.endswith("\n"), "the table does not end with a newline")
     order = []
     seen = set()
@@ -66,7 +73,7 @@ def main() -> int:
             continue
         key, value, gloss = fields
         check(syllable(key), f"line {number}: {key!r} is not one precomposed Hangul syllable")
-        check(kept_hanja(value), f"line {number}: {value!r} is not one CJK Unified or Extension A ideograph")
+        check(kept_hanja(value), f"line {number}: {value!r} is not one unified ideograph of the Basic Multilingual Plane")
         check(gloss == gloss.strip(), f"line {number}: the gloss has surrounding whitespace")
         check((key, value) not in seen, f"line {number}: {key} {value} is listed twice")
         seen.add((key, value))

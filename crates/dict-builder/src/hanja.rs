@@ -1,6 +1,6 @@
 //! `hanja`: the Hangul syllable to Hanja table Korean mode offers when the user converts the composing syllable, generated from libhangul's `data/hanja/hanja.txt` (BSD-3-Clause, see `resources/licenses/libhangul-hanja-BSD-3-Clause.txt`) at the commit `resources/dictionary-sources.lock.json` pins under `hanja/`.
 //!
-//! The source has one `key:value:comment` line per reading, words and single syllables mixed. Only single syllables are kept: the key is one precomposed Hangul syllable (U+AC00..U+D7A3) and the value one Hanja in the CJK Unified Ideographs block or Extension A. Compatibility ideographs are dropped because NFC rewrites each of them to a unified ideograph the same syllable already lists, and characters outside the Basic Multilingual Plane are dropped because fonts are not guaranteed to cover them. A value of two characters (the source has a few place names such as 莘洞) is not a single Hanja and is dropped too.
+//! The source has one `key:value:comment` line per reading, words and single syllables mixed. Only single syllables are kept: the key is one precomposed Hangul syllable (U+AC00..U+D7A3) and the value one unified ideograph of the Basic Multilingual Plane, that is one Hanja in the CJK Unified Ideographs block, Extension A, or one of the twelve unified ideographs the CJK Compatibility Ideographs block holds (U+FA0E 﨎, U+FA11 﨑 and so on, which NFC leaves alone). True compatibility ideographs are dropped because NFC rewrites them; the pinned source lists none of them as a single-syllable value. Characters outside the Basic Multilingual Plane are dropped because fonts are not guaranteed to cover them. A value of two characters (the source has a few place names such as 莘洞) is not a single Hanja and is dropped too.
 //!
 //! The output is `crates/engine/src/korean/hanja.tsv`, one `syllable<TAB>hanja<TAB>gloss` line per reading, which the engine embeds with `include_str!`. Syllables come in code point order and each syllable's Hanja in the source's order, which libhangul keeps by frequency of use (韓, 漢, 寒 for 한). The gloss is the source's 훈음 comment (나라 이름 한), empty where the source has none. A Hanja the source lists twice under one syllable is kept at its first position.
 
@@ -23,9 +23,17 @@ pub fn is_hangul_syllable(character: char) -> bool {
     ('\u{ac00}'..='\u{d7a3}').contains(&character)
 }
 
-/// CJK Unified Ideographs and Extension A, the two blocks the table keeps.
+/// The twelve code points of the CJK Compatibility Ideographs block that are unified ideographs (Unified_Ideograph=Yes, no decomposition), so NFC leaves them alone. The rest of the block are true compatibility ideographs.
+const UNIFIED_IN_COMPATIBILITY_BLOCK: [char; 12] = [
+    '\u{fa0e}', '\u{fa0f}', '\u{fa11}', '\u{fa13}', '\u{fa14}', '\u{fa1f}', '\u{fa21}', '\u{fa23}',
+    '\u{fa24}', '\u{fa27}', '\u{fa28}', '\u{fa29}',
+];
+
+/// The unified ideographs of the Basic Multilingual Plane the table keeps: CJK Unified Ideographs, Extension A, and the twelve unified ideographs of the compatibility block.
 pub fn is_kept_hanja(character: char) -> bool {
-    ('\u{4e00}'..='\u{9fff}').contains(&character) || ('\u{3400}'..='\u{4dbf}').contains(&character)
+    ('\u{4e00}'..='\u{9fff}').contains(&character)
+        || ('\u{3400}'..='\u{4dbf}').contains(&character)
+        || UNIFIED_IN_COMPATIBILITY_BLOCK.contains(&character)
 }
 
 /// The single-syllable readings of `source`, grouped by syllable in code point order with each group in source order.
@@ -113,6 +121,23 @@ mod tests {
         assert_eq!(
             glyphs(&readings),
             ["가家", "가佳", "가䄷", "각角", "한韓", "한漢", "한犴"]
+        );
+    }
+
+    #[test]
+    fn unified_ideographs_in_the_compatibility_block_are_kept() {
+        // U+FA11 (﨑) and U+FA0E (﨎) sit in the compatibility block but are unified ideographs that NFC leaves alone, unlike U+F900 and U+FA0D, which NFC rewrites.
+        let readings = build("기:\u{fa11}:\n쌍:\u{fa0e}:\n가:\u{f900}:\n가:\u{fa0d}:\n").unwrap();
+        assert_eq!(glyphs(&readings), ["기\u{fa11}", "쌍\u{fa0e}"]);
+        let unified: Vec<char> = ('\u{f900}'..='\u{faff}')
+            .filter(|&character| is_kept_hanja(character))
+            .collect();
+        assert_eq!(
+            unified,
+            [
+                '\u{fa0e}', '\u{fa0f}', '\u{fa11}', '\u{fa13}', '\u{fa14}', '\u{fa1f}', '\u{fa21}',
+                '\u{fa23}', '\u{fa24}', '\u{fa27}', '\u{fa28}', '\u{fa29}'
+            ]
         );
     }
 

@@ -75,9 +75,14 @@ mod tests {
         matches!((characters.next(), characters.next()), (Some(c), None) if ('\u{ac00}'..='\u{d7a3}').contains(&c))
     }
 
+    /// CJK Unified Ideographs, Extension A, and the twelve unified ideographs of the compatibility block that NFC leaves alone (U+FA0E 﨎, U+FA11 﨑 and so on), the rule `msime-dict-build hanja` writes the table by.
     fn is_kept_hanja(text: &str) -> bool {
+        const UNIFIED_IN_COMPATIBILITY_BLOCK: [char; 12] = [
+            '\u{fa0e}', '\u{fa0f}', '\u{fa11}', '\u{fa13}', '\u{fa14}', '\u{fa1f}', '\u{fa21}',
+            '\u{fa23}', '\u{fa24}', '\u{fa27}', '\u{fa28}', '\u{fa29}',
+        ];
         let mut characters = text.chars();
-        matches!((characters.next(), characters.next()), (Some(c), None) if ('\u{4e00}'..='\u{9fff}').contains(&c) || ('\u{3400}'..='\u{4dbf}').contains(&c))
+        matches!((characters.next(), characters.next()), (Some(c), None) if ('\u{4e00}'..='\u{9fff}').contains(&c) || ('\u{3400}'..='\u{4dbf}').contains(&c) || UNIFIED_IN_COMPATIBILITY_BLOCK.contains(&c))
     }
 
     #[test]
@@ -94,6 +99,9 @@ mod tests {
             rows += 1;
         }
         assert!(rows > 28_000, "{rows}");
+        // The twelve unified ideographs of the compatibility block are real Hanja that NFC leaves alone, so the table keeps them.
+        assert!(readings("기").any(|(hanja, _)| hanja == "\u{fa11}"));
+        assert!(readings("효").any(|(hanja, _)| hanja == "\u{fa27}"));
         // Every syllable's lines are one contiguous range, so the index covers every row exactly once.
         let indexed: usize = index()
             .keys()
