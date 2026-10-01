@@ -167,6 +167,36 @@ test("dictionary details apply the displayed revision and refresh saved state", 
   await waitFor(() => expect(save).toHaveBeenCalledWith(item.id, true));
 });
 
+test("resource details ignore a duplicate save while the first request is pending", async () => {
+  let resolveSave!: () => void;
+  const resource = base("dictionary");
+  const save = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        resolveSave = resolve;
+      }),
+  );
+  render(
+    <CommunityResourcesPage
+      client={client({
+        list: vi.fn().mockResolvedValue({ items: [resource], has_more: false }),
+        detail: vi.fn().mockResolvedValue(resource),
+        save,
+      })}
+      kind="dictionary"
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "查看词库 开发词包" }));
+  const saveButton = await screen.findByRole("button", { name: "收藏，关注后续更新" });
+  await act(async () => {
+    fireEvent.click(saveButton);
+    fireEvent.click(saveButton);
+  });
+  expect(save).toHaveBeenCalledOnce();
+  resolveSave();
+  await waitFor(() => expect(save).toHaveBeenCalledOnce());
+});
+
 test("a resource action from a replaced client cannot overwrite the current detail", async () => {
   const item = base("dictionary");
   const replacement = { ...item, name: "新客户端词库", saved: true };
