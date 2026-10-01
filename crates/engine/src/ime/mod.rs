@@ -461,17 +461,23 @@ fn apply_shuangpin_helpcode_segmentation(request: &mut QueryRequest, profile: &S
     let effective_with_cases = remove_manual_delimiters(&request.raw_input_with_cases);
     let help_codes = &effective_with_cases[effective_with_cases.len() - HELPCODE_LENGTH..];
 
-    request.raw_segmentation = format!(
-        "{}'{help_codes}",
-        apply_segmentation_cases(&base_segmentation, &base_raw_with_cases)
+    request.raw_segmentation = append_help_codes(
+        apply_segmentation_cases(&base_segmentation, &base_raw_with_cases),
+        help_codes,
     );
-    request.normalized_segmentation = format!(
-        "{}'{help_codes}",
-        to_quanpin_segmentation(&base_segmentation, profile)
+    request.normalized_segmentation = append_help_codes(
+        to_quanpin_segmentation(&base_segmentation, profile),
+        help_codes,
     );
     request
         .segmentation
         .clone_from(&request.normalized_segmentation);
+}
+
+fn append_help_codes(mut segmentation: String, help_codes: &str) -> String {
+    segmentation.push('\'');
+    segmentation.push_str(help_codes);
+    segmentation
 }
 
 #[cfg(test)]
@@ -533,6 +539,15 @@ mod tests {
         let list = merge_pinyin_fallback(Vec::new(), Vec::new());
         assert!(list.is_empty());
         assert!(!only_pinyin_rows(&list));
+    }
+
+    #[test]
+    fn appending_help_codes_extends_the_existing_segmentation() {
+        let mut segmentation = String::with_capacity("ni'hao'ab".len());
+        segmentation.push_str("ni'hao");
+        let result = append_help_codes(segmentation, "ab");
+        assert_eq!(result, "ni'hao'ab");
+        assert_eq!(result.capacity(), result.len());
     }
 
     #[test]
