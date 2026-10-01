@@ -126,3 +126,36 @@ test("a phrase list response from a replaced dictionary client is ignored", asyn
 
   expect(result.current.phrases).toEqual([]);
 });
+
+test("a learning reset response from a replaced dictionary client is ignored", async () => {
+  let resolve!: () => void;
+  const pending = new Promise<void>((accept) => {
+    resolve = accept;
+  });
+  const oldClient: DictionaryManagerClient = {
+    dictionary: { list: vi.fn(), edit: vi.fn().mockResolvedValue(undefined) },
+    resetLearnedData: vi.fn().mockReturnValue(pending),
+  };
+  const nextClient: DictionaryManagerClient = {
+    dictionary: { list: vi.fn(), edit: vi.fn().mockResolvedValue(undefined) },
+    resetLearnedData: vi.fn(),
+  };
+  const confirm = vi.fn().mockResolvedValue(true);
+  const { result, rerender } = renderHook(
+    ({ client }) => useDictionaryManager({ client, confirm }),
+    { initialProps: { client: oldClient } },
+  );
+  const existing = { kind: "quick_phrase" as const, key: "shortcut", value: "保留", weight: 1 };
+  act(() => result.current.setPhrases([existing]));
+
+  let pendingReset!: Promise<void>;
+  act(() => {
+    pendingReset = result.current.resetLearnedData();
+  });
+  await waitFor(() => expect(result.current.phraseBusy).toBe(true));
+  rerender({ client: nextClient });
+  resolve();
+  await act(async () => pendingReset);
+
+  expect(result.current.phrases).toEqual([existing]);
+});

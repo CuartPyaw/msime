@@ -58,6 +58,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
   const [dictionaryKind, setDictionaryKind] = useState<LocalDictionaryKind>("quick_phrase");
   const [dictionaryFormat, setDictionaryFormat] = useState<LocalDictionaryFormat>("standard");
   const phraseRequestGeneration = useRef(0);
+  const clientGeneration = useRef(0);
   const phraseListRef = useRef<HTMLUListElement>(null);
   const mounted = useRef(true);
 
@@ -76,6 +77,14 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
       if (phraseRequestGeneration.current === generation) phraseRequestGeneration.current++;
     };
   }, [client.dictionary]);
+
+  useEffect(() => {
+    const generation = ++clientGeneration.current;
+    setPhraseBusy(false);
+    return () => {
+      if (clientGeneration.current === generation) clientGeneration.current++;
+    };
+  }, [client.dictionary, client.resetLearnedData, client.saveExport]);
 
   async function runPhraseAction(
     operation: (isCurrent: () => boolean) => Promise<void>,
@@ -390,6 +399,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
 
   async function resetLearnedData() {
     if (!client.resetLearnedData || phraseBusy) return;
+    const generation = clientGeneration.current;
     const confirmed = await confirm({
       title: "清除学习数据",
       message:
@@ -403,6 +413,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
     setPhraseNotice("");
     try {
       await client.resetLearnedData();
+      if (clientGeneration.current !== generation) return;
       setPhrases([]);
       setPhrasePage({ offset: 0, hasMore: false, status: "已清除学习数据" });
       setDictionaryPendingCount(0);
@@ -410,11 +421,12 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
       setDictionarySnapshotError("");
       setPhraseNotice("已清除所有学习数据；输入方案和设置保持不变。");
     } catch (error) {
+      if (clientGeneration.current !== generation) return;
       setPhraseError(
         dictionaryErrorMessage(error, "清除学习数据失败，请关闭正在使用输入法的程序后重试。"),
       );
     } finally {
-      setPhraseBusy(false);
+      if (clientGeneration.current === generation) setPhraseBusy(false);
     }
   }
 
