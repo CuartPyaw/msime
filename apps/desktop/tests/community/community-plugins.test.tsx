@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
   CommunityPage,
   CommunityPluginPublishDialog,
@@ -263,6 +263,30 @@ test("a successful publish releases the dialog busy state after the callback", a
   fireEvent.click(submit);
   await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
   await waitFor(() => expect(submit.disabled).toBe(false));
+});
+
+test("publish dialog ignores a same-tick duplicate submission", async () => {
+  const pending = deferred<CommunityPlugin>();
+  const publish = vi.fn().mockReturnValue(pending.promise);
+  render(
+    <CommunityPluginPublishDialog
+      client={client({ publish })}
+      localPlugins={catalog([pack("sound", "rain")])}
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  const dialog = await screen.findByRole("dialog", { name: "发布插件" });
+  await within(dialog).findByRole("textbox", { name: "发布插件名称" });
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "确认拥有发布内容权利" }));
+
+  await act(async () => {
+    fireEvent.click(within(dialog).getByRole("button", { name: "公开发布" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "公开发布" }));
+  });
+  expect(publish).toHaveBeenCalledOnce();
+  pending.resolve(first);
+  await waitFor(() => expect(publish).toHaveBeenCalledOnce());
 });
 
 test("replacing the publish client releases a pending dialog action", async () => {

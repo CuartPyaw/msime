@@ -482,10 +482,12 @@ export function CommunityPluginPublishDialog({
   const [publicationId, setPublicationId] = useState(randomUuid);
   const clientGeneration = useRef(0);
   const packGeneration = useRef(0);
+  const actionRunning = useRef(false);
 
   useEffect(() => {
     const generation = ++clientGeneration.current;
     let active = true;
+    actionRunning.current = false;
     setBusy(false);
     setOptionsLoading(true);
     void localPlugins()
@@ -564,32 +566,37 @@ export function CommunityPluginPublishDialog({
   const ready = Boolean(pack) && !packLoading && nameValid && descriptionValid && agreed;
 
   const submit = async () => {
-    if (busy || !ready || !chosen) return;
+    if (busy || actionRunning.current || !ready || !chosen) return;
     const generation = clientGeneration.current;
+    actionRunning.current = true;
     setSignInRequired(false);
-    await runAsyncAction(
-      {
-        busy,
-        isCurrent: () => generation === clientGeneration.current,
-        setBusy,
-        setError,
-      },
-      async (isCurrent) => {
-        const published = await client.publish(
-          chosen.kind,
-          chosen.id,
-          publicationId,
-          normalizedName,
-          normalizedDescription,
-        );
-        if (!isCurrent()) return;
-        await onPublished(published);
-      },
-      {
-        formatError: (publishError) => communityPluginMessage(publishError, true),
-        onError: (publishError) => setSignInRequired(communityNeedsSignIn(publishError)),
-      },
-    );
+    try {
+      await runAsyncAction(
+        {
+          busy,
+          isCurrent: () => generation === clientGeneration.current,
+          setBusy,
+          setError,
+        },
+        async (isCurrent) => {
+          const published = await client.publish(
+            chosen.kind,
+            chosen.id,
+            publicationId,
+            normalizedName,
+            normalizedDescription,
+          );
+          if (!isCurrent()) return;
+          await onPublished(published);
+        },
+        {
+          formatError: (publishError) => communityPluginMessage(publishError, true),
+          onError: (publishError) => setSignInRequired(communityNeedsSignIn(publishError)),
+        },
+      );
+    } finally {
+      if (generation === clientGeneration.current) actionRunning.current = false;
+    }
   };
 
   // Enter in a text field would otherwise submit whichever form this dialog sits in.
