@@ -45,6 +45,26 @@ test("prepares resources before leaving the Android setup step", async () => {
   );
 });
 
+test("ignores a same-tick duplicate onboarding action", async () => {
+  let resolvePrepare!: () => void;
+  const prepareResources = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        resolvePrepare = resolve;
+      }),
+  );
+  const actions = makeActions({ prepareResources });
+  render(<WelcomeFlowPage actions={actions} onComplete={vi.fn().mockResolvedValue(undefined)} />);
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+  });
+  expect(prepareResources).toHaveBeenCalledOnce();
+  resolvePrepare();
+  await screen.findByRole("heading", { name: "选择输入方式" });
+});
+
 test("Android's first step leaves through 跳过 in the button bar, after the dictionaries are in place", async () => {
   const onSkip = vi.fn().mockResolvedValue(undefined);
   const prepareResources = vi.fn().mockResolvedValue(undefined);

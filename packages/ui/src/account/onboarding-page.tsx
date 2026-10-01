@@ -118,6 +118,7 @@ export function WelcomeFlowPage({
   const [gloss, setGloss] = useState<boolean>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const actionRunning = useRef(false);
   const prepared = useRef(false);
   const platform = useSettingsPlatform(
     { platform: actions.platform ?? "android", mobile_settings: actions.mobileSettings },
@@ -133,7 +134,8 @@ export function WelcomeFlowPage({
   const endSplash = useCallback(() => setSplashing(false), []);
 
   const run = async (operation: () => Promise<void>, next?: number) => {
-    if (busy) return;
+    if (busy || actionRunning.current) return;
+    actionRunning.current = true;
     setBusy(true);
     setError("");
     try {
@@ -142,6 +144,7 @@ export function WelcomeFlowPage({
     } catch {
       setError("操作失败，请稍后重试。");
     } finally {
+      actionRunning.current = false;
       setBusy(false);
     }
   };
