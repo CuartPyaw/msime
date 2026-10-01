@@ -41,6 +41,9 @@ NOTICE_CHANNELS = {
 }
 # The overviews say what each text covers, so they also have to name the pinned commit.
 OVERVIEWS = ("platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt", "platforms/linux/data/THIRD_PARTY_NOTICES.txt", "platforms/windows/Collect-Notices.ps1", "docs/third-party.md")
+# The vi crate behind Vietnamese mode is MIT. Windows and Linux collect crate licences from Cargo metadata, so only the macOS bundle, where Vietnamese ships and crates are listed by hand, carries its text explicitly.
+VI_LICENCE = "resources/licenses/vi-MIT.txt"
+VI_CHANNELS = ("platforms/macos/CMakeLists.txt", "platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt", "platforms/macos/tests/settings/bundle_contents.py")
 failures = []
 
 
@@ -76,11 +79,17 @@ def main() -> int:
         for url in files:
             check(f"/{commit}/" in url, f"the sources lock pins {url}, which is not at the commit {relative} covers ({commit})")
 
+    vi_licence = ROOT / VI_LICENCE
+    check(vi_licence.is_file() and "Copyright 2020, Hung Nguyen" in vi_licence.read_text(encoding="utf-8"), f"{VI_LICENCE} is missing or lost the vi copyright line")
+    for channel in VI_CHANNELS:
+        live = [line for line in (ROOT / channel).read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith("#")]
+        check(any("vi-MIT.txt" in line for line in live), f"{channel} does not ship vi-MIT.txt")
+
     if failures:
         for failure in failures:
             print(f"FAIL: {failure}")
         return 1
-    print(f"language data notices: {len(LICENCES)} licences in {len(NOTICE_CHANNELS)} channels")
+    print(f"language data notices: {len(LICENCES)} licences in {len(NOTICE_CHANNELS)} channels, vi in {len(VI_CHANNELS)} macOS channels")
     return 0
 
 

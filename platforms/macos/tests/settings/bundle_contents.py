@@ -175,6 +175,9 @@ def main() -> int:
     for notice in ("rime-cantonese-CC-BY-4.0.txt", "libchewing-data-LGPL-2.1.txt"):
         if not (contents / "Resources" / "Licenses" / notice).is_file():
             failures.append(f"Contents/Resources/Licenses/{notice} is missing; Cantonese and Zhuyin ship without the licence of their data")
+    # Vietnamese links the MIT-licensed vi crate, whose copyright and permission notice has to travel with the binary.
+    if not (contents / "Resources" / "Licenses" / "vi-MIT.txt").is_file():
+        failures.append("Contents/Resources/Licenses/vi-MIT.txt is missing; the vi crate Vietnamese mode links ships without its licence")
 
     if failures:
         for failure in failures:
