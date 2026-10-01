@@ -7543,6 +7543,117 @@ group("the settings app and the keyboard never present a spent refresh token", (
       check(JSON.parse(reply).error === "account_unauthorized", "a refused refresh signs out");
       check(expiredDisk.box.value === null, "and clears the stored session");
     });
+
+  // The keyboard's refresh is on the wire, holding the lock, when the settings page acts.
+  const tokens = (access: string, refresh: string, id = "synthetic-user") =>
+    JSON.stringify({
+      access_token: access.repeat(64),
+      refresh_token: refresh.repeat(64),
+      token_type: "Bearer",
+      expires_in: 900,
+      user: user(id),
+    });
+  const racing = (refreshReply: AccountTransportResponse, loginId = "synthetic-user") => {
+    const lock = sharedLock();
+    const shared = disk(session("a", "b", Date.now() - 1), lock);
+    const keyboardBridge = new AccountCloudBridge(
+      {
+        request: async (_method, path) => {
+          if (path === "/v1/auth/refresh") {
+            return await new Promise<AccountTransportResponse>((resolve) => {
+              pending.resolve = () => resolve(refreshReply);
+            });
+          }
+          return { status: 200, body: profile };
+        },
+      },
+      shared.store(),
+    );
+    shared.box.value = session("a", "b", Date.now() + 600_000);
+    const pending: { resolve?: () => void } = {};
+    const settingsBridge = new AccountCloudBridge(
+      {
+        request: async (_method, path) => {
+          // The settings page's own request reaches the service while the keyboard's refresh is still out; the refresh answers right after.
+          setTimeout(() => pending.resolve?.(), 0);
+          if (path === "/v1/auth/login") return { status: 200, body: tokens("7", "8", loginId) };
+          return { status: 200, body: "{}" };
+        },
+      },
+      shared.store(),
+    );
+    return { shared, keyboardBridge, settingsBridge };
+  };
+
+  const loggedOut = racing({ status: 200, body: tokens("c", "d") });
+  void Promise.all([
+    loggedOut.keyboardBridge.handle('{"operation":"profile"}'),
+    loggedOut.settingsBridge.handle('{"operation":"logout","all":false}'),
+  ]).then(() => {
+    check(
+      loggedOut.shared.box.value === null,
+      "a sign-out during a keyboard refresh stays signed out",
+    );
+  });
+
+  const signedIn = racing({ status: 200, body: tokens("c", "d") });
+  void Promise.all([
+    signedIn.keyboardBridge.handle('{"operation":"profile"}'),
+    signedIn.settingsBridge.handle(
+      '{"operation":"login","challenge_id":"challenge","credential":"123456"}',
+    ),
+  ]).then(() => {
+    check(
+      signedIn.shared.box.value !== null &&
+        JSON.parse(signedIn.shared.box.value).refresh_token === "8".repeat(64),
+      "a sign-in during a keyboard refresh is not overwritten by the old session's rotation",
+    );
+  });
+
+  const refusedAfterLogin = racing({ status: 401, body: "" }, "other-user");
+  void Promise.all([
+    refusedAfterLogin.keyboardBridge.handle('{"operation":"profile"}'),
+    refusedAfterLogin.settingsBridge.handle(
+      '{"operation":"login","challenge_id":"challenge","credential":"123456"}',
+    ),
+  ]).then(() => {
+    check(
+      refusedAfterLogin.shared.box.value !== null &&
+        JSON.parse(refusedAfterLogin.shared.box.value).user.id === "other-user",
+      "a refused refresh does not clear a sign-in saved after it",
+    );
+  });
+
+  // A writer that could not take the lock still lands mid-refresh; the refresh re-reads the store before writing.
+  const unlockedWriter = (refreshReply: AccountTransportResponse, landed: string | null) => {
+    const shared = disk(session("a", "b", Date.now() - 1), undefined);
+    const bridge = new AccountCloudBridge(
+      {
+        request: async (_method, path) => {
+          if (path === "/v1/auth/refresh") shared.box.value = landed;
+          return path === "/v1/auth/refresh" ? refreshReply : { status: 200, body: profile };
+        },
+      },
+      shared.store(),
+    );
+    return { shared, reply: bridge.handle('{"operation":"profile"}') };
+  };
+  const emptied = unlockedWriter({ status: 200, body: tokens("c", "d") }, null);
+  void emptied.reply.then((reply) => {
+    check(
+      JSON.parse(reply).error === "account_unauthorized",
+      "a rotation for an ended session is dropped",
+    );
+    check(emptied.shared.box.value === null, "and never written into an emptied store");
+  });
+  const resigned = session("7", "8", Date.now() + 600_000);
+  const replacedRefused = unlockedWriter({ status: 401, body: "" }, resigned);
+  void replacedRefused.reply.then(() => {
+    check(
+      replacedRefused.shared.box.value === resigned,
+      "a refusal clears only the session it refused",
+    );
+  });
 });
 
 group("cloud clipboard text follows the shared clipboard bounds", () => {

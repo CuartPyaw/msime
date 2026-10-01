@@ -677,7 +677,7 @@ export class AccountCloudBridge {
         case "delete_account":
           return await this.deleteAccount();
         case "clear_expired":
-          this.clearExpired();
+          await this.signOut();
           return success({});
         case "clipboard":
           return await this.clipboard(action);
@@ -928,9 +928,17 @@ export class AccountCloudBridge {
     if (value === null) return error("account_unavailable");
     const session: Session | null = sessionFromTokens(value);
     if (session === null) return error("account_unavailable");
-    this.session = session;
-    this.store.save(JSON.stringify(session));
-    return success({ user: session.user });
+    try {
+      // Under the lock, so a refresh the keyboard is in the middle of cannot write the previous session over this one.
+      return await this.locked(async (): Promise<string> => {
+        if (generation !== this.generation) return error("account_cancelled");
+        this.session = session;
+        this.store.save(JSON.stringify(session));
+        return success({ user: session.user });
+      });
+    } catch {
+      return error("account_unavailable");
+    }
   }
 
   private async rename(action: Action): Promise<string> {
@@ -984,22 +992,33 @@ export class AccountCloudBridge {
     ) {
       return error("account_cancelled");
     }
-    const updated: Session = { ...current, user: value.user };
-    this.store.save(JSON.stringify(updated));
-    this.session = updated;
-    return success(value);
+    const user: Session["user"] = value.user;
+    try {
+      // Only the user record is written back, onto whatever session the store holds now: the other process may have rotated the tokens, or the user signed in again, since this request was sent, and writing the tokens held here would put a spent or superseded refresh token back on disk.
+      const saved: boolean = await this.locked(async (): Promise<boolean> => {
+        if (expectedGeneration !== this.generation || this.session === null) return false;
+        const stored: Session | null = this.storedSession();
+        if (stored === null || stored.user.id !== expectedUserId) return false;
+        this.store.save(JSON.stringify({ ...stored, user }));
+        this.session = { ...this.session, user };
+        return true;
+      });
+      return saved ? success(value) : error("account_cancelled");
+    } catch {
+      return error("account_unavailable");
+    }
   }
 
   private async logout(action: Action): Promise<string> {
     if (typeof action.all !== "boolean") return error("account_invalid");
     const result = await this.authenticated("POST", "/v1/auth/logout", { all: action.all });
-    if (JSON.parse(result).ok) this.clearExpired();
+    if (JSON.parse(result).ok) await this.signOut();
     return result;
   }
 
   private async deleteAccount(): Promise<string> {
     const result = await this.authenticated("DELETE", "/v1/users/me");
-    if (JSON.parse(result).ok) this.clearExpired();
+    if (JSON.parse(result).ok) await this.signOut();
     return result;
   }
 
@@ -1713,10 +1732,8 @@ export class AccountCloudBridge {
     generation: number,
     rejectedToken?: string,
   ): Promise<CredentialReply> {
-    const store: AccountSessionStore = this.store;
-    if (store.exclusive === undefined) return await this.refreshLatest(generation, rejectedToken);
     try {
-      return await store.exclusive<CredentialReply>(
+      return await this.locked(
         async (): Promise<CredentialReply> => await this.refreshLatest(generation, rejectedToken),
       );
     } catch {
@@ -1737,7 +1754,7 @@ export class AccountCloudBridge {
     if (usable !== null) return { token: usable };
     const current: Session | null = this.session;
     if (current === null) return { error: "account_unauthorized" };
-    return await this.refresh(current.refresh_token, generation);
+    return await this.refresh(current, generation);
   }
 
   /**
@@ -1787,7 +1804,13 @@ export class AccountCloudBridge {
     return current.access_token;
   }
 
-  private async refresh(refreshToken: string, generation: number): Promise<CredentialReply> {
+  /**
+   * Spend `from`'s refresh token. Callers hold the store's lock.
+   *
+   * The store is read again right before anything is written. Unlocked writers remain — a sign-out that could not take the lock, a document refused as corrupt — and either can land while the request is out; the rotation is then not written over whatever they left.
+   */
+  private async refresh(from: Session, generation: number): Promise<CredentialReply> {
+    const refreshToken: string = from.refresh_token;
     let response: AccountTransportResponse;
     try {
       response = await this.transport.request("POST", "/v1/auth/refresh", undefined, {
@@ -1798,7 +1821,7 @@ export class AccountCloudBridge {
     }
     if (generation !== this.generation) return { error: "account_cancelled" };
     if (response.status === 401 || response.status === 403) {
-      this.clearExpired();
+      this.expireSession((session: Session): boolean => session.refresh_token === refreshToken);
       return { error: "account_unauthorized" };
     }
     if (response.status < 200 || response.status >= 300) {
@@ -1808,8 +1831,22 @@ export class AccountCloudBridge {
     if (value === null) return { error: "account_unavailable" };
     const next: Session | null = sessionFromTokens(value);
     if (next === null) return { error: "account_unavailable" };
-    if (generation !== this.generation || this.storedUserChanged())
+    if (generation !== this.generation) return { error: "account_cancelled" };
+    const stored: Session | null = this.storedSession();
+    if (stored === null) {
+      // Signed out while the request was out: the rotation belongs to a session the user ended.
+      this.forgetSession();
+      return { error: "account_unauthorized" };
+    }
+    if (stored.user.id !== next.user.id) {
+      this.forgetSession();
       return { error: "account_cancelled" };
+    }
+    if (stored.refresh_token !== refreshToken && stored.expires_at > from.expires_at) {
+      // A newer session for this account was saved meanwhile, a fresh sign-in; it stays, and this process uses it.
+      this.session = stored;
+      return { token: stored.access_token };
+    }
     // The service has already spent the old token, so memory takes the rotation even if the write below fails; refreshing the spent one again would revoke the session.
     this.session = next;
     this.store.save(JSON.stringify(next));
@@ -1849,7 +1886,7 @@ export class AccountCloudBridge {
     response = await this.transport.request(method, path, token, body, timeoutMs, requestTag);
     if (generation !== this.generation) return { error: "account_cancelled" };
     if (response.status === 401 || response.status === 403) {
-      this.clearExpired();
+      await this.expireAccessToken(token);
       return { error: "account_unauthorized" };
     }
     return { response, token };
@@ -1896,7 +1933,7 @@ export class AccountCloudBridge {
     );
     if (generation !== this.generation) return { error: "account_cancelled" };
     if (response.status === 401 || response.status === 403) {
-      this.clearExpired();
+      await this.expireAccessToken(token);
       return { error: "account_unauthorized" };
     }
     return { response };
@@ -1928,7 +1965,7 @@ export class AccountCloudBridge {
     response = await upload.call(this.transport, source, revision, expectedSha256, token);
     if (generation !== this.generation) return { error: "account_cancelled" };
     if (response.status === 401 || response.status === 403) {
-      this.clearExpired();
+      await this.expireAccessToken(token);
       return { error: "account_unauthorized" };
     }
     return { response };
@@ -1978,11 +2015,56 @@ export class AccountCloudBridge {
       : success(value ?? {});
   }
 
-  private clearExpired(): void {
+  /** Runs `body` under the store's cross-process lock when it has one; rejects when the lock cannot be taken. */
+  private async locked<T>(body: () => Promise<T>): Promise<T> {
+    const store: AccountSessionStore = this.store;
+    return store.exclusive === undefined ? await body() : await store.exclusive<T>(body);
+  }
+
+  /**
+   * The user signed out or deleted the account: forget the session and clear the store, under the lock so a refresh in the other process cannot write it back.
+   *
+   * The user asked for this, so a lock that cannot be taken does not keep them signed in; the refresh path re-reads the store before writing and leaves an emptied one alone.
+   */
+  private async signOut(): Promise<void> {
+    try {
+      await this.locked(async (): Promise<void> => this.clearExpired());
+    } catch {
+      this.clearExpired();
+    }
+  }
+
+  /** The service refused this access token even after a refresh; forget its session, and clear the store only if the store still holds it. */
+  private async expireAccessToken(token: string): Promise<void> {
+    const matches = (session: Session): boolean => session.access_token === token;
+    try {
+      await this.locked(async (): Promise<void> => this.expireSession(matches));
+    } catch {
+      // Without the lock the store is left as it is; this process still stops using the refused session.
+      if (this.session !== null && matches(this.session)) this.forgetSession();
+    }
+  }
+
+  /**
+   * Forget a session the service refused. Callers hold the lock.
+   *
+   * The store is cleared only if it still holds that session: a sign-in saved since the refused request went out belongs to a session the refusal says nothing about.
+   */
+  private expireSession(matches: (session: Session) => boolean): void {
+    if (this.session !== null && matches(this.session)) this.forgetSession();
+    const stored: Session | null = this.storedSession();
+    if (stored !== null && matches(stored)) this.store.clear();
+  }
+
+  private forgetSession(): void {
     this.session = null;
     this.generation++;
     this.refreshing = null;
     this.transport.cancelDownloads?.();
+  }
+
+  private clearExpired(): void {
+    this.forgetSession();
     this.store.clear();
   }
 }
