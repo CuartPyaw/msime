@@ -497,6 +497,47 @@ test("publish dialog: a preview that cannot be drawn says so and keeps the butto
   expect(screen.getByRole("button", { name: "生成预览图" })).not.toBeNull();
 });
 
+test("publish dialog: a preview write from a replaced client is ignored", async () => {
+  const missing = catalog(["ink-wash"]);
+  missing.packages[0].preview = null;
+  const pending = deferred<SkinCatalog>();
+  const oldClient = client({
+    packPreview: vi.fn().mockRejectedValue({ code: "candidate_skin_preview_required" }),
+    addPreview: vi.fn().mockReturnValue(pending.promise),
+  });
+  const nextClient = client({
+    packPreview: vi.fn().mockRejectedValue({ code: "candidate_skin_preview_required" }),
+  });
+  renderSkinPreview.mockResolvedValue([137, 80, 78, 71]);
+  const view = render(
+    <CandidateSkinPublishDialog
+      client={oldClient}
+      localSkins={vi.fn().mockResolvedValue(missing)}
+      initialSkinId="ink-wash"
+      readImage={vi.fn()}
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "生成预览图" }));
+  await waitFor(() => expect(oldClient.addPreview).toHaveBeenCalled());
+
+  view.rerender(
+    <CandidateSkinPublishDialog
+      client={nextClient}
+      localSkins={vi.fn().mockResolvedValue(missing)}
+      initialSkinId="ink-wash"
+      readImage={vi.fn()}
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  await screen.findByRole("alert");
+  pending.resolve(catalog(["ink-wash"]));
+  await settle();
+  expect(nextClient.packPreview).toHaveBeenCalledTimes(1);
+});
+
 test("publish dialog: without an image reader a missing preview is explained", async () => {
   const communityClient = client({
     packPreview: vi.fn().mockRejectedValue({ code: "candidate_skin_preview_required" }),
