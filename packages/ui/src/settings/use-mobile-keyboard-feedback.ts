@@ -19,9 +19,11 @@ export function useMobileKeyboardFeedback({
   const [value, setValue] = useState<MobileKeyboardFeedback>();
   const [busy, setBusy] = useState(false);
   const generation = useRef(0);
+  const saveRunning = useRef(false);
 
   useEffect(() => {
     const current = ++generation.current;
+    saveRunning.current = false;
     setBusy(false);
     if (!mobile || !client) {
       setValue(undefined);
@@ -45,9 +47,10 @@ export function useMobileKeyboardFeedback({
   }, [client, mobile, onError]);
 
   async function save(next: MobileKeyboardFeedback) {
-    if (!client) return;
+    if (!client || saveRunning.current) return;
     const current = generation.current;
     const previous = value;
+    saveRunning.current = true;
     setValue(next);
     setBusy(true);
     onError("");
@@ -60,7 +63,10 @@ export function useMobileKeyboardFeedback({
         onError("无法保存按键反馈设置，请重试。");
       }
     } finally {
-      if (generation.current === current) setBusy(false);
+      if (generation.current === current) {
+        saveRunning.current = false;
+        setBusy(false);
+      }
     }
   }
 
