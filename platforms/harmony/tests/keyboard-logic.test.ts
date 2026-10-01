@@ -760,6 +760,15 @@ group("keeps translation provider policy bounded and credential-free in signatur
       && !TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 8, 7),
     "a stale translation failure cannot clear a newer request",
   );
+  check(
+    TranslationPolicy.shouldReleaseAfterProviderFailure("tencent", false, true),
+    "offline rows do not hide a failed online provider",
+  );
+  check(
+    !TranslationPolicy.shouldReleaseAfterProviderFailure("tencent", true, true)
+      && !TranslationPolicy.shouldReleaseAfterProviderFailure("", false, true),
+    "complete or disabled providers keep a usable translation signature",
+  );
 });
 
 group("asks a /fy sentence query as its own item into its own target", () => {
