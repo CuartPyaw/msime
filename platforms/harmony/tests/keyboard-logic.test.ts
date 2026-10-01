@@ -749,6 +749,17 @@ group("keeps translation provider policy bounded and credential-free in signatur
     }).includes("niutrans:account"),
     "cache scope identifies the provider account",
   );
+  const signature = TranslationPolicy.signature(query);
+  check(
+    TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 7, 7),
+    "a failed current translation request can be retried",
+  );
+  check(
+    !TranslationPolicy.shouldReleaseAfterFailure(signature, "new", 4, 4, 7, 7)
+      && !TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 3, 4, 7, 7)
+      && !TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 8, 7),
+    "a stale translation failure cannot clear a newer request",
+  );
 });
 
 group("asks a /fy sentence query as its own item into its own target", () => {
