@@ -534,6 +534,35 @@ test("settings sync cancellation does not become a visible account error", async
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
+test("ignores a same-tick duplicate cloud settings refresh", async () => {
+  const schema = {
+    fields: { "input.schema": { type: "string" } },
+    maximumBytes: 65536,
+    updateMode: "replace" as const,
+    revisionRequired: true,
+  };
+  const load = vi.fn().mockResolvedValue({ revision: 7, settings: { "input.schema": "quanpin" } });
+  const client = account({
+    status: vi.fn().mockResolvedValue({ user }),
+    settingsSync: {
+      schema: vi.fn().mockResolvedValue(schema),
+      load,
+      upload: vi.fn(),
+      apply: vi.fn(),
+    },
+  });
+  render(<AccountPage client={client} />);
+  expect(await screen.findByText("云端版本：7")).not.toBeNull();
+  const refresh = screen.getByRole("button", { name: "刷新云端设置" });
+
+  act(() => {
+    fireEvent.click(refresh);
+    fireEvent.click(refresh);
+  });
+  expect(load).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+});
+
 test("logged-in accounts can open their published skin list", async () => {
   const openPublishedSkins = vi.fn();
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });
