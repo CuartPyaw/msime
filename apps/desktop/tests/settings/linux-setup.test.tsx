@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   LinuxSetupPage,
   type LinuxSetupClient,
@@ -40,6 +40,25 @@ test("Linux first-run page runs setup with the download choice and streams its o
   expect(log.textContent).toContain("启用用户服务失败");
   fireEvent.click(screen.getByRole("button", { name: "进入设置" }));
   expect(onComplete).toHaveBeenCalled();
+});
+
+test("ignores a same-tick duplicate setup action", async () => {
+  let resolveRun!: (result: LinuxSetupStatus) => void;
+  const run = vi.fn(
+    (_choices: unknown, _onLine: (line: LinuxSetupLine) => void) =>
+      new Promise<LinuxSetupStatus>((resolve) => {
+        resolveRun = resolve;
+      }),
+  );
+  render(<LinuxSetupPage status={missing} client={{ run }} onComplete={vi.fn()} />);
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "开始配置" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始配置" }));
+  });
+  expect(run).toHaveBeenCalledOnce();
+  resolveRun({ ...missing, prepared: true });
+  await screen.findByRole("heading", { name: "配置完成" });
 });
 
 test("Linux first-run page discloses cloud candidates and passes a declined choice", async () => {
