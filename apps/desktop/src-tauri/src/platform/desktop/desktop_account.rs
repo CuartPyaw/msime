@@ -1,6 +1,6 @@
 //! Desktop account commands shared by the macOS, Windows and Linux shells.
 //!
-//! The eleven commands, their state and the blocking-call bridge are the same on all three desktop hosts; only where the session tokens are kept differs. Each platform module owns its [`AccountSessionStorage`](msime_client_core::account::AccountSessionStorage) implementation and a thin `setup` that builds it and hands it to [`manage`]: the macOS Keychain item written by the Swift backend, the per-user Windows Credential Manager, or an owner-only file in the Linux shared state directory. The React surface only receives the same redacted DTOs as the mobile hosts; the tokens never leave this process.
+//! The fourteen commands, their state and the blocking-call bridge are the same on all three desktop hosts; only where the session tokens are kept differs. Each platform module owns its [`AccountSessionStorage`](msime_client_core::account::AccountSessionStorage) implementation and a thin `setup` that builds it and hands it to [`manage`]: the macOS Keychain item written by the Swift backend, the per-user Windows Credential Manager, or an owner-only file in the Linux shared state directory. The React surface only receives the same redacted DTOs as the mobile hosts; the tokens never leave this process.
 
 use crate::platform::account_helpers::call_session;
 use crate::platform::desktop::desktop_candidate_skin_community::CandidateSkinCommunityState;
@@ -13,6 +13,7 @@ use msime_client_core::plugins::community::BackendCommunityPluginService;
 use msime_client_core::skin::candidate_community::BackendCandidateSkinCommunityService;
 use std::sync::Arc;
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 
 #[cfg(target_os = "macos")]
 pub(crate) type Storage = crate::platform::macos::macos_account::MacosAccountStorage;
@@ -137,6 +138,55 @@ pub async fn account_rename(
 ) -> Result<ProfileResponse, crate::CommandError> {
     call_session(&state.session, move |session| {
         session.rename(&display_name).map(Into::into)
+    })
+    .await
+}
+
+/// The signed-in user's avatar as a `data:` URL, because the page's content security policy loads no remote image. `None` when signed out or when the user has no avatar.
+#[tauri::command]
+pub async fn account_avatar(
+    state: tauri::State<'_, AccountState>,
+) -> Result<Option<String>, crate::CommandError> {
+    call_session(&state.session, |session| {
+        Ok(session.avatar()?.map(|image| image.data_url()))
+    })
+    .await
+}
+
+/// Ask for a PNG or JPEG with the platform's own open dialog and upload it as the user's avatar. The page never names a path. `None` when the user closes the dialog.
+#[tauri::command]
+pub async fn account_choose_avatar(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, AccountState>,
+) -> Result<Option<ProfileResponse>, crate::CommandError> {
+    call_session(&state.session, move |session| {
+        // The dialog runs on the main thread; this worker only waits for the answer.
+        let picked = app
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_title("选择头像")
+            .add_filter("图片", &["png", "jpg", "jpeg"])
+            .blocking_pick_file();
+        let Some(picked) = picked else {
+            return Ok(None);
+        };
+        let path = picked.into_path().map_err(|_| AccountError::Invalid)?;
+        session
+            .upload_avatar(&path)
+            .map(|profile| Some(profile.into()))
+    })
+    .await
+}
+
+/// Remove the uploaded avatar; the Google picture, if any, shows again.
+#[tauri::command]
+pub async fn account_remove_avatar(
+    state: tauri::State<'_, AccountState>,
+) -> Result<ProfileResponse, crate::CommandError> {
+    call_session(&state.session, |session| {
+        session.remove_avatar().map(Into::into)
     })
     .await
 }

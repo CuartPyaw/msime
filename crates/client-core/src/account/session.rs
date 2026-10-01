@@ -372,6 +372,27 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         self.profile()
     }
 
+    /// Uploads the PNG or JPEG at `path` as the user's avatar and returns the refreshed profile, whose `avatar_url` now names it.
+    pub fn upload_avatar(&self, path: &Path) -> Result<AccountProfile, AccountError> {
+        let image = read_account_avatar_upload(path)?;
+        self.authenticated(|api, token| api.upload_avatar(&image, token))?;
+        self.profile()
+    }
+
+    /// Removes the user's uploaded avatar and returns the refreshed profile.
+    pub fn remove_avatar(&self) -> Result<AccountProfile, AccountError> {
+        self.authenticated(|api, token| api.delete_avatar(token))?;
+        self.profile()
+    }
+
+    /// The signed-in user's avatar, or `None` when they are signed out or have none. Reads the saved user, so it needs no backend round trip beyond the image itself.
+    pub fn avatar(&self) -> Result<Option<AccountAvatarImage>, AccountError> {
+        match self.status()?.and_then(|user| user.avatar_url) {
+            Some(url) => fetch_account_avatar(&url).map(Some),
+            None => Ok(None),
+        }
+    }
+
     pub fn logout(&self, all: bool) -> Result<(), AccountError> {
         let token = match self.access_token(None) {
             Ok(token) => token,

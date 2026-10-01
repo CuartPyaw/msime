@@ -672,6 +672,8 @@ fn tokens(access: u8, refresh: u8) -> AccountTokens {
             id: "fixture-user".into(),
             display_name: "Fixture".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
+            email: None,
+            avatar_url: None,
         },
     }
 }

@@ -68,6 +68,12 @@ pub struct AccountUser {
     pub id: String,
     pub display_name: String,
     pub created_at: String,
+    /// The verified email of the linked Google identity. Absent for other sign-ins, from older backends, and in sessions saved before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// The uploaded avatar's public URL, else the Google picture; absent when the user has neither. Fetched only through [`fetch_account_avatar`], which accepts the two hosts it can name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -362,12 +368,14 @@ impl AccountError {
 // does. Each part is re-exported, so `client_core::account::X` still resolves to
 // everything it did when this was one file.
 mod api;
+mod avatar;
 mod client;
 mod google;
 mod session;
 mod validate;
 
 pub use api::*;
+pub use avatar::*;
 pub use client::*;
 pub use google::*;
 pub use session::*;

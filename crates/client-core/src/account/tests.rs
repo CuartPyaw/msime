@@ -21,6 +21,8 @@ fn user() -> AccountUser {
         id: "fixture-user".into(),
         display_name: "Fixture".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
+        email: None,
+        avatar_url: None,
     }
 }
 
@@ -1596,4 +1598,172 @@ fn backend_login_forwards_a_google_authorization_code() {
     assert!(request.starts_with("POST /v1/auth/login "));
     assert!(request
         .ends_with(r#"{"challenge_id":"fixture-challenge","credential":"4/0Afixture-code"}"#));
+}
+
+#[test]
+fn avatar_urls_only_reach_the_bucket_and_google() {
+    for url in [
+        "https://media.msime.app/avatars/abc.jpg",
+        "https://lh3.googleusercontent.com/a/person=s96-c",
+        "https://googleusercontent.com/a",
+    ] {
+        assert!(account_avatar_url_allowed(url), "{url}");
+    }
+    for url in [
+        "http://media.msime.app/avatars/abc.jpg",
+        "https://media.msime.app:8443/avatars/abc.jpg",
+        "https://user@media.msime.app/avatars/abc.jpg",
+        "https://evilgoogleusercontent.com/a",
+        "https://msime.app/avatars/abc.jpg",
+        "https://example.test/a.png",
+        "not a url",
+    ] {
+        assert!(!account_avatar_url_allowed(url), "{url}");
+    }
+    assert!(account_avatar_is_uploaded(
+        "https://media.msime.app/avatars/abc.jpg"
+    ));
+    assert!(!account_avatar_is_uploaded(
+        "https://lh3.googleusercontent.com/a/person=s96-c"
+    ));
+}
+
+#[test]
+fn avatar_uploads_are_read_by_their_contents() {
+    let directory = tempfile::tempdir().unwrap();
+    let png = directory.path().join("picked.png");
+    std::fs::write(&png, b"\x89PNG\r\n\x1a\nrest-of-png").unwrap();
+    // A JPEG named .png is still a JPEG: the bytes decide, not the name.
+    let jpeg = directory.path().join("photo.png");
+    std::fs::write(&jpeg, [0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]).unwrap();
+    assert_eq!(
+        read_account_avatar_upload(&png).unwrap().content_type,
+        "image/png"
+    );
+    assert_eq!(
+        read_account_avatar_upload(&jpeg).unwrap().content_type,
+        "image/jpeg"
+    );
+    let gif = directory.path().join("anim.gif");
+    std::fs::write(&gif, b"GIF89a....").unwrap();
+    let webp = directory.path().join("still.webp");
+    std::fs::write(&webp, b"RIFF\0\0\0\0WEBPVP8 ").unwrap();
+    let large = directory.path().join("large.png");
+    let mut oversized = b"\x89PNG\r\n\x1a\n".to_vec();
+    oversized.resize(MAX_ACCOUNT_AVATAR_UPLOAD_BYTES as usize + 1, 0);
+    std::fs::write(&large, oversized).unwrap();
+    let empty = directory.path().join("empty.png");
+    std::fs::write(&empty, b"").unwrap();
+    let link = directory.path().join("link.png");
+    std::os::unix::fs::symlink(&png, &link).unwrap();
+    for path in [&gif, &webp, &large, &empty, &link, directory.path()] {
+        assert_eq!(
+            read_account_avatar_upload(path),
+            Err(AccountError::Invalid),
+            "{path:?}"
+        );
+    }
+    assert_eq!(
+        read_account_avatar_upload(Path::new("relative.png")),
+        Err(AccountError::Invalid)
+    );
+}
+
+#[test]
+fn avatar_upload_sends_the_image_itself_and_removal_deletes() {
+    let image = AccountAvatarImage {
+        content_type: "image/png",
+        bytes: b"\x89PNG\r\n\x1a\nsynthetic".to_vec(),
+    };
+    let body = r#"{"user":{"id":"u","display_name":"n","created_at":"c"},"identities":[]}"#;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let (origin, request) = serve_once_and_capture(response.into_bytes());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    client.upload_avatar(&image, &token(b'a')).unwrap();
+    let request = request.recv().unwrap();
+    let text = String::from_utf8_lossy(&request).to_lowercase();
+    assert!(
+        text.starts_with("put /v1/users/me/avatar http/1.1\r\n"),
+        "{text}"
+    );
+    assert!(text.contains("\r\ncontent-type: image/png\r\n"));
+    assert!(text.contains(&format!("\r\nauthorization: bearer {}\r\n", token(b'a'))));
+    assert!(request.ends_with(&image.bytes));
+
+    // Refused locally before any request: a GIF, an empty body and an oversized one.
+    for bad in [
+        AccountAvatarImage {
+            content_type: "image/gif",
+            bytes: b"GIF89a".to_vec(),
+        },
+        AccountAvatarImage {
+            content_type: "image/png",
+            bytes: Vec::new(),
+        },
+        AccountAvatarImage {
+            content_type: "image/jpeg",
+            bytes: vec![0; MAX_ACCOUNT_AVATAR_UPLOAD_BYTES as usize + 1],
+        },
+    ] {
+        assert_eq!(
+            client.upload_avatar(&bad, &token(b'a')),
+            Err(AccountError::Invalid)
+        );
+    }
+
+    // A DELETE has no body and so no Content-Length, which `serve_once_and_capture` expects; reading up to the end of the headers is enough here.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let (sender, received) = mpsc::channel();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let read = stream.read(&mut buffer).unwrap();
+            assert_ne!(read, 0, "request ended before its headers");
+            request.extend_from_slice(&buffer[..read]);
+        }
+        sender.send(request).unwrap();
+        std::io::Write::write_all(
+            &mut stream,
+            b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n",
+        )
+        .unwrap();
+    });
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    client.delete_avatar(&token(b'b')).unwrap();
+    let request = String::from_utf8(received.recv().unwrap()).unwrap();
+    assert!(
+        request.starts_with("DELETE /v1/users/me/avatar HTTP/1.1\r\n"),
+        "{request}"
+    );
+}
+
+#[test]
+fn user_profile_fields_are_optional_and_bounded() {
+    // A session saved before the fields existed still loads.
+    let old: AccountUser =
+        serde_json::from_str(r#"{"id":"u","display_name":"n","created_at":"c"}"#).unwrap();
+    assert_eq!((old.email, old.avatar_url), (None, None));
+    let current: AccountUser = serde_json::from_str(
+        r#"{"id":"u","display_name":"n","created_at":"c","email":"a@example.test","avatar_url":"https://media.msime.app/avatars/x.jpg"}"#,
+    )
+    .unwrap();
+    assert_eq!(current.email.as_deref(), Some("a@example.test"));
+    // Absent fields stay absent when the session is written back.
+    let written = serde_json::to_value(user()).unwrap();
+    assert!(written.get("email").is_none() && written.get("avatar_url").is_none());
+    let mut long = user();
+    long.avatar_url = Some(format!("https://media.msime.app/{}", "a".repeat(2048)));
+    assert_eq!(validate_user(&long), Err(AccountError::Invalid));
+    let image = AccountAvatarImage {
+        content_type: "image/jpeg",
+        bytes: vec![1, 2, 3],
+    };
+    assert_eq!(image.data_url(), "data:image/jpeg;base64,AQID");
 }

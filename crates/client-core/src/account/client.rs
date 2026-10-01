@@ -1060,6 +1060,45 @@ impl AccountApi for BackendAccountClient {
         self.empty::<()>(Method::DELETE, "/v1/users/me", Some(access_token), None)
     }
 
+    fn upload_avatar(
+        &self,
+        image: &AccountAvatarImage,
+        access_token: &str,
+    ) -> Result<(), AccountError> {
+        if !crate::text::is_lower_hex(access_token, 64)
+            || !matches!(image.content_type, "image/png" | "image/jpeg")
+            || image.bytes.is_empty()
+            || image.bytes.len() as u64 > MAX_ACCOUNT_AVATAR_UPLOAD_BYTES
+        {
+            return Err(AccountError::Invalid);
+        }
+        let url = self
+            .origin
+            .join("/v1/users/me/avatar")
+            .map_err(|_| AccountError::Invalid)?;
+        // The body is the image itself, not JSON, so this does not go through `request`, which only sends JSON.
+        let response = self
+            .client
+            .put(url)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .header(reqwest::header::CONTENT_TYPE, image.content_type)
+            .bearer_auth(access_token)
+            .timeout(Duration::from_secs(60))
+            .body(image.bytes.clone())
+            .send()
+            .map_err(|_| AccountError::Unavailable)?;
+        read_bounded_response(response, MAX_JSON_BYTES).map(|_| ())
+    }
+
+    fn delete_avatar(&self, access_token: &str) -> Result<(), AccountError> {
+        self.empty::<()>(
+            Method::DELETE,
+            "/v1/users/me/avatar",
+            Some(access_token),
+            None,
+        )
+    }
+
     fn chat_models(&self, access_token: &str) -> Result<AccountChatModels, AccountError> {
         if !crate::text::is_lower_hex(access_token, 64) {
             return Err(AccountError::Invalid);

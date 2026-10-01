@@ -1056,3 +1056,119 @@ test("macOS settings offer no setup guide to replay; the status notice covers th
   await screen.findByText("欢迎来到水杉");
   expect(screen.queryByRole("button", { name: "重新查看新手引导" })).toBeNull();
 });
+
+const avatarImage = "data:image/png;base64,iVBORw0KGgo=";
+
+test("a signed-in card shows the avatar the host fetched and the Google email", async () => {
+  const signedIn: AccountUser = {
+    ...user,
+    email: "person@example.test",
+    avatarUrl: "https://lh3.googleusercontent.com/a/card",
+  };
+  const avatar = vi.fn().mockResolvedValue(avatarImage);
+  render(
+    <AccountPage
+      client={account({
+        status: vi.fn().mockResolvedValue({ user: signedIn }),
+        profile: vi.fn().mockResolvedValue({ user: signedIn, providers: ["google"] }),
+        avatar,
+      })}
+    />,
+  );
+  const card = await screen.findByRole("button", { name: "编辑个人资料" });
+  expect(within(card).getByText("person@example.test")).not.toBeNull();
+  await waitFor(() => expect(card.querySelector("img")?.getAttribute("src")).toBe(avatarImage));
+  // The dialog shows the same avatar without asking the host again.
+  fireEvent.click(card);
+  const dialog = screen.getByRole("dialog", { name: "编辑个人资料" });
+  await waitFor(() => expect(dialog.querySelector("img")?.getAttribute("src")).toBe(avatarImage));
+  expect(avatar).toHaveBeenCalledOnce();
+  expect(within(dialog).getByText("person@example.test")).not.toBeNull();
+});
+
+test("without an avatar, or on a host that does not fetch one, the name's first character stands in", async () => {
+  render(
+    <AccountPage
+      client={account({
+        status: vi.fn().mockResolvedValue({
+          user: { ...user, avatarUrl: "https://lh3.googleusercontent.com/a/no-loader" },
+        }),
+      })}
+    />,
+  );
+  const card = await screen.findByRole("button", { name: "编辑个人资料" });
+  expect(card.querySelector("img")).toBeNull();
+  expect(within(card).getByText("水")).not.toBeNull();
+  expect(within(card).getByText("水杉账号已登录")).not.toBeNull();
+});
+
+test("the edit dialog uploads and removes a custom avatar without losing the name being typed", async () => {
+  const google = "https://lh3.googleusercontent.com/a/dialog";
+  const uploaded = "https://media.msime.app/avatars/dialog.jpg";
+  const signedIn: AccountUser = { ...user, avatarUrl: google };
+  const withUpload: AccountProfile = {
+    user: { ...signedIn, avatarUrl: uploaded, avatarUploaded: true },
+    providers: ["google"],
+  };
+  const avatar = vi.fn().mockImplementation(async () => avatarImage);
+  const chooseAvatar = vi.fn().mockResolvedValue(withUpload);
+  const removeAvatar = vi.fn().mockResolvedValue({ user: signedIn, providers: ["google"] });
+  render(
+    <AccountPage
+      client={account({
+        status: vi.fn().mockResolvedValue({ user: signedIn }),
+        profile: vi.fn().mockResolvedValue({ user: signedIn, providers: ["google"] }),
+        avatar,
+        chooseAvatar,
+        removeAvatar,
+      })}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  const dialog = screen.getByRole("dialog", { name: "编辑个人资料" });
+  // Only an uploaded avatar can be removed.
+  expect(within(dialog).queryByRole("button", { name: "移除头像" })).toBeNull();
+  fireEvent.change(within(dialog).getByLabelText("编辑社区昵称"), {
+    target: { value: "正在输入的昵称" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "更换头像" }));
+  expect(await screen.findByText("头像已更新。")).not.toBeNull();
+  expect(chooseAvatar).toHaveBeenCalledOnce();
+  // The new URL asks the host for the new image.
+  await waitFor(() => expect(avatar).toHaveBeenCalledTimes(2));
+  expect((within(dialog).getByLabelText("编辑社区昵称") as HTMLInputElement).value).toBe(
+    "正在输入的昵称",
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "移除头像" }));
+  expect(await screen.findByText("已移除头像。")).not.toBeNull();
+  expect(removeAvatar).toHaveBeenCalledOnce();
+  expect(within(dialog).queryByRole("button", { name: "移除头像" })).toBeNull();
+});
+
+test("closing the file dialog changes nothing, and a file the host refuses says what to pick", async () => {
+  const chooseAvatar = vi
+    .fn()
+    .mockResolvedValueOnce(null)
+    .mockRejectedValueOnce({ code: "account_invalid" });
+  render(
+    <AccountPage client={account({ status: vi.fn().mockResolvedValue({ user }), chooseAvatar })} />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  const dialog = screen.getByRole("dialog", { name: "编辑个人资料" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "更换头像" }));
+  await waitFor(() => expect(chooseAvatar).toHaveBeenCalledOnce());
+  expect(screen.queryByText("头像已更新。")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "更换头像" }));
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "请选择 1 MiB 以内的 PNG 或 JPEG 图片。",
+  );
+});
+
+test("a host without avatar upload offers no avatar button", async () => {
+  render(<AccountPage client={account({ status: vi.fn().mockResolvedValue({ user }) })} />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  const dialog = screen.getByRole("dialog", { name: "编辑个人资料" });
+  expect(within(dialog).queryByRole("button", { name: "更换头像" })).toBeNull();
+  expect(within(dialog).queryByText(/点头像可更换/)).toBeNull();
+});
