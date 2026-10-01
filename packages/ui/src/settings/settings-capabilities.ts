@@ -57,6 +57,10 @@ export function settingsCapabilities({
     ? (host.candidate_border_color ?? host.candidate_selection_appearance)
     : true;
   const showCandidateFollowCursor = host ? host.candidate_follow_cursor : false;
+  // A host older than these fields cannot draw them, so an absent flag hides the control.
+  const showCandidateWindowScale = host ? host.candidate_window_scale === true : true;
+  const showCandidateWindowOpacity = host ? host.candidate_window_opacity === true : true;
+  const showCandidateCornerRadius = host ? host.candidate_corner_radius === true : true;
   const showInputModeHUD = host?.input_mode_hud ?? macos;
   const showVoiceCaptureDevices =
     !android && (host ? host.voice_capture_devices : linux) && canListVoiceCaptureDevices;
@@ -100,6 +104,9 @@ export function settingsCapabilities({
     showCandidateSelectionAppearance,
     showCandidateBorderColor,
     showCandidateFollowCursor,
+    showCandidateWindowScale,
+    showCandidateWindowOpacity,
+    showCandidateCornerRadius,
     showInputModeHUD,
     showVoiceCaptureDevices,
     showDesktopMaintenanceShortcuts,

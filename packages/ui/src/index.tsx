@@ -672,6 +672,11 @@ export {
   CandidateSizingSection,
   type CandidateSizingPreferences,
 } from "./settings/candidate-sizing-section";
+export {
+  CandidateWindowStyleSection,
+  type CandidateWindowStyleSectionPreferences,
+  type CandidateWindowStyleSectionProps,
+} from "./settings/candidate-window-style-section";
 export { CandidatePageSizeSection } from "./settings/candidate-page-size-section";
 export { CandidateLayoutSection, type CandidateLayout } from "./settings/candidate-layout-section";
 export {
@@ -1238,6 +1243,12 @@ export interface HostCapabilities {
   candidate_selection_appearance: boolean;
   /** The host outlines the candidate panel in the border colour. Linux does (Fcitx5's classic UI theme) without any hover state; a host older than the field reads it from `candidate_selection_appearance`. */
   candidate_border_color?: boolean;
+  /** The host draws its own floating candidate window and scales its font and geometry by `candidate_scale_percent`. Absent on a host older than the field. */
+  candidate_window_scale?: boolean;
+  /** The host lowers the alpha of the candidate card fill, border and skin background by `candidate_opacity_percent`, keeping text opaque. */
+  candidate_window_opacity?: boolean;
+  /** The host rounds its candidate card by `candidate_corner_radius`, ahead of the skin package's radius. */
+  candidate_corner_radius?: boolean;
   candidate_follow_cursor: boolean;
   input_mode_hud?: boolean;
   candidate_english_font?: boolean;
@@ -1345,6 +1356,12 @@ export type Preferences = {
   number_row_selection?: boolean;
   candidate_font_size?: number;
   candidate_preedit_font_size?: number;
+  /** Whole candidate window scale in percent (50-200, default 100): the font size and every geometry constant are multiplied by it. Absent means 100; the core does not write the default. */
+  candidate_scale_percent?: number;
+  /** Alpha of the candidate card fill, border and skin background in percent (50-100, default 100); text and the selection stay opaque. */
+  candidate_opacity_percent?: number;
+  /** Candidate card corner radius in points (0-32). Absent or null follows the skin package's radius, then the host's own. */
+  candidate_corner_radius?: number | null;
   candidate_follow_cursor?: boolean;
   /** macOS-only non-activating badge shown after switching Chinese/English input. */
   input_mode_hud?: boolean;
@@ -1861,6 +1878,9 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showCandidateSelectionAppearance,
     showCandidateBorderColor,
     showCandidateFollowCursor,
+    showCandidateWindowScale,
+    showCandidateWindowOpacity,
+    showCandidateCornerRadius,
     showInputModeHUD,
     showVoiceCaptureDevices,
     showDesktopMaintenanceShortcuts,
@@ -2394,6 +2414,9 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showCandidateSelectionAppearance,
     showCandidateBorderColor,
     showCandidateFollowCursor,
+    showCandidateWindowScale,
+    showCandidateWindowOpacity,
+    showCandidateCornerRadius,
     showInputModeHUD,
     showVoiceCaptureDevices,
     showDesktopMaintenanceShortcuts,

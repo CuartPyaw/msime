@@ -2,6 +2,7 @@ import type { Preferences } from "../index";
 import { SkinCandidatePreview } from "../skin/skin-candidate-preview";
 import { candidateFontSize, candidateFontStyle } from "./candidate-font-size";
 import { candidateFamilyStyle } from "./candidate-font-family";
+import { candidateWindowStyle } from "./candidate-window-style";
 import { ExternalAppearancePreview } from "../skin/external-appearance-preview";
 import type { SkinCatalog } from "../skin/external-skins";
 import type { SkinImageReader } from "../skin/skin-image";
@@ -77,6 +78,7 @@ export function AppearanceCandidatePreview({
             ...(custom ? customCandidateStyle(base, colors) : themeCandidateStyle(globalTheme)),
             ...candidateFontStyle(preferences),
             ...candidateFamilyStyle(preferences),
+            ...candidateWindowStyle(preferences),
           }}
           aria-hidden="true"
         >
