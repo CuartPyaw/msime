@@ -829,7 +829,7 @@ pub fn clean_stack(value: &str) -> String {
     stack
 }
 
-/// Removes the directory part of every path in `line`, keeping the file name: `C:\Users\Name\AppData\Local\MSIME\msime.dll+0x1a2b` becomes `msime.dll+0x1a2b` and `/home/name/.local/lib/libmsime.so(+0x1f)` becomes `libmsime.so(+0x1f)`. A path starts at a `/`, `\`, `~/` or drive letter at the start of the line or after whitespace or an opening bracket or quote, and runs, spaces included, up to the next such start; its directory part ends at the last separator in that run. Text after the file name that itself contains a separator is cut with the path: losing part of a frame is preferable to sending a folder name.
+/// Removes the directory part of every path in `line`, keeping the file name: `C:\Users\Name\AppData\Local\MSIME\msime.dll+0x1a2b` becomes `msime.dll+0x1a2b` and `/home/name/.local/lib/libmsime.so(+0x1f)` becomes `libmsime.so(+0x1f)`. A path starts at a `/`, `\`, `~/` or drive letter at the start of the line or after whitespace, an opening bracket or quote, `=`, `,`, `;` or `:` (so the path of a `file:///Users/name/...` URL in an exception reason is caught too), and runs, spaces included, up to the next such start; its directory part ends at the last separator in that run. Text after the file name that itself contains a separator is cut with the path: losing part of a frame is preferable to sending a folder name.
 pub fn strip_directories(line: &str) -> String {
     let characters: Vec<char> = line.chars().collect();
     let starts: Vec<usize> = (0..characters.len())
@@ -866,12 +866,18 @@ fn is_separator(character: char) -> bool {
 }
 
 fn path_starts_at(characters: &[char], index: usize) -> bool {
-    let at_boundary = index == 0
-        || characters[index - 1].is_whitespace()
-        || matches!(
-            characters[index - 1],
-            '(' | '[' | '{' | '<' | '\'' | '"' | '=' | ',' | ';'
-        );
+    let previous = index.checked_sub(1).map(|before| characters[before]);
+    // After a colon only a separator starts a path (`file:///Users/...`, `error:/home/...`), and not the one of a drive letter, whose path already started at the letter.
+    if previous == Some(':') {
+        return is_separator(characters[index])
+            && !(index >= 2
+                && characters[index - 2].is_ascii_alphabetic()
+                && path_starts_at(characters, index - 2));
+    }
+    let at_boundary = previous.is_none_or(|before| {
+        before.is_whitespace()
+            || matches!(before, '(' | '[' | '{' | '<' | '\'' | '"' | '=' | ',' | ';')
+    });
     if !at_boundary {
         return false;
     }

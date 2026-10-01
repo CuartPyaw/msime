@@ -253,6 +253,16 @@ fn messages_and_stacks_are_cleaned_and_bounded() {
         "std::ratio<1/1000>"
     );
     assert_eq!(strip_directories("no paths here"), "no paths here");
+    // URLs in Foundation error descriptions carry the home directory after the scheme's colon.
+    assert_eq!(
+        strip_directories("NSURL=file:///Users/bob/Library/MSIME/x.json"),
+        "NSURL=file:x.json"
+    );
+    assert_eq!(
+        strip_directories("error:/home/bob/.local/lib/libmsime.so"),
+        "error:libmsime.so"
+    );
+    assert_eq!(strip_directories("std::vector::at"), "std::vector::at");
 
     let message = clean_message(&format!("{}\u{7}", "错".repeat(1200)));
     assert_eq!(message.chars().count(), MAX_MESSAGE_CHARS);
