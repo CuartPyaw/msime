@@ -1,10 +1,19 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import {
   MobileKeyboardFeedbackSection,
   MobileKeyboardFeedbackSettings,
   type MobileKeyboardFeedback,
+  useMobileKeyboardFeedback,
 } from "@msime/ui";
 
 afterEach(() => {
@@ -18,6 +27,14 @@ const value: MobileKeyboardFeedback = {
   hapticStrength: "medium",
   englishSuggestions: true,
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
 
 test("updates sound, haptics, and strength", () => {
   const onChange = vi.fn();
@@ -78,6 +95,38 @@ test("hides vibration controls when unavailable", () => {
 
   expect(screen.queryByRole("switch", { name: "按键振动" })).toBeNull();
   expect(screen.queryByRole("combobox", { name: "振动强度" })).toBeNull();
+});
+
+test("a save response from a replaced mobile feedback client is ignored", async () => {
+  const pendingSave = deferred<MobileKeyboardFeedback>();
+  const pendingLoad = deferred<MobileKeyboardFeedback>();
+  const oldClient = {
+    load: vi.fn().mockResolvedValue(value),
+    save: vi.fn().mockReturnValue(pendingSave.promise),
+  };
+  const nextValue = { ...value, soundEnabled: false };
+  const nextClient = {
+    load: vi.fn().mockReturnValue(pendingLoad.promise),
+    save: vi.fn().mockResolvedValue(nextValue),
+  };
+  const onError = vi.fn();
+  const { result, rerender } = renderHook(
+    ({ client }) => useMobileKeyboardFeedback({ mobile: true, client, onError }),
+    { initialProps: { client: oldClient } },
+  );
+  await waitFor(() => expect(result.current.value).toEqual(value));
+
+  let pending!: Promise<void>;
+  act(() => {
+    pending = result.current.save({ ...value, hapticsEnabled: false });
+  });
+  rerender({ client: nextClient });
+  pendingLoad.resolve(nextValue);
+  await waitFor(() => expect(result.current.value).toEqual(nextValue));
+
+  pendingSave.resolve({ ...value, hapticsEnabled: false });
+  await act(async () => pending);
+  expect(result.current.value).toEqual(nextValue);
 });
 
 test("only mounts the host binding when mobile feedback is available", () => {
