@@ -952,8 +952,9 @@ static NSImage *MSIMECandidateLogoImage() {
     NSNumber *_typingSourceOverride;
     // Whether secure event input was on at the last key or activation. Nothing is played while it is, and background music waits for it to go off; see secureEventInputActive.
     BOOL _secureEventInput;
-    // Typing effects: whether the foreground application held a full-screen display when this activation began (checked once, after activation, since it walks the window list), and the answers of msime_client_typing_effect not yet drawn. Keys only record their answer here; drawing waits for the main queue's next turn so a key never waits on it, and keys arriving in between are drawn once with the latest count.
+    // Typing effects: whether the foreground application holds a full-screen display, and the answers of msime_client_typing_effect not yet drawn. The full-screen state walks the window list, so it is read on the main queue's next turn, never on a key: after activation, after a preference update, when the active space changes (an application entering or leaving native full screen), and at most once a second while keys arrive (a borderless full-screen window changes no space). Keys only record their answer here; drawing waits for the main queue's next turn so a key never waits on it, and keys arriving in between are drawn once with the latest count.
     BOOL _typingEffectFullscreen;
+    NSTimeInterval _typingEffectFullscreenCheckedAt;
     BOOL _typingEffectScheduled;
     BOOL _typingEffectCommit;
     uint32_t _typingEffectPacked;
@@ -3338,6 +3339,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [NSDistributedNotificationCenter.defaultCenter removeObserver:self];
+    [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
     // The toolbar outlives focus-outs, so a controller freed by IMK releases it here; the panel's owner check leaves a newer owner in place.
     [_toolbar deactivateForDelegate:self];
     if (_globalVoiceHotkeyMonitor) [NSEvent removeMonitor:_globalVoiceHotkeyMonitor];
@@ -4054,6 +4056,9 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     if (!_appearance.englishMode) [self prepareSession];
     else [self startPreferencesMonitoring];
     [self claimBackgroundMusic];
+    NSNotificationCenter *workspaceCenter = NSWorkspace.sharedWorkspace.notificationCenter;
+    [workspaceCenter removeObserver:self name:NSWorkspaceActiveSpaceDidChangeNotification object:nil];
+    [workspaceCenter addObserver:self selector:@selector(typingEffectSpaceChanged:) name:NSWorkspaceActiveSpaceDidChangeNotification object:nil];
     [self refreshTypingEffectFullscreen];
     [self requestCloudCandidatesConsentIfNeeded];
     [self commitPendingEmojiForClient:sender];
@@ -4524,6 +4529,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     [[MSIMEInputModeHUDPanel sharedPanel] applySizingPreferences:preferences];
     // Typing effects follow preferences.plugins; a partial document without it leaves them as they are.
     [[MSIMETypingEffectPanel sharedPanel] applyPreferences:preferences];
+    // Effects switched on mid-session were never checked against the foreground application at activation.
+    if (_activeClient) [self refreshTypingEffectFullscreen];
     NSDictionary *toolbar = preferences[@"floating_toolbar"];
     id enabled = [toolbar isKindOfClass:NSDictionary.class] ? toolbar[@"enabled"] : nil;
     if ([enabled isKindOfClass:NSNumber.class]) {
@@ -4740,10 +4747,13 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     [self typingEffect:keyClass commit:NO];
 }
 
-// The foreground application's full-screen state, read once per activation on the main queue's next turn rather than on a key: it walks the on-screen window list.
+// The foreground application's full-screen state, read on the main queue's next turn rather than on a key: it walks the on-screen window list. The previous answer stands until then.
 - (void)refreshTypingEffectFullscreen {
-    _typingEffectFullscreen = NO;
-    if (!MSIMETypingEffectPanel.sharedPanel.configured) return;
+    if (!MSIMETypingEffectPanel.sharedPanel.configured) {
+        _typingEffectFullscreen = NO;
+        return;
+    }
+    _typingEffectFullscreenCheckedAt = NSProcessInfo.processInfo.systemUptime;
     __weak MSIMEInputController *weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
         MSIMEInputController *strongSelf = weakSelf;
@@ -4751,9 +4761,16 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     });
 }
 
+// Entering or leaving native full screen moves the foreground application to another space.
+- (void)typingEffectSpaceChanged:(NSNotification *)notification {
+    (void)notification;
+    if (_activeClient) [self refreshTypingEffectFullscreen];
+}
+
 // One key or commit for the typing effect. The library call is integer arithmetic on the session; nothing is drawn here. A full-screen foreground application keeps the tier-up sound quiet and gets nothing drawn over it, while the combo still counts.
 - (void)typingEffect:(uint32_t)event commit:(BOOL)commit {
     if (!_session || !MSIMETypingEffectPanel.sharedPanel.configured) return;
+    if (NSProcessInfo.processInfo.systemUptime - _typingEffectFullscreenCheckedAt >= 1.0) [self refreshTypingEffectFullscreen];
     const uint32_t packed = [_session typingEffect:event | (_typingEffectFullscreen ? MSIMETypingEffectEventMuted : 0)];
     if (_typingEffectFullscreen) return;
     // A tier reached by an earlier key still undrawn is kept, so its bounce is not lost to the key after it.
