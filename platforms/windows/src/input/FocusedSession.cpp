@@ -1,11 +1,19 @@
 #include "FocusedSession.h"
+#include "KeySoundPolicy.h"
+#include "TypingEffectPolicy.h"
+#include "TypingEffectSignal.h"
 #include <ctime>
 #include <memory>
 #include <stdexcept>
 #include <thread>
 #include <utility>
+#include "FullscreenForeground.h"
 
 namespace msime::windows {
+namespace {
+// Effect sounds and music stay quiet while a full-screen application is in front: a game, a video or a presentation the user did not ask to hear typing in.
+bool sound_allowed() { return !foreground_is_fullscreen(GetForegroundWindow()); }
+} // namespace
 std::string
 FocusedSession::typing_statistics_directory(const std::string &options) {
   try {
@@ -19,14 +27,14 @@ FocusedSession::typing_statistics_directory(const std::string &options) {
 }
 void record_typing_statistics_async(const std::string &directory,
                                     const std::string &text,
-                                    TypingSource source) {
+                                    TypingSource source, bool quiet) {
   if (directory.empty())
     return;
   const auto local = local_time_parts(std::time(nullptr));
   if (!local)
     return;
-  auto request = typing_statistics_record_request(directory, text, source,
-                                                  local->day, local->hour);
+  auto request = typing_statistics_record_request(
+      directory, text, source, local->day, local->hour, quiet);
   if (request.empty())
     return;
   // Off the calling thread: the shared store takes a file lock, and neither a commit nor a pipe listener may wait on statistics. Detached like the other hosts do; the request is a self-contained copy, so nothing here outlives it.
@@ -52,17 +60,28 @@ std::optional<FocusedSession::Commit> FocusedSession::pending_commit() const {
   if (!reply.committed_text || reply.committed_text->empty())
     return std::nullopt;
   return Commit{*reply.committed_text,
-                resolve_typing_source_from_transition(reply.source.transition)};
+                resolve_typing_source_from_transition(reply.source.transition),
+                transition_counts_as_typing(reply.source.transition)};
 }
 void FocusedSession::record_commit(const std::optional<Commit> &delivered) {
   if (!delivered)
+    return;
+  // Sampled once, at commit time: the achievement jingle a milestone plays follows the same full-screen rule as the commit sound.
+  const bool allowed = sound_allowed();
+  if (allowed)
+    (void)session_.commit_sound();
+  // The commit flash, on the session's current combo: a commit counts nothing and only reports the state.
+  if (session_.input_enabled())
+    TypingEffectSignal::instance().publish(
+        session_.typing_effect(typing_effect_commit(allowed)));
+  if (!delivered->typing)
     return;
   if (statistics_) {
     statistics_(delivered->text, delivered->source);
     return;
   }
   record_typing_statistics_async(statistics_directory_, delivered->text,
-                                 delivered->source);
+                                 delivered->source, !allowed);
 }
 void FocusedSession::check_thread() const {
   if (std::this_thread::get_id() != thread_)
@@ -116,6 +135,7 @@ bool FocusedSession::prepare(const FocusLease &lease) {
       session_.activate(lease.epoch);
       composer_.emplace(client_, lease.epoch);
       lease_ = lease;
+      session_.set_music_active(sound_allowed());
     });
   } catch (...) {
     gate_.deactivate(lease);
@@ -389,6 +409,7 @@ bool FocusedSession::cancel(const FocusLease &lease) {
   composer_->cancel();
   preferences_retry_.reset();
   continuation_hide_.clear();
+  session_.set_music_active(false);
   session_.deactivate(lease.epoch);
   composer_.reset();
   lease_.reset();
@@ -519,6 +540,18 @@ std::optional<PendingReply> FocusedSession::configured_key(
     result = composer_->configured_key(session_, packet, lease.epoch, style,
                                        bindings, std::move(local_text),
                                        word_binding);
+    // After the Engine, so only a key the input method took sounds (with input off, in English mode, the Server answers keys without taking them), and before the online queries are built, so they add no delay to it.
+    if (result && session_.input_enabled()) {
+      if (const auto key_class = key_sound_class(packet)) {
+        const bool allowed = sound_allowed();
+        if (allowed)
+          (void)session_.key_sound(*key_class);
+        // The same keys drive the typing effect and its combo, which keep counting in a full-screen application but stay silent there. The candidate window draws it on the UI thread; this only posts the packed value.
+        const bool auto_repeat = (packet.modifiers_down & PipeMetadata::AutoRepeat) != 0;
+        TypingEffectSignal::instance().publish(
+            session_.typing_effect(typing_effect_key_event(*key_class, allowed, auto_repeat)));
+      }
+    }
     attach_online_query(lease, result);
   });
   return result;

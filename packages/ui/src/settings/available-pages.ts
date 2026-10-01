@@ -8,6 +8,8 @@ export interface AvailablePageCapabilities {
   chat: boolean;
   community: boolean;
   floatingToolbar: boolean;
+  /** The 扩展 page: a host with a pack store, or one that plays or routes something it switches. */
+  plugins: boolean;
   mobile: boolean;
 }
 
@@ -22,6 +24,7 @@ export function availableSettingsPages(capabilities: AvailablePageCapabilities) 
       (item.id !== "chat" || capabilities.chat) &&
       (item.id !== "community" || capabilities.community) &&
       (item.id !== "floating-toolbar" || capabilities.floatingToolbar) &&
+      (item.id !== "plugins" || capabilities.plugins) &&
       (item.id !== "more" || capabilities.mobile),
   );
 }

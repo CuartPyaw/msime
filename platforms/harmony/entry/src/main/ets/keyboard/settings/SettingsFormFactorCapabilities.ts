@@ -19,6 +19,14 @@ export interface SettingsFormFactorProjection {
   fixedCandidateLayout: "horizontal" | null;
   candidateFollowCursor: boolean;
   inputModeHud: boolean;
+  /** Key sounds, the typing melody, commit and achievement sounds: played for a hardware keyboard on a 2in1, while a phone keeps its own key feedback. */
+  keySound: boolean;
+  /** Background music from a music pack, streamed through AVPlayer on a 2in1 while an editor that may hear it has focus; a phone plays none. */
+  music: boolean;
+  /** The V, / and @ modes, claimed for the 2in1, the PC form factor they were built around: a hardware keyboard sends their digits, operators and marks through the Engine's spelling symbols. */
+  pluginTriggers: boolean;
+  /** The typing effect and the combo counter: a 2in1 flashes its candidate card, shows the combo and plays the tier-up sound for a hardware keyboard; a phone draws none. */
+  typingEffects: boolean;
 }
 
 /** Keep the shared settings page aligned with the keyboard's actual device form factor. */
@@ -40,6 +48,10 @@ export class SettingsFormFactorCapabilities {
       fixedCandidateLayout: desktop ? null : "horizontal",
       candidateFollowCursor: desktop,
       inputModeHud: desktop,
+      keySound: desktop,
+      music: desktop,
+      pluginTriggers: desktop,
+      typingEffects: desktop,
     };
   }
 }

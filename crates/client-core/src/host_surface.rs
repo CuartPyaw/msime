@@ -282,6 +282,18 @@ pub struct HostCapabilities {
     /// every press fails. The same rule the other optional capabilities follow.
     #[serde(default)]
     pub vocabulary_review: bool,
+    /// The host plays the sound packs in `plugins`: a sample per key class, the melody, the commit sound and the achievement jingle. Only an input process that sees the keys can, and only where it has somewhere to play them; a host without the player keeps the settings but offers no switches for them.
+    #[serde(default)]
+    pub key_sound: bool,
+    /// The host routes the `/` command and `@` mention modes: it hands `/` and `@` to the runtime, stops treating digits as candidate numbers while a mode spells with them, and loads the enabled command tables and the name list into the Engine. The `V` mode needs only the digit routing and is covered by the same flag.
+    #[serde(default)]
+    pub plugin_triggers: bool,
+    /// The host streams the selected music pack while it is the active input method.
+    #[serde(default)]
+    pub music: bool,
+    /// The host draws the typing effects and the combo count that `msime_client_typing_effect` answers with. Each host flips this only in the change that wires the call, as with the flags above.
+    #[serde(default)]
+    pub typing_effects: bool,
     /// The operating system release, as the machine reports it, for the feedback
     /// page to attach. Not a platform assumption like the flags above -- the host
     /// fills it in after `for_platform`, the way `system_fonts` is filled in --
@@ -524,6 +536,12 @@ impl HostCapabilities {
             // no platform here that can and one that cannot. The flag exists for the version
             // skew: a host binary older than the entry point sends no field and gets `false`.
             vocabulary_review: true,
+            // The three desktop hosts play the packs, route V, / and @ by the Engine's spelling symbols and stream music while they are the active input method. HarmonyOS claims key sounds, music and the triggers per form factor in its own settings projection (2in1 only); the phone and tablet hosts wire none of them. A switch with nothing behind it reads as a setting being ignored, so each host flips here only in the change that wires it.
+            key_sound: platform.is_desktop(),
+            plugin_triggers: platform.is_desktop(),
+            music: platform.is_desktop(),
+            // macOS draws the sparks, the card flash and the combo badge (TypingEffectPanel.mm), Windows the flash and the badge on its candidate window (CandidateWindow.cpp), both Linux hosts the combo count in the candidate aux line (KeySound.h), and HarmonyOS the flash and the combo badge on its KeyboardView. Linux draws no style, only the count; the settings page hides the style controls there itself (`showTypingEffectStyles`). HarmonyOS still narrows this per form factor in its own settings projection; Android and iOS wire none.
+            typing_effects: platform.is_desktop() || platform == HostPlatform::Harmony,
             os_version: None,
             candidate_panel_limit: None,
         }
@@ -559,6 +577,8 @@ pub enum SettingsCategory {
     Voice,
     Ai,
     Tools,
+    /// 扩展: sound packs, background music, command tables and the @ name list.
+    Plugins,
     FloatingToolbar,
     /// 开发者选项, which holds the local MCP server.
     Developer,
@@ -589,6 +609,7 @@ impl SettingsCategory {
             SettingsCategory::Voice => "voice",
             SettingsCategory::Ai => "ai",
             SettingsCategory::Tools => "tools",
+            SettingsCategory::Plugins => "plugins",
             SettingsCategory::FloatingToolbar => "floating-toolbar",
             SettingsCategory::Developer => "developer",
             SettingsCategory::Help => "help",
@@ -617,6 +638,7 @@ impl SettingsCategory {
             "voice" => Ok(SettingsCategory::Voice),
             "ai" => Ok(SettingsCategory::Ai),
             "tools" => Ok(SettingsCategory::Tools),
+            "plugins" => Ok(SettingsCategory::Plugins),
             "floating-toolbar" => Ok(SettingsCategory::FloatingToolbar),
             "developer" => Ok(SettingsCategory::Developer),
             "help" => Ok(SettingsCategory::Help),
@@ -627,7 +649,7 @@ impl SettingsCategory {
         }
     }
 
-    pub const ALL: [SettingsCategory; 23] = [
+    pub const ALL: [SettingsCategory; 24] = [
         SettingsCategory::Account,
         SettingsCategory::Chat,
         SettingsCategory::Community,
@@ -646,6 +668,7 @@ impl SettingsCategory {
         SettingsCategory::Voice,
         SettingsCategory::Ai,
         SettingsCategory::Tools,
+        SettingsCategory::Plugins,
         SettingsCategory::FloatingToolbar,
         SettingsCategory::Developer,
         SettingsCategory::Help,

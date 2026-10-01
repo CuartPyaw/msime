@@ -73,6 +73,11 @@ char *msime_client_refresh_host(const uint8_t *path, size_t length);
  * Linux hosts may provide absolute online_provider_socket and
  * translation_provider_socket paths for user-managed Unix-socket services;
  * translation may reuse the online socket when omitted.
+ * preferences_directory also names the plugins root, <preferences_directory>/plugins: the
+ * installed plugin packs, the enabled command tables the "/" mode reads and the "@" mode's
+ * mentions.json. They are read at creation, on preference updates and when a field gains
+ * focus, and only while the mode that uses them is on. Optional sound_packs is the absolute
+ * path of the bundle's built-in sound packs; absent means sound-packs beside resources.
  * Do not delete .msime-dictionary-access.lock files. Legacy/external writers do
  * not participate; preparation/upgrades still require stopped sessions.
  */
@@ -191,6 +196,9 @@ char *msime_client_load_preferences(const uint8_t *directory, size_t length);
  * text is never returned or stored. May block on disk/file lock: use a worker.
  * `hour` is the commit's local hour and must come from the same instant as `day`;
  * omit it rather than guess, and the day keeps its counts with no hourly split.
+ * Record answers {recorded, milestone}: milestone is the achievement count (100, 1000, ...)
+ * the total just passed, or null. It is only computed while a session in this process has
+ * achievement sounds on, and on the desktop hosts the jingle is then already queued.
  */
 char *msime_client_typing_statistics(const uint8_t *request, size_t length);
 /* Read only the aggregate-statistics master switch from an absolute UTF-8
@@ -488,11 +496,8 @@ char *msime_client_all_candidates(uint64_t session);
 /* Return read-only English completions for a bounded ASCII prefix. */
 char *msime_client_english_completions(uint64_t session, const uint8_t *prefix,
                                        size_t prefix_length, size_t limit);
-/* View.local_mode is the Engine-owned mode, not a preedit-prefix heuristic:
- * View.microsoft_shuangpin reports the applied Engine configuration, never a
- * newer deferred preference. Hosts use it with mode, editing text and caret.
- * none, unicode, date_time, quick_phrase, emoji, kaomoji, super_jianpin,
- * temporary_english, temporary_japanese. Treat unknown as unusable state.
+/* View.local_mode is the Engine-owned mode, not a preedit-prefix heuristic: View.microsoft_shuangpin reports the applied Engine configuration, never a newer deferred preference. Hosts use it with mode, editing text and caret. none, unicode, date_time, quick_phrase, emoji, kaomoji, super_jianpin, temporary_english, temporary_japanese, expression, command, mention. Treat unknown as unusable state.
+ * View.spelling_symbols lists the non-letter keys the Engine takes as input in this state: the active mode's spelling (digits and operators in expression, digits in unicode) or, with nothing composed, the keys that open a mode (/ and @). Send them as characters; a digit listed there is input, not a candidate shortcut. A transition's commit_context.typing_statistics is false for text the expression, command and mention modes generated, which is not counted as typing.
  */
 char *msime_client_view(uint64_t session);
 /* Return a copied OnlineQuery JSON object, or null when the current composition
@@ -517,6 +522,7 @@ char *msime_client_set_ai_credential(uint64_t session, const uint8_t *token,
                                      size_t token_length);
 /* Return null or {generation,target_language,candidates:[{text}], provider:"none"|"account"|"tencent"|"niutrans"|"custom", translation_account:bool, custom_translation:{enabled,endpoint,api_key}|null, tencent_tmt:{enabled,secret_id,secret_key,region}|null, niutrans:{enabled,app_id,apikey}|null} for visible candidates.
  * provider names the service selected in preferences even when its configuration is incomplete; a transport must ask that service or none, never fall back to another. Credentials are returned only for the selected usable provider. These fields are for host-owned transport; never log the query. The existing target_language applies to both providers. translation_account is true only when the user explicitly chose the MSIME account, candidate_translations is on and no service of the user's own applies; it is the whole decision for a host's account gloss path, which must send nothing when it is false. offline_gloss_languages is present only when non-empty: the non-English target languages, in preference order, whose offline dictionary is installed beside resources; ask msime_client_candidate_gloss_request with that target_language for each.
+ * While the composition is a /fy request (command mode) the query is that request alone, whatever the gloss switches say: sentence:true, target_language "zh", one candidate {text, online_gloss:false} holding the English typed after the command, no resources, user_data or offline_gloss_languages, and null when no service of the user's own (tencent, niutrans or custom) is selected. Ask only that service, without the offline dictionary or the gloss cache, and hand the answer back through msime_client_apply_translations, which shows it as the first row and commits the translation.
  */
 char *msime_client_translation_query(uint64_t session);
 /* How long a cloud candidate is worth waiting for: connecting, and in total.
@@ -709,6 +715,33 @@ char *msime_client_host_capabilities(const uint8_t *platform, size_t length);
 char *msime_client_mcp_status(const uint8_t *request, size_t length);
 /* Write the msime entry into one assistant's configuration, keeping every other key. JSON request {options,client:"claude_desktop"|"cursor",replace:bool}. Returns "added"|"replaced"|"unchanged"; a different msime entry fails with mcp_entry_exists unless replace is set. Writes a file: use a worker thread. */
 char *msime_client_mcp_install(const uint8_t *request, size_t length);
+/* Effect sounds and background music, played by this library on macOS, Windows and Linux from the session's preferences.plugins. The three calls below are for the key path: they return whether a request was queued, never block, decode or read files, and need no free. False means nothing is switched on, the session handle is unknown or on another thread, the queue is full, this platform does not play (iOS, Android, HarmonyOS), or sound failed earlier in this process, which turns it off until the process restarts with one line on stderr. Nothing starts - no thread, no audio device - until a call finds something switched on, so a process that never calls them (the Windows TSF DLL) pays nothing; the device is let go again after 30 s without a sound or playing music. Do not call them for keys typed into a secure (password) field.
+ * key_sound: key_class 0 any other key, 1 space, 2 enter, 3 backspace; anything else queues nothing. Plays the key pack's sample for the class, or the melody pack's next note in melody mode.
+ * commit_sound: call when a transition commits text. Plays the key pack's commit sample when the commit sound is on, and the next note of a melody that advances on commits.
+ * music_set_active: true while the input method is active in a field that is not a secure one, false when it deactivates or a secure field gains focus; music plays only in between.
+ * Achievement sounds need no call: msime_client_typing_statistics record plays one when the count passes a milestone. */
+bool msime_client_key_sound(uint64_t session, uint32_t key_class);
+bool msime_client_commit_sound(uint64_t session);
+bool msime_client_music_set_active(uint64_t session, bool active);
+/* The typing effect of one key, for the host to draw beside the caret: the session's combo count and the resolved style: the selected effect pack's (preferences.plugins.effect_pack) when one is set, preferences.plugins.effect_style otherwise. Also for the key path: integer arithmetic on the session's own state, no lock, no allocation, no file, no free; it works on every platform, iOS, Android and HarmonyOS included. Call it once per key the host handles while effect_style is not "off", effect_pack is set or combo_counter is on, alongside key_sound, and once per commit; skip keys typed into a secure (password) field.
+ * event bits 0-7: 0 any other key, 1 space, 2 enter, 3 backspace (the key_sound classes), 4 commit, 5 backspace by any other route (a delete that bypasses key_sound). 0-2 count one key; 3 and 5 end the combo; 4 counts nothing and only reports the state.
+ * event bit 8 (0x100): the key is an auto-repeat of a held key; drawn, not counted. Bit 9 (0x200): sounds must stay quiet now (a full-screen foreground application on Windows); the tier-up sound is neither queued nor reported due. Other bits are ignored.
+ * Return value, 0 when the resolved style is off and combo_counter is off, for an unknown session handle, a wrong thread, an event code above 5, or after a panic: bits 0-15 the combo count (saturating at 65535, always 0 while combo_counter is off); bit 16 this key moved the combo up a tier (it reached 10, 25, 50 or 100 keys); bits 17-19 the style, 0 off, 1 flash, 2 sparks, 3 power_mode; bit 20 the tier-up sound is due, set only with combo_counter and combo_tier_sound on and bit 9 clear. On macOS, Windows and Linux this library has already queued that sound (the key pack's commit sample raised 3 semitones per tier); a host that plays packs itself plays it. The combo also ends after 3000 ms without a counted key, and carries over a change of preferences. */
+uint32_t msime_client_typing_effect(uint64_t session, uint32_t event);
+/* The session's resolved typing effect, for drawing what msime_client_typing_effect reports. Standard response; value {pack: id|null, issue: string|null, style: "off"|"flash"|"sparks"|"power_mode", intensity: 0..100, colors: ["#RRGGBB", 0..4 entries], duration_ms: 60..1500|null, particles: 0..64|null, combo_counter: bool}. With no effect pack selected (pack null) style and intensity are preferences.plugins.effect_style and effect_intensity, colors is empty and duration_ms and particles are null: the host's own defaults for the style. With one selected, the pack's parameters replace them; a pack that cannot be loaded gives style "off" and issue says why, in Chinese for a log line. colors, duration_ms and particles are hints a host may ignore when its style has no such thing. Linux draws no effect and shows only the combo count. Reads one small manifest only when the selection or the pack changed: call it after msime_client_update_preferences and after a focus-in, not per key. Free with string_free. */
+char *msime_client_typing_effect_settings(uint64_t session);
+/* The validated files of one sound pack, for a host that plays packs itself (HarmonyOS). Request (<=65536 bytes): {state_root: absolute|null, sound_packs: absolute|null, pack: id}; state_root is the preferences directory holding plugins/, sound_packs the bundle's built-in pack root. Built-in ids ("default", "twinkle", "msime-typewriter", "msime-bubble", "msime-8bit", "msime-woodblock", "msime-pentatonic", "msime-canon", "msime-ode-to-joy") always resolve from sound_packs; any other id needs state_root and is refused without one. Value: {id, name, license, builtin, mode:"keys"|"sequence", sounds:{default, space, enter, backspace, commit, achievement: absolute path|null}, sequence:{sample: absolute path, semitones:[-24..24], advance:"key"|"commit"}|null, max_sample_millis, melody_idle_reset_millis}. Reads the pack from disk: not for the key path. */
+char *msime_client_key_sound_pack(const uint8_t *request, size_t length);
+/* The validated tracks of one music pack, for a host that streams music itself (HarmonyOS). Request (<=65536 bytes): {state_root: absolute|null, sound_packs: absolute|null, pack: id}, as for key_sound_pack. Built-in ids ("msime-music-lofi", "msime-music-ambient") resolve from sound_packs, which holds them beside the built-in sound packs; any other id needs state_root and is refused without one. Value: {id, name, license, tracks:[absolute path, in play order], max_track_seconds}; a host plays a track only when its duration is within max_track_seconds, then the next, starting over after the last. Reads the pack from disk: not for the key path. */
+char *msime_client_music_pack(const uint8_t *request, size_t length);
+/* The settings page's pack store and @ name list, for a settings host other than the desktop shell (HarmonyOS). Request (<=2 MiB): {state_root: absolute, sound_packs: absolute|null, action}; packs and mentions.json live in state_root/plugins, sound_packs is the bundle's built-in sound pack root. action.operation:
+ * "catalog": value {packages:[...], issues:[{kind, folder, reason}]}, every installed pack and the built-in sound packs, as the desktop shell lists them.
+ * "import" {source: absolute path of a pack folder or .zip file}: installs it, replacing an installed pack of the same id whole; value is the installed pack.
+ * "remove" {kind: "sound"|"music"|"command_table"|"effect", id}: value null; a pack that is not installed is already removed.
+ * "load_mentions": value [{text, key}], empty before a list was saved.
+ * "save_mentions" {entries:[{text, key}]}: replaces the list; value null.
+ * A failure is {ok:false, error: code, detail?}: the codes are the desktop shell's (invalid, storage, plugin_invalid, plugin_unsupported_source, plugin_archive, plugin_reserved, plugin_storage, mention_invalid, mention_format, mention_storage) and detail, when present, is the rule a refused pack or entry broke, in Chinese for the page. Reads and writes files, and an import copies up to a music pack's size: use a worker thread where the host has one. */
+char *msime_client_plugins(const uint8_t *request, size_t length);
 char *msime_client_destroy(uint64_t session);
 /* Write the selection counts held by every session on the calling thread and all queued personal-context learning, without ending any session. Call from the host's will-terminate hook (e.g. NSApplicationWillTerminateNotification) on the thread that owns the sessions; the C++ Engine did this from atexit. Returns null on success. */
 char *msime_client_flush_all(void);

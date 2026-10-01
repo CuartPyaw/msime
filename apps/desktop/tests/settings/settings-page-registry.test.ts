@@ -21,6 +21,7 @@ test("keeps the current settings route registry in navigation order", () => {
     "handwriting",
     "account",
     "tools",
+    "plugins",
     "typing-statistics",
     "community",
     "download",
@@ -40,7 +41,7 @@ test("keeps navigation groups and nested route ownership aligned", () => {
     ["skin", "appearance", "floating-toolbar"],
     ["input", "expression", "shortcuts", "dictionary"],
     ["screen-keyboard", "voice", "handwriting"],
-    ["account", "tools", "typing-statistics", "community", "download"],
+    ["account", "tools", "plugins", "typing-statistics", "community", "download"],
     ["developer", "feedback", "about"],
   ]);
   expect(subPageParents).toEqual({

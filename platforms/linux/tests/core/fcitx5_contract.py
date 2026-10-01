@@ -94,6 +94,40 @@ labels = (root / "src/candidates/CandidateLocalModeLabels.h").read_text()
 for name in emitted:
     if name != "none":
         assert f'{{"{name}", "' in labels, name
+# Plugin input modes and sounds are wired the same way in both hosts. A key the local mode spells with (View.spelling_symbols) is sent to the Engine before any host binding, digits gate on the listed symbols rather than on a mode name, generated commits stay out of typing statistics, and sounds only post requests to the Host API.
+for host_source in (source, ibus_source):
+    assert 'msime::linux_host::local_mode_spelling(' in host_source
+    assert 'msime::linux_host::spelling_digits(' in host_source
+    assert 'context.value("typing_statistics", true)' in host_source
+    assert 'msime_client_key_sound(' in host_source
+    assert 'msime_client_commit_sound(' in host_source
+    assert 'msime_client_music_set_active' in host_source
+    assert 'local_mode_enabled_by_default(' in host_source
+    for mode in ('"expression"', '"command"', '"mention"'):
+        assert mode in host_source, mode
+assert 'const bool unicodeMode' not in source
+assert 'unicode_digit' not in ibus_source
+# The key sound is asked for from the key event, after ensure(): never for a restricted or private context, and the session must be released (music told to stop) before it is destroyed.
+assert source.index('music_.release(session_') < source.index('msime_client_destroy(session_)')
+assert 'state->playKeySound(event);' in source
+assert 'play_key_sound(engine, key, flags);' in ibus_source
+# The typing effect is asked for at the same two points as the sounds, and Linux shows only its combo count: IBus at the end of the candidate aux line, Fcitx5 in the aux line below the page, never in setAuxUp, which the voice, emoji search and configuration notices own.
+for host in (source, ibus_source):
+    assert host.count('msime_client_typing_effect(') == 2
+    assert 'kTypingEffectCommit' in host and 'kTypingEffectRepeat' in host
+    assert 'typing_combo_label(' in host
+assert ibus_source.index('msime_client_key_sound(s.session, key_class)') < ibus_source.index('kTypingEffectRepeat')
+assert source.index('msime_client_key_sound(session_, keyClass)') < source.index('kTypingEffectRepeat')
+assert 'setAuxDown(fcitx::Text(candidateAux()))' in source
+assert 'setAuxUp(fcitx::Text(candidateAux()))' not in source
+# /fy's translation goes to the selected service whatever the gloss switches say, and never to an offline gloss.
+for host in (source, ibus_source):
+    assert 'command_translation_query(' in host
+assert ibus_source.index('music.release(session') < ibus_source.index('msime_client_destroy(session)')
+# Both hosts name the installed built-in sound packs, which the parent project installs.
+assert 'MSIME_SOUND_PACKS="${CMAKE_INSTALL_FULL_DATADIR}/msime-client/sound-packs"' in cmake_fcitx5
+assert 'installed_sound_pack_directory(' in ibus_source
+assert 'DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/sound-packs")' in cmake
 # The IBus candidate property menu uses the shared Windows wording (置顶, 固定到第 N 位, 取消固定) and takes the slot from the CandidateFixN action name.
 assert 'msime::linux_host::candidate_pin_label' in ibus_source
 assert 'candidate_fix_label(fix[12] - \'0\')' in ibus_source

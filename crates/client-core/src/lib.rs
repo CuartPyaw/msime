@@ -30,6 +30,7 @@ pub mod file_lock;
 pub mod helpcode;
 pub mod host_surface;
 pub mod panels;
+pub mod plugins;
 pub mod preferences;
 pub mod punctuation;
 pub mod resources;

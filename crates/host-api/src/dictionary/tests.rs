@@ -39,6 +39,11 @@ fn import_engine_options() -> msime_engine::host::EngineOptions {
         local_super_jianpin: true,
         local_temporary_english: true,
         local_temporary_japanese: true,
+        local_expression: false,
+        local_command: false,
+        local_mention: false,
+        command_table: Vec::new(),
+        mention_entries: Vec::new(),
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,

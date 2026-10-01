@@ -47,6 +47,11 @@ fn options(root: &Path) -> EngineOptions {
         local_super_jianpin: true,
         local_temporary_english: true,
         local_temporary_japanese: true,
+        local_expression: false,
+        local_command: false,
+        local_mention: false,
+        command_table: Vec::new(),
+        mention_entries: Vec::new(),
         sentence_association: SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
@@ -1841,4 +1846,152 @@ fn a_session_dropped_while_its_thread_exits_does_not_abort() {
         )
         .unwrap();
     assert_eq!(written, 1);
+}
+
+fn generated_mode_options(root: &Path) -> EngineOptions {
+    let mut value = options(root);
+    value.local_expression = true;
+    value.local_command = true;
+    value.local_mention = true;
+    value.command_table = vec![CommandTableEntry {
+        trigger: "hi".into(),
+        title: "问候".into(),
+        template: "你好".into(),
+    }];
+    value.mention_entries = vec![MentionEntry {
+        text: "Alice".into(),
+        key: String::new(),
+    }];
+    value
+}
+
+#[test]
+fn generated_local_modes_map_through_the_options() {
+    let dir = tempfile::tempdir().unwrap();
+    let resources = dir.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    for name in ["msime.db", "english.db"] {
+        Connection::open(resources.join(name)).unwrap();
+    }
+    let defaults = prepare_options(
+        resources.to_str().unwrap(),
+        dir.path().join("user").to_str().unwrap(),
+        dir.path().join("cache").to_str().unwrap(),
+        "generated-modes",
+    )
+    .unwrap();
+    assert!(!defaults.local_expression && !defaults.local_command && !defaults.local_mention);
+    assert!(defaults.command_table.is_empty() && defaults.mention_entries.is_empty());
+    let value = generated_mode_options(dir.path());
+    let mapped = super::options::session_options(&value).unwrap();
+    assert!(
+        mapped.local_modes.expression && mapped.local_modes.command && mapped.local_modes.mention
+    );
+    assert_eq!(mapped.command_table, value.command_table);
+    assert_eq!(mapped.mention_entries, value.mention_entries);
+    let off = super::options::session_options(&options(dir.path())).unwrap();
+    assert!(!off.local_modes.expression && !off.local_modes.command && !off.local_modes.mention);
+}
+
+#[test]
+fn generated_local_modes_publish_their_spelling_symbols_and_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::new(&generated_mode_options(dir.path())).unwrap();
+    assert_eq!(session.snapshot().unwrap().spelling_symbols, "/@");
+    assert!(session.character(b'V', true).unwrap().handled);
+    type_text(&mut session, b"2*3");
+    let view = session.snapshot().unwrap();
+    assert_eq!(view.local_mode, "expression");
+    assert_eq!(view.spelling_symbols, "0123456789+-*/.()%^");
+    assert_eq!(view.candidates[0], "6");
+    assert!(!session.online_query().unwrap().available);
+    session.command(Command::Cancel).unwrap();
+
+    assert!(session.character(b'/', false).unwrap().handled);
+    type_text(&mut session, b"h");
+    let view = session.snapshot().unwrap();
+    assert_eq!(view.local_mode, "command");
+    assert_eq!(view.candidates, ["你好"]);
+    assert_eq!(view.candidate_codes, ["hi"]);
+    assert_eq!(view.candidate_annotations, ["问候"]);
+    session.command(Command::Cancel).unwrap();
+
+    assert!(session.character(b'@', false).unwrap().handled);
+    type_text(&mut session, b"al");
+    assert_eq!(session.snapshot().unwrap().candidates, ["Alice"]);
+    session
+        .set_mention_entries(&[MentionEntry {
+            text: "Alan".into(),
+            key: String::new(),
+        }])
+        .unwrap();
+    assert_eq!(session.snapshot().unwrap().candidates, ["Alan"]);
+    session.command(Command::Cancel).unwrap();
+    session
+        .set_command_table(&[CommandTableEntry {
+            trigger: "yo".into(),
+            title: "招呼".into(),
+            template: "哟".into(),
+        }])
+        .unwrap();
+    session.character(b'/', false).unwrap();
+    type_text(&mut session, b"y");
+    assert_eq!(session.snapshot().unwrap().candidates, ["哟"]);
+}
+
+/// Enter in the expression, command and mention modes commits what was typed, and unlike the other local modes learns none of it as an English word: arithmetic, a trigger or a mention key is not a word the user spelled.
+#[test]
+fn generated_local_mode_raw_commits_are_not_learned() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = generated_mode_options(dir.path());
+    value.learning = true;
+    let mut session = Session::new(&value).unwrap();
+    for (entry, shift, input, expected) in [
+        (b'V', true, &b"1+"[..], "V1+"),
+        (b'/', false, &b"xyz"[..], "/xyz"),
+        (b'@', false, &b"bob"[..], "@bob"),
+    ] {
+        assert!(session.character(entry, shift).unwrap().handled);
+        type_text(&mut session, input);
+        let result = session.command(Command::CommitRaw).unwrap();
+        assert_eq!(result.commit, expected);
+        assert_eq!(result.diagnostic, "");
+        for word in [expected, &expected[1..]] {
+            assert_eq!(english_word_count(&value, word), 0, "{word}");
+        }
+    }
+}
+
+#[test]
+fn generated_rows_carry_no_helpcode() {
+    let root = tempfile::tempdir().unwrap();
+    let mut options = helpcode_fixture(root.path(), "", "一=ab\n二=cd\n三=ef\n");
+    options.local_expression = true;
+    let mut session = Session::new(&options).unwrap();
+    session.character(b'V', true).unwrap();
+    type_text(&mut session, b"123");
+    let view = session.snapshot().unwrap();
+    assert_eq!(view.candidates[0], "一百二十三");
+    assert!(
+        view.candidate_annotations.iter().all(String::is_empty),
+        "{:?}",
+        view.candidate_annotations
+    );
+}
+
+#[test]
+fn only_generated_modes_are_left_out_of_typing_statistics() {
+    for mode in ["expression", "command", "mention"] {
+        assert!(!local_mode_counts_as_typing(mode), "{mode}");
+    }
+    for mode in [
+        "none",
+        "unicode",
+        "date_time",
+        "temporary_english",
+        "unknown",
+        "",
+    ] {
+        assert!(local_mode_counts_as_typing(mode), "{mode}");
+    }
 }

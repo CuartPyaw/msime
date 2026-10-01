@@ -28,6 +28,8 @@ FOUNDATION_EXPORT BOOL MetasequoiaFloatingToolbarShouldShow(BOOL configuredEnabl
 /// Return whether a foreground window covers the complete display rectangle, allowing a
 /// small coordinate tolerance for the borderless edge used by native full-screen windows.
 FOUNDATION_EXPORT BOOL MetasequoiaWindowCoversDisplay(CGRect windowBounds, CGRect displayBounds);
+/// Return whether the foreground application, other than this process, has a window covering a whole display. Walks the on-screen window list: not for every key press.
+FOUNDATION_EXPORT BOOL MetasequoiaFrontmostApplicationOwnsFullscreenDisplay(void);
 FOUNDATION_EXPORT NSMenu *CreateMetasequoiaFloatingToolbarUtilityMenu(id target);
 
 @interface MetasequoiaFloatingToolbarPanel : NSPanel

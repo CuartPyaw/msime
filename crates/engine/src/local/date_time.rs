@@ -19,7 +19,7 @@ pub struct LocalDateTime {
     pub second: u32,
 }
 
-const WEEKDAYS: [&str; 7] = [
+pub(crate) const WEEKDAYS: [&str; 7] = [
     "星期日",
     "星期一",
     "星期二",
@@ -205,7 +205,7 @@ fn week_candidates(now: &LocalDateTime) -> Vec<String> {
     results
 }
 
-fn year_digits(value: u32) -> String {
+pub(crate) fn year_digits(value: u32) -> String {
     value
         .to_string()
         .bytes()
@@ -214,7 +214,7 @@ fn year_digits(value: u32) -> String {
 }
 
 /// 0 is the empty string, 10 is 十, 11-19 are 十X, other multiples of ten X十, the rest X十Y (date_time_query.cpp:58-78). Only month, day, hour and minute values reach it.
-fn chinese_number(value: u32) -> String {
+pub(crate) fn chinese_number(value: u32) -> String {
     let digit = |index: u32| NUMBER_DIGITS[index as usize];
     match value {
         0..=9 => digit(value).to_owned(),
@@ -233,7 +233,7 @@ fn financial_digits(value: u32, minimum_digits: usize) -> String {
 }
 
 /// `<stem><branch>年[闰]<month>月<day>日` of the lunar year, or `None` outside what the calendar covers (lunar years 1850..=2150) or for an impossible date such as the zero clock.
-fn lunar_date(now: &LocalDateTime) -> Option<String> {
+pub(crate) fn lunar_date(now: &LocalDateTime) -> Option<String> {
     let solar = SolarDate {
         year: now.year,
         month: u8::try_from(now.month).ok()?,

@@ -59,23 +59,40 @@ constexpr int PhysicalCandidateDigitSlot(unsigned short keyCode)
     }
 }
 
-// Candidate digits are a controller shortcut only for an ordinary candidate
-// panel. Unicode composition consumes the same physical keys as hexadecimal
-// input, while nine-key mode and modified chords belong to the Engine.
-constexpr bool ShouldRoutePhysicalCandidateDigit(bool candidatePanelVisible, bool nineKeyMode, bool unicodeMode,
+// Candidate digits are a controller shortcut only for an ordinary candidate panel. A digit the Engine lists in the view's spelling_symbols is input - the code point being typed in Unicode mode, the number in expression mode - while nine-key mode and modified chords belong to the Engine.
+constexpr bool ShouldRoutePhysicalCandidateDigit(bool candidatePanelVisible, bool nineKeyMode, bool digitIsSpelling,
                                                    bool modified)
 {
-    return candidatePanelVisible && !nineKeyMode && !unicodeMode && !modified;
+    return candidatePanelVisible && !nineKeyMode && !digitIsSpelling && !modified;
 }
 
-// Unicode composition still has to let the user reach the second candidate.
+// A mode that spells with digits still has to let the user reach the second candidate.
 //
-// Its digits are the code point being typed, so the reference moves selection onto Shift+digit, which
-// cannot be part of one: `Shift + 数字 选其他候选` in the mode's own documentation. Without it the only
-// candidate a keyboard can commit here is the first one.
-constexpr bool ShouldRouteUnicodeShiftCandidateDigit(bool candidatePanelVisible, bool unicodeMode, bool shiftOnly)
+// Its digits are what is being typed, so the reference moves selection onto Shift+digit, which cannot be part of a code point: `Shift + 数字 选其他候选` in the Unicode mode's own documentation. Without it the only candidate a keyboard can commit there is the first one. Expression mode also spells some shifted digits - ( ) % ^ * on a US layout - and a Shift+digit whose character the mode takes stays input; only the others select.
+constexpr bool ShouldRouteSpellingShiftCandidateDigit(bool candidatePanelVisible, bool digitIsSpelling, bool shiftOnly,
+                                                        bool shiftedIsSpelling)
 {
-    return candidatePanelVisible && unicodeMode && shiftOnly;
+    return candidatePanelVisible && digitIsSpelling && shiftOnly && !shiftedIsSpelling;
+}
+
+// The digit a candidate slot's physical key types, so it can be looked up in spelling_symbols whatever the keyboard layout puts on that key.
+constexpr char PhysicalCandidateDigitCharacter(int slot)
+{
+    return slot >= 0 && slot <= 8 ? static_cast<char>('1' + slot) : '\0';
+}
+
+// The key class msime_client_key_sound takes: 1 space, 2 enter (main or keypad), 3 backspace, 0 any other key.
+constexpr unsigned PhysicalKeySoundClass(unsigned short keyCode)
+{
+    switch (keyCode)
+    {
+    case 49: return 1; // kVK_Space
+    case 36: // kVK_Return
+    case 76: // kVK_ANSI_KeypadEnter
+        return 2;
+    case 51: return 3; // kVK_Delete
+    default: return 0;
+    }
 }
 
 constexpr bool IsKeypadDecimal(unsigned short keyCode)

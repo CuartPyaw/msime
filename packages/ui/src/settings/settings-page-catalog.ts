@@ -23,6 +23,7 @@ export function settingsPageCatalog(options: SettingsPageCatalogOptions) {
     chat: options.chat,
     community: options.community,
     floatingToolbar: options.floatingToolbar,
+    plugins: options.plugins,
     mobile: options.mobile,
   });
   // Physical-keyboard shortcuts and a desktop floating toolbar have no phone

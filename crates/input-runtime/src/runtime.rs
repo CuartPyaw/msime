@@ -208,7 +208,8 @@ impl Runtime<Session> {
     pub fn set_chinese_punctuation_enabled(&mut self, enabled: bool) -> Result<(), RuntimeError> {
         self.engine
             .set_chinese_punctuation_enabled(enabled)
-            .map_err(|error| RuntimeError::Engine(error.to_string()))
+            .map_err(|error| RuntimeError::Engine(error.to_string()))?;
+        self.refresh_idle_spelling_symbols()
     }
 
     pub fn online_query(&self) -> Result<Option<OnlineQuery>, RuntimeError> {
@@ -460,12 +461,42 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     pub fn set_punctuation_lock(&mut self, lock: u8) -> Result<(), RuntimeError> {
-        self.engine.set_punctuation_lock(lock)
+        self.engine.set_punctuation_lock(lock)?;
+        self.refresh_idle_spelling_symbols()
+    }
+
+    /// With nothing composed, whether `/` and `@` open their modes follows the punctuation mode and lock, so the cached `spelling_symbols` that `punctuation` and the host read is taken again. A composition keeps its view: its symbols do not depend on either.
+    fn refresh_idle_spelling_symbols(&mut self) -> Result<(), RuntimeError> {
+        if self.cached.editing_text.is_empty() {
+            self.refresh()?;
+        }
+        Ok(())
     }
 
     pub fn set_dedicated_english(&mut self, enabled: bool) -> Result<(), RuntimeError> {
         self.advance()?;
         self.engine.set_dedicated_english(enabled)?;
+        self.refresh()
+    }
+
+    /// Hand the Engine a new `/` command table. An open command list is rebuilt from it, so the view is refreshed.
+    pub fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_command_table(table)?;
+        self.refresh()
+    }
+
+    /// Hand the Engine a new `@` name list, refreshing the view as `set_command_table` does.
+    pub fn set_mention_entries(&mut self, entries: &[MentionEntry]) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_mention_entries(entries)?;
+        self.refresh()
+    }
+
+    /// Turn the places of `@` mode on or off, refreshing the view as `set_mention_entries` does. The engine starts with them off, so a new or replaced engine needs this again.
+    pub fn set_mention_places(&mut self, enabled: bool) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_mention_places(enabled)?;
         self.refresh()
     }
 
@@ -661,6 +692,12 @@ impl<E: InputEngine> Runtime<E> {
             shuangpin_profile: self.cached.shuangpin_profile.clone(),
             answered_by_pinyin_fallback: self.cached.answered_by_pinyin_fallback,
             local_mode: self.cached.local_mode.clone(),
+            // A held phrase piece is a composition too: no key opens a mode behind it, and a host that reads the symbols (Harmony) must not compose or pick with them.
+            spelling_symbols: if self.phrase_prefix.is_empty() || self.cached.local_mode != "none" {
+                self.cached.spelling_symbols.clone()
+            } else {
+                String::new()
+            },
             dedicated_english: self.cached.dedicated_english,
             session: self.session,
             generation: self.generation,
@@ -844,6 +881,40 @@ impl<E: InputEngine> Runtime<E> {
         self.generation
     }
 
+    /// The live `/fy` request, if the composition is one; see [`CommandTranslation`].
+    pub fn command_translation(&self) -> Option<CommandTranslation> {
+        let query = self.engine.command_translation_query()?;
+        Some(CommandTranslation {
+            generation: self.generation,
+            session_id: query.session_id,
+            text: query.text,
+        })
+    }
+
+    /// Show a translation for a `/fy` request as the first row, which commits the translation. False for an answer to an older generation, another session or text no longer typed, and for text a row cannot show.
+    pub fn apply_command_translation(
+        &mut self,
+        query: &CommandTranslation,
+        translation: &str,
+    ) -> Result<bool, RuntimeError> {
+        if query.generation != self.generation
+            || !msime_client_core::is_bounded_text(translation, 4096)
+        {
+            return Ok(false);
+        }
+        let request = CommandTranslationQuery {
+            session_id: query.session_id,
+            text: query.text.clone(),
+        };
+        if !self.engine.apply_command_translation(&request, translation) {
+            return Ok(false);
+        }
+        // The row arrives outside dispatch(), so the identity advances as it does for an online candidate and an ID from the page before cannot select the new first row.
+        self.advance()?;
+        self.refresh()?;
+        Ok(true)
+    }
+
     /// Apply translations to the current candidate generation. Stale async
     /// responses are ignored so a newer candidate window cannot be polluted.
     pub fn apply_translations(
@@ -854,7 +925,16 @@ impl<E: InputEngine> Runtime<E> {
         if generation != self.generation {
             return false;
         }
-        self.translations = translations.into_iter().collect();
+        let translations: HashMap<String, String> = translations.into_iter().collect();
+        // The answer to a `/fy` request arrives through the same host path as candidate glosses, so a host forwarding `translation_query` needs nothing else: it becomes the row that commits the translation, not a gloss under the English.
+        if let Some(query) = self.command_translation() {
+            if let Some(translation) = translations.get(&query.text) {
+                return self
+                    .apply_command_translation(&query, translation)
+                    .unwrap_or(false);
+            }
+        }
+        self.translations = translations;
         true
     }
 
@@ -1150,6 +1230,7 @@ impl<E: InputEngine> Runtime<E> {
             commit_context: result.has_commit.then(|| OutputContext {
                 scheme: self.cached.scheme,
                 local_mode: self.cached.local_mode.clone(),
+                typing_statistics: local_mode_counts_as_typing(&self.cached.local_mode),
             }),
             handled: result.handled,
             commit: result.has_commit.then_some(result.commit),
@@ -1519,6 +1600,7 @@ impl<E: InputEngine> Runtime<E> {
                     answered_by_pinyin_fallback: true,
                     wubi_unique_four_code: false,
                     local_mode: "unknown".into(),
+                    spelling_symbols: String::new(),
                     dedicated_english: false,
                     preedit: String::new(),
                     reading: String::new(),
@@ -1585,6 +1667,20 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     fn punctuation(&mut self, value: u8) -> Result<EngineResult, RuntimeError> {
+        // A symbol the Engine spells with (an operator in the expression mode) or opens a mode with (`/` with nothing composed) is input, whichever route the host chose for the key: finishing first would commit the half-typed spelling. A phrase still being held is a composition too, and the mark has to end it rather than open a mode after it.
+        if self.cached.spelling_symbols.as_bytes().contains(&value)
+            && (self.cached.local_mode != "none" || self.phrase_prefix.is_empty())
+        {
+            return self.engine.character(value, false);
+        }
+        // The apostrophe is not a spelling symbol, but right after a unit (`3jin'g`) or a `/fy` word it separates rather than ends.
+        if value == b'\'' && self.engine.takes_local_separator() {
+            return self.engine.character(value, false);
+        }
+        // A mark on a bare `/` or `@` ends the mode as punctuation; finishing first would commit the first row.
+        if self.bare_mode_prefix() {
+            return self.engine.punctuation(value);
+        }
         // Finish through Engine with the host highlight BEFORE asking it to translate.
         // Calling Engine punctuation on an active composition would choose candidate zero.
         let mut finished = self.engine.finish(self.engine_index(self.highlighted))?;
@@ -1603,6 +1699,10 @@ impl<E: InputEngine> Runtime<E> {
             Err(error) => return Err(error),
         };
         if !finished.has_commit {
+            if !punctuation.handled && !self.phrase_prefix.is_empty() {
+                // The held phrase piece goes out ahead of the mark (`hold_phrase_progress`), which marks the key handled, so a mark with no Chinese form has to go out with it rather than be left to the host.
+                return Ok(literal_mark(value, punctuation.diagnostic));
+            }
             return Ok(punctuation);
         }
         finished.handled = true;
@@ -1620,12 +1720,36 @@ impl<E: InputEngine> Runtime<E> {
         Ok(finished)
     }
 
+    /// A `/` or `@` mode holding nothing but its prefix.
+    fn bare_mode_prefix(&self) -> bool {
+        matches!(self.cached.local_mode.as_str(), "command" | "mention")
+            && self.cached.editing_text.len() == 1
+    }
+
     fn punctuation_ascii(&mut self, value: u8) -> Result<EngineResult, RuntimeError> {
+        // A spelling symbol still extends the composition in progress. With nothing composed the host asked for the literal mark after weighing the surrounding text (a `/` after a digit), so it never opens a mode.
+        if self.cached.local_mode != "none"
+            && self.cached.spelling_symbols.as_bytes().contains(&value)
+        {
+            return self.engine.character(value, false);
+        }
+        if value == b'\'' && self.engine.takes_local_separator() {
+            return self.engine.character(value, false);
+        }
         // Keep the same highlighted-candidate completion semantics as normal
         // punctuation, but do not ask Engine to translate the trailing mark.
         // The Linux host has already applied its surrounding-text policy.
-        let mut finished = self.engine.finish(self.engine_index(self.highlighted))?;
+        // A bare `/` or `@` commits as the literal prefix rather than its first row.
+        let mut finished = if self.bare_mode_prefix() {
+            self.engine.command(Command::CommitRaw)?
+        } else {
+            self.engine.finish(self.engine_index(self.highlighted))?
+        };
         if !finished.has_commit {
+            // As in `punctuation`: a held phrase piece takes the key, so the mark goes out with it.
+            if !self.phrase_prefix.is_empty() {
+                return Ok(literal_mark(value, finished.diagnostic));
+            }
             return Ok(finished);
         }
         finished.handled = true;
@@ -1762,6 +1886,8 @@ impl<E: InputEngine> Runtime<E> {
             }
             Action::Punctuation(value) => self.punctuation(value),
             Action::PunctuationAscii(value) => self.punctuation_ascii(value),
+            // A bare `/` or `@` flushes as the literal prefix, as on the punctuation routes; finishing would commit the list's first row.
+            Action::Finish if self.bare_mode_prefix() => self.engine.command(Command::CommitRaw),
             Action::Finish => self.engine.finish(self.engine_index(self.highlighted)),
             Action::Character { value, shift } if wubi_top_commit => self
                 .engine
@@ -1770,6 +1896,14 @@ impl<E: InputEngine> Runtime<E> {
                     self.engine.character(value, shift)?;
                     Ok(committed)
                 }),
+            // A symbol that would open a mode behind a held phrase piece ends the phrase as punctuation instead, as on the punctuation route.
+            Action::Character { value, .. }
+                if !self.phrase_prefix.is_empty()
+                    && self.cached.local_mode == "none"
+                    && self.cached.spelling_symbols.as_bytes().contains(&value) =>
+            {
+                self.punctuation(value)
+            }
             Action::Character { value, shift } => {
                 self.engine.character(value, shift).and_then(|result| {
                     // The nine-key separator is a layout action, not Chinese quote punctuation.
@@ -1841,6 +1975,7 @@ impl<E: InputEngine> Runtime<E> {
         let commit_context = needs_commit_context.then(|| OutputContext {
             scheme: self.cached.scheme,
             local_mode: self.cached.local_mode.clone(),
+            typing_statistics: local_mode_counts_as_typing(&self.cached.local_mode),
         });
         let refresh = self.refresh();
         let mut result = result?;
@@ -1887,6 +2022,16 @@ impl<E: InputEngine> Runtime<E> {
             }
         }
         Ok(transition)
+    }
+}
+
+/// `value` committed as it is, for a mark that has to leave together with a held phrase piece.
+fn literal_mark(value: u8, diagnostic: String) -> EngineResult {
+    EngineResult {
+        handled: true,
+        has_commit: true,
+        commit: char::from(value).to_string(),
+        diagnostic,
     }
 }
 

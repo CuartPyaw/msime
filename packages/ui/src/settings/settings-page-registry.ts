@@ -54,6 +54,11 @@ export const pages = [
     icon: new URL("../assets/utilities.svg", import.meta.url).href,
   },
   {
+    id: "plugins",
+    title: "扩展",
+    icon: new URL("../assets/plugins.svg", import.meta.url).href,
+  },
+  {
     id: "typing-statistics",
     title: "统计",
     icon: new URL("../assets/statistics.svg", import.meta.url).href,
@@ -99,7 +104,7 @@ export const settingsNavGroups = [
   ["skin", "appearance", "floating-toolbar"],
   ["input", "expression", "shortcuts", "dictionary"],
   ["screen-keyboard", "voice", "handwriting"],
-  ["account", "tools", "typing-statistics", "community", "download"],
+  ["account", "tools", "plugins", "typing-statistics", "community", "download"],
   ["developer", "feedback", "about"],
 ] as const satisfies readonly (readonly SettingsPageId[])[];
 

@@ -22,7 +22,8 @@ md-5 = "0.11"
 base64 = "0.23"
 flate2 = "1"
 uuid = { workspace = true, features = ["serde", "v4"] }
-time.workspace = true
+# `formatting` for the strftime placeholders a command-table pack's templates are checked against, the same the Engine expands them with.
+time = { workspace = true, features = ["formatting"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tokio = { workspace = true, features = ["rt", "net", "time"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
@@ -32,6 +33,8 @@ tar = { version = "0.4", default-features = false }
 bzip2 = "0.6"
 # Toneless pinyin for hotword post-correction of recognizers without native hotword support.
 pinyin = { version = "0.11", default-features = false, features = ["plain", "heteronym"] }
+# Plugin packs picked as a .zip archive. Only the flate2 deflate backend: stored and deflated members are what every archiver writes, and flate2 is already here.
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 

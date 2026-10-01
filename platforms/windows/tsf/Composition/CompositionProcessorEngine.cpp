@@ -288,6 +288,12 @@ BOOL CCompositionProcessorEngine::IsUnicodeModeComposition() const
     return _keystrokeBuffer.GetLength() > 0 && _keystrokeBuffer.Get() && _keystrokeBuffer.Get()[0] == L'U';
 }
 
+BOOL CCompositionProcessorEngine::IsExpressionModeComposition() const
+{
+    return Global::IsExpressionModeComposition(_keystrokeBuffer.Get(), _keystrokeBuffer.GetLength(),
+                                               Global::ExpressionModeEnabled.load(std::memory_order_relaxed));
+}
+
 BOOL CCompositionProcessorEngine::AddVirtualKey(WCHAR wch)
 {
     if (!wch)
@@ -2129,6 +2135,29 @@ BOOL CCompositionProcessorEngine::IsVirtualKeyNeed( //
             pKeyState->Function = FUNCTION_INPUT;
         }
         return TRUE;
+    }
+    // V-mode: its digits and operators compose, ahead of the paging and punctuation meanings of '-', '+', '.' and '/'; a digit key printing anything else selects. Ctrl and Alt chords never reach here.
+    if (IsExpressionModeComposition())
+    {
+        switch (Global::ClassifyExpressionKey(uCode, pwch ? *pwch : 0))
+        {
+        case Global::ExpressionKey::Input:
+            if (pKeyState)
+            {
+                pKeyState->Category = CATEGORY_COMPOSING;
+                pKeyState->Function = FUNCTION_INPUT;
+            }
+            return TRUE;
+        case Global::ExpressionKey::SelectByNumber:
+            if (pKeyState)
+            {
+                pKeyState->Category = CATEGORY_CANDIDATE;
+                pKeyState->Function = FUNCTION_SELECT_BY_NUMBER;
+            }
+            return TRUE;
+        case Global::ExpressionKey::Unclaimed:
+            break;
+        }
     }
 
     if (IsJapaneseLongVowelKey(uCode, pwch ? *pwch : 0))

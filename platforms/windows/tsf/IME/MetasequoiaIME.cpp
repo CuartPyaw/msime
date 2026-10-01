@@ -2003,6 +2003,13 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
         {
             Global::MicrosoftShuangpinEnabled.store(buf.data[0] == L'1', std::memory_order_relaxed);
         }
+        else if (buf.msg_type == Global::DataToTsfWorkerThreadMsgType::LocalModeTriggersChanged)
+        {
+            const auto triggers = Global::ParseLocalModeTriggers(buf.data, std::size(buf.data));
+            Global::ExpressionModeEnabled.store(triggers.expression, std::memory_order_relaxed);
+            Global::CommandModeEnabled.store(triggers.command, std::memory_order_relaxed);
+            Global::MentionModeEnabled.store(triggers.mention, std::memory_order_relaxed);
+        }
         else if (buf.msg_type == Global::DataToTsfWorkerThreadMsgType::InputModeChanged)
         {
             Global::JapaneseInputModeEnabled.store(buf.data[0] == L'1', std::memory_order_relaxed);

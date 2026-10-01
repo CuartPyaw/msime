@@ -32,6 +32,7 @@ fn settings_deep_link_names_a_category() {
         ("settings:expression", SettingsCategory::Expression),
         ("settings:download", SettingsCategory::Download),
         ("settings:developer", SettingsCategory::Developer),
+        ("settings:plugins", SettingsCategory::Plugins),
     ] {
         assert_eq!(
             SurfaceRoute::parse(argument),
@@ -532,4 +533,57 @@ fn voice_commit_mode_is_offered_only_where_a_host_chooses_between_paths() {
     ] {
         assert!(!HostCapabilities::for_platform(platform).voice_commit_mode);
     }
+}
+
+/// No host plays sound packs, routes the `/` and `@` modes or streams music yet, and a host binary from before the flags sends a document without them; both must read as "not offered".
+#[test]
+fn plugin_surfaces_are_claimed_only_by_the_hosts_that_wire_them() {
+    for platform in [
+        HostPlatform::Windows,
+        HostPlatform::Macos,
+        HostPlatform::Linux,
+    ] {
+        let capabilities = HostCapabilities::for_platform(platform);
+        assert!(
+            capabilities.key_sound
+                && capabilities.plugin_triggers
+                && capabilities.music
+                && capabilities.typing_effects,
+            "{platform:?}"
+        );
+    }
+    // HarmonyOS claims its 2in1 sound and trigger surfaces in its own form-factor projection; Android and iOS wire none.
+    for platform in [
+        HostPlatform::Android,
+        HostPlatform::Ios,
+        HostPlatform::Harmony,
+    ] {
+        let capabilities = HostCapabilities::for_platform(platform);
+        assert!(
+            !capabilities.key_sound && !capabilities.plugin_triggers && !capabilities.music,
+            "{platform:?}"
+        );
+        // The HarmonyOS KeyboardView draws the flash and the combo badge itself.
+        assert_eq!(
+            capabilities.typing_effects,
+            platform == HostPlatform::Harmony,
+            "{platform:?}"
+        );
+    }
+    let mut document =
+        serde_json::to_value(HostCapabilities::for_platform(HostPlatform::Macos)).unwrap();
+    let fields = document.as_object_mut().unwrap();
+    for key in ["key_sound", "plugin_triggers", "music", "typing_effects"] {
+        assert!(fields.remove(key).is_some(), "{key}");
+    }
+    let older: HostCapabilities = serde_json::from_value(document).unwrap();
+    assert!(!older.key_sound && !older.plugin_triggers && !older.music && !older.typing_effects);
+    let mut claimed = HostCapabilities::for_platform(HostPlatform::Windows);
+    claimed.key_sound = true;
+    let text = serde_json::to_string(&claimed).unwrap();
+    assert!(
+        serde_json::from_str::<HostCapabilities>(&text)
+            .unwrap()
+            .key_sound
+    );
 }

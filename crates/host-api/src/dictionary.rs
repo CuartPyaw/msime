@@ -1990,6 +1990,9 @@ pub fn lookup_candidates(
     options.local_super_jianpin = false;
     options.local_temporary_english = false;
     options.local_temporary_japanese = false;
+    options.local_expression = false;
+    options.local_command = false;
+    options.local_mention = false;
     let _access = DictionaryAccess::try_session(
         Path::new(&options.user_data),
         Path::new(&options.dictionaries),

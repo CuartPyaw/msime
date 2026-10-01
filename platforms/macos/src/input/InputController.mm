@@ -51,6 +51,7 @@
 #import "../settings/ShuangpinKeymapPanel.h"
 #import "../core/FloatingToolbarPanel.h"
 #import "InputModeHUDPanel.h"
+#import "TypingEffectPanel.h"
 #import "InputModeIdentifiers.h"
 #import "../voice/VoiceInputService.h"
 #import "../voice/VoiceProviderSocket.h"
@@ -213,6 +214,23 @@ static BOOL MSIMEScriptConversionApplies(id value) {
     // Temporary Japanese retains the original Chinese scheme in the host snapshot.
     return ![mode isKindOfClass:NSString.class] ||
         (![mode isEqualToString:@"unicode"] && ![mode isEqualToString:@"temporary_japanese"]);
+}
+
+// commit_context.typing_statistics is false for text the expression, command and mention modes produced: a result the Engine worked out, not something the user typed. A context without the field predates it and counts.
+static BOOL MSIMECommitCountsAsTyping(id context) {
+    if (![context isKindOfClass:NSDictionary.class]) return YES;
+    id counts = context[@"typing_statistics"];
+    return ![counts isKindOfClass:NSNumber.class] || [counts boolValue];
+}
+
+// Whether the Engine takes this character as input in the view's state: View.spelling_symbols lists the non-letter keys the active mode spells with (digits and operators in expression mode, digits in Unicode mode) and, with nothing composed, the keys that open a mode (/ and @). Such a key belongs to the Engine even where this host would otherwise read it as a candidate digit, a paging key or a punctuation shortcut.
+static BOOL MSIMESpellingSymbol(NSDictionary *view, unichar character) {
+    NSString *symbols = [view isKindOfClass:NSDictionary.class] ? view[@"spelling_symbols"] : nil;
+    if (![symbols isKindOfClass:NSString.class] || character == 0 || character > 0x7F) return NO;
+    return [symbols rangeOfString:[NSString stringWithCharacters:&character length:1]].location != NSNotFound;
+}
+static BOOL MSIMESpellingSymbolString(NSDictionary *view, NSString *characters) {
+    return characters.length == 1 && MSIMESpellingSymbol(view, [characters characterAtIndex:0]);
 }
 
 static NSString *CandidateDisplay(NSDictionary *candidate, BOOL traditional) {
@@ -932,6 +950,14 @@ static NSImage *MSIMECandidateLogoImage() {
     // The closing mark for a pair this host opened itself from the `{` key, which the Engine commits as ASCII and so never names as an opening mark. Consumed by the next apply:.
     NSString *_hostOpenedClosing;
     NSNumber *_typingSourceOverride;
+    // Whether secure event input was on at the last key or activation. Nothing is played while it is, and background music waits for it to go off; see secureEventInputActive.
+    BOOL _secureEventInput;
+    // Typing effects: whether the foreground application holds a full-screen display, and the answers of msime_client_typing_effect not yet drawn. The full-screen state walks the window list, so it is read on the main queue's next turn, never on a key: after activation, after a preference update, when the active space changes (an application entering or leaving native full screen), and at most once a second while keys arrive (a borderless full-screen window changes no space). Keys only record their answer here; drawing waits for the main queue's next turn so a key never waits on it, and keys arriving in between are drawn once with the latest count.
+    BOOL _typingEffectFullscreen;
+    NSTimeInterval _typingEffectFullscreenCheckedAt;
+    BOOL _typingEffectScheduled;
+    BOOL _typingEffectCommit;
+    uint32_t _typingEffectPacked;
     // The ASCII punctuation key behind the transition about to be applied, or 0. Set only on the punctuation-key routes and consumed by the next apply:, so pairing can read the last mark of a commit that finished a composition (`nihao(` gives `你好（`) without ever rewriting a candidate that merely ends in a mark.
     unichar _punctuationKeyInFlight;
     MSIMEModifierTap _modifierTap;
@@ -1219,6 +1245,8 @@ static NSImage *MSIMECandidateLogoImage() {
         ([_view[@"candidates"] isKindOfClass:NSArray.class] && [_view[@"candidates"] count]);
     const BOOL japanese = [self japaneseSchemeActive];
     if (!MSIMESmartPunctuationKey(character)) return NO;
+    // Expression mode's decimal point is part of the number being typed, not a mark to convert.
+    if (MSIMESpellingSymbol(_view, character)) return NO;
     if (!_appearance.smartPunctuationRepeatToChinese) {
         _lastSmartPunctuation = 0;
         _smartPunctuationRejected = NO;
@@ -3311,6 +3339,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [NSDistributedNotificationCenter.defaultCenter removeObserver:self];
+    [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
     // The toolbar outlives focus-outs, so a controller freed by IMK releases it here; the panel's owner check leaves a newer owner in place.
     [_toolbar deactivateForDelegate:self];
     if (_globalVoiceHotkeyMonitor) [NSEvent removeMonitor:_globalVoiceHotkeyMonitor];
@@ -4026,6 +4055,11 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     _focusPending = _appearance.englishMode;
     if (!_appearance.englishMode) [self prepareSession];
     else [self startPreferencesMonitoring];
+    [self claimBackgroundMusic];
+    NSNotificationCenter *workspaceCenter = NSWorkspace.sharedWorkspace.notificationCenter;
+    [workspaceCenter removeObserver:self name:NSWorkspaceActiveSpaceDidChangeNotification object:nil];
+    [workspaceCenter addObserver:self selector:@selector(typingEffectSpaceChanged:) name:NSWorkspaceActiveSpaceDidChangeNotification object:nil];
+    [self refreshTypingEffectFullscreen];
     [self requestCloudCandidatesConsentIfNeeded];
     [self commitPendingEmojiForClient:sender];
 }
@@ -4172,13 +4206,25 @@ static NSString *const MSIMECloudConsentMessage =
 // The file is shared with hosts that render a view differently, so a behaviour this host draws is
 // requested here rather than written into it. Its own function because the session it produces is
 // built inside prepareSession, where a test would have to stand up a whole Engine to see it.
-static NSDictionary *MSIMESessionOptions(NSDictionary *runtimeOptions) {
+//
+// soundPacks is the bundle's built-in sound-pack directory, or nil when the bundle has none. The host library otherwise looks for it beside `resources`, and here that is EngineResources in Application Support, not in the bundle.
+static NSDictionary *MSIMESessionOptions(NSDictionary *runtimeOptions, NSString *soundPacks) {
     if (![runtimeOptions isKindOfClass:NSDictionary.class]) return nil;
     NSMutableDictionary *requested = [runtimeOptions mutableCopy];
     // This host draws view.phrase_prefix, so a phrase being assembled out of several selections
     // stays in the composition instead of arriving in the document one piece at a time.
     requested[@"phrase_preedit"] = @YES;
+    // An options file that names a directory itself keeps it.
+    if (soundPacks.length && !requested[@"sound_packs"]) requested[@"sound_packs"] = soundPacks;
     return requested;
+}
+
+// Resources/sound-packs of this bundle, where CMakeLists.txt stages the built-in packs; nil when it is not there.
+static NSString *MSIMEBundleSoundPacks(NSBundle *bundle) {
+    NSString *directory = [bundle.resourcePath stringByAppendingPathComponent:@"sound-packs"];
+    BOOL isDirectory = NO;
+    return directory.isAbsolutePath && [NSFileManager.defaultManager fileExistsAtPath:directory isDirectory:&isDirectory] && isDirectory
+        ? directory : nil;
 }
 
 // The two reasons a session can be missing, as its own function for the reason MSIMESessionOptions is: what
@@ -4204,7 +4250,7 @@ static NSString *MSIMESessionUnavailableReason(NSDictionary *options) {
 - (void)prepareSession {
     BOOL reopened = NO;
     if (!_session) {
-        NSDictionary *options = MSIMESessionOptions([self runtimeOptions]);
+        NSDictionary *options = MSIMESessionOptions([self runtimeOptions], MSIMEBundleSoundPacks(NSBundle.mainBundle));
         // Dictionary maintenance is running: open nothing, so keys pass through to the application until the lease is gone. The preferences timer keeps running, so settings still apply meanwhile.
         if (options && MSIMEDictionaryQuiesced(options)) {
             if (!_preferencesTimer) [self startPreferencesMonitoring];
@@ -4326,6 +4372,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
                                                  _appearance.inlinePreeditStyle);
         }
         [self refreshFloatingToolbarState];
+        if (MSIMEMusicOwner == self) [self claimBackgroundMusic];
         // Another surface - the shared settings page, an account push - can have changed the scheme.
         [self syncSystemInputModeForClient:_activeClient];
         [self renderCandidates];
@@ -4480,6 +4527,10 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     [_toolbar applySizingPreferences:preferences];
     // And it is the toolbar's size, from the same font size and scale.
     [[MSIMEInputModeHUDPanel sharedPanel] applySizingPreferences:preferences];
+    // Typing effects follow preferences.plugins; a partial document without it leaves them as they are.
+    [[MSIMETypingEffectPanel sharedPanel] applyPreferences:preferences];
+    // Effects switched on mid-session were never checked against the foreground application at activation.
+    if (_activeClient) [self refreshTypingEffectFullscreen];
     NSDictionary *toolbar = preferences[@"floating_toolbar"];
     id enabled = [toolbar isKindOfClass:NSDictionary.class] ? toolbar[@"enabled"] : nil;
     if ([enabled isKindOfClass:NSNumber.class]) {
@@ -4490,6 +4541,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
 
 - (void)deactivateServer:(id)sender {
     [[MSIMEInputModeHUDPanel sharedPanel] orderOut:nil];
+    [[MSIMETypingEffectPanel sharedPanel] settle];
     [self flushPendingPairedClosing];
     _pairedPunctuation.clear();
     // A delayed callback from the previous client must not tear down the
@@ -4517,6 +4569,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     [_keymapPanel orderOut:nil];
     [_preferencesTimer invalidate];
     _preferencesTimer = nil;
+    [self releaseBackgroundMusic];
     if (_session) [self apply:[_session setFocused:NO error:nil]];
     [self resetCandidateAnchor];
     [self hideCandidatePanel:"focus_out"];
@@ -4636,6 +4689,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     NSString *characters = event.charactersIgnoringModifiers;
     if (characters.length != 1) return NO;
     const unichar character = [characters characterAtIndex:0];
+    // A key the Engine spells with, such as expression mode's '-', is input rather than an edge pick.
+    if (MSIMESpellingSymbol(_view, character)) return NO;
     const BOOL brackets = [wordCharacter[@"keys"] isEqual:@"brackets"];
     return msime::mac::IsPhysicalWordCharacterKey(event.keyCode, brackets, static_cast<char>(character)) &&
         (character == (brackets ? '[' : '-') || character == (brackets ? ']' : '='));
@@ -4658,6 +4713,100 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     return MSIMETranslationTextSize(placeholder, glossFont).height + 4;
 }
 
+// Background music plays while one controller of this process is the active input method. IMK does not promise that the previous client's deactivateServer: comes before the next one's activateServer:, so only the controller that last let music play may stop it.
+static __weak MSIMEInputController *MSIMEMusicOwner;
+
+// Secure event input is on while a password field, or a terminal's secure keyboard entry, has the keyboard. It is window-server state shared by every process, so an application that leaves it on also silences this one; that errs the right way, because a click per keystroke tells anyone listening how long a password is.
+- (BOOL)secureEventInputActive { return IsSecureEventInputEnabled(); }
+
+// Become the controller music follows: it may play unless secure event input is on. Also called after a preference update, because music switched on while nothing else was sounding only starts once the player is told the input method is active.
+- (void)claimBackgroundMusic {
+    _secureEventInput = [self secureEventInputActive];
+    MSIMEMusicOwner = self;
+    [_session setMusicActive:!_secureEventInput];
+}
+
+- (void)releaseBackgroundMusic {
+    if (MSIMEMusicOwner != self) return;
+    MSIMEMusicOwner = nil;
+    [_session setMusicActive:NO];
+}
+
+// Every key press this input method is given makes its key sound, handled or passed on to the application, except auto-repeat (a held key is one press), a Command or Control shortcut (silent on Linux and Windows too; Option stays audible, it types characters on macOS), anything typed while secure event input is on, and English mode, which is silent on every desktop host (Windows only hears the keys it composes). The session only queues the request, so this costs the key nothing when sound is off.
+- (void)playKeySound:(NSEvent *)event {
+    const BOOL secure = [self secureEventInputActive];
+    if (secure != _secureEventInput) {
+        _secureEventInput = secure;
+        if (MSIMEMusicOwner == self) [_session setMusicActive:!secure];
+    }
+    const BOOL shortcut = (event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) != 0;
+    if (secure || shortcut || _appearance.englishMode) return;
+    const uint32_t keyClass = msime::mac::PhysicalKeySoundClass(event.keyCode);
+    [_session keySound:keyClass];
+    // The typing effect counts the same keys the key sound plays for.
+    [self typingEffect:keyClass commit:NO];
+}
+
+// The foreground application's full-screen state, read on the main queue's next turn rather than on a key: it walks the on-screen window list. The previous answer stands until then.
+- (void)refreshTypingEffectFullscreen {
+    if (!MSIMETypingEffectPanel.sharedPanel.configured) {
+        _typingEffectFullscreen = NO;
+        return;
+    }
+    _typingEffectFullscreenCheckedAt = NSProcessInfo.processInfo.systemUptime;
+    __weak MSIMEInputController *weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        MSIMEInputController *strongSelf = weakSelf;
+        if (strongSelf && strongSelf->_activeClient) strongSelf->_typingEffectFullscreen = MetasequoiaFrontmostApplicationOwnsFullscreenDisplay();
+    });
+}
+
+// Entering or leaving native full screen moves the foreground application to another space.
+- (void)typingEffectSpaceChanged:(NSNotification *)notification {
+    (void)notification;
+    if (_activeClient) [self refreshTypingEffectFullscreen];
+}
+
+// One key or commit for the typing effect. The library call is integer arithmetic on the session; nothing is drawn here. A full-screen foreground application keeps the tier-up sound quiet and gets nothing drawn over it, while the combo still counts.
+- (void)typingEffect:(uint32_t)event commit:(BOOL)commit {
+    if (!_session || !MSIMETypingEffectPanel.sharedPanel.configured) return;
+    if (NSProcessInfo.processInfo.systemUptime - _typingEffectFullscreenCheckedAt >= 1.0) [self refreshTypingEffectFullscreen];
+    const uint32_t packed = [_session typingEffect:event | (_typingEffectFullscreen ? MSIMETypingEffectEventMuted : 0)];
+    if (_typingEffectFullscreen) return;
+    // A tier reached by an earlier key still undrawn is kept, so its bounce is not lost to the key after it.
+    _typingEffectPacked = packed | (_typingEffectScheduled ? (_typingEffectPacked & MSIMETypingEffectTierUp) : 0);
+    _typingEffectCommit = commit || (_typingEffectScheduled && _typingEffectCommit);
+    if (_typingEffectScheduled) return;
+    _typingEffectScheduled = YES;
+    __weak MSIMEInputController *weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf presentTypingEffect]; });
+}
+
+- (void)presentTypingEffect {
+    const uint32_t packed = _typingEffectPacked;
+    const BOOL commit = _typingEffectCommit;
+    _typingEffectScheduled = NO;
+    _typingEffectPacked = 0;
+    _typingEffectCommit = NO;
+    if (!_activeClient || _secureEventInput) return;
+    MSIMETypingEffectPanel *panel = MSIMETypingEffectPanel.sharedPanel;
+    const MSIMETypingEffect effect = MSIMETypingEffectDecode(packed);
+    // Nothing to draw, as after a backspace with only the counter on: the panel only takes a stale badge down, so the client is not asked for its caret.
+    if (effect.style == MSIMETypingEffectStyleOff && MSIMETypingEffectComboText(effect.combo) == nil) {
+        [panel presentEffect:packed commit:commit caretRect:NSZeroRect candidateView:nil cardRect:NSZeroRect cornerRadius:0];
+        return;
+    }
+    NSRect caret = NSZeroRect;
+    [(id<IMKTextInput>)_activeClient attributesForCharacterIndex:0 lineHeightRectangle:&caret];
+    if (!MSIMEValidCaret(caret)) caret = NSZeroRect;
+    MSIMECandidateChromeView *card = _panel.isVisible && [_panel.contentView isKindOfClass:MSIMECandidateChromeView.class]
+        ? (MSIMECandidateChromeView *)_panel.contentView
+        : nil;
+    const NSRect bounds = card.bounds;
+    const NSRect cardRect = card ? NSMakeRect(NSMinX(bounds), NSMinY(bounds), NSWidth(bounds), MAX(0.0, NSHeight(bounds) - MAX(0.0, card.cardTopInset))) : NSZeroRect;
+    [panel presentEffect:packed commit:commit caretRect:caret candidateView:card cardRect:cardRect cornerRadius:card.cornerRadius];
+}
+
 // Every key down leaves through here, so the smart punctuation shadow sees each one exactly once, after it has been handled and with what became of it. Events this host posted itself (the voice sendinput route and the smart punctuation rewrite) are skipped: whoever posted them has already recorded what they carry.
 - (BOOL)handleEvent:(NSEvent *)event client:(id)sender {
     const bool timed = msime_macos_diagnostic_enabled();
@@ -4677,6 +4826,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         if (_appearance.floatingToolbarEnabled)
             [[MSIMEFloatingToolbarPanel sharedPanel] wakeForInputDelegate:self];
     }
+    if (event.type == NSEventTypeKeyDown && sender && !selfPosted && !event.isARepeat) [self playKeySound:event];
     const BOOL handled = [self handleKeyEvent:event client:sender];
     if (event.type == NSEventTypeKeyDown && sender && !selfPosted) {
         // A key event is the wake-up edge: restore the toolbar before the next event arrives, even if
@@ -4969,13 +5119,14 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         NSDictionary *candidate = ((NSUInteger)physicalDigit < visibleCandidates.count) ? visibleCandidates[(NSUInteger)physicalDigit] : nil;
         if ([self commitCandidateGlossColumn:_armedGlossColumn candidate:candidate client:sender]) return YES;
     }
-    const BOOL unicodeComposition = [_view[@"local_mode"] isEqual:@"unicode"];
+    const BOOL digitIsSpelling = MSIMESpellingSymbol(_view, (unichar)msime::mac::PhysicalCandidateDigitCharacter(physicalDigit));
     if (msime::mac::ShouldRoutePhysicalCandidateDigit(
-            _panel.isVisible, [_view[@"nine_key"] boolValue], unicodeComposition,
+            _panel.isVisible, [_view[@"nine_key"] boolValue], digitIsSpelling,
             (event.modifierFlags & candidateDigitModifiers) != 0) ||
-        msime::mac::ShouldRouteUnicodeShiftCandidateDigit(
-            _panel.isVisible, unicodeComposition,
-            (event.modifierFlags & candidateDigitModifiers) == NSEventModifierFlagShift)) {
+        msime::mac::ShouldRouteSpellingShiftCandidateDigit(
+            _panel.isVisible, digitIsSpelling,
+            (event.modifierFlags & candidateDigitModifiers) == NSEventModifierFlagShift,
+            MSIMESpellingSymbolString(_view, event.characters))) {
         const int slot = msime::mac::PhysicalCandidateDigitSlot(event.keyCode);
         if (slot >= 0) {
             // The panel owns the rendered snapshot. If it is from an older
@@ -5090,14 +5241,15 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     }
     // Candidate paging is keyed by the physical ANSI key, matching Windows
     // even when the current keyboard layout produces a different glyph (or no
-    // text at all). Unicode '+' is an Engine code-sequence character, and the
-    // Japanese minus/equal keys remain composition input.
+    // text at all). Unicode '+' is an Engine code-sequence character, the
+    // Japanese minus/equal keys remain composition input, and so does any key
+    // the Engine spells with (expression mode's '-' and '.').
     const int physicalPageDirection = msime::mac::PhysicalCandidatePageDirection(event.keyCode);
     const BOOL japaneseMinusEqual = msime::mac::IsJapaneseMinusEqualKey(
         [_view[@"scheme"] intValue], [_view[@"local_mode"] isEqual:@"temporary_japanese"],
         event.keyCode, 0);
-    const BOOL unicodePlus = [_view[@"local_mode"] isEqual:@"unicode"] &&
-        [event.charactersIgnoringModifiers isEqual:@"+"];
+    const BOOL engineInputKey = ([_view[@"local_mode"] isEqual:@"unicode"] &&
+        [event.charactersIgnoringModifiers isEqual:@"+"]) || MSIMESpellingSymbolString(_view, event.charactersIgnoringModifiers);
     // Word-to-character owns whichever pair it is bound to, and paging does not get to take it. The two are
     // alternatives, which applyCloudSettingsSnapshot: already says by refusing a snapshot whose paging
     // preset collides - but that only guards the cloud path, so a locally enabled bracket or minus paging
@@ -5107,7 +5259,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     // exactly when that branch will claim it: whichever way it goes, the keystroke has an owner.
     const BOOL wordCharacterOwnsKey = [self wordCharacterClaimsEvent:event];
     if (_panel.isVisible && !(event.modifierFlags & NSEventModifierFlagShift) &&
-        physicalPageDirection != 0 && !japaneseMinusEqual && !unicodePlus && !wordCharacterOwnsKey) {
+        physicalPageDirection != 0 && !japaneseMinusEqual && !engineInputKey && !wordCharacterOwnsKey) {
         const BOOL previous = physicalPageDirection < 0 &&
             ((event.keyCode == 27 && [_appearance navigationEnabled:@"minus_equal"]) ||
              (event.keyCode == 33 && [_appearance navigationEnabled:@"brackets"]) ||
@@ -5194,6 +5346,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     // NSTextInputClient has no caret setter; replacing the known following
     // closing mark atomically advances the caret without duplicating text.
     if (_appearance.pairedPunctuation && event.characters.length == 1 &&
+        !MSIMESpellingSymbolString(_view, event.characters) &&
         !(event.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand))) {
         NSString *following = MSIMETextClientFollowingCharacter((id<MSIMETextClient>)sender);
         NSString *typed = event.characters;
@@ -5483,8 +5636,14 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         const auto source = sourceOverride == msime::mac::TypingSource::Unknown
             ? MSIMEResolveTypingSource(transition[@"commit_context"], previousView, MSIMEStatisticsHostOptions(_session), _appearance.englishMode)
             : sourceOverride;
-        MSIMERecordTypingStatistics(_preferencesDirectory ?: MSIMEStatisticsHostOptions(_session)[@"preferences_directory"],
-                                    displayTransition[@"commit"], source);
+        if (MSIMECommitCountsAsTyping(transition[@"commit_context"]))
+            MSIMERecordTypingStatistics(_preferencesDirectory ?: MSIMEStatisticsHostOptions(_session)[@"preferences_directory"],
+                                        displayTransition[@"commit"], source);
+        // Dictated text is not typing, and the melody follows the keyboard.
+        if (source != msime::mac::TypingSource::Voice && !_secureEventInput) {
+            [_session commitSound];
+            [self typingEffect:MSIMETypingEffectEventCommit commit:YES];
+        }
     }
     // A key handled while this transition's text was being written has already put the newer view on screen; this one is older and must not replace it.
     if (applySequence != _applySequence) return;

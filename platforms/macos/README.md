@@ -322,6 +322,10 @@ Home/End 在候选可见时通过共享运行时移到当前页首/末候选，�
 
 按键处理覆盖 ASCII 输入、退格、移动编辑光标、空格选择、回车原文、Esc 取消、候选上下移动和翻页、鼠标选词，以及由共享运行时处理的当前页数字选词与标点结束组词。候选面板显示对应数字；Engine 优先接收字符，保留 Unicode 等输入模式与拼音分隔符。未被 Engine 接收的 ASCII 标点先按当前高亮完成组词，再复用 Engine 中文标点转换；关闭中文标点时保留 ASCII。设置后台重读、输入法菜单和 Tauri 安装入口均已接入。原始 ASCII 编辑串用于内联预编辑，光标单位与 Engine 一致；日语等美化预编辑另行处理。日语方案下空格通常开始转换，但当唯一候选是快捷模式的原文 Fallback（候选 `source` 为 9，即 `CandidateSource::Fallback`）时，空格直接交给 Engine 上屏这条原文，与 Windows 一致。
 
+V 模式（算式、数字大小写与日期）、/ 指令和 @ 名单是 Engine 的本地模式，宿主不另做判断：视图的 `spelling_symbols` 列出当前状态下 Engine 当作输入的非字母键（V 模式是数字和 `+ - * / . ( ) % ^`，Unicode 模式是数字，空闲时是开着的模式入口 `/`、`@`），列在里面的键一律交给 Engine。于是这两种模式里数字不选词，改用 Shift + 数字选词；Shift + 数字打出的字符本身也在列表里时（美式键盘 V 模式下的 `%`、`^`、`*`、`(`、`)`）仍是输入，其余照常选词。`-`、`.` 不再当翻页键，`-` 也不触发以词定字，`.` 不走智能标点，`)` 不跳过成对标点补上的右括号。原来只认 `local_mode == "unicode"` 的数字门槛改成读 `spelling_symbols`。这三个模式上屏的文本带 `commit_context.typing_statistics: false`，不计入输入统计（也就不计入成就）。
+
+按键音、上屏音、按键旋律、背景音乐和成就音由 host-api 在输入法进程里播放，偏好在共享 `preferences.plugins`，全部默认关闭。宿主只在三处调用：`handleEvent:client:` 对每个非自动重复的按下调 `msime_client_key_sound`（空格、回车与小键盘回车、退格各有键类，其余为默认），不论这个键最后是否被输入法处理；英文模式下不出声，与 Windows、Linux 一致；`apply:` 在有上屏时调 `msime_client_commit_sound`，语音上屏除外；`activateServer:` 让背景音乐可以播放，`deactivateServer:` 停止，偏好更新生效后再告知一次（开着的播放器才会记住激活状态）。多个控制器之间只有最后一个让音乐播放的控制器能停止它，因为 IMK 不保证上一个客户端的失活先于下一个的激活。`IsSecureEventInputEnabled()` 为真时（密码框、终端的安全键盘输入）不发任何声音、背景音乐暂停，这个状态是窗口服务器级的，别的应用没关掉它时本输入法同样静音。内置音效包随 bundle 放在 `Contents/Resources/sound-packs`，会话创建时作为 `sound_packs` 传给 host-api（`resources` 指向 Application Support 里的 EngineResources，旁边没有音效包）；运行时选项文件里已经写了 `sound_packs` 时以文件为准。`shortcut` 测试覆盖键类、自动重复与松键不发声、安全输入、V 模式各键的路由、统计排除、语音上屏不发上屏音以及音乐归属；`session-smoke` 用真实 host 库确认开关全关时三个调用都不排队。
+
 ## 词库准备与 Tauri 设置应用
 
 先下载锁定词库，然后在隔离的开发状态目录中准备工作词库；该步骤要求相关会话已停止，不用于对现有输入法在线升级：

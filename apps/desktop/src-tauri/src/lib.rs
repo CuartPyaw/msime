@@ -41,7 +41,7 @@ use panel_input::{send_panel_key_windows, send_panel_text_windows, windows_panel
 use platform::android::android_account;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 use platform::desktop::{
-    desktop_account, desktop_candidate_skin_community, desktop_preferences_monitor,
+    desktop_account, desktop_candidate_skin_community, desktop_plugins, desktop_preferences_monitor,
 };
 #[cfg(target_os = "ios")]
 use platform::ios::ios_account;
@@ -1175,6 +1175,7 @@ impl From<PreferencesError> for CommandError {
                 PreferencesError::InvalidMixedInput => "mixed_input_invalid",
                 PreferencesError::InvalidFloatingToolbar => "floating_toolbar_invalid",
                 PreferencesError::ConflictingKeyBindings => "key_conflict",
+                PreferencesError::InvalidPlugins => "plugins_invalid",
                 PreferencesError::UnsupportedFormat | PreferencesError::Json(_) => "format",
                 _ => "storage",
             },
@@ -4343,6 +4344,9 @@ pub fn run() {
     } else {
         builder
     };
+    // The 扩展 page's import picker. Rust calls it host-side; no capability grants the webview any dialog command, so the page cannot open a dialog or name a path itself.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_dialog::init());
     #[cfg(target_os = "android")]
     let builder = builder.plugin(android_account::init());
     #[cfg(target_os = "ios")]
@@ -4517,6 +4521,8 @@ pub fn run() {
                     .unwrap_or_else(|_| directory.clone()),
             ));
             app.manage(SkinDirectoryState(directory.join("skins")));
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            app.manage(desktop_plugins::PluginsState::new(&directory));
             app.manage(UserDirectoryState(directory.join("user")));
             app.manage(preferences.clone());
             let clipboard_state = ClipboardHistoryState(Arc::new(Mutex::new(clipboard)));
@@ -4826,6 +4832,16 @@ pub fn run() {
             reset_typing_statistics,
             open_typing_statistics_directory,
             open_diagnostic_log_directory,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            desktop_plugins::plugin_catalog,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            desktop_plugins::import_plugin_pack,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            desktop_plugins::remove_plugin_pack,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            desktop_plugins::load_plugin_mentions,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            desktop_plugins::save_plugin_mentions,
             vocabulary::load_vocabulary_review,
             vocabulary::answer_vocabulary_card,
             vocabulary::set_vocabulary_settings,

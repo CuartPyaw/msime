@@ -200,14 +200,14 @@ pub fn is_external_id(id: &str) -> bool {
     safe_id(id) && !is_reserved(id)
 }
 
-fn safe_id(id: &str) -> bool {
+pub(crate) fn safe_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
         && id.as_bytes()[0].is_ascii_alphanumeric()
         && crate::is_ascii_lowercase_identifier_with_dots(id)
 }
 
-fn contained(root: &Path, child: &Path) -> bool {
+pub(crate) fn contained(root: &Path, child: &Path) -> bool {
     root.canonicalize()
         .ok()
         .and_then(|r| child.canonicalize().ok().map(|c| c.starts_with(r)))

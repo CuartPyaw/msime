@@ -4,7 +4,7 @@ Source: https://github.com/metasequoiaime/MSIME-Windows at remote default branch
 
 ## Copied assets
 
-`src/upstream/settings-variables.css` comes from `ui-html/webview2/settings/ime-settings/src/styles/variables.css`. The SVG files in `src/assets/` come from that settings project's `public/assets/`, with category icons under `sidebar/`; `utilities.svg` is `public/assets/sidebar/utilities.svg`. The window control icons `minimize.svg`, `maximize.svg`, `restore.svg` and `close.svg` come from the same `public/assets/` directory at `04a8df56f86312474a069f4335a1b58da7afaa9e`, with only a final newline added.
+`src/upstream/settings-variables.css` comes from `ui-html/webview2/settings/ime-settings/src/styles/variables.css`. The SVG files in `src/assets/` come from that settings project's `public/assets/`, with category icons under `sidebar/`; `utilities.svg` is `public/assets/sidebar/utilities.svg`. The window control icons `minimize.svg`, `maximize.svg`, `restore.svg` and `close.svg` come from the same `public/assets/` directory at `04a8df56f86312474a069f4335a1b58da7afaa9e`, with only a final newline added. `plugins.svg`, the 扩展 page's puzzle piece, has no upstream counterpart: it is this repository's own drawing, in the stroke colour and weight of `expression.svg`.
 
 `src/upstream/skin-toolbar-preview.html` is extracted from `ui-html/webview2/ftb/default.html` at `04a8df56f86312474a069f4335a1b58da7afaa9e`, following upstream `skin.ts` fillToolbar: retain only `.status-bar`, remove `#en`, `#fullwidth`, `#puncEn`, and remove descendant IDs. No scripts or host handlers are included.
 

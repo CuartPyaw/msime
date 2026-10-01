@@ -11,6 +11,7 @@ import http from '@ohos.net.http';
 import webSocket from '@ohos.net.webSocket';
 import util from '@ohos.util';
 import fs from '@ohos.file.fs';
+import fileUri from '@ohos.file.fileuri';
 import { KeyboardLog, describeError } from '../keyboard/KeyboardLog';
 import { KeyboardSession } from '../keyboard/KeyboardSession';
 import { StagedResources } from '../keyboard/StagedResources';
@@ -26,6 +27,9 @@ import { PreferenceRevisionPolicy } from '../keyboard/input/PreferenceRevisionPo
 import { PreferencesErrorCode } from '../keyboard/settings/PreferencesErrorCode';
 import picker from '@ohos.file.picker';
 import { SkinImportPolicy } from '../keyboard/skin/SkinImportPolicy';
+import {
+  PickedEntryKind, PluginFolderScan, PluginImportPolicy, PluginImportRefusal
+} from '../keyboard/settings/PluginImportPolicy';
 import EntryAbility from '../entryability/EntryAbility';
 import { ImeEnabledState, OnboardingState, OnboardingStatePolicy }
   from '../keyboard/input/OnboardingStatePolicy';
@@ -212,6 +216,28 @@ interface TypingStatisticsAction {
   operation: string;
   enabled?: boolean;
   retention?: string;
+}
+
+/** One 扩展 page request; only the operation is read here, the rest travels to `msime_client_plugins` as the page wrote it. */
+interface PluginPageAction {
+  operation: string;
+}
+
+/** The page's import request: which picker to show. */
+interface PluginImportRequest {
+  source: string;
+}
+
+/** `msime_client_plugins`'s import action, naming the staged copy of what was picked. */
+interface PluginImportAction {
+  operation: string;
+  source: string;
+}
+
+interface PluginImportCall {
+  state_root: string;
+  sound_packs: string;
+  action: PluginImportAction;
 }
 
 /** 背单词 request, as `msime_client_vocabulary_review` reads it. */
@@ -485,7 +511,7 @@ struct Settings {
                 'typingStatistics', 'vocabularyReview', 'openExternalUrl', 'copyText',
                 'openSystemKeyboardSettings', 'listVoiceCaptureDevices', 'listFontFamilies',
                 'keyboardFeedback', 'customTranslations', 'onboardingStatus',
-                'showInputMethodPicker', 'importSkinFolder', 'startRequest'],
+                'showInputMethodPicker', 'importSkinFolder', 'startRequest', 'plugins'],
               []);
           } catch (error) {
             KeyboardLog.error(`settings bridge not registered: ${describeError(error)}`);
@@ -721,6 +747,11 @@ class SettingsBridge {
         KeyboardLog.error(`local voice model request failed: ${describeError(error)}`);
         deliver(LocalVoiceModelPolicy.refusal('local_model_failed'));
       });
+    } else if (kind === 'plugin_import') {
+      this.importPlugin(payload).then(deliver).catch((error: Object): void => {
+        KeyboardLog.error(`plugin import failed: ${describeError(error)}`);
+        deliver(JSON.stringify({ ok: false, error: 'storage' }));
+      });
     } else if (kind === 'save_export') {
       this.saveExport(payload).then(deliver).catch((error: Object): void => {
         KeyboardLog.error(`export save failed: ${describeError(error)}`);
@@ -850,6 +881,135 @@ class SettingsBridge {
       .catch((error: Object): void => {
         KeyboardLog.error(`bridge reply not delivered: ${describeError(error)}`);
       });
+  }
+
+  /**
+   * The 扩展 page's pack store and @ name list: `catalog`, `remove`, `load_mentions` and `save_mentions`, answered by `msime_client_plugins` with the same rules and failure codes the desktop shell answers with. The page never names a path: the state root and the bundle's built-in sound packs are filled in here, and an import, which has to wait for the system picker, arrives through `startRequest` as `plugin_import` instead.
+   */
+  plugins(actionDocument: string): string {
+    const refused: string = JSON.stringify({ ok: false, error: 'invalid' });
+    if (this.context === undefined) {
+      return refused;
+    }
+    let action: PluginPageAction;
+    try {
+      action = JSON.parse(actionDocument) as PluginPageAction;
+    } catch {
+      return refused;
+    }
+    if (!['catalog', 'remove', 'load_mentions', 'save_mentions'].includes(action.operation)) {
+      return refused;
+    }
+    return client.plugins(`{"state_root":${JSON.stringify(this.stateDirectory)},`
+      + `"sound_packs":${JSON.stringify(this.soundPacks())},"action":${actionDocument}}`);
+  }
+
+  /** The built-in sound packs this bundle ships, where the keyboard's players read them too. */
+  private soundPacks(): string {
+    return this.context === undefined ? '' : `${this.context.resourceDir}/sound-packs`;
+  }
+
+  /**
+   * Installs a pack folder or `.zip` file the user picks with the system picker.
+   *
+   * What the picker hands back is a document URI the native library cannot open, so the pick is copied into a private staging directory first, under a fixed name rather than the picked one, and installed from there by `msime_client_plugins` on a worker thread, which checks it by the same rules as every other host and leaves nothing installed when it refuses. The copy stops at client-core's bounds (`PluginImportPolicy`), so a wrong pick is refused before it is copied whole. The staging copy is removed however the import ends, after the worker has finished with it. The reply is the installed pack, or null when the user closed the picker, which is not a failure.
+   */
+  private async importPlugin(document: string): Promise<string> {
+    const context: common.UIAbilityContext | undefined = this.context;
+    let request: PluginImportRequest;
+    try {
+      request = JSON.parse(document) as PluginImportRequest;
+    } catch {
+      return JSON.stringify({ ok: false, error: 'invalid' });
+    }
+    if (context === undefined || (request.source !== 'folder' && request.source !== 'archive')) {
+      return JSON.stringify({ ok: false, error: 'invalid' });
+    }
+    const folder: boolean = request.source === 'folder';
+    let picked: string[] = [];
+    try {
+      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      options.selectMode = folder ? picker.DocumentSelectMode.FOLDER : picker.DocumentSelectMode.FILE;
+      options.maxSelectNumber = 1;
+      if (!folder) {
+        options.fileSuffixFilters = ['扩展包|.zip'];
+      }
+      picked = await new picker.DocumentViewPicker(context).select(options);
+    } catch (error) {
+      KeyboardLog.error(`plugin picker refused: ${describeError(error)}`);
+      return JSON.stringify({ ok: false, error: 'storage' });
+    }
+    if (picked.length === 0) {
+      return JSON.stringify({ ok: true, value: null });
+    }
+    const staging: string = `${context.cacheDir}/plugin-import/${util.generateRandomUUID(false)}`;
+    try {
+      fs.mkdirSync(staging, true);
+      let source: string;
+      if (folder) {
+        source = `${staging}/${PluginImportPolicy.FOLDER_NAME}`;
+        const refusal: PluginImportRefusal | null =
+          await this.copyPluginFolder(new fileUri.FileUri(picked[0]).path, source);
+        if (refusal !== null) {
+          return JSON.stringify(refusal);
+        }
+      } else {
+        source = `${staging}/${PluginImportPolicy.ARCHIVE_NAME}`;
+        const file: fs.File = fs.openSync(picked[0], fs.OpenMode.READ_ONLY);
+        try {
+          const refusal: PluginImportRefusal | null = PluginImportPolicy.archive(fs.statSync(file.fd).size);
+          if (refusal !== null) {
+            return JSON.stringify(refusal);
+          }
+          await fs.copyFile(file.fd, source);
+        } finally {
+          fs.closeSync(file);
+        }
+      }
+      const action: PluginImportAction = { operation: 'import', source: source };
+      const call: PluginImportCall = {
+        state_root: this.stateDirectory, sound_packs: this.soundPacks(), action: action
+      };
+      const reply: string = await client.pluginsAsync(JSON.stringify(call));
+      KeyboardLog.info('plugin import answered');
+      return reply;
+    } catch (error) {
+      KeyboardLog.error(`plugin import failed: ${describeError(error)}`);
+      return JSON.stringify({ ok: false, error: 'storage' });
+    } finally {
+      try {
+        if (fs.accessSync(staging)) {
+          fs.rmdirSync(staging);
+        }
+      } catch (error) {
+        KeyboardLog.error(`plugin import staging not removed: ${describeError(error)}`);
+      }
+    }
+  }
+
+  /**
+   * Copy the top level of a picked pack folder to `destination`, or answer why it cannot be a pack without copying anything. Every entry is looked at before the first byte is copied, and the look stops at the first entry that rules the folder out: a subfolder, a link, or more files or bytes than any pack may hold.
+   */
+  private async copyPluginFolder(picked: string, destination: string): Promise<PluginImportRefusal | null> {
+    const scan: PluginFolderScan = new PluginFolderScan();
+    for (const name of fs.listFileSync(picked)) {
+      if (PluginImportPolicy.hidden(name)) {
+        continue;
+      }
+      const stat: fs.Stat = fs.lstatSync(`${picked}/${name}`);
+      const kind: PickedEntryKind = stat.isSymbolicLink() ? PickedEntryKind.LINK
+        : stat.isDirectory() ? PickedEntryKind.DIRECTORY
+        : stat.isFile() ? PickedEntryKind.FILE : PickedEntryKind.OTHER;
+      const refusal: PluginImportRefusal | null = scan.take(name, kind, stat.size);
+      if (refusal !== null) {
+        return refusal;
+      }
+    }
+    fs.mkdirSync(destination);
+    for (const name of scan.files) {
+      await fs.copyFile(`${picked}/${name}`, `${destination}/${name}`);
+    }
+    return null;
   }
 
   /** The shared settings page uses the same validated catalog as desktop presenters. */
@@ -1122,6 +1282,10 @@ class SettingsBridge {
       }
       value['candidate_follow_cursor'] = projection.candidateFollowCursor;
       value['input_mode_hud'] = projection.inputModeHud;
+      value['key_sound'] = projection.keySound;
+      value['music'] = projection.music;
+      value['plugin_triggers'] = projection.pluginTriggers;
+      value['typing_effects'] = projection.typingEffects;
       if (release !== null) {
         value['os_version'] = release;
       }

@@ -66,7 +66,33 @@ export const savePreferences: (
 ) => string;
 export const dictionary: (request: string) => string;
 export const updatePreferences: (handle: number, snapshot: string) => string;
+/** `{directory,action}`; a `record` action answers `{recorded,milestone}`, where milestone is the commit count just passed while achievements are switched on, else null. */
 export const typingStatistics: (request: string) => string;
+/**
+ * `{state_root,sound_packs,pack}` in, all paths absolute; the validated files of that sound pack out: `{id,name,license,builtin,mode,sounds:{default,space,enter,backspace,commit,achievement},sequence:{sample,semitones,advance}|null,max_sample_millis,melody_idle_reset_millis}` with absolute paths. Reads the pack from disk: not for the key path.
+ */
+export const keySoundPack: (request: string) => string;
+/**
+ * `{state_root,sound_packs,pack}` in, as for `keySoundPack`; the validated tracks of that music pack out: `{id,name,license,tracks,max_track_seconds}`, the tracks as absolute paths in play order. Reads the pack from disk: not for the key path.
+ */
+export const musicPack: (request: string) => string;
+/**
+ * The 扩展 page's pack store: `{state_root,sound_packs,action}` in, with `action.operation` one of `catalog`, `import` `{source}` (an absolute path inside this sandbox), `remove` `{kind,id}`, `load_mentions` and `save_mentions` `{entries}`. Answers `{ok,value}` or `{ok:false,error,detail?}`, the error one of the desktop shell's codes and the detail the rule a refused pack or name broke.
+ */
+export const plugins: (request: string) => string;
+/**
+ * `plugins` on a worker thread, for an `import`, which extracts or copies up to a music pack's size and validates it before swapping it into place. Resolves with the same answer `plugins` returns; rejects only when the worker produced no answer.
+ */
+export const pluginsAsync: (request: string) => Promise<string>;
+/**
+ * Decodes the WAV sample at `sample` once per semitone and writes each note to `<directory>/note-<index>.wav` at 48 kHz, pitched as a playback rate. Resolves with the files in semitone order; rejects a sample that is not WAV, lasts longer than `maxMillis`, or decodes past its declared length.
+ */
+export const keySoundRenderNotes: (
+  sample: string,
+  semitones: number[],
+  directory: string,
+  maxMillis: number,
+) => Promise<string[]>;
 export const vocabularyReview: (request: string) => string;
 /**
  * Locked mobile history operations. Harmony opts into migration of its original
@@ -132,6 +158,10 @@ export const character: (handle: number, ascii: number, shift: boolean) => strin
 export const punctuationWithContext: (handle: number, ascii: number, preceding: number) => string;
 export const balancePairedPunctuationAfterAutoClose: (handle: number, opening: number) => string;
 export const command: (handle: number, command: number) => string;
+/**
+ * `msime_client_typing_effect`: count one key or commit into the session's combo and answer what to draw, packed into one integer. `event` bits 0-7 are 0 any other key, 1 space, 2 enter, 3 backspace, 4 commit, 5 a delete by another route; 0x100 marks an auto-repeat, 0x200 keeps the tier-up sound quiet. The answer's bits 0-15 are the combo count, bit 16 a tier-up, bits 17-19 the style (0 off, 1 flash, 2 sparks, 3 power mode) and bit 20 a tier-up sound this host plays itself; `TypingEffectPolicy.decode` unpacks it. 0 while the effect and the combo counter are both off. No disk, no allocation: safe on the key path.
+ */
+export const typingEffect: (handle: number, event: number) => number;
 
 export const select: (handle: number, generation: number, index: number) => string;
 export const selectEdge: (

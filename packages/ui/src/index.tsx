@@ -431,6 +431,9 @@ import { FloatingToolbarSettingsPage } from "./settings/pages/floating-toolbar-p
 import { ScreenKeyboardSettingsPage } from "./settings/pages/screen-keyboard-page";
 import { ShortcutSettingsPage } from "./settings/pages/shortcuts-page";
 import { ToolsSettingsPage } from "./settings/pages/tools-page";
+import { PluginsSettingsPage } from "./settings/pages/plugins-page";
+import type { PluginClient } from "./settings/plugins-section";
+import type { PluginPreferences } from "./settings/plugin-preferences";
 import { AboutSettingsPage } from "./settings/pages/about-page";
 import { HelpcodeSettingsPage } from "./settings/pages/helpcode-page";
 import type { CustomHelpcodeSchema, HelpcodePreferences } from "./settings/pages/helpcode-page";
@@ -606,6 +609,36 @@ export {
   type LocalModeKey,
   type LocalModePreferences,
 } from "./settings/local-modes-section";
+export {
+  PluginsSection,
+  MAX_MENTIONS,
+  mentionListIssue,
+  pluginErrorMessage,
+  type MentionEntry,
+  type PluginCatalogResult,
+  type PluginClient,
+  type PluginCommand,
+  type PluginIssue,
+  type PluginKind,
+  type PluginPackage,
+  type PluginsSectionProps,
+} from "./settings/plugins-section";
+export {
+  DEFAULT_MELODY_PACK,
+  DEFAULT_SOUND_PACK,
+  MAX_COMMAND_TABLES,
+  defaultPluginPreferences,
+  pluginPreferences,
+  withoutRemovedPack,
+  type AchievementPreferences,
+  type CommitSoundPreferences,
+  type EffectStyle,
+  type KeySoundMode,
+  type KeySoundPreferences,
+  type MelodyPreferences,
+  type MusicPreferences,
+  type PluginPreferences,
+} from "./settings/plugin-preferences";
 export {
   ThemeSettingsSection,
   type SurfaceTheme,
@@ -1233,6 +1266,14 @@ export interface HostCapabilities {
   os_version?: string;
   /** Why the Linux desktop panel drawing the candidate list ignores the candidate font, colours and skin, as the running host reported it. Absent when the panel honours them. */
   candidate_panel_limit?: "gnome_shell" | "fcitx_theme" | "kimpanel";
+  /** The host plays the sound packs in `plugins`: key sounds, the melody, the commit sound and the achievement jingle. Absent on a host older than the field. */
+  key_sound?: boolean;
+  /** The host routes the V, / and @ modes: it hands / and @ to the runtime, keeps digits as input while a mode spells with them, and loads the command tables and the @ name list. */
+  plugin_triggers?: boolean;
+  /** The host streams the selected music pack while it is the active input method. */
+  music?: boolean;
+  /** The host draws the typing effects and the combo count `msime_client_typing_effect` answers with. Absent on a host older than the field. */
+  typing_effects?: boolean;
 }
 
 export { useCandidatePreviewTheme } from "./candidate/candidate-preview-theme";
@@ -1335,6 +1376,8 @@ export type Preferences = {
   paired_punctuation?: boolean;
   punctuation_lock?: "follow" | "chinese" | "english";
   traditional_chinese_output?: boolean;
+  /** Sound packs, music and command tables; the document leaves it out while every value is the default. */
+  plugins?: PluginPreferences;
 };
 export type AiAssistantPreferences = {
   enabled: boolean;
@@ -1731,6 +1774,8 @@ export interface SettingsClient {
   aiSkins?: AiSkinClient;
   /** Mobile and desktop hosts can show packaged offline English glosses without changing candidate identity. */
   candidateEnglishGloss?: boolean;
+  /** The desktop hosts' plugin pack store and the @ name list, behind the 扩展 page. */
+  plugins?: PluginClient;
   /**
    * Which packaged dictionary is installed, for the dictionary page to state.
    *
@@ -1822,6 +1867,11 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     clientHostedPlatform,
     desktopPanels,
     showVoiceHotkeys,
+    showKeySound,
+    showMusic,
+    showPluginTriggers,
+    showTypingEffects,
+    showTypingEffectStyles,
   } = capabilities;
   const {
     fullwidthChord,
@@ -2249,6 +2299,8 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
       ? []
       : (["shortcuts"] as const)),
     "floating-toolbar",
+    // Sound packs, music and the / and @ modes all belong to a physical keyboard and a desktop candidate window; a phone keeps its own keyboard feedback settings.
+    "plugins",
   ];
   const { availablePages, sidebarGroups, mobilePrimaryPages, mobileSecondaryGroups } =
     settingsPageProjections({
@@ -2263,6 +2315,14 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
       ),
       showFloatingToolbar,
       showDeveloperPage,
+      // A host with a pack store, or one that plays or routes something the page switches.
+      hasPlugins:
+        !mobilePlatform &&
+        (Boolean(client.plugins) ||
+          showKeySound ||
+          showMusic ||
+          showPluginTriggers ||
+          showTypingEffects),
       mobileHiddenPageIds,
       mobilePageTitle,
     });
@@ -2351,6 +2411,11 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     platformAboutDescription,
     desktopPanels,
     showVoiceHotkeys,
+    showKeySound,
+    showMusic,
+    showPluginTriggers,
+    showTypingEffects,
+    showTypingEffectStyles,
     snapshot,
     draft,
     setDraft,
@@ -3017,6 +3082,7 @@ export function SettingsPage(props: SettingsPageProps) {
                   <VoiceSettingsPage />
                   <HandwritingSettingsPage />
                   <ToolsSettingsPage />
+                  <PluginsSettingsPage />
                   <DownloadSettingsPage />
                   <DeveloperSettingsPage />
                   <FeedbackSettingsPage />

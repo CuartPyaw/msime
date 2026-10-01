@@ -207,6 +207,11 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         local_super_jianpin: true,
         local_temporary_english: true,
         local_temporary_japanese: true,
+        local_expression: false,
+        local_command: false,
+        local_mention: false,
+        command_table: Vec::new(),
+        mention_entries: Vec::new(),
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
@@ -2573,6 +2578,44 @@ fn selection_statistics_reach_the_store_at_focus_out() {
     assert_eq!(store.load().unwrap().selections.total(), 3);
     read(msime_client_destroy(handle));
     assert_eq!(store.load().unwrap().selections.total(), 3);
+}
+/// A result of the expression mode is picked, not typed: the preference opens the mode through the host, and the pick is kept out of the selection statistics as it is kept out of learning.
+#[test]
+fn generated_mode_selections_stay_out_of_selection_statistics() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut preferences = chinese_preferences();
+    preferences.local_modes.expression = true;
+    let store = TypingStatisticsStore::new(dir.path().join("user"));
+    store.set_enabled(true).unwrap();
+    let handle = test_host_with_pinyin_fixture(dir.path(), preferences);
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    let entered = read(msime_client_character(handle, b'V', true));
+    assert_eq!(entered["value"]["view"]["local_mode"], "expression");
+    assert_eq!(
+        entered["value"]["view"]["spelling_symbols"],
+        "0123456789+-*/.()%^"
+    );
+    let mut view = Value::Null;
+    for byte in b"1+2" {
+        view = read(msime_client_character(handle, *byte, false))["value"]["view"].clone();
+    }
+    let generation = view["generation"].as_u64().unwrap();
+    let selected = read(msime_client_select(handle, generation, 1));
+    assert_eq!(selected["value"]["commit"], "1+2=3");
+    assert_eq!(
+        selected["value"]["commit_context"]["local_mode"],
+        "expression"
+    );
+    assert_eq!(
+        selected["value"]["commit_context"]["typing_statistics"],
+        false
+    );
+    commit_candidate_by_position(handle, 1);
+    assert_eq!(read(msime_client_focus(handle, false))["ok"], true);
+    let selections = store.load().unwrap().selections;
+    assert_eq!(selections.ranks[1], 1);
+    assert_eq!(selections.total(), 1);
+    read(msime_client_destroy(handle));
 }
 #[test]
 fn selection_statistics_reach_the_store_when_the_session_is_destroyed() {
@@ -6849,4 +6892,512 @@ fn mcp_status_and_install_check_their_requests_before_touching_a_file() {
         install(br#"{"options":null,"client":"other"}"#)["error"],
         "invalid mcp request"
     );
+}
+
+/// A session whose preferences directory is `<root>/state`, so its plugins root is `<root>/state/plugins`, with the repository's built-in sound packs.
+fn plugin_host(root: &std::path::Path, preferences: Preferences) -> u64 {
+    let path = |name| {
+        let path = root.join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    };
+    let sound_packs =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/sound-packs");
+    let options = json!({ "api_version": 1, "resources": path("resources"), "user_data": path("user"), "cache": path("cache"), "dictionaries": path("dictionaries"), "preferences": preferences, "preferences_directory": path("state"), "sound_packs": sound_packs }).to_string();
+    let created = read(unsafe { msime_client_create(options.as_ptr(), options.len()) });
+    assert_eq!(created["ok"], true, "{created}");
+    created["value"]["session"].as_u64().unwrap()
+}
+
+fn install_command_table(root: &std::path::Path, id: &str, commands: &str) {
+    let pack = root.join("state/plugins/command_table").join(id);
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        format!("schema_version = 1\nkind = \"command_table\"\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n{commands}"),
+    )
+    .unwrap();
+}
+
+fn save_mentions(root: &std::path::Path, entries: &[(&str, &str)]) {
+    let entries: Vec<_> = entries
+        .iter()
+        .map(
+            |(text, key)| msime_client_core::plugins::mentions::MentionEntry {
+                text: (*text).into(),
+                key: (*key).into(),
+            },
+        )
+        .collect();
+    msime_client_core::plugins::mentions::MentionStore::new(root.join("state/plugins"))
+        .save(&entries)
+        .unwrap();
+}
+
+/// The candidate texts after typing `keys` into an idle session, which is cancelled again afterwards.
+fn local_mode_candidates(handle: u64, keys: &[u8]) -> Vec<String> {
+    let mut view = Value::Null;
+    for key in keys {
+        let result = read(msime_client_character(handle, *key, false));
+        assert_eq!(result["ok"], true, "{result}");
+        view = result["value"]["view"].clone();
+    }
+    read(msime_client_command(handle, 3));
+    view["candidates"]
+        .as_array()
+        .map(|candidates| {
+            candidates
+                .iter()
+                .map(|candidate| candidate["text"].as_str().unwrap_or_default().to_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Enabled command tables and the saved name list reach the Engine at creation, and a field gaining focus picks up what the settings page changed since, without a preference change.
+#[test]
+fn command_tables_and_mentions_reach_the_engine_from_the_plugins_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    install_command_table(
+        dir.path(),
+        "work",
+        "[[commands]]\ntrigger = \"sig\"\ntitle = \"签名\"\ntemplate = \"张三敬上\"\n",
+    );
+    install_command_table(
+        dir.path(),
+        "unused",
+        "[[commands]]\ntrigger = \"zzz\"\ntitle = \"未启用\"\ntemplate = \"不会出现\"\n",
+    );
+    save_mentions(dir.path(), &[("张三", "zhang'san"), ("Alice", "")]);
+    let mut preferences = chinese_preferences();
+    preferences.local_modes.command = true;
+    preferences.local_modes.mention = true;
+    preferences.plugins.command_tables = vec!["work".into()];
+    let handle = plugin_host(dir.path(), preferences);
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    assert!(local_mode_candidates(handle, b"/sig").contains(&"张三敬上".to_owned()));
+    assert!(!local_mode_candidates(handle, b"/zzz").contains(&"不会出现".to_owned()));
+    assert!(local_mode_candidates(handle, b"@zs").contains(&"张三".to_owned()));
+    assert!(local_mode_candidates(handle, b"@al").contains(&"Alice".to_owned()));
+
+    install_command_table(
+        dir.path(),
+        "work",
+        "[[commands]]\ntrigger = \"sig\"\ntitle = \"签名\"\ntemplate = \"李四 敬上\"\n",
+    );
+    save_mentions(dir.path(), &[("李四", "li'si")]);
+    assert_eq!(read(msime_client_focus(handle, false))["ok"], true);
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    let commands = local_mode_candidates(handle, b"/sig");
+    assert!(commands.contains(&"李四 敬上".to_owned()), "{commands:?}");
+    assert!(!commands.contains(&"张三敬上".to_owned()));
+    assert!(local_mode_candidates(handle, b"@ls").contains(&"李四".to_owned()));
+    assert!(!local_mode_candidates(handle, b"@zs").contains(&"张三".to_owned()));
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+/// Switching the `/` mode on, or enabling another table, goes through the ordinary preference update and reads the tables then.
+#[test]
+fn preference_updates_load_the_enabled_command_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    install_command_table(
+        dir.path(),
+        "work",
+        "[[commands]]\ntrigger = \"sig\"\ntitle = \"签名\"\ntemplate = \"张三敬上\"\n",
+    );
+    install_command_table(
+        dir.path(),
+        "home",
+        "[[commands]]\ntrigger = \"sig\"\ntitle = \"家\"\ntemplate = \"家里的签名\"\n[[commands]]\ntrigger = \"addr\"\ntitle = \"地址\"\ntemplate = \"某某路一号\"\n",
+    );
+    let mut preferences = chinese_preferences();
+    let handle = plugin_host(dir.path(), preferences.clone());
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    preferences.local_modes.command = true;
+    preferences.plugins.command_tables = vec!["work".into()];
+    assert_eq!(update(handle, 1, &preferences)["value"]["deferred"], false);
+    assert!(local_mode_candidates(handle, b"/sig").contains(&"张三敬上".to_owned()));
+    assert!(!local_mode_candidates(handle, b"/addr").contains(&"某某路一号".to_owned()));
+    // The first table listed wins a trigger both define.
+    preferences.plugins.command_tables = vec!["home".into(), "work".into()];
+    assert_eq!(update(handle, 2, &preferences)["value"]["deferred"], false);
+    let signatures = local_mode_candidates(handle, b"/sig");
+    assert!(
+        signatures.contains(&"家里的签名".to_owned()),
+        "{signatures:?}"
+    );
+    assert!(!signatures.contains(&"张三敬上".to_owned()));
+    assert!(local_mode_candidates(handle, b"/addr").contains(&"某某路一号".to_owned()));
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+/// The `@ 地名` switch reaches the Engine both when a session is created with it on and when a preference update turns it on or off, since every engine starts with the places off.
+#[test]
+fn mention_places_preference_reaches_the_engine() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut preferences = chinese_preferences();
+    preferences.local_modes.mention = true;
+    preferences.local_modes.mention_places = true;
+    let handle = plugin_host(dir.path(), preferences.clone());
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    assert!(local_mode_candidates(handle, b"@shenzhen").contains(&"深圳市".to_owned()));
+    preferences.local_modes.mention_places = false;
+    assert_eq!(update(handle, 1, &preferences)["value"]["deferred"], false);
+    assert!(!local_mode_candidates(handle, b"@shenzhen").contains(&"深圳市".to_owned()));
+    preferences.local_modes.mention_places = true;
+    assert_eq!(update(handle, 2, &preferences)["value"]["deferred"], false);
+    assert!(local_mode_candidates(handle, b"@shenzhen").contains(&"深圳市".to_owned()));
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+/// `/fy` gets a query of its own: one English text, a sentence translated into Chinese by the selected service, asked whatever the gloss switches say and carrying nothing for an offline dictionary or the gloss cache. Its answer becomes the first row, and no service selected means no query.
+#[test]
+fn command_translation_has_its_own_chinese_sentence_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut preferences = chinese_preferences();
+    preferences.local_modes.command = true;
+    preferences.candidate_translations = false;
+    preferences.candidate_english_gloss = false;
+    preferences.tencent_tmt.enabled = false;
+    preferences.niutrans.enabled = true;
+    let handle = plugin_host(dir.path(), preferences.clone());
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    let mut view = Value::Null;
+    for key in b"/fyhello" {
+        view = read(msime_client_character(handle, *key, false))["value"]["view"].clone();
+    }
+    let query = read(msime_client_translation_query(handle))["value"].clone();
+    assert_eq!(query["sentence"], true, "{query}");
+    assert_eq!(query["target_language"], "zh");
+    assert_eq!(query["provider"], "niutrans");
+    assert_eq!(
+        query["candidates"],
+        json!([{"text": "hello", "online_gloss": false}])
+    );
+    assert!(query["resources"].is_null() && query["user_data"].is_null());
+    assert!(query.get("offline_gloss_languages").is_none());
+    assert_eq!(query["generation"], view["generation"]);
+
+    let encoded = serde_json::to_vec(&json!([{"text": "hello", "translation": "你好"}])).unwrap();
+    let applied = read(unsafe {
+        msime_client_apply_translations(
+            handle,
+            query["generation"].as_u64().unwrap(),
+            encoded.as_ptr(),
+            encoded.len(),
+        )
+    });
+    assert_eq!(applied["value"]["applied"], true, "{applied}");
+    assert_eq!(applied["value"]["view"]["candidates"][0]["text"], "你好");
+    read(msime_client_command(handle, 3));
+
+    // With no service selected `/fy` asks nothing, and the other local modes stay off the network while the gloss switches are off.
+    preferences.niutrans.enabled = false;
+    assert_eq!(update(handle, 1, &preferences)["value"]["deferred"], false);
+    for key in b"/fyhello" {
+        read(msime_client_character(handle, *key, false));
+    }
+    assert!(read(msime_client_translation_query(handle))["value"].is_null());
+    read(msime_client_command(handle, 3));
+    preferences.niutrans.enabled = true;
+    assert_eq!(update(handle, 2, &preferences)["value"]["deferred"], false);
+    for key in b"/sig" {
+        read(msime_client_character(handle, *key, false));
+    }
+    assert!(read(msime_client_translation_query(handle))["value"].is_null());
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+/// The sound calls sit on the key path: with every sound off (the default) they queue nothing and start nothing, and a bad handle or class is refused the same way.
+#[test]
+fn sound_calls_queue_nothing_while_sounds_are_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let handle = plugin_host(dir.path(), chinese_preferences());
+    for class in 0..4 {
+        assert!(!msime_client_key_sound(handle, class));
+    }
+    assert!(!msime_client_key_sound(handle, 4));
+    assert!(!msime_client_commit_sound(handle));
+    assert!(!msime_client_music_set_active(handle, true));
+    assert!(!msime_client_key_sound(0, 0));
+    assert!(!msime_client_commit_sound(u64::MAX));
+    let other_thread = std::thread::spawn(move || msime_client_key_sound(handle, 0))
+        .join()
+        .unwrap();
+    assert!(!other_thread);
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+/// Sound settings are not Engine state, so a preference update reaches them at once, even while a composition keeps the Engine's own changes waiting.
+#[test]
+fn sound_settings_follow_preference_updates_during_composition() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut preferences = chinese_preferences();
+    let handle = plugin_host(dir.path(), preferences.clone());
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    read(msime_client_character(handle, b'n', false));
+    preferences.plugins.key_sound.enabled = true;
+    preferences.plugins.key_sound.volume = 70;
+    preferences.local_modes.command = true;
+    let updated = update(handle, 1, &preferences);
+    assert_eq!(updated["value"]["deferred"], true, "{updated}");
+    SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let session = sessions.get(&handle).unwrap();
+        let settings = key_sound::SoundSettings::new(&preferences.plugins, &session.plugin_roots);
+        assert!(settings.key && settings.volume == 70);
+        assert_eq!(
+            session.plugin_roots.installed.as_deref(),
+            Some(dir.path().join("state/plugins").as_path())
+        );
+        assert!(session.plugin_roots.builtin_sounds.is_some());
+        assert!(
+            !session.options.local_command,
+            "the Engine switch waits for the composition"
+        );
+    });
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+#[test]
+fn key_sound_pack_boundary_resolves_validated_files() {
+    let call = |request: &[u8]| {
+        read(unsafe { msime_client_key_sound_pack(request.as_ptr(), request.len()) })
+    };
+    let sound_packs =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/sound-packs");
+    let request =
+        json!({"state_root": null, "sound_packs": sound_packs, "pack": "default"}).to_string();
+    let pack = call(request.as_bytes());
+    assert_eq!(pack["ok"], true, "{pack}");
+    assert_eq!(pack["value"]["mode"], "keys");
+    assert!(std::path::Path::new(pack["value"]["sounds"]["space"].as_str().unwrap()).is_file());
+
+    let relative =
+        json!({"state_root": "state", "sound_packs": sound_packs, "pack": "default"}).to_string();
+    assert_eq!(
+        call(relative.as_bytes())["error"],
+        "sound pack paths must be absolute"
+    );
+    // An installed pack is only ever under the state root, so without one it is not looked for against the working directory.
+    let missing =
+        json!({"state_root": null, "sound_packs": sound_packs, "pack": "nothing"}).to_string();
+    assert_eq!(
+        call(missing.as_bytes())["error"],
+        "sound packs need a state root"
+    );
+    assert_eq!(
+        call(br#"{"pack":"default","extra":1}"#)["error"],
+        "invalid sound pack request"
+    );
+    assert_eq!(
+        read(unsafe { msime_client_key_sound_pack(std::ptr::null(), 4) })["error"],
+        "invalid sound pack request"
+    );
+}
+
+/// A music pack in `<state>/plugins/music/<id>` with one synthetic WAV track.
+fn installed_music_pack(state: &std::path::Path, id: &str) -> std::path::PathBuf {
+    let pack = state.join("plugins/music").join(id);
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        format!("schema_version = 1\nkind = 'music'\nid = '{id}'\nname = '雨声'\nversion = '1.0.0'\nlicense = 'CC0-1.0'\n[music]\ntracks = ['rain.wav']\n"),
+    )
+    .unwrap();
+    let mut wav = b"RIFF\x24\0\0\0WAVEfmt ".to_vec();
+    wav.extend_from_slice(&[0; 32]);
+    std::fs::write(pack.join("rain.wav"), wav).unwrap();
+    pack
+}
+
+#[test]
+fn music_pack_boundary_resolves_validated_tracks() {
+    let call =
+        |request: &[u8]| read(unsafe { msime_client_music_pack(request.as_ptr(), request.len()) });
+    let state = tempfile::tempdir().unwrap();
+    let pack = installed_music_pack(state.path(), "rain");
+    let request =
+        json!({"state_root": state.path(), "sound_packs": null, "pack": "rain"}).to_string();
+    let music = call(request.as_bytes());
+    assert_eq!(music["ok"], true, "{music}");
+    assert_eq!(music["value"]["id"], "rain");
+    assert_eq!(music["value"]["license"], "CC0-1.0");
+    assert_eq!(
+        music["value"]["tracks"],
+        json!([pack.join("rain.wav").to_string_lossy()])
+    );
+    assert_eq!(music["value"]["max_track_seconds"], 15 * 60);
+
+    // Music packs are only ever installed under the state root: without one the pack is refused rather than read against the working directory with relative track paths.
+    let rootless = json!({"state_root": null, "sound_packs": null, "pack": "rain"}).to_string();
+    assert_eq!(
+        call(rootless.as_bytes())["error"],
+        "music packs need a state root"
+    );
+
+    // A sound pack id is not a music pack, even a built-in one.
+    let sound_packs =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/sound-packs");
+    let builtin =
+        json!({"state_root": state.path(), "sound_packs": sound_packs, "pack": "default"})
+            .to_string();
+    assert_eq!(call(builtin.as_bytes())["ok"], false);
+    let relative = json!({"state_root": "state", "sound_packs": null, "pack": "rain"}).to_string();
+    assert_eq!(
+        call(relative.as_bytes())["error"],
+        "music pack paths must be absolute"
+    );
+    assert_eq!(
+        call(br#"{"pack":"rain","tracks":[]}"#)["error"],
+        "invalid music pack request"
+    );
+    assert_eq!(
+        read(unsafe { msime_client_music_pack(std::ptr::null(), 4) })["error"],
+        "invalid music pack request"
+    );
+}
+
+#[test]
+fn plugins_boundary_lists_imports_removes_and_keeps_the_name_list() {
+    let state = tempfile::tempdir().unwrap();
+    let picked = tempfile::tempdir().unwrap();
+    let sound_packs =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/sound-packs");
+    let call = |action: Value| {
+        let request = serde_json::to_vec(
+            &json!({"state_root": state.path(), "sound_packs": sound_packs, "action": action}),
+        )
+        .unwrap();
+        read(unsafe { msime_client_plugins(request.as_ptr(), request.len()) })
+    };
+
+    let catalog = call(json!({"operation": "catalog"}));
+    assert_eq!(catalog["ok"], true, "{catalog}");
+    let ids = |catalog: &Value| -> Vec<String> {
+        catalog["value"]["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pack| pack["id"].as_str().unwrap().to_owned())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    };
+    // Every built-in pack, sound and music alike, in the catalog's id order, with `extra` among them.
+    let builtins = |extra: &[&str]| -> Vec<String> {
+        msime_client_core::plugins::BUILTIN_SOUND_PACKS
+            .iter()
+            .chain(msime_client_core::plugins::BUILTIN_MUSIC_PACKS.iter())
+            .chain(extra)
+            .map(|id| (*id).to_owned())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    };
+    assert_eq!(ids(&catalog), builtins(&[]), "the built-in packs");
+
+    let source = picked.path().join("rain");
+    std::fs::rename(installed_music_pack(picked.path(), "rain"), &source).unwrap();
+    let imported = call(json!({"operation": "import", "source": source}));
+    assert_eq!(imported["ok"], true, "{imported}");
+    assert_eq!(imported["value"]["kind"], "music");
+    assert_eq!(imported["value"]["tracks"], json!(["rain.wav"]));
+    assert!(state.path().join("plugins/music/rain/rain.wav").is_file());
+    assert_eq!(
+        ids(&call(json!({"operation": "catalog"}))),
+        builtins(&["rain"])
+    );
+
+    // Refusals carry the desktop shell's codes, and the rule a pack broke as the detail.
+    let broken = picked.path().join("broken");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(broken.join("plugin.toml"), "schema_version = 2\n").unwrap();
+    let refused = call(json!({"operation": "import", "source": broken}));
+    assert_eq!(refused["error"], "plugin_invalid", "{refused}");
+    assert!(refused["detail"]
+        .as_str()
+        .is_some_and(|detail| !detail.is_empty()));
+    let unsupported = call(json!({"operation": "import", "source": picked.path().join("x.txt")}));
+    assert_eq!(unsupported["error"], "plugin_unsupported_source");
+    assert!(unsupported.get("detail").is_none());
+    assert_eq!(
+        call(json!({"operation": "import", "source": "relative/rain"}))["error"],
+        "invalid"
+    );
+    assert_eq!(
+        call(json!({"operation": "remove", "kind": "sound", "id": "default"}))["error"],
+        "plugin_reserved"
+    );
+    assert_eq!(
+        call(json!({"operation": "remove", "kind": "script", "id": "rain"}))["error"],
+        "invalid"
+    );
+    let removed = call(json!({"operation": "remove", "kind": "music", "id": "rain"}));
+    assert_eq!(removed, json!({"ok": true, "value": null}));
+    assert_eq!(ids(&call(json!({"operation": "catalog"}))), builtins(&[]));
+
+    assert_eq!(
+        call(json!({"operation": "load_mentions"}))["value"],
+        json!([])
+    );
+    let entries = json!([{"text": "张三", "key": "zhang'san"}, {"text": "Alice", "key": ""}]);
+    let saved = call(json!({"operation": "save_mentions", "entries": entries}));
+    assert_eq!(saved, json!({"ok": true, "value": null}));
+    assert_eq!(
+        call(json!({"operation": "load_mentions"}))["value"],
+        entries
+    );
+    assert!(state.path().join("plugins/mentions.json").is_file());
+    let invalid =
+        call(json!({"operation": "save_mentions", "entries": [{"text": "张三", "key": "Zhang"}]}));
+    assert_eq!(invalid["error"], "mention_invalid", "{invalid}");
+    assert!(invalid["detail"]
+        .as_str()
+        .is_some_and(|detail| detail.contains("张三")));
+    assert_eq!(
+        call(json!({"operation": "load_mentions"}))["value"],
+        entries
+    );
+
+    // Requests the page could not have meant.
+    assert_eq!(call(json!({"operation": "rename"}))["error"], "invalid");
+    let raw =
+        |request: &[u8]| read(unsafe { msime_client_plugins(request.as_ptr(), request.len()) });
+    assert_eq!(
+        raw(br#"{"state_root":"state","sound_packs":null,"action":{"operation":"catalog"}}"#)
+            ["error"],
+        "invalid"
+    );
+    assert_eq!(
+        raw(br#"{"action":{"operation":"catalog"}}"#)["error"],
+        "invalid"
+    );
+    assert_eq!(
+        read(unsafe { msime_client_plugins(std::ptr::null(), 4) })["error"],
+        "invalid"
+    );
+}
+
+/// A statistics record reports which achievement milestone it passed; without a session asking for achievement sounds it never looks.
+#[test]
+fn statistics_record_reports_the_milestone_field() {
+    let directory = tempfile::tempdir().unwrap();
+    let call = |action: Value| {
+        let request =
+            serde_json::to_vec(&json!({"directory": directory.path(), "action": action})).unwrap();
+        read(unsafe { msime_client_typing_statistics(request.as_ptr(), request.len()) })
+    };
+    call(json!({"operation": "set_enabled", "enabled": true}));
+    let recorded = call(
+        json!({"operation": "record", "text": "合成", "source": "quanpin", "day": "2026-10-01"}),
+    );
+    assert_eq!(recorded["value"]["recorded"], 2, "{recorded}");
+    assert_eq!(recorded["value"]["milestone"], Value::Null);
+    // A host keeping sounds quiet (Windows behind a full-screen application) still has the commit counted.
+    let quiet = call(
+        json!({"operation": "record", "text": "输入", "source": "quanpin", "day": "2026-10-01", "quiet": true}),
+    );
+    assert_eq!(quiet["value"]["recorded"], 2, "{quiet}");
+    assert!(quiet["value"].get("milestone").is_some());
 }

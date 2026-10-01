@@ -1,4 +1,5 @@
 #include "msime_client.h"
+#include "key_sound_render.h"
 #include <napi/native_api.h>
 #include <zlib.h>
 #include <cstring>
@@ -211,6 +212,9 @@ TEXT_ENTRY(SnapshotVersion, msime_client_snapshot_version)
 TEXT_ENTRY(SnapshotInspect, msime_client_snapshot_inspect)
 TEXT_ENTRY(SnapshotQueue, msime_client_snapshot_queue)
 TEXT_ENTRY(CloudRequestUrl, msime_client_cloud_request_url)
+TEXT_ENTRY(KeySoundPack, msime_client_key_sound_pack)
+TEXT_ENTRY(MusicPack, msime_client_music_pack)
+TEXT_ENTRY(Plugins, msime_client_plugins)
 TEXT_ENTRY(Create, msime_client_create)
 
 struct SnapshotRestoreWork {
@@ -349,6 +353,51 @@ static napi_value VoiceHotwords(napi_env env, napi_callback_info info) {
         napi_delete_async_work(env, work->work);
         delete work;
         return invalid(env, "Unable to queue voice hotword worker");
+    }
+    return promise;
+}
+
+// A pack import extracts or copies up to a music pack's size and validates it before swapping it into place, which the header says belongs on a worker thread, so it runs as async work and answers through a promise. The small catalog, remove and name-list calls stay on the synchronous `plugins` entry.
+struct PluginsWork {
+    napi_async_work work = nullptr;
+    napi_deferred deferred = nullptr;
+    std::string request;
+    char *result = nullptr;
+};
+
+static void executePlugins(napi_env, void *data) {
+    auto *work = static_cast<PluginsWork *>(data);
+    work->result = msime_client_plugins(
+        reinterpret_cast<const uint8_t *>(work->request.data()), work->request.size());
+}
+
+static void completePlugins(napi_env env, napi_status status, void *data) {
+    auto *work = static_cast<PluginsWork *>(data);
+    settleVoicePromise(env, status, work->deferred, work->result, "Plugin worker failed");
+    napi_delete_async_work(env, work->work);
+    delete work;
+}
+
+static napi_value PluginsAsync(napi_env env, napi_callback_info info) {
+    std::vector<napi_value> argv;
+    auto *work = new PluginsWork();
+    if (!arguments(env, info, 1, argv) || !argumentText(env, argv[0], work->request)) {
+        delete work;
+        return invalid(env, "Expected a plugins request");
+    }
+    napi_value promise = nullptr;
+    napi_value resource = nullptr;
+    if (napi_create_promise(env, &work->deferred, &promise) != napi_ok
+            || napi_create_string_utf8(env, "MSIME plugins", NAPI_AUTO_LENGTH, &resource) != napi_ok
+            || napi_create_async_work(env, nullptr, resource, executePlugins, completePlugins, work,
+                &work->work) != napi_ok) {
+        delete work;
+        return invalid(env, "Unable to create plugin worker");
+    }
+    if (napi_queue_async_work(env, work->work) != napi_ok) {
+        napi_delete_async_work(env, work->work);
+        delete work;
+        return invalid(env, "Unable to queue plugin worker");
     }
     return promise;
 }
@@ -744,6 +793,20 @@ static napi_value Command(napi_env env, napi_callback_info info) {
     return response(env, msime_client_command(handle, command));
 }
 
+// The typing effect of one key or commit: the packed integer msime_client.h documents. Called on the key path, so it allocates nothing beyond the returned number.
+static napi_value TypingEffect(napi_env env, napi_callback_info info) {
+    std::vector<napi_value> argv;
+    uint64_t handle = 0;
+    uint32_t event = 0;
+    if (!arguments(env, info, 2, argv) || !argumentHandle(env, argv[0], handle)
+            || napi_get_value_uint32(env, argv[1], &event) != napi_ok) {
+        return invalid(env, "Expected a session handle and a typing effect event");
+    }
+    napi_value output = nullptr;
+    if (napi_create_uint32(env, msime_client_typing_effect(handle, event), &output) != napi_ok) return nullptr;
+    return output;
+}
+
 static napi_value FixCandidatePosition(napi_env env, napi_callback_info info) {
     std::vector<napi_value> argv;
     uint64_t handle = 0;
@@ -904,6 +967,86 @@ static napi_value DoubaoDecodeFrame(napi_env env, napi_callback_info info) {
     return result;
 }
 
+// Decoding and pitching a pack's WAV samples reads files and runs a sample-rate converter, so it runs as async work and answers through a promise: the paths of the notes it wrote, or a rejection naming what was wrong with the sample.
+struct KeySoundRenderWork {
+    napi_async_work work = nullptr;
+    napi_deferred deferred = nullptr;
+    std::string sample;
+    std::vector<int32_t> semitones;
+    std::string directory;
+    uint32_t max_millis = 0;
+    KeySoundRender result;
+};
+
+static void executeKeySoundRender(napi_env, void *data) {
+    auto *work = static_cast<KeySoundRenderWork *>(data);
+    work->result = renderKeySoundNotes(work->sample, work->semitones, work->directory,
+        work->max_millis);
+}
+
+static void completeKeySoundRender(napi_env env, napi_status status, void *data) {
+    auto *work = static_cast<KeySoundRenderWork *>(data);
+    napi_value files = nullptr;
+    bool resolved = status == napi_ok && work->result.ok
+        && napi_create_array_with_length(env, work->result.files.size(), &files) == napi_ok;
+    for (size_t index = 0; resolved && index < work->result.files.size(); ++index) {
+        napi_value file = nullptr;
+        const std::string &path = work->result.files[index];
+        resolved = napi_create_string_utf8(env, path.data(), path.size(), &file) == napi_ok
+            && napi_set_element(env, files, static_cast<uint32_t>(index), file) == napi_ok;
+    }
+    if (resolved) {
+        napi_resolve_deferred(env, work->deferred, files);
+    } else {
+        rejectWith(env, work->deferred, work->result.error.empty()
+            ? "Key sound render worker failed" : work->result.error.c_str());
+    }
+    napi_delete_async_work(env, work->work);
+    delete work;
+}
+
+static napi_value KeySoundRenderNotes(napi_env env, napi_callback_info info) {
+    std::vector<napi_value> argv;
+    auto *work = new KeySoundRenderWork();
+    uint32_t count = 0;
+    bool is_array = false;
+    if (!arguments(env, info, 4, argv) || !argumentText(env, argv[0], work->sample)
+            || napi_is_array(env, argv[1], &is_array) != napi_ok || !is_array
+            || napi_get_array_length(env, argv[1], &count) != napi_ok
+            || count == 0 || count > kKeySoundMaxNotes
+            || !argumentText(env, argv[2], work->directory)
+            || napi_get_value_uint32(env, argv[3], &work->max_millis) != napi_ok) {
+        delete work;
+        return invalid(env, "Expected a sample path, semitones, a directory and a length bound");
+    }
+    for (uint32_t index = 0; index < count; ++index) {
+        napi_value element = nullptr;
+        int32_t semitone = 0;
+        if (napi_get_element(env, argv[1], index, &element) != napi_ok
+                || !argumentInt32(env, element, semitone)) {
+            delete work;
+            return invalid(env, "Semitones must be integers");
+        }
+        work->semitones.push_back(semitone);
+    }
+    napi_value promise = nullptr;
+    napi_value resource = nullptr;
+    if (napi_create_promise(env, &work->deferred, &promise) != napi_ok
+            || napi_create_string_utf8(env, "MSIME key sound render", NAPI_AUTO_LENGTH,
+                &resource) != napi_ok
+            || napi_create_async_work(env, nullptr, resource, executeKeySoundRender,
+                completeKeySoundRender, work, &work->work) != napi_ok) {
+        delete work;
+        return invalid(env, "Unable to create key sound render worker");
+    }
+    if (napi_queue_async_work(env, work->work) != napi_ok) {
+        napi_delete_async_work(env, work->work);
+        delete work;
+        return invalid(env, "Unable to queue key sound render worker");
+    }
+    return promise;
+}
+
 #define ENTRY(exported, function)                                                                  \
     { exported, nullptr, function, nullptr, nullptr, nullptr, napi_default, nullptr }
 
@@ -944,6 +1087,11 @@ static napi_value Init(napi_env env, napi_value exports) {
         ENTRY("parseCustomTranslationResponse", ParseCustomTranslationResponse),
         ENTRY("onlineQuery", OnlineQuery),
         ENTRY("cloudRequestUrl", CloudRequestUrl),
+        ENTRY("keySoundPack", KeySoundPack),
+        ENTRY("musicPack", MusicPack),
+        ENTRY("plugins", Plugins),
+        ENTRY("pluginsAsync", PluginsAsync),
+        ENTRY("keySoundRenderNotes", KeySoundRenderNotes),
         ENTRY("aiRequestForQuery", AiRequestForQuery),
         ENTRY("aiHttpRequest", AiHttpRequest),
         ENTRY("parseAiResponse", ParseAiResponse),
@@ -969,6 +1117,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         ENTRY("punctuationWithContext", PunctuationWithContext),
         ENTRY("balancePairedPunctuationAfterAutoClose", BalancePairedPunctuationAfterAutoClose),
         ENTRY("command", Command),
+        ENTRY("typingEffect", TypingEffect),
         ENTRY("select", Select),
         ENTRY("selectEdge", SelectEdge),
         ENTRY("selectAnyCandidate", SelectAnyCandidate),

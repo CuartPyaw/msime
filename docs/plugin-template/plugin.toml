@@ -1,0 +1,15 @@
+# A minimal sound pack to start from: copy this folder, rename it to your pack's id, change the fields below and replace the two samples. `msime-pack validate <folder>` checks it by the rules the input method imports it by; docs/plugins.md describes every field and limit.
+schema_version = 1
+kind = "sound"
+id = "example-keys"
+name = "示例按键音"
+version = "1.0.0"
+license = "CC0-1.0"
+author = "你的名字"
+description = "最小的按键音效包：普通键一声，空格一声。"
+permissions = []
+mode = "keys"
+
+[sounds]
+default = "key.wav"
+space = "space.wav"

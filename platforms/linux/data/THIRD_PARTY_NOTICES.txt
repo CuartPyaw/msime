@@ -8,8 +8,11 @@ Components compiled into the shared host library (libmsime_host_api.so, in the m
 * The input engine (msime-engine) — this project's GPL-3.0 (copyright).
 * The offline handwriting recognizer, a Rust port of zinnia's recognizer and model reader — zinnia's BSD 3-clause license (Zinnia-LICENSE.txt). The zinnia model it reads, installed in share/msime-client/handwriting, is under the LGPL 2.1 (HandwritingModel-LICENSE.txt, also installed beside the model).
 * SQLite, compiled in through rusqlite's bundled build — public domain.
+* The Chinese administrative divisions `@` mode offers, from modood/Administrative-divisions-of-China (https://github.com/modood/Administrative-divisions-of-China, commit c49d495b40ac73eb1a66f6eeae5f8fd10696f035), compiled by its author from the division codes published by the National Bureau of Statistics of China — WTFPL (Administrative-divisions-of-China-WTFPL.txt).
 * OpenCC dictionaries used for Simplified/Traditional conversion — Apache License 2.0 (OpenCC-Apache-2.0.txt).
-* The Rust crates the library is built from (serde, toml, sha2, cpal for audio capture, rusqlite and the rest of its dependency graph) — each crate's own license files, collected at package time (rust-crates-NOTICES.txt).
+* The Rust crates the library is built from (serde, toml, sha2, cpal for audio capture and playback, kira for mixing key sounds and music, rusqlite and the rest of its dependency graph) — each crate's own license files, collected at package time (rust-crates-NOTICES.txt).
+* Symphonia, which decodes the WAV and Ogg Vorbis files of sound packs (the symphonia crates and triple_buffer) — Mozilla Public License 2.0, whose text is in rust-crates-NOTICES.txt. Their source code is published on crates.io (https://crates.io/crates/symphonia, https://crates.io/crates/triple_buffer) at the versions this project's Cargo.lock pins.
+* rink-core, the input engine's V-mode unit conversion — Mozilla Public License 2.0, whose text is in rust-crates-NOTICES.txt; its source is published on crates.io (https://crates.io/crates/rink-core) at the version Cargo.lock pins. The units database it embeds (definitions.units) is forked from the GNU Units database, Copyright Free Software Foundation, Inc., under the GNU General Public License version 3 or later.
 
 The desktop settings binary (msime-linux-desktop, started by msime-linux-settings) statically links its own Rust crate graph, including reqwest with rustls and the webpki-roots certificate data (CDLA-Permissive-2.0); those crates are in rust-crates-NOTICES.txt as well. Its embedded web frontend is bundled from npm packages (React, @tauri-apps/api and their dependencies), whose license files are in frontend-npm-NOTICES.txt.
 
@@ -22,6 +25,8 @@ On-device speech recognition runs in the msime-voice-local helper, installed bes
 
 The speech recognition models are not part of this package; the settings page downloads them on request, and each model directory carries its own license.
 
+The built-in sound packs in share/msime-client/sound-packs are this project's own work, synthesized by scripts/generate_sound_packs.py, and dedicated to the public domain under CC0-1.0 (the license field of each plugin.toml).
+
 Compiled into the native IBus engine, the provider programs and the Fcitx5 addon without a runtime package of their own:
 
 * nlohmann/json, header-only — MIT (nlohmann_json-MIT.txt).
@@ -29,6 +34,6 @@ Compiled into the native IBus engine, the provider programs and the Fcitx5 addon
 
 Dictionaries fetched after installation by msime-linux-setup are verified against the installed desktop-dictionary.lock.json and keep their own notices beside them (for example mozc_dictionary_oss_README.txt for the Japanese dictionary); msime-engine-dictionary-NOTICE.md records where the dictionary data in those resources comes from and under which terms, including the attribution bigram.bin and trigram.bin owe the Chinese Wikipedia. This package ships no helpcode tables; the engine reads them at run time from helpcodes/ in the resource directory when one provides them, and msime-engine-helpcode-NOTICE.md applies to them.
 
-Shared libraries such as IBus, Fcitx5, ICU, libcurl, ALSA (libasound, which the host library's audio capture links), GTK and WebKitGTK are not bundled; they are loaded at run time from the distribution's packages, which carry their own copyright files.
+Shared libraries such as IBus, Fcitx5, ICU, libcurl, ALSA (libasound, which the host library's audio capture and playback link), GTK and WebKitGTK are not bundled; they are loaded at run time from the distribution's packages, which carry their own copyright files.
 
 The source tree retains each upstream notice. This collection is not a license-completeness or redistribution-authorization assessment; nested archives and distribution-specific dependencies must retain their own terms.

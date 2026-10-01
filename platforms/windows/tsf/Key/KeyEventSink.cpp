@@ -14,6 +14,7 @@
 #include "PassthroughStatistics.h"
 #include "PassthroughStatisticsQueue.h"
 #include "FanyDefines.h"
+#include "AltGrKeyPolicy.h"
 #include "FanyUtils.h"
 #include "FanyLog.h"
 #include "../Utils/PerfTimer.h"
@@ -783,7 +784,8 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
 
     if (isOpen) // Chinese mode
     {
-        const UINT shortcutModifiers = CaptureIpcModifiers();
+        // AltGr reads as Ctrl+Alt; a character it types is input, not a shortcut (AltGr+0 is '@' on AZERTY).
+        const UINT shortcutModifiers = Global::CharacterModifiers(CaptureIpcModifiers(), wch, *pCodeOut);
         if (!_serverUnavailableFallbackActive && IsCharacterSetInputModeToggle(*pCodeOut, shortcutModifiers))
         {
             if (pKeyState)
@@ -913,6 +915,22 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
         if (isCapsLockOn && isUppercaseAlphabet && !isInputInProgress)
         {
             return isTouchKeyboardSpecialKeys;
+        }
+
+        // "/" and "@" open their modes on an empty composition instead of typing a mark: they start the composition, and the Server hands them to the Engine as its first character.
+        if (!isInputInProgress && candidateMode == CANDIDATE_NONE &&
+            Global::OpensLocalMode(wch, false,
+                                   isPunctuation != FALSE && Global::PunctuationLockMode.load(std::memory_order_relaxed) !=
+                                                                 Global::PunctuationLock::AlwaysEnglish,
+                                   Global::CommandModeEnabled.load(std::memory_order_relaxed),
+                                   Global::MentionModeEnabled.load(std::memory_order_relaxed)))
+        {
+            if (pKeyState)
+            {
+                pKeyState->Category = CATEGORY_COMPOSING;
+                pKeyState->Function = FUNCTION_INPUT;
+            }
+            return TRUE;
         }
 
         //
@@ -1339,7 +1357,10 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
     keyState->Category = CATEGORY_NONE;
     keyState->Function = FUNCTION_NONE;
 
-    const UINT capturedModifiers = modifiersDown ? *modifiersDown : CaptureIpcModifiers();
+    // AltGr reads as Ctrl+Alt; a character it types is input, not a shortcut (AltGr+0 is '@' on AZERTY).
+    const UINT capturedModifiers =
+        Global::CharacterModifiers(modifiersDown ? *modifiersDown : CaptureIpcModifiers(), *classifiedWch,
+                                   *classifiedCode);
     const bool projectedImeOpen = _deferredKeyProjectionValid
                                       ? _deferredProjectedImeOpen
                                       : _pCompositionProcessorEngine->GetIMEMode(_pThreadMgr, _tfClientId) != FALSE;
@@ -1492,6 +1513,16 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
             // the beginning belongs to the application.
             isInputKey = false;
         }
+        // Match the normal path: "/" and "@" open their modes on an empty composition.
+        if (!isInputKey && shadow.inputLength == 0 && !shadow.candidateActive &&
+            Global::OpensLocalMode(*classifiedWch, false,
+                                   shadow.punctuationOpen && Global::PunctuationLockMode.load(std::memory_order_relaxed) !=
+                                                                 Global::PunctuationLock::AlwaysEnglish,
+                                   Global::CommandModeEnabled.load(std::memory_order_relaxed),
+                                   Global::MentionModeEnabled.load(std::memory_order_relaxed)))
+        {
+            isInputKey = true;
+        }
     }
 
     if (shadow.candidateActive && isInputKey)
@@ -1505,6 +1536,20 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
 
     if (shadow.imeOpen && shadow.inputLength > 0)
     {
+        // Match the normal path: V's digits and operators compose ahead of their paging and punctuation meanings, and a digit key printing anything else selects.
+        if (Global::IsExpressionModeComposition(shadow.rawInput.c_str(), shadow.rawInput.size(),
+                                                Global::ExpressionModeEnabled.load(std::memory_order_relaxed)))
+        {
+            switch (Global::ClassifyExpressionKey(*classifiedCode, *classifiedWch))
+            {
+            case Global::ExpressionKey::Input:
+                return setKeyState(CATEGORY_COMPOSING, FUNCTION_INPUT);
+            case Global::ExpressionKey::SelectByNumber:
+                return setKeyState(CATEGORY_CANDIDATE, FUNCTION_SELECT_BY_NUMBER);
+            case Global::ExpressionKey::Unclaimed:
+                break;
+            }
+        }
         const bool candidateKey = shadow.candidateActive;
         switch (*classifiedCode)
         {
@@ -2485,7 +2530,8 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
 
         Global::Keycode = code;
         Global::wch = wch;
-        Global::ModifiersDown = capturedModifiers;
+        // The modifiers the key was classified with: an AltGr character goes without Ctrl+Alt, or the Server would cancel it as a shortcut.
+        Global::ModifiersDown = Global::CharacterModifiers(capturedModifiers, wch, code);
 
         PerfTimer writeShmTimer;
         // Enter is finalized by the in-process TSF path. Reuse the legacy
@@ -2515,7 +2561,8 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
             Global::ModifiersDown |
             (_candidateMode == CANDIDATE_ORIGINAL
                  ? msime::windows::PipeMetadata::CandidateActive
-                 : 0u);
+                 : 0u) |
+            (IsAutoRepeat(lParam) ? msime::windows::PipeMetadata::AutoRepeat : 0u);
         WriteDataToSharedMemory(Global::Keycode, wch, ipcModifiers, nullptr, 0,
                                 localCommitObservation,
                                 hasLocalCommitObservation && !localCommitObservation.empty()

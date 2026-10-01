@@ -281,7 +281,9 @@ constexpr std::uint32_t CancelKeyboardComposition = 22;
 // Commit a completed Wubi code while preserving letters already buffered after it.
 // Payload: "<consumed>\t<text>".
 constexpr std::uint32_t CommitCandidateAndContinue = 27;
-constexpr std::uint32_t MaxKnown = CommitCandidateAndContinue;
+// Which of the V, "/" and "@" local modes the Engine opens, so the TIP routes their keys as composition input. Payload: three '0'/'1' flags in that order. Each is already false outside the pinyin schemes, where the Engine opens none of them.
+constexpr std::uint32_t LocalModeTriggersChanged = 28;
+constexpr std::uint32_t MaxKnown = LocalModeTriggersChanged;
 // Source compatibility for the Server's historical spellings.
 constexpr std::uint32_t SwitchToEn = SwitchToEnglish;
 constexpr std::uint32_t SwitchToCn = SwitchToChinese;

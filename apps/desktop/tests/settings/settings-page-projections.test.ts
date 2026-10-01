@@ -13,7 +13,8 @@ const project = (overrides: Partial<Parameters<typeof settingsPageProjections>[0
     hasCommunity: true,
     showFloatingToolbar: true,
     showDeveloperPage: true,
-    mobileHiddenPageIds: ["floating-toolbar"],
+    hasPlugins: true,
+    mobileHiddenPageIds: ["floating-toolbar", "plugins"],
     mobilePageTitle,
     ...overrides,
   });
@@ -61,4 +62,25 @@ test("projects mobile pages into tabs, grouped settings, and sidebar sections", 
   );
   expect(mobile.sidebarGroups[0].map((page) => page.id)).toEqual(["home"]);
   expect(mobile.sidebarGroups.flat().map((page) => page.id)).not.toContain("more");
+});
+
+test("places the 扩展 page beside 云剪贴板 and drops it where the host does not back it", () => {
+  const desktop = project();
+  const group = desktop.sidebarGroups.find((ids) => ids.some((page) => page.id === "tools"));
+  expect(group?.map((page) => page.id)).toEqual([
+    "account",
+    "tools",
+    "plugins",
+    "typing-statistics",
+    "community",
+    "download",
+  ]);
+  expect(desktop.availablePages.find((page) => page.id === "plugins")?.title).toBe("扩展");
+
+  expect(project({ hasPlugins: false }).availablePages.map((page) => page.id)).not.toContain(
+    "plugins",
+  );
+  const phone = project({ mobilePlatform: true });
+  expect(phone.sidebarGroups.flat().map((page) => page.id)).not.toContain("plugins");
+  expect(phone.mobileSecondaryGroups.flat().map((page) => page.id)).not.toContain("plugins");
 });

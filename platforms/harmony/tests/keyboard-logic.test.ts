@@ -259,6 +259,30 @@ import { CandidateNumberFontPolicy } from "../entry/src/main/ets/keyboard/candid
 import { PreeditCaretPolicy } from "../entry/src/main/ets/keyboard/candidate/PreeditCaretPolicy";
 import { CandidatePreeditStylePolicy } from "../entry/src/main/ets/keyboard/candidate/CandidatePreeditStylePolicy";
 import {
+  KEY_SOUNDS_OFF,
+  KeySoundClass,
+  KeySoundEvent,
+  KeySoundMelody,
+  KeySoundPackFiles,
+  KeySoundPolicy,
+  KeySoundSettings,
+} from "../entry/src/main/ets/keyboard/KeySoundPolicy";
+import {
+  MUSIC_OFF,
+  MusicChange,
+  MusicPolicy,
+  MusicSettings,
+  MusicStep,
+  MusicTransport,
+} from "../entry/src/main/ets/keyboard/MusicPolicy";
+import {
+  COMBO_IDLE_RESET_MILLIS,
+  TYPING_EFFECT_COMMIT,
+  TYPING_EFFECTS_OFF,
+  TypingEffectPolicy,
+  TypingEffectStyle,
+} from "../entry/src/main/ets/keyboard/TypingEffectPolicy";
+import {
   EmojiPanelKeyAction,
   EmojiPanelKeyPolicy,
 } from "../entry/src/main/ets/keyboard/emoji/EmojiPanelKeyPolicy";
@@ -282,6 +306,11 @@ import {
 } from "../entry/src/main/ets/keyboard/settings/AiModelCatalogPolicy";
 import { HttpAsrConfigurationPolicy } from "../entry/src/main/ets/keyboard/input/HttpAsrConfigurationPolicy";
 import { SkinImportPolicy } from "../entry/src/main/ets/keyboard/skin/SkinImportPolicy";
+import {
+  PickedEntryKind,
+  PluginFolderScan,
+  PluginImportPolicy,
+} from "../entry/src/main/ets/keyboard/settings/PluginImportPolicy";
 import {
   SmartPunctuationSpacePolicy,
   SpaceConvertDecision,
@@ -611,6 +640,14 @@ group("projects the same form factor into every settings capability", () => {
     "phone settings offer the hardware-keyboard switches the keyboard still acts on",
   );
   check(desktop.voiceHotkeys, "2-in-1 settings offer the voice hotkeys");
+  check(
+    desktop.keySound && desktop.music && desktop.pluginTriggers && desktop.typingEffects,
+    "2-in-1 settings offer key sounds, background music, the V, / and @ modes and the typing effects",
+  );
+  check(
+    !phone.keySound && !phone.music && !phone.pluginTriggers && !phone.typingEffects,
+    "a phone keeps its own key feedback, plays no music, draws no typing effect and does not claim the hardware-only modes",
+  );
   // The phone strip is always horizontal, so a layout select there is a control that does nothing; the 2in1 candidate window keeps the choice.
   check(
     phone.fixedCandidateLayout === "horizontal",
@@ -3732,6 +3769,28 @@ group("local modes are addressable by trigger and by preference key", () => {
   check(LocalInputMode.fromTrigger("Z") === null, "an unassigned letter enters nothing");
   const triggers = new Set(LocalInputMode.MODES.map((entry) => entry.trigger));
   check(triggers.size === LocalInputMode.MODES.length, "no two modes share a trigger");
+  // V, / and @ are named by the Engine's local_mode and entered from a hardware keyboard; the touch tools panel, which lists MODES, does not offer them as tiles.
+  check(
+    LocalInputMode.HARDWARE_MODES.map((entry) => entry.preferenceKey).join(",") ===
+      "expression,command,mention",
+    "the three hardware-only modes are named as the Engine names them",
+  );
+  const expression = LocalInputMode.fromPreferenceKey("expression");
+  check(
+    expression !== null && expression.trigger === "V" && expression.title === "计算",
+    "expression is entered with Shift+V and titled for the strip",
+  );
+  check(LocalInputMode.fromTrigger("/")?.preferenceKey === "command", "/ enters the command mode");
+  check(LocalInputMode.fromTrigger("@")?.preferenceKey === "mention", "@ enters the mention mode");
+  check(
+    LocalInputMode.MODES.every((entry) => LocalInputMode.HARDWARE_MODES.indexOf(entry) < 0),
+    "the touch tiles stay the eight they were",
+  );
+  const all = LocalInputMode.MODES.concat(LocalInputMode.HARDWARE_MODES);
+  check(
+    new Set(all.map((entry) => entry.trigger)).size === all.length,
+    "no hardware-only mode shares a trigger with a touch mode",
+  );
 });
 
 group("voice providers share one recording session", () => {
@@ -8905,7 +8964,12 @@ group("a hardware key spells or punctuates depending on what is being spelled", 
       true,
       { ...PLAIN_SPELLING, ...spelling },
     );
-  const unicode: Partial<HardwareSpelling> = { localMode: "unicode", editing: "u4e", caret: 3 };
+  const unicode: Partial<HardwareSpelling> = {
+    localMode: "unicode",
+    editing: "u4e",
+    caret: 3,
+    spellingSymbols: "0123456789",
+  };
   const digit = route({ keyCode: 2000, unicodeChar: 0x30 }, unicode);
   check(
     digit.action === HardwareKeyAction.COMPOSE && digit.character === 0x30,
@@ -8923,7 +8987,7 @@ group("a hardware key spells or punctuates depending on what is being spelled", 
   );
   const plus = route(
     { keyCode: 2058, unicodeChar: 0x2b, shiftKey: true },
-    { localMode: "unicode", editing: "U", caret: 1 },
+    { localMode: "unicode", editing: "U", caret: 1, spellingSymbols: "0123456789" },
   );
   check(
     plus.action === HardwareKeyAction.COMPOSE && plus.character === 0x2b,
@@ -10400,5 +10464,757 @@ group("LocalVoiceModelPolicy", () => {
       LocalVoiceModelPolicy.action('{"operation":"format","id":"x"}') === null &&
       LocalVoiceModelPolicy.action("[") === null,
     "a missing id, an unknown operation or unreadable text is refused",
+  );
+});
+
+group("V mode spells digits and operators the Engine lists, and Shift+digit picks", () => {
+  const route = (
+    over: Record<string, unknown>,
+    spelling: Partial<HardwareSpelling>,
+    wordCharacter: string = "disabled",
+  ) =>
+    HardwareKeyRouter.route(
+      {
+        keyCode: 0,
+        unicodeChar: 0,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+        logoKey: false,
+        ...over,
+      } as HardwareKey,
+      true,
+      true,
+      false,
+      undefined,
+      false,
+      false,
+      wordCharacter,
+      true,
+      { ...PLAIN_SPELLING, ...spelling },
+    );
+  // What the Engine exports in expression mode (`LocalInputMode::spelling_symbols`).
+  const expression: Partial<HardwareSpelling> = {
+    localMode: "expression",
+    editing: "V12",
+    caret: 3,
+    spellingSymbols: "0123456789+-*/.()%^",
+  };
+  const four = route({ keyCode: 2004, unicodeChar: 0x34 }, expression);
+  check(
+    four.action === HardwareKeyAction.COMPOSE && four.character === 0x34,
+    "a plain 4 is part of the number, not the fourth candidate",
+  );
+  const zero = route({ keyCode: 2000, unicodeChar: 0x30 }, expression);
+  check(
+    zero.action === HardwareKeyAction.COMPOSE && zero.character === 0x30,
+    "0 is a digit rather than the key that finishes the composition",
+  );
+  const pick = route({ keyCode: 2002, unicodeChar: 0x40, shiftKey: true }, expression);
+  check(
+    pick.action === HardwareKeyAction.SELECT && pick.index === 1,
+    "Shift+2 types @, which V mode does not spell, so it picks the second row",
+  );
+  const open = route({ keyCode: 2009, unicodeChar: 0x28, shiftKey: true }, expression);
+  check(
+    open.action === HardwareKeyAction.COMPOSE && open.character === 0x28,
+    "Shift+9 is the ( of the expression, not a pick",
+  );
+  const times = route({ keyCode: 2008, unicodeChar: 0x2a, shiftKey: true }, expression);
+  check(
+    times.action === HardwareKeyAction.COMPOSE && times.character === 0x2a,
+    "Shift+8 is the multiplication sign",
+  );
+  const minus = route({ keyCode: 2057, unicodeChar: 0x2d }, expression);
+  check(
+    minus.action === HardwareKeyAction.COMPOSE && minus.character === 0x2d,
+    "- is subtraction rather than the previous-page key",
+  );
+  const plus = route({ keyCode: 2058, unicodeChar: 0x2b, shiftKey: true }, expression);
+  check(
+    plus.action === HardwareKeyAction.COMPOSE && plus.character === 0x2b,
+    "Shift+= is addition rather than the next-page key",
+  );
+  const point = route({ keyCode: 2044, unicodeChar: 0x2e }, expression);
+  check(
+    point.action === HardwareKeyAction.COMPOSE && point.character === 0x2e,
+    ". is a decimal point rather than the next-page key",
+  );
+  const divide = route({ keyCode: 2064, unicodeChar: 0x2f }, expression);
+  check(
+    divide.action === HardwareKeyAction.COMPOSE && divide.character === 0x2f,
+    "/ is division rather than a mark that ends the composition",
+  );
+  const keypadDot = route({ keyCode: 2114, unicodeChar: 0x2e }, expression);
+  check(
+    keypadDot.action === HardwareKeyAction.COMPOSE && keypadDot.character === 0x2e,
+    "the keypad's point is the decimal point too",
+  );
+  const keypadSeven = route({ keyCode: 2110, unicodeChar: 0 }, expression);
+  check(
+    keypadSeven.action === HardwareKeyAction.COMPOSE && keypadSeven.character === 0x37,
+    "a keypad digit is a digit of the number",
+  );
+  check(
+    route({ keyCode: 2058, unicodeChar: 0x3d }, expression).action === HardwareKeyAction.NEXT_PAGE,
+    "= is not an operator the Engine takes, so it still pages",
+  );
+  check(
+    route({ keyCode: 2043, unicodeChar: 0x2c }, expression).action ===
+      HardwareKeyAction.PREVIOUS_PAGE,
+    ", still pages",
+  );
+  const wordCharacter = route({ keyCode: 2057, unicodeChar: 0x2d }, expression, "minus_equal");
+  check(
+    wordCharacter.action === HardwareKeyAction.COMPOSE,
+    "with -/= taking a word's first or last character, - is still subtraction in V mode",
+  );
+  check(
+    route({ keyCode: 2050, unicodeChar: 0x20 }, expression).action === HardwareKeyAction.COMMIT,
+    "Space takes the highlighted result",
+  );
+  check(
+    route({ keyCode: 2004, unicodeChar: 0x34 }, { ...expression, englishCandidates: true })
+      .action === HardwareKeyAction.SELECT,
+    "the English candidate mode spells letters only, whatever the symbols say",
+  );
+  check(
+    route({ keyCode: 2004, unicodeChar: 0x34 }, { editing: "ni", caret: 2 }).action ===
+      HardwareKeyAction.SELECT,
+    "an ordinary composition lists no symbols, so its digits still pick",
+  );
+  check(
+    route({ keyCode: 2114, unicodeChar: 0x2e }, { editing: "ni", caret: 2 }).action ===
+      HardwareKeyAction.COMMIT_THEN_TYPE,
+    "and the keypad's point still finishes it and types an ASCII point",
+  );
+  // The command and mention modes spell with letters, so they list no symbols and their keys route like any composition.
+  check(
+    route({ keyCode: 2001, unicodeChar: 0x31 }, { localMode: "command", editing: "/rq", caret: 3 })
+      .action === HardwareKeyAction.SELECT,
+    "a digit picks a command",
+  );
+});
+
+group(
+  "/ and @ with nothing composed reach the Engine as punctuation, which opens their modes",
+  () => {
+    const mark = (character: string, shiftKey: boolean): HardwareKey => ({
+      keyCode: 0,
+      unicodeChar: character.charCodeAt(0),
+      ctrlKey: false,
+      altKey: false,
+      logoKey: false,
+      shiftKey,
+    });
+    // The runtime sends a mark listed in spelling_symbols to the Engine as a character, which is where the modes open; the host only has to claim the key.
+    const slash = HardwareKeyRouter.route(mark("/", false), false, true);
+    check(
+      slash.action === HardwareKeyAction.PUNCTUATION && slash.character === 0x2f,
+      "/ is claimed for the Engine",
+    );
+    const at = HardwareKeyRouter.route(mark("@", true), false, true);
+    check(at.action === HardwareKeyAction.PUNCTUATION && at.character === 0x40, "@ is claimed too");
+    check(
+      HardwareKeyRouter.route(mark("/", false), false, false).action === HardwareKeyAction.RELEASE,
+      "in English the application types a literal /",
+    );
+  },
+);
+
+group("key sounds follow the desktop player's settings and pack rules", () => {
+  const files = (overrides: Partial<KeySoundPackFiles>): KeySoundPackFiles => ({
+    id: "default",
+    name: "清脆键盘",
+    license: "CC0-1.0",
+    builtin: true,
+    mode: "keys",
+    sounds: {
+      default: "/packs/default/key.wav",
+      space: "/packs/default/space.wav",
+      enter: null,
+      backspace: "/packs/default/backspace.wav",
+      commit: "/packs/default/commit.wav",
+      achievement: "/packs/default/achievement.wav",
+    },
+    sequence: null,
+    max_sample_millis: 1500,
+    melody_idle_reset_millis: 3000,
+    ...overrides,
+  });
+  const keys = files({});
+  const twinkle = files({
+    id: "twinkle",
+    mode: "sequence",
+    sounds: {
+      default: null,
+      space: null,
+      enter: null,
+      backspace: null,
+      commit: null,
+      achievement: null,
+    },
+    sequence: { sample: "/packs/twinkle/tone.wav", semitones: [0, 0, 7, 7, 9], advance: "key" },
+  });
+
+  check(
+    KeySoundPolicy.settings(undefined) === KEY_SOUNDS_OFF,
+    "no plugins record is every sound off",
+  );
+  check(!KeySoundPolicy.wanted(KEY_SOUNDS_OFF), "and nothing is loaded for it");
+  const on: KeySoundSettings = KeySoundPolicy.settings({ key_sound: { enabled: true } });
+  check(
+    on.key &&
+      !on.melody &&
+      on.pack === "default" &&
+      on.melodyPack === "twinkle" &&
+      on.volume === 50,
+    "a partial record takes the shared defaults for what it leaves out",
+  );
+  check(
+    KeySoundPolicy.settings({ key_sound: { enabled: true, volume: 250 } }).volume === 50,
+    "an out-of-range volume falls back rather than playing louder than full",
+  );
+  const melody: KeySoundSettings = KeySoundPolicy.settings({
+    key_sound: { enabled: true, mode: "melody", volume: 80 },
+    melody: { pack: "twinkle" },
+  });
+  check(melody.melody && melody.volume === 80, "melody mode and its volume are read");
+  check(
+    KeySoundPolicy.selection(melody).pack === null &&
+      KeySoundPolicy.selection(melody).melodyPack === "twinkle",
+    "a melody alone loads only the melody pack",
+  );
+  const commitToo: KeySoundSettings = { ...melody, commit: true };
+  check(
+    KeySoundPolicy.selection(commitToo).pack === "default",
+    "a commit sound loads the key pack beside the melody",
+  );
+  check(
+    KeySoundPolicy.settings({ achievements: { enabled: true } }).achievements &&
+      KeySoundPolicy.wanted(KeySoundPolicy.settings({ achievements: { enabled: true } })),
+    "achievements alone are enough to load the key pack",
+  );
+  check(
+    KeySoundPolicy.gain({ ...on, volume: 50 }) === 0.5,
+    "50 is half amplitude, as on the desktop",
+  );
+  check(KeySoundPolicy.gain({ ...on, volume: 0 }) === 0, "0 is silent");
+  check(!KeySoundPolicy.keysSilent(false, false, false), "Chinese mode sounds its keys");
+  check(KeySoundPolicy.keysSilent(true, false, false), "a password field is silent");
+  check(KeySoundPolicy.keysSilent(false, true, false), "English mode is silent, as on the desktop");
+  check(
+    !KeySoundPolicy.keysSilent(false, true, true),
+    "the English candidate mode composes its keys and sounds them",
+  );
+
+  check(KeySoundPolicy.keyClass(2050, 0x20, false, false, false) === KeySoundClass.SPACE, "space");
+  check(KeySoundPolicy.keyClass(2054, 0, false, false, false) === KeySoundClass.ENTER, "enter");
+  check(
+    KeySoundPolicy.keyClass(2119, 0, false, false, false) === KeySoundClass.ENTER,
+    "keypad enter",
+  );
+  check(
+    KeySoundPolicy.keyClass(2055, 0, false, false, false) === KeySoundClass.BACKSPACE,
+    "backspace",
+  );
+  check(
+    KeySoundPolicy.keyClass(2017, 0x61, false, false, false) === KeySoundClass.DEFAULT,
+    "a letter",
+  );
+  check(
+    KeySoundPolicy.keyClass(2017, 0x61, true, false, false) === -1,
+    "Ctrl+A is a shortcut, silent",
+  );
+  check(KeySoundPolicy.keyClass(2014, 0, false, false, false) === -1, "an arrow is silent");
+  check(KeySoundPolicy.keyClass(2047, 0, false, false, false) === -1, "Shift on its own is silent");
+
+  const requests = KeySoundPolicy.samples(keys, twinkle, []);
+  check(
+    requests.map((request) => request.file).join(",") ===
+      "/packs/default/key.wav,/packs/default/space.wav,/packs/default/backspace.wav," +
+        "/packs/default/commit.wav,/packs/default/achievement.wav,/packs/twinkle/tone.wav",
+    "each file is prepared once, a missing class falling back to the default at play time",
+  );
+  check(
+    requests[requests.length - 1].semitones.join(",") === "0,7,9",
+    "a melody sample is rendered once per distinct pitch of its tune",
+  );
+  check(
+    KeySoundPolicy.samples(twinkle, null, TypingEffectPolicy.tierSemitones()).length === 0,
+    "a key pack in sequence mode has no key, commit or achievement samples here",
+  );
+
+  const state = new KeySoundMelody();
+  const keyCues = KeySoundPolicy.cues(
+    on,
+    keys,
+    null,
+    KeySoundEvent.KEY,
+    KeySoundClass.ENTER,
+    state,
+    0,
+  );
+  check(
+    keyCues.length === 1 &&
+      keyCues[0].file === "/packs/default/key.wav" &&
+      keyCues[0].semitone === 0,
+    "a class without its own sample plays the pack's default",
+  );
+  check(
+    KeySoundPolicy.cues(on, keys, null, KeySoundEvent.KEY, KeySoundClass.SPACE, state, 0)[0]
+      .file === "/packs/default/space.wav",
+    "space plays its own sample",
+  );
+  check(
+    KeySoundPolicy.cues(on, keys, null, KeySoundEvent.COMMIT, 0, state, 0).length === 0,
+    "a commit is silent while the commit sound is off",
+  );
+  check(
+    KeySoundPolicy.cues({ ...on, commit: true }, keys, null, KeySoundEvent.COMMIT, 0, state, 0)[0]
+      .file === "/packs/default/commit.wav",
+    "and plays the pack's commit sample while it is on",
+  );
+  check(
+    KeySoundPolicy.cues(
+      { ...on, achievements: true },
+      keys,
+      null,
+      KeySoundEvent.ACHIEVEMENT,
+      0,
+      state,
+      0,
+    )[0].file === "/packs/default/achievement.wav",
+    "a milestone plays the achievement sample",
+  );
+  check(
+    KeySoundPolicy.cues(on, keys, null, KeySoundEvent.ACHIEVEMENT, 0, state, 0).length === 0,
+    "but only with achievements on",
+  );
+  check(
+    KeySoundPolicy.cues({ ...on, key: false }, keys, null, KeySoundEvent.KEY, 0, state, 0)
+      .length === 0,
+    "keys are silent with the key sound off",
+  );
+  check(
+    KeySoundPolicy.cues(on, twinkle, null, KeySoundEvent.KEY, 0, state, 0).length === 0,
+    "a sequence pack chosen as the key pack leaves keys silent, as on the desktop",
+  );
+
+  const tune = new KeySoundMelody();
+  const notes: number[] = [];
+  for (let press = 0; press < 6; press++) {
+    const cue = KeySoundPolicy.cues(melody, null, twinkle, KeySoundEvent.KEY, 0, tune, press * 100);
+    notes.push(cue[0].semitone);
+  }
+  check(notes.join(",") === "0,0,7,7,9,0", "keys step through the tune and start over at its end");
+  const paused = KeySoundPolicy.cues(melody, null, twinkle, KeySoundEvent.KEY, 0, tune, 500 + 3000);
+  check(paused[0].semitone === 0, "three seconds without a note start the tune again");
+  check(
+    KeySoundPolicy.cues(melody, null, twinkle, KeySoundEvent.COMMIT, 0, tune, 3600).length === 0,
+    "a tune that advances on keys ignores commits",
+  );
+  const onCommit = files({
+    ...twinkle,
+    sequence: { sample: "/packs/twinkle/tone.wav", semitones: [4, 5], advance: "commit" },
+  });
+  const commitTune = new KeySoundMelody();
+  check(
+    KeySoundPolicy.cues(melody, null, onCommit, KeySoundEvent.KEY, 0, commitTune, 0).length === 0,
+    "a tune that advances on commits leaves keys silent",
+  );
+  check(
+    KeySoundPolicy.cues(melody, null, onCommit, KeySoundEvent.COMMIT, 0, commitTune, 0)[0]
+      .semitone === 4,
+    "and steps on each commit",
+  );
+  check(new KeySoundMelody().step([], 0, 3000) === null, "an empty tune has no note");
+
+  check(
+    KeySoundPolicy.isWav("/a/B.WAV") && !KeySoundPolicy.isWav("/a/b.ogg"),
+    "WAV is told by extension, and an Ogg sample is not played: nothing here could bound its decoded length",
+  );
+  check(
+    KeySoundPolicy.cueKey("/a.wav", -2) !== KeySoundPolicy.cueKey("/a.wav", 2),
+    "each pitch of a file is its own sound",
+  );
+
+  const tiered: KeySoundSettings = KeySoundPolicy.settings({
+    combo_counter: true,
+    combo_tier_sound: true,
+  });
+  check(
+    tiered.tierSound && KeySoundPolicy.wanted(tiered),
+    "the tier-up sound alone is enough to load sounds",
+  );
+  check(
+    !KeySoundPolicy.settings({ combo_tier_sound: true }).tierSound,
+    "the tier-up sound needs the combo counter, as host-api's tier_sound does",
+  );
+  check(
+    KeySoundPolicy.selection(tiered).pack === "default" &&
+      KeySoundPolicy.selection(tiered).tierSound &&
+      !KeySoundPolicy.selection(on).tierSound,
+    "the tier-up sound loads the key pack, and its switch is part of what a reload is decided by",
+  );
+  const tierRequests = KeySoundPolicy.samples(keys, null, TypingEffectPolicy.tierSemitones());
+  const commitRequest = tierRequests.find(
+    (request) => request.file === "/packs/default/commit.wav",
+  );
+  check(
+    commitRequest !== undefined && commitRequest.semitones.join(",") === "0,3,6,9,12",
+    "the commit sample is prepared at its own pitch and at each tier's, 3 semitones apart up to an octave",
+  );
+  check(
+    KeySoundPolicy.samples(keys, null, [])
+      .filter((request) => request.file === "/packs/default/commit.wav")[0]
+      .semitones.join(",") === "0",
+    "without the tier-up sound the commit sample is prepared at its own pitch only",
+  );
+  const tierCue = KeySoundPolicy.tierCue(tiered, keys, TypingEffectPolicy.tierSemitone(2));
+  check(
+    tierCue !== null && tierCue.file === "/packs/default/commit.wav" && tierCue.semitone === 6,
+    "the second tier plays the commit sample 6 semitones up",
+  );
+  check(
+    KeySoundPolicy.tierCue(on, keys, 3) === null &&
+      KeySoundPolicy.tierCue(tiered, null, 3) === null,
+    "no tier-up sound while it is off or before the key pack has loaded",
+  );
+
+  check(
+    KeySoundPolicy.manifests("sound", "/res/sound-packs", "/state", "rain").join(",") ===
+      "/res/sound-packs/rain/plugin.toml,/state/plugins/sound/rain/plugin.toml",
+    "a pack is watched where it is built in and where it would be installed",
+  );
+  check(
+    KeySoundPolicy.manifests("music", "/res/sound-packs", "", "lofi").join(",") ===
+      "/res/sound-packs/lofi/plugin.toml",
+    "without a state root only the built-in manifest is watched",
+  );
+  const manifestStat = { ino: BigInt(42), size: 120, mtime: 1700000000 };
+  const loadedStamp = KeySoundPolicy.stamp([manifestStat, null]);
+  check(
+    loadedStamp === KeySoundPolicy.stamp([{ ...manifestStat }, null]),
+    "an untouched manifest keeps its stamp",
+  );
+  check(
+    loadedStamp !== KeySoundPolicy.stamp([{ ...manifestStat, ino: BigInt(43) }, null]) &&
+      loadedStamp !== KeySoundPolicy.stamp([{ ...manifestStat, size: 121 }, null]) &&
+      loadedStamp !== KeySoundPolicy.stamp([{ ...manifestStat, mtime: 1700000001 }, null]),
+    "a pack imported again under the same id moves the stamp, whichever of inode, size or time changed",
+  );
+  check(
+    loadedStamp !== KeySoundPolicy.stamp([null, null]) &&
+      KeySoundPolicy.stamp([null, null]) !== KeySoundPolicy.stamp([null, manifestStat]),
+    "removing a pack, or installing one that was missing, moves the stamp",
+  );
+});
+
+group("typing effects decode host-api's answer and draw what it asks", () => {
+  check(TypingEffectPolicy.settings(undefined) === TYPING_EFFECTS_OFF, "no plugins record is off");
+  check(
+    !TypingEffectPolicy.active(TypingEffectPolicy.settings({})),
+    "keys are not handed to host-api while the effect and the counter are both off",
+  );
+  const power = TypingEffectPolicy.settings({
+    effect_style: "power_mode",
+    effect_intensity: 80,
+    combo_counter: true,
+    combo_tier_sound: true,
+  });
+  check(
+    power.style === TypingEffectStyle.POWER_MODE &&
+      power.intensity === 80 &&
+      power.comboCounter &&
+      power.tierSound &&
+      TypingEffectPolicy.active(power),
+    "the shared preference keys are read",
+  );
+  check(
+    TypingEffectPolicy.settings({ effect_style: "confetti", effect_intensity: 150 }).style ===
+      TypingEffectStyle.OFF &&
+      TypingEffectPolicy.settings({ effect_intensity: 150 }).intensity === 50,
+    "an unknown style is off and an out-of-range intensity takes the default",
+  );
+  check(
+    TypingEffectPolicy.active(TypingEffectPolicy.settings({ combo_counter: true })),
+    "the counter alone is enough to count keys",
+  );
+  check(
+    !TypingEffectPolicy.settings({ combo_tier_sound: true }).tierSound,
+    "the tier-up sound needs the counter",
+  );
+
+  const answer = 25 | (1 << 16) | (TypingEffectStyle.SPARKS << 17) | (1 << 20);
+  const decoded = TypingEffectPolicy.decode(answer);
+  check(
+    decoded.count === 25 &&
+      decoded.tierUp &&
+      decoded.style === TypingEffectStyle.SPARKS &&
+      decoded.tierSound,
+    "every field of the answer is unpacked",
+  );
+  const quiet = TypingEffectPolicy.decode(0);
+  check(
+    quiet.count === 0 && !quiet.tierUp && quiet.style === TypingEffectStyle.OFF && !quiet.tierSound,
+    "0 is nothing to draw",
+  );
+  check(
+    TypingEffectPolicy.decode(0xffff | (TypingEffectStyle.POWER_MODE << 17)).count === 65535 &&
+      TypingEffectPolicy.decode(0xffff | (TypingEffectStyle.POWER_MODE << 17)).style ===
+        TypingEffectStyle.POWER_MODE,
+    "a saturated count does not spill into the style",
+  );
+  check(
+    TypingEffectPolicy.tier(9) === 0 &&
+      TypingEffectPolicy.tier(10) === 1 &&
+      TypingEffectPolicy.tier(25) === 2 &&
+      TypingEffectPolicy.tier(50) === 3 &&
+      TypingEffectPolicy.tier(100) === 4 &&
+      TypingEffectPolicy.tier(400) === 4,
+    "the tiers are client-core's milestones 10, 25, 50 and 100",
+  );
+  check(
+    TypingEffectPolicy.tierSemitone(4) === 12 &&
+      TypingEffectPolicy.tierSemitones().join(",") === "3,6,9,12",
+    "the fourth tier's sound is an octave up, as host-api pitches it",
+  );
+  check(
+    TYPING_EFFECT_COMMIT === 4 && COMBO_IDLE_RESET_MILLIS === 3000,
+    "the ABI's commit code and idle time",
+  );
+
+  const flash = TypingEffectPolicy.decode(12 | (TypingEffectStyle.FLASH << 17));
+  const sparks = TypingEffectPolicy.decode(12 | (TypingEffectStyle.SPARKS << 17));
+  const powerKey = TypingEffectPolicy.decode(12 | (TypingEffectStyle.POWER_MODE << 17));
+  check(
+    TypingEffectPolicy.flashOpacity(quiet, 50) === 0 &&
+      TypingEffectPolicy.flashOpacity(TypingEffectPolicy.decode(12), 100) === 0,
+    "no style, no flash",
+  );
+  check(
+    TypingEffectPolicy.flashOpacity(flash, 50) < TypingEffectPolicy.flashOpacity(sparks, 50) &&
+      TypingEffectPolicy.flashOpacity(sparks, 50) < TypingEffectPolicy.flashOpacity(powerKey, 50),
+    "a stronger style flashes brighter",
+  );
+  check(
+    TypingEffectPolicy.flashOpacity(flash, 0) === 0 &&
+      TypingEffectPolicy.flashOpacity(flash, 100) > TypingEffectPolicy.flashOpacity(flash, 50),
+    "the intensity scales the flash, 0 drawing none",
+  );
+  check(
+    TypingEffectPolicy.flashOpacity(decoded, 100) <= 0.6 &&
+      TypingEffectPolicy.flashOpacity(decoded, 50) > TypingEffectPolicy.flashOpacity(sparks, 50),
+    "a tier-up flashes brighter, and no flash hides the candidates",
+  );
+  check(
+    TypingEffectPolicy.badge(0) === "" &&
+      TypingEffectPolicy.badge(1) === "" &&
+      TypingEffectPolicy.badge(12) === "连击 ×12",
+    "the badge shows a combo from two keys on",
+  );
+  check(
+    TypingEffectPolicy.badgeScale(sparks, 100) === 1 &&
+      TypingEffectPolicy.badgeScale(powerKey, 100) > 1 &&
+      TypingEffectPolicy.badgeScale(
+        TypingEffectPolicy.decode(25 | (1 << 16) | (TypingEffectStyle.POWER_MODE << 17)),
+        100,
+      ) > TypingEffectPolicy.badgeScale(powerKey, 100),
+    "only power mode swells the badge, harder on a tier-up",
+  );
+});
+
+group("background music follows the desktop player's rules", () => {
+  check(MusicPolicy.settings(undefined) === MUSIC_OFF, "no plugins record is music off");
+  check(MusicPolicy.settings({}) === MUSIC_OFF, "nor is a record without music");
+  check(
+    !MusicPolicy.settings({ music: { enabled: true } }).enabled,
+    "a switch without a chosen pack plays nothing, as on the desktop",
+  );
+  const on: MusicSettings = MusicPolicy.settings({
+    music: { enabled: true, pack: "rain", volume: 80 },
+  });
+  check(on.enabled && on.pack === "rain" && on.volume === 80, "the chosen pack at its volume");
+  check(
+    MusicPolicy.settings({ music: { enabled: true, pack: "rain", volume: 101 } }).volume === 30,
+    "a volume outside 0-100 is the default",
+  );
+  check(MusicPolicy.gain(on) === 0.8, "the volume scales amplitude");
+
+  check(
+    MusicPolicy.change(on, on, "/state", "/state") === MusicChange.NONE,
+    "the same settings change nothing",
+  );
+  check(
+    MusicPolicy.change(on, { ...on, volume: 20 }, "/state", "/state") === MusicChange.VOLUME,
+    "a new volume is applied to the playing track",
+  );
+  check(
+    MusicPolicy.change(on, { ...on, pack: "piano" }, "/state", "/state") === MusicChange.RELOAD &&
+      MusicPolicy.change(on, MUSIC_OFF, "/state", "/state") === MusicChange.RELOAD &&
+      MusicPolicy.change(on, on, "/state", "/other") === MusicChange.RELOAD,
+    "a new pack, the switch or a new state root starts afresh",
+  );
+
+  check(MusicPolicy.active(true, false, false), "a focused ordinary field hears music");
+  check(
+    !MusicPolicy.active(false, false, false),
+    "nothing plays before the field's attributes say it is not a password field",
+  );
+  check(!MusicPolicy.active(true, true, false), "a password field never hears music");
+  check(!MusicPolicy.active(true, false, true), "music pauses while recording");
+
+  check(
+    MusicPolicy.durationMillis("183000") === 183000,
+    "the extractor's duration is milliseconds",
+  );
+  check(
+    MusicPolicy.durationMillis(undefined) === null &&
+      MusicPolicy.durationMillis("") === null &&
+      MusicPolicy.durationMillis("-1") === null &&
+      MusicPolicy.durationMillis("1.5") === null,
+    "anything else is no duration",
+  );
+  check(
+    MusicPolicy.trackAllowed(900000, 900) && !MusicPolicy.trackAllowed(900001, 900),
+    "a track plays only within the pack bound",
+  );
+  check(
+    !MusicPolicy.trackAllowed(null, 900) && !MusicPolicy.trackAllowed(0, 900),
+    "a track whose length is unknown is not played",
+  );
+  check(
+    !MusicPolicy.overran(900000, 900) && MusicPolicy.overran(900001, 900),
+    "a track that runs past the bound is cut off",
+  );
+  check(
+    MusicPolicy.next(0, 3) === 1 && MusicPolicy.next(2, 3) === 0 && MusicPolicy.next(0, 1) === 0,
+    "tracks play in order and start over after the last",
+  );
+});
+
+group("background music sends one play or pause at a time and settles on the latest wish", () => {
+  const flip: MusicTransport = new MusicTransport();
+  check(flip.step(true, "paused") === MusicStep.PLAY, "a paused track plays once music may play");
+  check(
+    flip.step(false, "paused") === MusicStep.NONE && flip.step(true, "paused") === MusicStep.NONE,
+    "an active true -> false -> true flip while the play is in flight sends nothing more",
+  );
+  check(flip.settled("playing"), "the play settling asks for another look");
+  check(flip.step(true, "playing") === MusicStep.NONE, "and music that may play keeps playing");
+
+  const password: MusicTransport = new MusicTransport();
+  check(password.step(true, "prepared") === MusicStep.PLAY, "a prepared track is played");
+  check(
+    password.step(false, "prepared") === MusicStep.NONE,
+    "focus moving to a password field while the play is in flight sends no second command",
+  );
+  check(
+    password.settled("playing") && password.step(false, "playing") === MusicStep.PAUSE,
+    "but once the play settles the track is paused, so a password field never hears music",
+  );
+
+  const back: MusicTransport = new MusicTransport();
+  check(back.step(false, "playing") === MusicStep.PAUSE, "leaving a field pauses the track");
+  check(
+    back.step(true, "playing") === MusicStep.NONE,
+    "the next field's attributes arriving while the pause is in flight send nothing yet",
+  );
+  check(
+    back.settled("paused") && back.step(true, "paused") === MusicStep.PLAY,
+    "the player settling on paused while music may play results in a play",
+  );
+
+  const interrupted: MusicTransport = new MusicTransport();
+  check(
+    !interrupted.settled("paused"),
+    "a pause the system made on its own is not answered with a play",
+  );
+  check(
+    interrupted.step(true, "stopped") === MusicStep.RELEASE &&
+      interrupted.step(false, "stopped") === MusicStep.RELEASE,
+    "a player the system stopped is let go, to be opened afresh",
+  );
+  const pending: MusicTransport = new MusicTransport();
+  pending.step(true, "paused");
+  check(
+    pending.step(true, "stopped") === MusicStep.RELEASE,
+    "a stop overrides a play still in flight, which will never settle",
+  );
+  pending.reset();
+  check(
+    pending.step(true, "paused") === MusicStep.PLAY,
+    "a released player's pending command does not hold up the next one",
+  );
+  check(
+    new MusicTransport().step(true, "initialized") === MusicStep.NONE &&
+      new MusicTransport().step(false, "prepared") === MusicStep.NONE,
+    "a player between states, or one not yet playing, is left alone",
+  );
+});
+
+group("a picked pack is copied for import only within client-core's bounds", () => {
+  const MIB: number = 1024 * 1024;
+  const pack: PluginFolderScan = new PluginFolderScan();
+  check(
+    pack.take("plugin.toml", PickedEntryKind.FILE, 400) === null &&
+      pack.take("rain.ogg", PickedEntryKind.FILE, 12 * MIB) === null,
+    "a pack's files are taken",
+  );
+  check(pack.files.join(",") === "plugin.toml,rain.ogg", "and are what gets copied");
+  check(
+    PluginImportPolicy.hidden(".DS_Store") && !PluginImportPolicy.hidden("plugin.toml"),
+    "hidden names are left behind, as client-core's folder copy leaves them",
+  );
+
+  const nested = new PluginFolderScan().take("Photos", PickedEntryKind.DIRECTORY, 0);
+  check(
+    nested !== null && nested.error === "plugin_invalid" && nested.detail === "Photos 是子文件夹",
+    "a folder with a subfolder is refused before anything is copied, as client-core refuses it",
+  );
+  const linked = new PluginFolderScan().take("sample.wav", PickedEntryKind.LINK, 0);
+  check(linked !== null && linked.detail === "sample.wav 是符号链接", "and so is a symbolic link");
+  check(
+    new PluginFolderScan().take("fifo", PickedEntryKind.OTHER, 0)?.detail === "fifo 不是普通文件",
+    "and anything that is not a plain file",
+  );
+
+  const oversized = new PluginFolderScan().take("movie.mp4", PickedEntryKind.FILE, 16 * MIB + 1);
+  check(
+    oversized !== null && oversized.error === "plugin_invalid" && oversized.detail === "扩展包太大",
+    "a file larger than any pack allows stops the scan",
+  );
+  check(
+    new PluginFolderScan().take("track.ogg", PickedEntryKind.FILE, 16 * MIB) === null,
+    "16 MiB is still one file's limit",
+  );
+  const total: PluginFolderScan = new PluginFolderScan();
+  for (let index: number = 0; index < 4; index++) {
+    total.take(`track-${index}.ogg`, PickedEntryKind.FILE, 16 * MIB);
+  }
+  check(
+    total.take("notice.txt", PickedEntryKind.FILE, 2 * MIB) === null &&
+      total.take("extra.txt", PickedEntryKind.FILE, 1)?.detail === "扩展包太大",
+    "the whole copy stops past 66 MiB",
+  );
+  const crowded: PluginFolderScan = new PluginFolderScan();
+  for (let index: number = 0; index < 16; index++) {
+    crowded.take(`${index}.wav`, PickedEntryKind.FILE, 1);
+  }
+  check(
+    crowded.take("16.wav", PickedEntryKind.FILE, 1)?.detail === "扩展包太大",
+    "a folder with more files than a pack may hold, such as Downloads, is refused at the seventeenth",
+  );
+
+  check(PluginImportPolicy.archive(80 * MIB) === null, "an 80 MiB archive may be copied");
+  const archive = PluginImportPolicy.archive(80 * MIB + 1);
+  check(
+    archive !== null && archive.error === "plugin_archive" && archive.detail === "压缩包太大",
+    "a larger one is refused before it is copied",
+  );
+  check(
+    PluginImportPolicy.ARCHIVE_NAME.endsWith(".zip"),
+    "the staged archive keeps the extension client-core goes by, whatever the picked name",
   );
 });

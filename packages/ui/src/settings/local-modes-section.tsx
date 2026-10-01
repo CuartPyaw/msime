@@ -9,7 +9,11 @@ export type LocalModeKey =
   | "kaomoji"
   | "super_jianpin"
   | "temporary_english"
-  | "temporary_japanese";
+  | "temporary_japanese"
+  | "expression"
+  | "command"
+  | "mention"
+  | "mention_places";
 
 export type LocalModePreferences = {
   unicode: boolean;
@@ -20,6 +24,12 @@ export type LocalModePreferences = {
   super_jianpin: boolean;
   temporary_english: boolean;
   temporary_japanese: boolean;
+  /** The V, / and @ modes. Off in a fresh profile and absent from the document while off, so an absent key reads as off. */
+  expression?: boolean;
+  command?: boolean;
+  mention?: boolean;
+  /** The @ mode also offers China's provinces, cities and counties from the built-in table, after the user's own names. Absent while off, like the three above. */
+  mention_places?: boolean;
 };
 
 export const defaultLocalModes: LocalModePreferences = {
@@ -72,7 +82,37 @@ const localModeRows: readonly [LocalModeKey, string, string][] = [
   ],
 ];
 
-const iosLocalModeDescriptions: Record<LocalModeKey, string> = {
+/** The modes a host has to route itself: digits that stay input in V, and the / and @ keys. Shown only where the host does (`HostCapabilities.plugin_triggers`). */
+const triggerModeRows: readonly [LocalModeKey, string, string][] = [
+  [
+    "expression",
+    "计算与数字(V 模式)",
+    "中文模式下按 Shift+V，再输入算式（如 1+2*3）、数字（123 可转为一百二十三、壹佰贰拾叁或金额）或日期（2026.10.1）。空格上屏；Shift+数字选词；上屏内容不参与学习和打字统计",
+  ],
+  [
+    "command",
+    "指令(/ 模式)",
+    "中文标点下没有输入时按 /，再输入指令字母：rq 日期、sj 时间、xq 星期、fy 翻译（fy 后输入英文，' 分隔单词，首选为中文译文），以及「扩展」页启用的指令表。空格上屏；数字选词",
+  ],
+  [
+    "mention",
+    "@ 名字与地点(@ 模式)",
+    "中文标点下没有输入时按 @，再输入拼音或首字母，从「扩展」页的 @ 名单中选择。空格上屏；数字选词",
+  ],
+];
+
+/** Shown under the @ switch wherever that is, and switchable only while it is on: the places come after the user's own names in the same mode. */
+const mentionPlacesRow: [LocalModeKey, string, string] = [
+  "mention_places",
+  "@ 地名",
+  "@ 模式在名单之后列出全国省、市、区县，候选旁注明所属省市。地名表内置在输入法中，不联网、不读取位置",
+];
+
+/** Why /fy gives nothing while no translation service is chosen: it asks the chosen service only, and never falls back to another. */
+const commandTranslationNotice =
+  "fy 翻译需要先在「表达 → 候选词翻译」选择翻译服务，目前未选择，fy 不会出结果。";
+
+const iosLocalModeDescriptions: Partial<Record<LocalModeKey, string>> = {
   quick_phrase: `${iosLocalModeEntry("快捷短语")}再输入编码即可调用快捷短语`,
   date_time: `${iosLocalModeEntry("日期时间")}再输入 rq / riqi / date 输入日期，sj / shijian / time 输入时间，xq / xingqi / week 输入星期`,
   unicode: `${iosLocalModeEntry("Unicode 码点")}再输入十六进制码位（如 4e00 / +1f600）。空格或点候选上屏`,
@@ -86,21 +126,48 @@ const iosLocalModeDescriptions: Record<LocalModeKey, string> = {
 export interface LocalModesSectionProps {
   preferences: LocalModePreferences;
   ios: boolean;
+  /** The host routes the V, / and @ modes, so their switches have an effect. */
+  triggers?: boolean;
+  /** The host can also edit the @ name list (a plugin store), without which the @ mode could never produce a candidate; its switch is shown only then. */
+  mentions?: boolean;
+  /** A translation service is chosen, which the / mode's fy command asks. When false, the / row says fy gives nothing; absent where the host offers no choice of service. */
+  translationService?: boolean;
   onChange: (preferences: LocalModePreferences) => void;
 }
 
 /** Shared local input mode switches for desktop and touch settings hosts: the 实用功能 group. */
-export function LocalModesSection({ preferences, ios, onChange }: LocalModesSectionProps) {
+export function LocalModesSection({
+  preferences,
+  ios,
+  triggers = false,
+  mentions = false,
+  translationService,
+  onChange,
+}: LocalModesSectionProps) {
+  const rows = triggers
+    ? [
+        ...localModeRows,
+        ...triggerModeRows.filter(([key]) => key !== "mention" || mentions),
+        ...(mentions ? [mentionPlacesRow] : []),
+      ]
+    : localModeRows;
   return (
     <GroupList title="实用功能">
-      {localModeRows.map(([key, label, description]) => (
+      {rows.map(([key, label, description]) => (
         <Row
           key={key}
           title={label}
-          description={ios ? iosLocalModeDescriptions[key] : description}
+          description={
+            key === "command" && translationService === false
+              ? `${description}。${commandTranslationNotice}`
+              : ios
+                ? (iosLocalModeDescriptions[key] ?? description)
+                : description
+          }
         >
           <Switch
-            checked={preferences[key]}
+            checked={preferences[key] ?? false}
+            disabled={key === "mention_places" && !preferences.mention}
             onChange={(checked) => onChange({ ...preferences, [key]: checked })}
           />
         </Row>

@@ -35,6 +35,13 @@ import { EmojiPanelKey } from './emoji/EmojiPanelKeyPolicy';
 import { DEFAULT_VOICE_HOTKEY_BINDINGS, VoiceHotkeyAction, VoiceHotkeyBindings, VoiceHotkeyPolicy,
   VoiceKey } from './input/VoiceHotkeyPolicy';
 import { HarmonyVoiceRecordingBehaviour } from './input/HarmonyVoiceRecordingBehaviour';
+import { KeySoundPlayer } from './KeySoundPlayer';
+import { KEY_SOUNDS_OFF, KeySoundPolicy, PluginPreferenceDocument } from './KeySoundPolicy';
+import { MusicPlayer } from './MusicPlayer';
+import { MUSIC_OFF, MusicPolicy } from './MusicPolicy';
+import {
+  TYPING_EFFECT_COMMIT, TYPING_EFFECTS_OFF, TypingEffect, TypingEffectPolicy, TypingEffectSettings
+} from './TypingEffectPolicy';
 import { EnglishCompletions, EnglishReplacement, EnglishSuggestionPolicy }
   from './input/EnglishSuggestionPolicy';
 import { ImeModeScopePolicy } from './input/ImeModeScopePolicy';
@@ -178,6 +185,8 @@ interface EngineView {
   microsoft_shuangpin?: boolean;
   /** 'none' unless a local utility mode is consuming the keys. */
   local_mode: string;
+  /** The non-letter keys the Engine takes as input now: the active local mode's digits and operators, or with nothing composed `/` and `@` for the modes they open. Absent from a runtime older than those modes. */
+  spelling_symbols?: string;
   dedicated_english: boolean;
 }
 
@@ -207,6 +216,19 @@ interface TypingStatisticsRecordAction {
 interface TypingStatisticsRecordRequest {
   directory: string;
   action: TypingStatisticsRecordAction;
+}
+
+interface TypingStatisticsRecordValue {
+  /** Characters counted from this text. */
+  recorded: number;
+  /** The commit count just passed, while achievements are switched on; otherwise null. */
+  milestone?: number | null;
+}
+
+interface TypingStatisticsRecordResponse {
+  ok: boolean;
+  value?: TypingStatisticsRecordValue;
+  error?: string;
 }
 
 interface MobileClipboardAction {
@@ -464,9 +486,16 @@ interface EngineValue {
   // the null the JSON names, so both have to be spelled out here. Treating one and not the other
   // threw on every focus, which tore the session down before a single key could be pressed.
   commit: string | null | undefined;
+  /** What the commit came from; present with a commit. */
+  commit_context?: CommitContext | null;
   /** Something the Engine wants the user told, such as a dictionary that could not be opened. */
   diagnostic: string | null | undefined;
   view: EngineView;
+}
+
+interface CommitContext {
+  /** False for text the expression, command and mention modes generated, which the user did not type out and typing statistics do not count. */
+  typing_statistics: boolean;
 }
 
 interface CreateValue {
@@ -676,6 +705,8 @@ interface PreparedPreferences {
   ai_assistant: PreparedAiAssistant;
   touch_keyboard_schemes: PreparedTouchKeyboardSchemes;
   keybindings: PreparedKeybindings;
+  /** Sound packs and the rest of the plugin settings; absent while every part is at its default. */
+  plugins?: PluginPreferenceDocument;
 }
 
 /** The shared fuzzy pinyin record. Turning it off keeps the rules, so the next on restores the same set. */
@@ -919,6 +950,13 @@ export class KeyboardSession implements HardwareKeyTarget {
   // because Space and Escape belong to a composition at every other moment.
   private voiceRecording: boolean = false;
   private voiceBehaviour: HarmonyVoiceRecordingBehaviour = new HarmonyVoiceRecordingBehaviour();
+  // Key, melody, commit and achievement sounds. Configured off on a phone, which keeps its own key feedback.
+  private readonly soundPlayer: KeySoundPlayer = new KeySoundPlayer();
+  private readonly musicPlayer: MusicPlayer = new MusicPlayer();
+  /** The typing effect and combo settings; off on a phone, as the sounds are. */
+  private typingEffects: TypingEffectSettings = TYPING_EFFECTS_OFF;
+  /** The focused editor's attributes have arrived, so whether it is a password field is known; background music waits for that. */
+  private editorAttributesKnown: boolean = false;
   private modeScope: ImeModeScopePolicy = new ImeModeScopePolicy();
   private modeScopeSetting: string = 'app';
   private defaultEnglish: boolean = false;
@@ -1030,6 +1068,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   onVoiceInputChanged: ((enabled: boolean) => void) | undefined = undefined;
   /** Lets a desktop panel resize when a vertical candidate page changes height. */
   onCandidateCount: ((count: number) => void) | undefined = undefined;
+  /** Lets a desktop panel flash its candidate card and show the combo for each key and commit handed to the typing effect, with the intensity it is drawn at; `key` is false for a commit, which counts nothing and only reports the combo. */
+  onTypingEffect: ((effect: TypingEffect, intensity: number, key: boolean) => void) | undefined = undefined;
   /** Lets a desktop panel follow the widest current candidate without measuring ArkUI nodes. */
   onCandidateWidth: ((widthVp: number) => void) | undefined = undefined;
   /** The native host owns panel geometry; the touch view reports its newly requested total height. */
@@ -1383,6 +1423,12 @@ export class KeyboardSession implements HardwareKeyTarget {
       this.toolbar = preferences.floating_toolbar;
       this.nineKeyMode = preferences.touch_keyboard_layout === 'nine_key'
         && preferences.scheme === 'quanpin';
+      this.soundPlayer.configure(KeyboardFormFactor.isDesktop()
+        ? KeySoundPolicy.settings(preferences.plugins) : KEY_SOUNDS_OFF, stateRoot);
+      this.musicPlayer.configure(KeyboardFormFactor.isDesktop()
+        ? MusicPolicy.settings(preferences.plugins) : MUSIC_OFF, stateRoot);
+      this.typingEffects = KeyboardFormFactor.isDesktop()
+        ? TypingEffectPolicy.settings(preferences.plugins) : TYPING_EFFECTS_OFF;
     } catch (error) {
       KeyboardLog.error(`host preparation unreadable: ${describeError(error)}`);
       return false;
@@ -2403,6 +2449,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.invalidateReplyContext();
     this.clearSmartPunctuationRepeat();
     this.inputClient = inputClient;
+    this.editorAttributesKnown = false;
+    this.updateMusic();
     inputClient.getEditorAttribute().then((attribute: inputMethodEngine.EditorAttribute): void => {
       if (attributeGeneration !== this.attributeGeneration || this.inputClient !== inputClient) {
         return;
@@ -2410,6 +2458,11 @@ export class KeyboardSession implements HardwareKeyTarget {
       this.enterKey = attribute.enterKeyType;
       this.previewSupported = attribute.isTextPreviewSupported === true;
       this.traits = KeyboardSession.traitsFor(attribute.inputPattern);
+      this.editorAttributesKnown = true;
+      // A pack imported again under the same id, or removed, while another editor had focus is picked up here, as host-api re-stamps its packs on focus.
+      this.soundPlayer.recheck();
+      this.musicPlayer.recheck();
+      this.updateMusic();
       this.capitalization = EditorPolicy.capitalizationMode(this.traits,
         KeyboardSession.capitalizationFor(attribute.capitalizeMode));
       // Says the keyboard reached a real editor, which nothing else in the log does. Verifying that
@@ -2469,6 +2522,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.previewSupported = false;
     this.previewText = '';
     this.inputClient = undefined;
+    this.editorAttributesKnown = false;
+    this.updateMusic();
   }
 
   stop(): void {
@@ -2500,6 +2555,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** Final ability teardown: invalidate editor callbacks that may still be awaiting attributes. */
   shutdown(): void {
     this.stop();
+    this.soundPlayer.shutdown();
+    this.musicPlayer.shutdown();
     this.attributeGeneration++;
     this.inputClient = undefined;
     this.previewSupported = false;
@@ -2937,6 +2994,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       wubi: this.schemeName === 'wubi',
       microsoftShuangpin: this.lastView?.microsoft_shuangpin === true,
       englishCandidates: this.isEnglishCandidates(),
+      spellingSymbols: this.lastView?.spelling_symbols ?? '',
     };
   }
 
@@ -3220,7 +3278,14 @@ export class KeyboardSession implements HardwareKeyTarget {
       // same boundary the Apple and Android hosts draw.
       const output: string = this.asTraditional(commit);
       this.insertEditorText(output);
-      this.recordTypingStatistics(output, this.typingSource());
+      // What the V, / and @ modes generated is not the user's typing: an evaluated sum or an expanded command template would count characters nobody typed.
+      if (value.commit_context?.typing_statistics !== false) {
+        this.recordTypingStatistics(output, this.typingSource());
+      }
+      if (!this.soundsSilencedByEditor()) {
+        this.soundPlayer.commit();
+        this.typingEffect(TYPING_EFFECT_COMMIT);
+      }
     }
     this.render(value.view);
     return value.handled === true;
@@ -4774,6 +4839,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   setVoiceRecording(active: boolean, cancelled: boolean = false): void {
     const changed: boolean = this.voiceRecording !== active;
     this.voiceRecording = active;
+    this.updateMusic();
     if (!active) {
       this.voiceHotkeys.reset();
     }
@@ -4798,6 +4864,58 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** The extension's context, which is what turns a packaged tone into something playable. */
   useVoiceContext(context: common.Context): void {
     this.voiceBehaviour.use(context);
+  }
+
+  /** The extension's context, which says where the built-in sound packs are and where rendered notes may go. */
+  useSoundContext(context: common.Context): void {
+    this.soundPlayer.use(context);
+    this.musicPlayer.use(context);
+  }
+
+  /** Background music plays on a 2in1 while an editor whose attributes are known has focus, is not a password field, and nothing is being recorded; the desktop hosts tell their player the same with `msime_client_music_set_active`. */
+  private updateMusic(): void {
+    this.musicPlayer.setActive(
+      MusicPolicy.active(this.editorAttributesKnown, this.traits.password, this.voiceRecording));
+  }
+
+  /** Whether the editor forbids sounds: a password field, or one whose attributes have not arrived yet, since `traits` still describes the previous field until they do (as music waits for them). */
+  private soundsSilencedByEditor(): boolean {
+    return !this.editorAttributesKnown || this.traits.password;
+  }
+
+  /**
+   * The sound of a hardware key-down, on a 2in1 with key sounds on. Never in a password field: the rhythm of a password is what a key sound would give away.
+   */
+  hardwareKeySound(keyCode: number, unicodeChar: number, ctrl: boolean, alt: boolean, logo: boolean): void {
+    if (KeySoundPolicy.keysSilent(this.soundsSilencedByEditor(), this.isEnglish(), this.isEnglishCandidates())) {
+      return;
+    }
+    const keyClass: number = KeySoundPolicy.keyClass(keyCode, unicodeChar, ctrl, alt, logo);
+    if (keyClass >= 0) {
+      this.soundPlayer.key(keyClass);
+      // HarmonyOS key events do not say whether a key is an auto-repeat, so every key-down counts.
+      this.typingEffect(keyClass);
+    }
+  }
+
+  /**
+   * Hand one key or commit to the session's typing effect, alongside its sound, while a style is drawn or the combo is counted. host-api links no audio stack here, so a tier-up sound it reports due is played by this host; the view draws the rest.
+   *
+   * @param event a `msime_client_typing_effect` event: a key sound class, or `TYPING_EFFECT_COMMIT`
+   */
+  private typingEffect(event: number): void {
+    if (this.handle === 0 || !TypingEffectPolicy.active(this.typingEffects)) {
+      return;
+    }
+    const effect: TypingEffect = TypingEffectPolicy.decode(client.typingEffect(this.handle, event));
+    if (effect.tierSound) {
+      this.soundPlayer.tierUp(TypingEffectPolicy.tier(effect.count));
+    }
+    const listener: ((effect: TypingEffect, intensity: number, key: boolean) => void) | undefined =
+      this.onTypingEffect;
+    if (listener !== undefined) {
+      listener(effect, this.typingEffects.intensity, event !== TYPING_EFFECT_COMMIT);
+    }
   }
 
   /** Whether the current recording outlives its hold key, for the panel that says so. */
@@ -4906,8 +5024,13 @@ export class KeyboardSession implements HardwareKeyTarget {
     setTimeout((): void => {
       try {
         const response: string = client.typingStatistics(request);
-        const value: Record<string, Object> = JSON.parse(response) as Record<string, Object>;
-        if (value.ok !== true) KeyboardLog.error('typing statistics write refused');
+        const value: TypingStatisticsRecordResponse = JSON.parse(response) as TypingStatisticsRecordResponse;
+        if (value.ok !== true) {
+          KeyboardLog.error('typing statistics write refused');
+        } else if (typeof value.value?.milestone === 'number' && !this.soundsSilencedByEditor()) {
+          // host-api reports the milestone only while achievements are on; it plays the jingle itself on the desktop, and here the player does. Not over a password field, like every other sound.
+          this.soundPlayer.achievement();
+        }
       } catch (error) {
         KeyboardLog.error(`typing statistics unavailable: ${describeError(error)}`);
       }

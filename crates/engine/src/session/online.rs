@@ -5,13 +5,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::composition::resolve_shuangpin_composition_base;
 use super::input::InputSession;
 use crate::ime::online_batch::replace_online_candidate_batch;
+use crate::local::command::TEXT_UTF16_LIMIT;
 use crate::pinyin::active_helpcode::strip_active_helpcodes;
 use crate::pinyin::segment::{is_complete_pinyin_input, split_segments};
 use crate::pinyin::syllables::to_google_spelling;
 use crate::shuangpin::query::{
     is_complete_input, normalize_input_with_delimiters, raw_length_for_effective_prefix,
 };
-use crate::types::{CandidateSource, LocalInputMode, OnlineQuery, SchemeType};
+use crate::types::{
+    CandidateSource, CommandTranslationQuery, LocalInputMode, OnlineQuery, SchemeType, WordItem,
+};
 
 /// Session ids are unique for the process, so an answer can never be applied to a different session than the one that asked.
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
@@ -104,6 +107,60 @@ impl InputSession {
                 .iter()
                 .all(|segment| is_complete_pinyin_input(segment));
         Some(query)
+    }
+
+    /// The `/fy` request, the only one a local mode makes; `None` in every other state, so the cloud and AI path above stays closed to local input, and `None` again once the text has its translation, so a host that asks again for every new view does not send the same text twice.
+    pub(super) fn command_translation_query(&self) -> Option<CommandTranslationQuery> {
+        if self.dedicated_english || self.local_mode != LocalInputMode::Command {
+            return None;
+        }
+        let code = self.local_preedit.get(1..)?;
+        let (_, text) = self.queries.translation_source(code)?;
+        // `query_command` lists the English first; anything ahead of it is the translation.
+        if self
+            .local_candidates
+            .first()
+            .is_some_and(|row| row.word != text)
+        {
+            return None;
+        }
+        Some(CommandTranslationQuery {
+            session_id: self.online_requests.session_id,
+            text,
+        })
+    }
+
+    /// Puts a translation of the live `/fy` text first, as a row that commits the translation; false for an answer to another session or to text no longer typed, and for text a row cannot show.
+    pub(super) fn apply_command_translation(
+        &mut self,
+        query: &CommandTranslationQuery,
+        translation: &str,
+    ) -> bool {
+        let translation = translation.trim();
+        if translation.is_empty()
+            || translation.chars().any(char::is_control)
+            || translation.encode_utf16().count() > TEXT_UTF16_LIMIT
+            || translation == query.text
+            || self.command_translation_query().as_ref() != Some(query)
+        {
+            return false;
+        }
+        let Some((trigger, _)) = self
+            .local_preedit
+            .get(1..)
+            .and_then(|code| self.queries.translation_source(code))
+        else {
+            return false;
+        };
+        let weight = self
+            .local_candidates
+            .first()
+            .map_or(1, |item| item.weight + 1);
+        self.local_candidates.insert(
+            0,
+            WordItem::new(trigger, translation, weight, CandidateSource::Generated, ""),
+        );
+        true
     }
 
     pub(super) fn apply_online_candidate(

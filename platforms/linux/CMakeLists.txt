@@ -156,6 +156,12 @@ file(RELATIVE_PATH MSIME_INSTALLED_RESOURCE_RELATIVE_DIR
      "${CMAKE_INSTALL_FULL_DATADIR}/msime-client/resources")
 target_compile_definitions(msime-linux-prepare PRIVATE
   MSIME_INSTALLED_RESOURCE_RELATIVE_DIR="${MSIME_INSTALLED_RESOURCE_RELATIVE_DIR}")
+# The IBus engine names the installed built-in sound packs to the Host API, found from its own executable as the prepare tool finds the resources (core/PreparePaths.h).
+file(RELATIVE_PATH MSIME_INSTALLED_SOUND_PACKS_RELATIVE_DIR
+     "${CMAKE_INSTALL_FULL_BINDIR}"
+     "${CMAKE_INSTALL_FULL_DATADIR}/msime-client/sound-packs")
+target_compile_definitions(msime-ibus-host PRIVATE
+  MSIME_INSTALLED_SOUND_PACKS_RELATIVE_DIR="${MSIME_INSTALLED_SOUND_PACKS_RELATIVE_DIR}")
 target_compile_options(msime-linux-dictionary PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(msime-linux-dictionary PRIVATE msime-ibus-host)
 add_executable(msime-linux-cloud-dictionary src/providers/cloud_dictionary_request.cpp)
@@ -209,6 +215,15 @@ target_compile_options(linux-navigation-bindings-test PRIVATE -Wall -Wextra -Wer
 target_include_directories(linux-navigation-bindings-test PRIVATE src ../../crates/host-api/include)
 target_link_libraries(linux-navigation-bindings-test PRIVATE PkgConfig::IBUS)
 add_test(NAME linux-navigation-bindings COMMAND linux-navigation-bindings-test)
+add_executable(linux-spelling-symbols-test tests/input/spelling_symbols.cpp)
+target_compile_options(linux-spelling-symbols-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+target_include_directories(linux-spelling-symbols-test PRIVATE src)
+target_link_libraries(linux-spelling-symbols-test PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME linux-spelling-symbols COMMAND linux-spelling-symbols-test)
+add_executable(linux-key-sound-test tests/input/key_sound.cpp)
+target_compile_options(linux-key-sound-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+target_include_directories(linux-key-sound-test PRIVATE src)
+add_test(NAME linux-key-sound COMMAND linux-key-sound-test)
 add_executable(linux-client-input-mode-memory-test tests/input/client_input_mode_memory.cpp)
 target_compile_options(linux-client-input-mode-memory-test PRIVATE -Wall -Wextra -Werror)
 target_include_directories(linux-client-input-mode-memory-test PRIVATE src)
@@ -659,6 +674,9 @@ if(MSIME_MCP_BINARY)
   endif()
   install(PROGRAMS "${MSIME_MCP_BINARY}" DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
+# The built-in sound packs, synthesized by scripts/generate_sound_packs.py and dedicated to the public domain, beside the resource directory rather than in it: that directory has to hold exactly what the dictionary lock pins. The hosts and the settings window name this directory to client-core as the built-in pack root.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/sound-packs/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/msime-client/sound-packs")
 # 桌面入口的 Icon=msime-linux、Fcitx5 输入法条目的 Icon 和 IBus 组件的 <icon> 都按名字
 # 解析，所以这些文件决定了托盘、输入法列表和启动器上显示的是 logo 还是占位图。它们此前
 # 装在桌面二进制那个分支里，于是只装输入法、不装设置窗口的安装一张图标都没有，而那恰恰
@@ -745,7 +763,7 @@ if(NOT MSIME_ENABLE_FCITX5)
   message(STATUS "跳过：Fcitx5 插件；请安装 Fcitx5 开发包（Fcitx5Core 5.0.20+），"
                  "或在配置时传入 -DMSIME_ENABLE_FCITX5=ON")
 endif()
-# License and third-party notices, the Linux counterpart of the macOS bundle's Resources/Licenses. Every install redistributes the code compiled into the host library, so plain `cmake --install` gets them as well, not only packages. The project license is `copyright` here (GPL-3.0.txt on macOS); it also covers the input engine (crates/engine), which is this project's code. What the engine carries from elsewhere keeps its own notice: zinnia, whose recognizer crates/engine/src/handwriting ports; the provenance of the dictionary data msime-linux-setup downloads, carried verbatim from msime-engine as resources/licenses/msime-engine-dictionary-NOTICE.md, the copy every platform ships; and the provenance of the helpcode tables installed into the packaged resource directory: the five the Engine brought (ENGINE-NOTICE.md) and jiajia (NOTICE.md).
+# License and third-party notices, the Linux counterpart of the macOS bundle's Resources/Licenses. Every install redistributes the code compiled into the host library, so plain `cmake --install` gets them as well, not only packages. The project license is `copyright` here (GPL-3.0.txt on macOS); it also covers the input engine (crates/engine), which is this project's code. What the engine carries from elsewhere keeps its own notice: zinnia, whose recognizer crates/engine/src/handwriting ports; the place names `@` mode offers, from modood/Administrative-divisions-of-China (WTFPL); the provenance of the dictionary data msime-linux-setup downloads, carried verbatim from msime-engine as resources/licenses/msime-engine-dictionary-NOTICE.md, the copy every platform ships; and the provenance of the helpcode tables installed into the packaged resource directory: the five the Engine brought (ENGINE-NOTICE.md) and jiajia (NOTICE.md).
 set(MSIME_NOTICE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/../../LICENSE"
   "${CMAKE_CURRENT_SOURCE_DIR}/data/THIRD_PARTY_NOTICES.txt"
@@ -753,6 +771,7 @@ set(MSIME_NOTICE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/helpcodes/ENGINE-NOTICE.md"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/helpcodes/NOTICE.md"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/Zinnia-LICENSE.txt"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/Administrative-divisions-of-China-WTFPL.txt"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../crates/client-core/data/opencc/LICENSE")
 # `copyright` is the name Debian policy requires for the package license.
 set(MSIME_NOTICE_NAMES
@@ -762,6 +781,7 @@ set(MSIME_NOTICE_NAMES
   msime-engine-helpcode-NOTICE.md
   msime-helpcode-jiajia-NOTICE.md
   Zinnia-LICENSE.txt
+  Administrative-divisions-of-China-WTFPL.txt
   OpenCC-Apache-2.0.txt)
 # The handwriting model's LGPL-2.1 license travels with the model, so it is a notice only when the model is installed.
 if(MSIME_HANDWRITING_MODEL_DIR)

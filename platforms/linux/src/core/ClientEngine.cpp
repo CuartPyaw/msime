@@ -16,6 +16,9 @@
 #include "InputModeIndicator.h"
 #include "ReplacedProgram.h"
 #include "SmartPunctuationSpace.h"
+#include "SpellingSymbols.h"
+#include "PreparePaths.h"
+#include "LocalModeSwitches.h"
 #include "WordCharacterBinding.h"
 #include "../voice/VoiceAction.h"
 #include "../voice/VoiceHotwords.h"
@@ -36,6 +39,7 @@
 #include "../candidates/ShuangpinProfileNames.h"
 #include "ClientInputModeMemory.h"
 #include "../system/DiagnosticLog.h"
+#include "../system/KeySound.h"
 #include "../system/PanelInputChannel.h"
 #include "../system/TypingStatistics.h"
 #include "msime_client.h"
@@ -304,6 +308,11 @@ struct State {
   std::string focused_client;
   bool blocked = false;
   bool private_input = false;
+  // What the process's sound player was last told about background music; see sync_music.
+  msime::linux_host::MusicActivity music;
+  // The combo count the session last answered msime_client_typing_effect with, shown at the end of the candidate aux line, and the key held down, so an auto-repeat is drawn but not counted.
+  uint32_t typing_combo = 0;
+  msime::linux_host::KeyRepeat key_repeat;
   guint preferences_timer = 0;
   bool preferences_loading = false;
   // IBus hide notifications can trail the next confirmed candidate update;
@@ -608,6 +617,10 @@ struct State {
           voice_provider_socket.size(), voice_generation));
     if (voice_active && session)
       msime_client_string_free(msime_client_voice_cancel(session));
+    music.release(session, msime_client_music_set_active);
+    // The combo lives in the session; the next one starts from none.
+    typing_combo = 0;
+    key_repeat.reset();
     voice_active = false;
     voice_generation = 0;
     voice_preedit.clear();
@@ -759,6 +772,16 @@ struct State {
     if (private_input)
       options["preferences"]["learning"] = false;
     options.erase("candidate_skin_catalog");
+    // The built-in sound packs of this installation, unless the runtime options name others; resolved once, from the executable, as the resource bundle is.
+    if (!options.contains("sound_packs")) {
+      static const std::string sound_packs = [] {
+        std::error_code error;
+        const auto executable = std::filesystem::read_symlink("/proc/self/exe", error);
+        return error ? std::string{} : msime_linux::installed_sound_pack_directory(executable);
+      }();
+      if (!sound_packs.empty())
+        options["sound_packs"] = sound_packs;
+    }
     // This host draws view.phrase_prefix ahead of the reading, so a phrase assembled out of
     // several selections stays in the composition instead of reaching the document one piece at a
     // time. Requesting it and drawing it are one decision; see PhrasePreedit.h.
@@ -1221,18 +1244,26 @@ msime::linux_host::TypingSource typing_source(const State &s) {
       s.english_mode, s.view.value("local_mode", "none"), profile);
 }
 
-// Record the exact text sent to IBus after each route's output conversion.
+// Record the exact text sent to IBus after each route's output conversion. `typing_statistics` is false for text the Engine generated rather than the user typed out (the expression, command and mention modes), which the statistics leave out.
 void commit_text(
     IBusEngine *engine, const std::string &text,
-    std::optional<msime::linux_host::TypingSource> source_override = std::nullopt) {
+    std::optional<msime::linux_host::TypingSource> source_override = std::nullopt,
+    bool typing_statistics = true) {
   if (text.empty())
     return;
   auto &s = state(engine);
-  // Only derive the source from the Engine view when the caller did not name one: English mode and sessionless voice commits have no view, and value_or would evaluate typing_source eagerly and throw on it.
-  const auto source = source_override ? *source_override : typing_source(s);
   ibus_engine_commit_text(engine, ibus_text_new_from_string(text.c_str()));
-  record_typing_statistics(engine, text, source);
+  // Only derive the source from the Engine view when the caller did not name one: English mode and sessionless voice commits have no view, and value_or would evaluate typing_source eagerly and throw on it.
+  if (typing_statistics)
+    record_typing_statistics(engine, text,
+                             source_override ? *source_override : typing_source(s));
   s.remember_commit(text);
+}
+// Background music may play while this input method is focused in a field that is not a secure one (a password, PIN or no-spellcheck field), and not while a recording would pick it up. The player serves the whole process, so this only tells it about a change (KeySound.h); State::close tells it the music is over before the session goes away.
+void sync_music(IBusEngine *engine) {
+  auto &s = state(engine);
+  s.music.sync(s.session, s.focused && !s.blocked && !s.private_input && !s.voice_active,
+               msime_client_music_set_active);
 }
 void publish_mode(IBusEngine *engine, bool registration = false);
 void sync_global_input_mode(IBusEngine *engine);
@@ -1854,8 +1885,9 @@ void translation_dispatch(IBusEngine *engine) {
   auto &s = state(engine);
   const bool online_translation =
       s.candidate_translations && !s.translation_provider_socket.empty();
-  // Either switch can reach an offline gloss: English, or an installed non-English dictionary, which only the query below can name.
-  if (!(s.candidate_english_gloss || s.candidate_translations) ||
+  const auto local_mode = s.view.value("local_mode", std::string("none"));
+  // Either switch can reach an offline gloss: English, or an installed non-English dictionary, which only the query below can name. The command mode may hold /fy, whose query is asked for whatever they say.
+  if (!(s.candidate_english_gloss || s.candidate_translations || local_mode == "command") ||
       s.translation_loading || !s.session ||
       !s.focused || s.blocked || !s.input_enabled || s.private_input ||
       !s.view.value("candidates", Json::array()).size())
@@ -1863,6 +1895,25 @@ void translation_dispatch(IBusEngine *engine) {
   try {
     auto query = response(msime_client_translation_query(s.session));
     if (query.is_null() || !query.is_object()) return;
+    // /fy asks the selected service alone, in the query's own target language, and answers with a row rather than a gloss (CandidateTranslationPolicy.h): no offline dictionary, no other service, no gloss cache.
+    if (msime::linux_host::command_translation_query(local_mode,
+                                                     query.value("sentence", false))) {
+      if (s.translation_provider_socket.empty()) return;
+      auto texts = Json::array();
+      for (const auto &candidate : query.at("candidates"))
+        texts.push_back(candidate.at("text"));
+      query["candidates"] = std::move(texts);
+      const auto encoded = query.dump();
+      if (encoded == s.translation_dispatched_query) return;
+      s.translation_dispatched_query = encoded;
+      start_translation_task(engine, TranslationTask{
+          s.session, s.provider_epoch, encoded, s.translation_provider_socket,
+          configured.value("resources", std::string{}),
+          Json{{"generation", query.at("generation")}, {"candidates", Json::array()}}.dump(),
+          false, Json::array(), false});
+      return;
+    }
+    if (!(s.candidate_english_gloss || s.candidate_translations)) return;
     const auto &target = s.translation_target_language;
     const auto installed = query.value("offline_gloss_languages", Json::array());
     const bool dictionary = target != "en" && installed.is_array() &&
@@ -1990,8 +2041,9 @@ void translation_schedule(IBusEngine *engine) {
     s.translation_delay_source = 0;
     g_source_remove(source);
   }
-  // The same switches reach every gloss, offline or online; translation_dispatch decides which applies once it has the query.
-  if (!(s.candidate_english_gloss || s.candidate_translations) ||
+  // The same switches reach every gloss, offline or online; translation_dispatch decides which applies once it has the query. The command mode may hold /fy, which does not depend on them.
+  if (!(s.candidate_english_gloss || s.candidate_translations ||
+        s.view.value("local_mode", std::string("none")) == "command") ||
       !s.session || !s.focused || s.blocked || !s.input_enabled || s.private_input ||
       s.view.value("candidates", Json::array()).empty())
     return;
@@ -3002,11 +3054,15 @@ void publish_mode(IBusEngine *engine, bool registration) {
       {"kaomoji", "颜文字（M 模式）"},
       {"super_jianpin", "超级简拼（J 模式）"},
       {"temporary_english", "临时英文（Y 模式）"},
-      {"temporary_japanese", "临时日文（R 模式）"}};
+      {"temporary_japanese", "临时日文（R 模式）"},
+      {"expression", "计算与数字（V 模式）"},
+      {"command", "指令（/ 模式）"},
+      {"mention", "名单（@ 模式）"}};
   for (const auto &[key, label] : local_mode_options) {
     const bool enabled = s.local_mode_overrides.contains(key)
                              ? s.local_mode_overrides.at(key).get<bool>()
-                             : configured_local_modes.value(key, true);
+                             : configured_local_modes.value(
+                                   key, msime::linux_host::local_mode_enabled_by_default(key));
     auto item = ibus_property_new(
         (std::string("LocalModes/") + key).c_str(), PROP_TYPE_TOGGLE,
         ibus_text_new_from_static_string(label), "",
@@ -3392,6 +3448,32 @@ void underline_preedit(IBusText *text, guint length) {
                              IBUS_ATTR_UNDERLINE_SINGLE, 0,
                              static_cast<gint>(length));
 }
+// The aux line above a candidate page: the page number, the reading when the candidate preedit shows it, the local mode, and the typing combo while there is one.
+std::string candidate_aux_text(IBusEngine *engine, const Json &view) {
+  auto paging = std::to_string(view.at("page").get<size_t>() + 1) + "/" +
+                std::to_string(view.at("page_count").get<size_t>());
+  if (state(engine).candidate_preedit_style == "pinyin") {
+    const auto candidate_preedit = view.value("preedit", std::string{});
+    if (!candidate_preedit.empty()) {
+      paging += "  · ";
+      const auto editing_text = view.value("editing_text", std::string{});
+      const auto caret = view.value("caret_position", editing_text.size());
+      paging += msime::linux_host::candidate_preedit_with_caret(
+          candidate_preedit, editing_text, caret);
+    }
+  }
+  const auto mode = view.at("local_mode").get<std::string>();
+  if (const char *label = msime::linux_host::candidate_local_mode_label(mode)) {
+    paging += "  · ";
+    paging += label;
+  }
+  const auto combo = msime::linux_host::typing_combo_label(state(engine).typing_combo);
+  if (!combo.empty()) {
+    paging += "  · ";
+    paging += combo;
+  }
+  return paging;
+}
 void render(IBusEngine *engine, const Json &view) {
   cancel_candidate_hide(engine);
   // Engine caret offsets refer to ASCII editing_text, never the display
@@ -3484,25 +3566,8 @@ void render(IBusEngine *engine, const Json &view) {
       ibus_engine_hide_lookup_table(engine);
     return;
   }
-  auto paging = std::to_string(view.at("page").get<size_t>() + 1) + "/" +
-                std::to_string(view.at("page_count").get<size_t>());
-  if (state(engine).candidate_preedit_style == "pinyin") {
-    const auto candidate_preedit = view.value("preedit", std::string{});
-    if (!candidate_preedit.empty()) {
-      paging += "  · ";
-      const auto editing_text = view.value("editing_text", std::string{});
-      const auto caret = view.value("caret_position", editing_text.size());
-      paging += msime::linux_host::candidate_preedit_with_caret(
-          candidate_preedit, editing_text, caret);
-    }
-  }
-  const auto mode = view.at("local_mode").get<std::string>();
-  if (const char *label = msime::linux_host::candidate_local_mode_label(mode)) {
-    paging += "  · ";
-    paging += label;
-  }
   ibus_engine_update_auxiliary_text(
-      engine, ibus_text_new_from_string(paging.c_str()), TRUE);
+      engine, ibus_text_new_from_string(candidate_aux_text(engine, view).c_str()), TRUE);
   auto table = ibus_lookup_table_new(static_cast<guint>(candidates.size()), 0,
                                      TRUE, FALSE);
   ibus_lookup_table_set_orientation(table, state(engine).candidate_orientation);
@@ -3672,8 +3737,8 @@ bool apply(IBusEngine *engine, char *raw, PunctuationPairMode pair_mode,
   if (commit.is_string()) {
     auto text = commit.get<std::string>();
     auto &s = state(engine);
-    text = traditional_display(
-        s, result.value("commit_context", Json(nullptr)), std::move(text));
+    const auto context = result.value("commit_context", Json(nullptr));
+    text = traditional_display(s, context, std::move(text));
     const auto space_convert_ascii =
         space_convert_preceding
             ? msime::linux_host::smart_punctuation_ascii_mark(text)
@@ -3698,7 +3763,15 @@ bool apply(IBusEngine *engine, char *raw, PunctuationPairMode pair_mode,
     if (state(engine).fullwidth && !korean_commit)
       text = fullwidth_text(text);
     if (!text.empty()) {
-      commit_text(engine, text);
+      commit_text(engine, text, std::nullopt,
+                  !context.is_object() || context.value("typing_statistics", true));
+      // The key sound played when the key went down; this is the commit's own sound, or the next note of a melody that advances on commits. A transition only commits for a key or click in this focused, non-secure field.
+      if (!s.private_input) {
+        msime_client_commit_sound(s.session);
+        // The commit counts nothing; it reports the combo as it stands, which is how one that lapsed while the user paused leaves the aux line drawn just below.
+        s.typing_combo = msime::linux_host::typing_effect_combo(
+            msime_client_typing_effect(s.session, msime::linux_host::kTypingEffectCommit));
+      }
       if (space_convert_ascii != 0 && !inserted_pair) {
         // Preserve Engine's actual half (notably opening/closing quotes).
         s.space_convert_mark = space_convert_mark;
@@ -3938,6 +4011,7 @@ void voice_start_impl(IBusEngine *engine) {
   const auto session_id = s.session;
   const auto focus_epoch = s.focus_epoch;
   s.voice_active = true;
+  sync_music(engine);
   s.voice_phase = "正在录音…";
   s.voice_level.reset();
   s.wave_overlay.reset();
@@ -4381,6 +4455,7 @@ void focus_in(IBusEngine *engine) {
       // without re-registering it or disturbing repeated focus negotiation.
       publish_mode(engine);
     }
+    sync_music(engine);
     schedule_upgrade_restart(engine);
   });
 }
@@ -4407,6 +4482,7 @@ void focus_out(IBusEngine *engine) {
     s.native_compose.reset();
     s.reset_mode_modifiers();
     s.backspace_hold.reset();
+    s.key_repeat.reset();
     s.ai_context.clear();
     s.invalidate_providers();
     s.surrounding_text.clear();
@@ -4417,6 +4493,7 @@ void focus_out(IBusEngine *engine) {
     s.last_smart_punctuation_time = 0;
     s.smart_punctuation_rejected = 0;
     s.paired_tracker.clear();
+    sync_music(engine);
     // Leaving the client commits an open Korean syllable. render() draws it in IBUS_ENGINE_PREEDIT_COMMIT mode, so IBus has already handed that preedit to the client being left; committing the runtime's copy here as well would type the syllable twice, or into the client that takes the focus next. The session still finishes it, so nothing of it is left composing.
     const bool korean_composition =
         s.session && s.view.is_object() && s.view.value("scheme", 0) == 4 &&
@@ -4798,7 +4875,8 @@ void property_activate(IBusEngine *engine, const gchar *name, guint value) {
         return value == "unicode" || value == "date_time" ||
                value == "quick_phrase" || value == "emoji" ||
                value == "kaomoji" || value == "super_jianpin" ||
-               value == "temporary_english" || value == "temporary_japanese";
+               value == "temporary_english" || value == "temporary_japanese" ||
+               value == "expression" || value == "command" || value == "mention";
       };
       if (!allowed(key))
         return;
@@ -4806,7 +4884,8 @@ void property_activate(IBusEngine *engine, const gchar *name, guint value) {
           "local_modes", Json::object());
       const bool current = s.local_mode_overrides.contains(key)
                                ? s.local_mode_overrides.at(key).get<bool>()
-                               : configured_modes.value(key, true);
+                               : configured_modes.value(
+                                     key, msime::linux_host::local_mode_enabled_by_default(key));
       const bool enabled = value == PROP_STATE_CHECKED;
       if (current == enabled)
         return;
@@ -5528,6 +5607,7 @@ void content_type(IBusEngine *engine, guint purpose, guint hints) {
     s.open();
     if (s.session)
       apply(engine, msime_client_focus(s.session, true));
+    sync_music(engine);
     publish_mode(engine);
   });
 }
@@ -5544,14 +5624,15 @@ std::optional<size_t> candidate_digit_slot(guint key, guint keycode,
   const auto modifiers = flags &
       (IBUS_CONTROL_MASK | IBUS_SHIFT_MASK | IBUS_MOD1_MASK | IBUS_MOD4_MASK |
        IBUS_SUPER_MASK | IBUS_META_MASK | IBUS_HYPER_MASK | IBUS_MOD5_MASK);
-  const bool unicode = view.value("local_mode", std::string("none")) == "unicode";
+  // Digits are input in the modes that spell with them (unicode, expression): the Engine lists them in spelling_symbols.
+  const bool spelling_digits = msime::linux_host::spelling_digits(view);
   const bool shifted = (modifiers & IBUS_SHIFT_MASK) != 0;
   // Windows uses Shift+the physical number row for Unicode candidates, while
   // ordinary modes use the unmodified row. IBus exposes the shifted symbols
   // as key values, so map those symbols back to their physical slots.
-  if (modifiers != (unicode ? IBUS_SHIFT_MASK : 0))
+  if (modifiers != (spelling_digits ? IBUS_SHIFT_MASK : 0))
     return std::nullopt;
-  if (!unicode) {
+  if (!spelling_digits) {
     // IBus clients send evdev codes (GTK subtracts 8 from XKB hardware
     // codes). The number row is 2..11 (1..9,0); this preserves physical-key
     // selection when the active layout produces symbols such as '&' or 'é'.
@@ -5568,6 +5649,11 @@ std::optional<size_t> candidate_digit_slot(guint key, guint keycode,
     return std::nullopt;
   }
   if (!shifted)
+    return std::nullopt;
+  // A shifted number-row symbol the mode spells with (the expression mode's % ^ * ( )) is input, not the slot under it. A digit still picks: that is what Shift gives on AZERTY, and on the keypad of some X11 layouts.
+  const gunichar shifted_character = ibus_keyval_to_unicode(key);
+  if ((shifted_character < '0' || shifted_character > '9') &&
+      msime::linux_host::spelling_symbol(view, shifted_character))
     return std::nullopt;
   if (keycode >= 2 && keycode <= 11)
     return keycode == 11 ? 9 : static_cast<size_t>(keycode - 2);
@@ -6244,6 +6330,16 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
       return;
     if (!s.view.at("focused").get<bool>())
       apply(engine, msime_client_focus(s.session, true));
+    // A key the active local mode spells with is input before any binding below can claim it: a page key, a paired bracket, smart punctuation or a candidate digit (SpellingSymbols.h).
+    if ((modifiers & ~IBUS_SHIFT_MASK) == 0) {
+      const gunichar spelled = ibus_keyval_to_unicode(key);
+      if (msime::linux_host::local_mode_spelling(s.view, spelled)) {
+        handled = apply(engine, msime_client_character(
+                                    s.session, static_cast<uint8_t>(spelled),
+                                    (flags & IBUS_SHIFT_MASK) != 0));
+        return;
+      }
+    }
     if (try_skip_paired_closing(engine, key, flags)) {
       handled = true;
       return;
@@ -6641,12 +6737,13 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
                               : lowercase_letter ||
                                     (uppercase_letter &&
                                      (helpcode || s.english_mode));
+    const bool spelling_digits = msime::linux_host::spelling_digits(s.view);
     const bool nine_key_digit =
-        local_mode != "unicode" && s.view.value("nine_key", false) &&
+        !spelling_digits && s.view.value("nine_key", false) &&
         ((key >= IBUS_KP_2 && key <= IBUS_KP_9) ||
          (key >= '2' && key <= '9'));
-    const bool unicode_digit =
-        local_mode == "unicode" && key >= '0' && key <= '9' &&
+    const bool spelling_digit =
+        spelling_digits && key >= '0' && key <= '9' &&
         (modifiers & IBUS_SHIFT_MASK) == 0;
     const bool microsoft_ing =
         microsoft_shuangpin_ing_key(s.view, key, modifiers);
@@ -6660,7 +6757,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
          local_mode == "temporary_japanese");
     const bool candidate_input =
         candidate_active &&
-        (accepted_letter || nine_key_digit || unicode_digit || microsoft_ing ||
+        (accepted_letter || nine_key_digit || spelling_digit || microsoft_ing ||
          unicode_plus || accepted_apostrophe);
     if (candidate_input) {
       // Candidate visibility does not end composition. Engine owns how the
@@ -7531,10 +7628,40 @@ void destroy(IBusObject *object) {
   self->state = nullptr;
   IBUS_OBJECT_CLASS(msime_ibus_engine_parent_class)->destroy(object);
 }
+// The key sound of one press: every typing key while Chinese input is on in a field that is not a secure one, whether the Engine or the application takes the key, and none while a recording is running. It is asked for after the key is handled, when the session that holds the sound settings exists and the field's state is settled; the call only posts a request (msime_client.h).
+void play_key_sound(IBusEngine *engine, guint key, guint flags) {
+  auto &s = state(engine);
+  sync_music(engine);
+  const bool release = (flags & IBUS_RELEASE_MASK) != 0;
+  if (release)
+    s.key_repeat.release(key);
+  if (!s.session || !s.focused || s.blocked || s.private_input || !s.input_enabled ||
+      s.voice_active)
+    return;
+  const bool shortcut =
+      (flags & (IBUS_CONTROL_MASK | IBUS_MOD1_MASK | IBUS_MOD4_MASK | IBUS_SUPER_MASK |
+                IBUS_META_MASK | IBUS_HYPER_MASK)) != 0;
+  if (!msime::linux_host::key_press_sounds(release, modifier(key), shortcut))
+    return;
+  const auto key_class = msime::linux_host::key_sound_class(key);
+  msime_client_key_sound(s.session, key_class);
+  // The typing effect of the same press, from the same session: Linux shows only the combo count, in the candidate aux line. The key was rendered before this point, so a count that moved redraws that line alone, from the page the panel holds.
+  const auto combo = msime::linux_host::typing_effect_combo(msime_client_typing_effect(
+      s.session, key_class | (s.key_repeat.press(key) ? msime::linux_host::kTypingEffectRepeat : 0)));
+  if (combo == s.typing_combo)
+    return;
+  s.typing_combo = combo;
+  if (s.rendered_session == s.session && s.rendered_view.is_object() &&
+      s.rendered_candidates.is_array() && !s.rendered_candidates.empty())
+    ibus_engine_update_auxiliary_text(
+        engine, ibus_text_new_from_string(candidate_aux_text(engine, s.rendered_view).c_str()),
+        TRUE);
+}
 // Characters the IME hands back to the application are still typed text: Windows counts them in the statistics (ShouldCountPassthroughChar), so English-mode letters and Chinese-mode keys the Engine declines show up in the daily totals. Keys the IME consumed already recorded their committed text.
 gboolean process_key_and_count(IBusEngine *engine, guint key, guint keycode,
                                guint flags) {
   const gboolean handled = process_key(engine, key, keycode, flags);
+  play_key_sound(engine, key, flags);
   if (handled || (flags & IBUS_RELEASE_MASK) || !typing_statistics_switch.enabled())
     return handled;
   const auto &s = state(engine);

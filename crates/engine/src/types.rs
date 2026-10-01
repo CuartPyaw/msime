@@ -416,6 +416,12 @@ pub enum LocalInputMode {
     SuperJianpin,
     TemporaryEnglish,
     TemporaryJapanese,
+    /// `V`: a calculator, Chinese numerals and dates.
+    Expression,
+    /// `/`: built-in commands and the host's command table.
+    Command,
+    /// `@`: the names and places of the host's mention list.
+    Mention,
 }
 
 impl LocalInputMode {
@@ -431,7 +437,44 @@ impl LocalInputMode {
             Self::SuperJianpin => "super_jianpin",
             Self::TemporaryEnglish => "temporary_english",
             Self::TemporaryJapanese => "temporary_japanese",
+            Self::Expression => "expression",
+            Self::Command => "command",
+            Self::Mention => "mention",
         }
+    }
+
+    /// The mode `name` returns the name of; `None` for a name no mode has.
+    pub fn from_name(name: &str) -> Option<Self> {
+        [
+            Self::None,
+            Self::Unicode,
+            Self::DateTime,
+            Self::QuickPhrase,
+            Self::Emoji,
+            Self::Kaomoji,
+            Self::SuperJianpin,
+            Self::TemporaryEnglish,
+            Self::TemporaryJapanese,
+            Self::Expression,
+            Self::Command,
+            Self::Mention,
+        ]
+        .into_iter()
+        .find(|mode| mode.name() == name)
+    }
+
+    /// The non-letter characters the mode spells with. The runtime hands these to `character` even when a host reports them as punctuation, because finishing the composition on them would commit a half-typed spelling; hosts read digits here as input rather than candidate shortcuts.
+    pub fn spelling_symbols(self) -> &'static str {
+        match self {
+            Self::Unicode => "0123456789",
+            Self::Expression => crate::local::expression::SPELLING_SYMBOLS,
+            _ => "",
+        }
+    }
+
+    /// Whether the mode's rows are text the engine generated rather than words the user spelled. Their commits are never learned and never counted as typing.
+    pub fn generates_text(self) -> bool {
+        matches!(self, Self::Expression | Self::Command | Self::Mention)
     }
 }
 
@@ -488,7 +531,7 @@ impl Default for FrequencyAdjustmentOptions {
     }
 }
 
-/// Which Shift+letter local modes may be entered. All on by default.
+/// Which local modes may be entered. The Shift+letter modes of the reference are on by default; expression (`V`), command (`/`) and mention (`@`) are off, because entering them takes a key that used to reach the host as text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalModeOptions {
     pub unicode: bool,
@@ -499,6 +542,9 @@ pub struct LocalModeOptions {
     pub super_jianpin: bool,
     pub temporary_english: bool,
     pub temporary_japanese: bool,
+    pub expression: bool,
+    pub command: bool,
+    pub mention: bool,
 }
 
 impl Default for LocalModeOptions {
@@ -512,8 +558,32 @@ impl Default for LocalModeOptions {
             super_jianpin: true,
             temporary_english: true,
             temporary_japanese: true,
+            expression: false,
+            command: false,
+            mention: false,
         }
     }
+}
+
+/// One command of a host-supplied command table (`/` mode). The host validates the table it read; the engine still skips a row it cannot use rather than trusting it.
+///
+/// `template` is literal text with three kinds of placeholder: `{date}` or `{date:FORMAT}`, `{time}` or `{time:FORMAT}`, and `{weekday}`. FORMAT is a strftime pattern (`%Y-%m-%d`), the defaults are `%Y-%m-%d` and `%H:%M`, and `{weekday}` is the Chinese day name (星期四). Any other brace, including one left unclosed, makes the row unusable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandTableEntry {
+    /// 1..=32 lowercase ASCII letters, what the user types after `/`.
+    pub trigger: String,
+    /// Shown beside the row.
+    pub title: String,
+    pub template: String,
+}
+
+/// One name or place of the host's mention list (`@` mode).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MentionEntry {
+    /// The committed text.
+    pub text: String,
+    /// Lowercase pinyin syllables joined by `'` (`zhang'san`), matched by prefix and by initials; empty to match an ASCII `text` by its own letters only.
+    pub key: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -556,6 +626,13 @@ pub struct OnlineQuery {
     pub cloud_eligible: bool,
     pub ai_eligible: bool,
     pub session_id: u64,
+}
+
+/// What `/fy` asks the user's translation service: the English typed after the trigger, to be translated into Chinese. Unlike `OnlineQuery` it is never raised by spelling; only this command in the `/` mode produces one, and the answer is refused unless the session and the text are still the ones that asked.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CommandTranslationQuery {
+    pub session_id: u64,
+    pub text: String,
 }
 
 /// Which dictionary a personal entry or journal row belongs to. The ordinal is the host ABI value.

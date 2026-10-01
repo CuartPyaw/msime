@@ -101,6 +101,8 @@ pub use dictionary::{
     WordEdit, WordImport, WordKind, WordPage,
 };
 mod dictionary_snapshot;
+mod key_sound;
+mod plugin_tables;
 mod voice_capture;
 pub use dictionary_snapshot::{
     msime_client_snapshot_discard, msime_client_snapshot_inspect, msime_client_snapshot_prepare,
@@ -206,6 +208,12 @@ struct HostSession {
     voice: VoiceSessionState,
     /// Committing candidate selections counted but not yet written to typing statistics, indexed by one-based position minus one, with every position past a page in the last slot. See `SELECTION_BATCH`.
     pending_selections: [u64; RANKS + 1],
+    /// Where this session's plugin packs, command tables and name list are read from.
+    plugin_roots: key_sound::PluginRoots,
+    /// The key sound, melody, commit, achievement and music settings of the newest preferences, which take effect at once rather than waiting for the composition to end: none of them is Engine state.
+    sound: key_sound::SessionSound,
+    /// The command-table and name-list files `options` was filled from.
+    plugin_tables: plugin_tables::PluginTables,
     // Declared after runtime so the Engine is dropped before releasing access.
     _dictionary_access: DictionaryAccess,
 }
@@ -361,6 +369,16 @@ impl HostSession {
         options.local_super_jianpin = snapshot.preferences.local_modes.super_jianpin;
         options.local_temporary_english = snapshot.preferences.local_modes.temporary_english;
         options.local_temporary_japanese = snapshot.preferences.local_modes.temporary_japanese;
+        options.local_expression = snapshot.preferences.local_modes.expression;
+        options.local_command = snapshot.preferences.local_modes.command;
+        options.local_mention = snapshot.preferences.local_modes.mention;
+        let plugin_root = self.plugin_roots.installed.as_deref();
+        let plugin_tables = plugin_tables::PluginTables::stamp(
+            plugin_root,
+            &options,
+            &snapshot.preferences.plugins.command_tables,
+        );
+        plugin_tables.fill(&self.plugin_tables, plugin_root, &mut options);
         options.sentence_association =
             engine_sentence_association(&snapshot.preferences.sentence_association);
         // Unconditional, because `Runtime::crop_alternative_readings` runs whether or not a model is
@@ -421,6 +439,10 @@ impl HostSession {
         engine
             .set_dedicated_english(self.english_mode)
             .map_err(|e| e.to_string())?;
+        // The places of `@` mode are not an engine option: every new engine starts with them off, so the switch is carried over on each rebuild.
+        engine
+            .set_mention_places(snapshot.preferences.local_modes.mention_places)
+            .map_err(|e| e.to_string())?;
         self.runtime
             .replace_engine_with_touch_layout(
                 engine,
@@ -432,9 +454,36 @@ impl HostSession {
         self.runtime
             .set_settled_rerank_enabled(snapshot.preferences.sentence_association.neural_desktop);
         self.options = options;
+        self.plugin_tables = plugin_tables;
         self.applied = snapshot.preferences.clone();
         self.preferences_pending = false;
         self.nine_key_override = next_nine_key_override;
+        Ok(())
+    }
+
+    /// Bring the `/` command table and the `@` name list up to date with the plugins directory, for a field that just gained focus: the settings page may have imported a table or edited the names since. Reads nothing when no file moved.
+    fn refresh_plugin_tables(&mut self) -> Result<(), String> {
+        let root = self.plugin_roots.installed.as_deref();
+        let tables = plugin_tables::PluginTables::stamp(
+            root,
+            &self.options,
+            &self.applied.plugins.command_tables,
+        );
+        if tables.commands_differ(&self.plugin_tables) {
+            let table = tables.command_table(root);
+            self.runtime
+                .set_command_table(&table)
+                .map_err(|e| e.to_string())?;
+            self.options.command_table = table;
+        }
+        if tables.mentions_differ(&self.plugin_tables) {
+            let entries = tables.mention_entries(root, &self.options);
+            self.runtime
+                .set_mention_entries(&entries)
+                .map_err(|e| e.to_string())?;
+            self.options.mention_entries = entries;
+        }
+        self.plugin_tables = tables;
         Ok(())
     }
 
@@ -498,6 +547,10 @@ impl HostSession {
             .preferences
             .clone();
         self.set_ai_provider_cache(&requested_preferences);
+        self.sound.update(key_sound::SoundSettings::new(
+            &requested_preferences.plugins,
+            &self.plugin_roots,
+        ));
         self.apply_pending()?;
         let snapshot = self.requested.as_ref().expect("requested snapshot exists");
         Ok(
@@ -573,6 +626,9 @@ struct HostOptions {
     /// desktop platforms are the ones this is for, and they set it alongside shipping the file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     settled_model: Option<String>,
+    /// Absolute path to the bundle's built-in sound packs (`resources/sound-packs` in the repository), for a host whose bundle does not put them in `sound-packs` beside `resources`, the directory used when this is absent. Installed packs, command tables and the `@` name list are read from `plugins` under `preferences_directory`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sound_packs: Option<String>,
 }
 
 impl HostOptions {
@@ -606,6 +662,11 @@ impl HostOptions {
             local_super_jianpin: self.preferences.local_modes.super_jianpin,
             local_temporary_english: self.preferences.local_modes.temporary_english,
             local_temporary_japanese: self.preferences.local_modes.temporary_japanese,
+            local_expression: self.preferences.local_modes.expression,
+            local_command: self.preferences.local_modes.command,
+            local_mention: self.preferences.local_modes.mention,
+            command_table: Vec::new(),
+            mention_entries: Vec::new(),
             sentence_association: engine_sentence_association(
                 &self.preferences.sentence_association,
             ),
@@ -788,6 +849,7 @@ pub fn prepare_host_configuration(
         // places one beside the dictionaries needs no configuration.
         sentence_model: None,
         settled_model: settled_model_beside(&resources),
+        sound_packs: None,
     })?)
 }
 
@@ -1212,7 +1274,12 @@ fn dispatch(handle: u64, action: Action) -> *mut c_char {
                 .runtime
                 .dispatch(action)
                 .map_err(|e| e.to_string())?;
-            if result.commit.is_some() {
+            // Text the Engine generated (a calculator result, a command, a mention) was picked, not typed, and stays out of the statistics the way it stays out of learning.
+            let counts_as_typing = result
+                .commit_context
+                .as_ref()
+                .is_none_or(|context| context.typing_statistics);
+            if result.commit.is_some() && counts_as_typing {
                 if let Some(position) = position {
                     session.count_selection(position);
                 }

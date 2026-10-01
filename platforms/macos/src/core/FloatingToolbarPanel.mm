@@ -326,6 +326,11 @@ static BOOL __attribute__((unused)) FrontmostApplicationOwnsFullscreenDisplay(vo
     return NO;
 }
 
+BOOL MetasequoiaFrontmostApplicationOwnsFullscreenDisplay(void)
+{
+    return FrontmostApplicationOwnsFullscreenDisplay();
+}
+
 BOOL MetasequoiaWindowCoversDisplay(CGRect windowBounds, CGRect displayBounds)
 {
     if (!std::isfinite(windowBounds.origin.x) || !std::isfinite(windowBounds.origin.y) ||

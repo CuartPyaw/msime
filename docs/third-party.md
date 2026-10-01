@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | `metasequoiaime/Google-PinyinIME-Rev` | Apache-2.0 | 已移除。Google 整句解码器和它的 `dict_pinyin.dat` 随 C++ Engine 一并退役，整句候选只来自词格 |
 | `nemtrif/utfcpp` | BSL-1.0 | 引擎不再使用。Windows TSF 仍通过 vcpkg 引入它，见[各平台引入的第三方 SDK](#各平台引入的第三方-sdk) |
-| `mackron/miniaudio` | 公有领域 / MIT-0 双许可 | 不再随引擎来。Windows 提示音（`platforms/windows/src/voice/CuePlayer.cpp`）用的单头文件固定在 `platforms/windows/third_party/miniaudio/`，许可证全文在同目录 `LICENSE`；麦克风采集改由下表的 `cpal` 负责 |
+| `mackron/miniaudio` | 公有领域 / MIT-0 双许可 | 不再随引擎来。Windows 提示音（`platforms/windows/src/voice/CuePlayer.cpp`）用的单头文件固定在 `platforms/windows/third_party/miniaudio/`，许可证全文在同目录 `LICENSE`；麦克风采集改由下表的 `cpal` 负责。HarmonyOS 2in1 的按键音也用这同一份头文件（v0.11.25）：`platforms/harmony/native/key_sound_render.cpp` 只编译它的 WAV 解码、采样率转换和 WAV 编码（不编设备后端和其他编解码器），在长度上限内解码音效包的 WAV 样本并按旋律音高写出，再交给 SoundPool 播放 |
 | `ggml-org/whisper.cpp` | MIT | 已移除。Whisper 本地文件识别不再提供，本地语音识别只走下文的 sherpa-onnx |
 | Zinnia（Taku Kudo） | BSD-3-Clause | 不再编译 C++ 版。`crates/engine/src/handwriting/` 是其识别器的 Rust 移植，桌面包照旧携带 `Zinnia-LICENSE.txt` |
 | 手写模型 `handwriting-zh_CN.model` | LGPL-2.1 | 由 `resources/handwriting-model.lock.json` 固定长度与 SHA-256，许可证全文 `HandwritingModel-LICENSE.txt` 与模型一同固定、一同分发 |
@@ -32,6 +32,9 @@
 | `wana_kana` | 4 | MIT | 日语罗马字转假名（`crates/engine/src/japanese/romaji.rs`） |
 | `cpal` | 0.18 | Apache-2.0 | `host-api` 的麦克风采集（iOS 与 HarmonyOS 不链接）。Linux 上经 ALSA 的 `libasound` 访问声卡，构建需要 `libasound2-dev` 与 `pkg-config` |
 | `rubato` | 5 | MIT OR Apache-2.0 | 把采集到的音频重采样到识别所需的采样率 |
+| `exmex` | 0.21 | MIT OR Apache-2.0 | V模式的算式求值（`crates/engine/src/local/expression.rs`），只注册四则运算、`%` 取余和 `^` 乘方。它带进 `regex` 与 `smallvec`，两者原本就在锁文件里 |
+| `chinese-number`（关闭默认特性，只开 `std`、`number-to-chinese`） | 0.8 | MIT | V模式把数字写成中文小写、大写与金额（同一文件）。传递依赖 `chinese-variant`（MIT）、`enum-ordinalize`（MIT）、`num-bigint`（MIT OR Apache-2.0） |
+| `rink-core`（关闭默认特性，只开 `bundle-files`） | 0.9 | MPL-2.0；它内嵌的单位库 `definitions.units` 分叉自 GNU Units 的数据库，为 GPL-3.0-or-later（Free Software Foundation），与本仓库的 GPL-3.0 兼容 | V模式的单位换算（`crates/engine/src/local/units.rs`），例如 `3jin'g` 把 3 斤换成克。`bundle-files` 把单位库编进库里，单位上下文在第一次用到时才加载；汇率要联网取数据，从不加载，所以不换算货币。带进 `num-rational`（MIT OR Apache-2.0）与 `strsim`（MIT）。源码在 crates.io 的对应版本，上游仓库是 [codeberg.org/tiffany/rink](https://codeberg.org/tiffany/rink)。MPL-2.0 的履行方式与下文音效包一节的 `symphonia` 相同 |
 
 ## 随包资源（`resources/desktop-dictionary.lock.json`）
 
@@ -110,6 +113,41 @@ print(json.loads(f.read(n))["__metadata__"]["attribution"])
 
 构成这张表所用的部件拆分与笔顺数据另有来源（rime-radical-pinyin，GPL-3.0，上游含 chaizi/CC-BY-3.0、CHISE/GPL-2+、yi-bai/ids/MIT；笔顺来自 cnchar，MIT），逐条同样见 NOTICE.md。另外五套辅助码表原先随 Engine 归档而来，现在同样放在 `resources/helpcodes/`，来源说明是从 Engine 原样带过来的 [`resources/helpcodes/ENGINE-NOTICE.md`](../resources/helpcodes/ENGINE-NOTICE.md)：它们同样没有拿到明确的再分发授权。
 
+## 自带音效包与插件包（`resources/sound-packs/`、`client-core::plugins`）
+
+内置的九套音效包和两套背景音乐包是本项目自己的作品，随各平台安装包分发，放在资源目录的旁边（资源目录必须与锁文件完全一致）。它们的标识登记在 `client-core::plugins` 的 `BUILTIN_SOUND_PACKS` 与 `BUILTIN_MUSIC_PACKS`，这些标识保留给内置包，用户导入的包不能占用。
+
+| 项 | 值 |
+| --- | --- |
+| 文件 | `default/`：普通键、空格、回车、退格、上屏与里程碑共 6 段 WAV；`msime-typewriter/`、`msime-bubble/`、`msime-8bit/`、`msime-woodblock/`：普通键、空格、回车、退格与上屏各 1 段 WAV；`twinkle/`、`msime-pentatonic/`、`msime-canon/`、`msime-ode-to-joy/`：1 段音色 `tone.wav`，按键时按清单里的半音序列变调演奏；`msime-music-lofi/`、`msime-music-ambient/`：各 1 段 36 秒的无缝循环曲目（`lofi.wav`、`ambient.wav`） |
+| 来源 | `scripts/generate_sound_packs.py` 用正弦、衰减包络和定种子的噪声逐样本合成，不录音、不下载任何素材 |
+| 许可证 | CC0-1.0，写在各包的 `plugin.toml` 里 |
+| 核对方式 | `scripts/test-sound-packs.py` 把样本重新合成一遍，与提交的文件逐样本比对（容差为 16 位量化的 1 级），不一致就失败，所以手工替换的样本进不来 |
+| 旋律 | `twinkle` 的音符序列是《小星星》（法国民谣 "Ah! vous dirai-je, maman"，18 世纪）；`msime-canon` 取自帕赫贝尔《D 大调卡农》（约 1680 年）的上声部；`msime-ode-to-joy` 是贝多芬第九交响曲（1824 年）的《欢乐颂》主题；`msime-pentatonic` 只是 C 大调五声音阶的上下行。前三者都属公有领域，曲目说明写在各自 `plugin.toml` 的注释里。两段背景音乐也是生成脚本按程序写出的和声与节奏，不取材于任何既有作品 |
+
+第三方插件包（音效、背景音乐、/指令表）由用户自行导入，本仓库不分发。每个包必须在清单里声明 `license`，设置页原样显示；包里只能有清单、清单点名的 WAV/Ogg 和文本说明，不能带任何可执行内容，`permissions` 必须为空。
+
+导入插件包用到的 Rust crate：
+
+| crate | 版本 | 许可证 | 用途 |
+| --- | --- | --- | --- |
+| `zip`（关闭默认特性，只开 `deflate-flate2`） | 8.6 | MIT | 导入用户选中的 `.zip` 插件包（`crates/client-core/src/plugins/import.rs`）。带进 `typed-path`（MIT OR Apache-2.0）；其余依赖 `crc32fast`、`indexmap`、`memchr`、`flate2` 原本就在锁文件里 |
+
+播放音效包与背景音乐用到的 Rust crate，只链进 macOS、Windows、Linux 的 `host-api`（`crates/host-api/src/key_sound/`）；iOS、Android、HarmonyOS 不链接，HarmonyOS 2in1 用系统 SoundPool 播 `msime_client_key_sound_pack` 解析出的文件，WAV 样本先经上文的 miniaudio 在长度上限内解码、按旋律音高重写，背景音乐则由系统 AVPlayer 流式播放 `msime_client_music_pack` 解析出的曲目：
+
+| crate | 版本 | 许可证 | 用途 |
+| --- | --- | --- | --- |
+| `kira`（关闭默认特性，只开 `cpal`、`wav`、`pcm`、`ogg`、`vorbis`） | 0.12 | MIT OR Apache-2.0 | 混音、复音、按半音变调播放旋律、流式播放背景音乐。输出走上表已有的 `cpal` 0.18，不另带一份。带进 `glam`（MIT OR Apache-2.0）、`mint`（MIT）、`rtrb`（MIT OR Apache-2.0）、`atomic-arena`（MIT OR Apache-2.0）、`triple_buffer`（MPL-2.0）；`send_wrapper`（MIT OR Apache-2.0）只在 wasm 目标下用到 |
+| `symphonia`（关闭默认特性，只开 `wav`、`pcm`、`ogg`、`vorbis`） | 0.6 | MPL-2.0 | WAV 与 Ogg Vorbis 解码，是 `kira` 自己用的解码器；`host-api` 直接调用它，在包的时长上限内逐包解码（`decode.rs`），不整段解码后再检查。带进 `symphonia-core`、`symphonia-common`、`symphonia-metadata`、`symphonia-format-riff`、`symphonia-format-ogg`、`symphonia-codec-pcm`、`symphonia-codec-vorbis`（均为 MPL-2.0）、`extended`（MIT）、`regex-lite`（MIT OR Apache-2.0） |
+
+设置窗口「扩展」页导入插件包时弹出的系统选择框，只链进 macOS、Windows、Linux 的 Tauri 外壳（`apps/desktop/src-tauri/src/platform/desktop/desktop_plugins.rs`）。选择框只由 Rust 端调用，没有任何 capability 把对话框命令开放给网页：
+
+| crate | 版本 | 许可证 | 用途 |
+| --- | --- | --- | --- |
+| `tauri-plugin-dialog` | 2.7 | Apache-2.0 OR MIT | 用各平台自己的打开对话框选择插件包文件夹或 `.zip` 文件（macOS 的 NSOpenPanel、Windows 的通用对话框、Linux 的 GTK 文件选择器），在主线程弹出并以设置窗口为父窗口。停在 2.7，因为 2.8 要求 tauri 2.12。带进 `rfd`（MIT，实际的原生对话框实现）与 `tauri-plugin-fs`（Apache-2.0 OR MIT，本插件的依赖，同样没有开放给网页）；它们用到的 `dunce`、`glob`、`schemars`、`serde_repr` 等原本就在锁文件里 |
+
+MPL-2.0 是文件级 copyleft，与本仓库的 GPL-3.0 兼容：这些 crate 未作修改，以二进制随包分发时附上许可证全文并指明源码位置（crates.io 上的对应版本）即可。Linux 与 Windows 由 `platforms/linux/collect-notices.py` 从 Cargo 依赖图收集的通知覆盖；macOS 的输入法包不走这个脚本，由 `resources/licenses/MPL-2.0.txt`（取自 `symphonia-core` 0.6.1 的 LICENSE）复制成 `Contents/Resources/Licenses/MPL-2.0.txt`，并在 `platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt` 里列出这些 crate 与源码位置，`platforms/macos/tests/settings/bundle_contents.py` 检查它在包里。
+
 ## 背单词词书（`resources/wordbook.lock.json`）
 
 背单词模式的八本内置词书来自 ECDICT，不在 `desktop-dictionary.lock.json` 的覆盖范围里，所以单列一节。
@@ -161,6 +199,7 @@ kaikki 每周覆盖同一个 URL，所以能复现构建的是 `filtered_input`�
 
 | 组件 | 许可证 | 位置与说明 |
 | --- | --- | --- |
+| [modood/Administrative-divisions-of-China](https://github.com/modood/Administrative-divisions-of-China) 的省、地、县三级行政区划，提交 `c49d495b40ac73eb1a66f6eeae5f8fd10696f035` | WTFPL（全文在 `resources/licenses/Administrative-divisions-of-China-WTFPL.txt`）；上游整理自国家统计局公布的统计用区划代码与城乡划分代码 | `crates/engine/src/local/places.tsv`，`@` 模式在用户自己的列表之后补充的内置地名（3302 个，约 126 KB，`include_str!` 编进引擎）。`msime-dict-build places` 读 `dist/provinces.csv`、`dist/cities.csv`、`dist/areas.csv` 三个文件生成这张表，三者的 URL、长度与 SHA-256 固定在 `resources/dictionary-sources.lock.json` 的 `places/` 条目；拼音由生成器按字注音，再用 `crates/dict-builder/src/places.rs` 的 `READINGS` 纠正地名专用读音。只取地名和上级关系，不带区划代码。设置里「@ 地名」默认关闭 |
 | [OpenCC](https://github.com/BYVoid/OpenCC) 词典，提交 `26753884f1984add422f3b0249ccee8613deaff6` | Apache-2.0 | `crates/client-core/data/opencc/`，许可证全文在同目录 `LICENSE`。`STPhrases.txt`、`STCharacters.txt`、`CJK_Compatibility_Ideographs.txt` 原样取自该提交的 `data/dictionary/`；`STPhrases_GeneratedFromRegionalPhrases.txt` 是该提交的 OpenCC 构建产物（`data/scripts/generate_st_phrases_from_regional_phrases.py` 用 `t2s.json` 生成），本仓不重新生成。提交号与来源 MSIME-Windows 的 `vendor/opencc` 子模块一致。只使用数据，不链接 OpenCC 的 C++ 库；`chinese_conversion.rs` 按 `s2t.json` 的规则实现转换。Windows 通知由 `Collect-Notices.ps1` 一并收集 |
 
 ## 本地语音识别

@@ -9,6 +9,7 @@ const allCapabilities = {
   chat: true,
   community: true,
   floatingToolbar: true,
+  plugins: true,
 };
 
 test("builds the complete desktop page catalog in registry order", () => {
@@ -41,13 +42,14 @@ test("builds the complete desktop page catalog in registry order", () => {
     "screen-keyboard",
     "handwriting",
     "tools",
+    "plugins",
     "ai",
     "floating-toolbar",
     "help",
     "about",
     "feedback",
   ]);
-  expect(catalog.mobileHiddenPageIds).toEqual(["floating-toolbar"]);
+  expect(catalog.mobileHiddenPageIds).toEqual(["floating-toolbar", "plugins"]);
   expect(catalog.mobilePrimaryPages.map((page) => page.id)).toEqual([
     "home",
     "community",
@@ -69,10 +71,17 @@ test("hides hardware shortcuts and floating toolbar on touch-only mobile hosts",
     macos: false,
   });
 
-  expect(catalog.mobileHiddenPageIds).toEqual(["shortcuts", "floating-toolbar", "helpcode"]);
+  expect(catalog.mobileHiddenPageIds).toEqual([
+    "shortcuts",
+    "floating-toolbar",
+    "plugins",
+    "helpcode",
+  ]);
   expect(catalog.sidebarGroups.flat().map((page) => page.id)).not.toContain("shortcuts");
   expect(catalog.sidebarGroups.flat().map((page) => page.id)).not.toContain("floating-toolbar");
+  expect(catalog.sidebarGroups.flat().map((page) => page.id)).not.toContain("plugins");
   expect(catalog.mobileSecondaryPages.map((page) => page.id)).not.toContain("helpcode");
+  expect(catalog.mobileSecondaryPages.map((page) => page.id)).not.toContain("plugins");
 });
 
 test("keeps helper codes on Android and HarmonyOS while exposing keyboard shortcuts by capability", () => {
@@ -99,8 +108,25 @@ test("keeps helper codes on Android and HarmonyOS while exposing keyboard shortc
     macos: false,
   });
 
-  expect(android.mobileHiddenPageIds).toEqual(["shortcuts", "floating-toolbar"]);
-  expect(harmonyTwoInOne.mobileHiddenPageIds).toEqual(["floating-toolbar"]);
+  expect(android.mobileHiddenPageIds).toEqual(["shortcuts", "floating-toolbar", "plugins"]);
+  expect(harmonyTwoInOne.mobileHiddenPageIds).toEqual(["floating-toolbar", "plugins"]);
   expect(harmonyTwoInOne.mobileSecondaryPages.map((page) => page.id)).toContain("helpcode");
   expect(harmonyTwoInOne.mobileSecondaryPages.map((page) => page.id)).toContain("shortcuts");
+});
+
+test("offers the 扩展 page only where the host backs it", () => {
+  const catalog = settingsPageCatalog({
+    ...allCapabilities,
+    plugins: false,
+    mobile: false,
+    modeSwitchShortcuts: true,
+    panelShortcuts: true,
+    desktopMaintenanceShortcuts: true,
+    helpcodeShiftEntry: true,
+    android: false,
+    harmony: false,
+    macos: true,
+  });
+
+  expect(catalog.availablePages.map((page) => page.id)).not.toContain("plugins");
 });

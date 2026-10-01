@@ -4,6 +4,7 @@
 //! msime-dict-build --cache <dir> --out <dir>                 every stage, then the manifest
 //! msime-dict-build --cache <dir> --out <dir> --skip ngram    a quick local build without the corpus pass
 //! msime-dict-build --list
+//! msime-dict-build places --cache <dir> [--out <places.tsv>] [--offline]
 //! msime-dict-build check-words [--base <words.txt> --head <words.txt>] [--translations-base <translations.txt> --translations-head <translations.txt>] [--english-base <english.txt> --english-head <english.txt>] [--msime-db <msime.db>] [--english-db <english.db>] [--json <report.json>] [--markdown <summary.md>]
 //! ```
 
@@ -15,6 +16,7 @@ mod msime;
 mod ngram;
 mod others;
 mod pinyin;
+mod places;
 mod product;
 mod sources;
 mod sqlite;
@@ -115,6 +117,47 @@ struct Arguments {
 enum Command {
     /// Check a change to the shared custom dictionary's words.txt, translations.txt and english.txt; pass a base/head pair for each file to check. Exits 0 when every appended line is accepted, 1 when anything is rejected (the reports are still written), 2 when the check cannot run.
     CheckWords(CheckWords),
+    /// Write the `@` mode place table (crates/engine/src/local/places.tsv) from the administrative divisions pinned under places/ in the sources lock.
+    Places(Places),
+}
+
+#[derive(Args)]
+struct Places {
+    /// Where pinned sources are downloaded and reused from.
+    #[arg(long)]
+    cache: PathBuf,
+    /// The table to write; the engine's embedded copy by default.
+    #[arg(long, default_value_os_t = repository_root().join("crates/engine/src/local/places.tsv"))]
+    out: PathBuf,
+    /// Fail instead of downloading a source that is not cached.
+    #[arg(long)]
+    offline: bool,
+    /// The msime checkout the sources lock is read from.
+    #[arg(long, default_value_os_t = repository_root())]
+    repository: PathBuf,
+}
+
+fn build_places(arguments: &Places) -> Result<()> {
+    let root = &arguments.repository;
+    let sources = Sources {
+        lock: Lock::load(&root.join("resources/dictionary-sources.lock.json"))?,
+        repository_inputs: root.join("resources/dictionary-sources"),
+        cache: arguments.cache.clone(),
+        offline: arguments.offline,
+    };
+    let read = |path: &str| -> Result<String> { text::read(&sources.pinned(path)?) };
+    let places = places::build(
+        &read(places::PROVINCES)?,
+        &read(places::CITIES)?,
+        &read(places::AREAS)?,
+    )?;
+    places::write(&places, &arguments.out)?;
+    eprintln!(
+        "[done] {} places -> {}",
+        places.len(),
+        arguments.out.display()
+    );
+    Ok(())
 }
 
 #[derive(Args)]
@@ -439,6 +482,9 @@ fn stage_name(stage: Stage) -> String {
 
 fn main() -> Result<()> {
     let arguments = Arguments::parse();
+    if let Some(Command::Places(places)) = &arguments.command {
+        return build_places(places);
+    }
     if let Some(Command::CheckWords(check)) = &arguments.command {
         match check_words(check) {
             Ok(true) => return Ok(()),

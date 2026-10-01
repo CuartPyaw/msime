@@ -112,7 +112,10 @@ int main() {
         });
         assert(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
         assert(rejected);
+        // Nothing under preferences.plugins is on, so the sound calls queue nothing and start no player; a closed session answers the same without reaching the library.
+        assert(![session keySound:0] && ![session keySound:1] && ![session commitSound] && ![session setMusicActive:YES]);
         assert([session closeWithError:&error]);
+        assert(![session keySound:0] && ![session commitSound] && ![session setMusicActive:NO]);
         assert(![session resetCacheWithError:&error]);
         assert(![session setChinesePunctuationEnabled:NO error:&error]);
         assert(![session viewWithError:&error]);

@@ -131,8 +131,23 @@ static void CheckMenu(NSMenu *menu, id controller) {
 @property(nonatomic) NSUInteger rawCommitCalls;
 @property(nonatomic) NSUInteger commandCalls;
 @property(nonatomic, copy) NSDictionary *rawTransition;
+// The sound requests the controller made, in order: key classes, commits, and each music on/off.
+@property(nonatomic, strong) NSMutableArray<NSNumber *> *keySounds;
+@property(nonatomic) NSUInteger commitSounds;
+@property(nonatomic, strong) NSMutableArray<NSNumber *> *musicStates;
 @end
 @implementation ShortcutSession
+- (BOOL)keySound:(uint32_t)keyClass {
+    if (!self.keySounds) self.keySounds = [NSMutableArray array];
+    [self.keySounds addObject:@(keyClass)];
+    return YES;
+}
+- (BOOL)commitSound { ++self.commitSounds; return YES; }
+- (BOOL)setMusicActive:(BOOL)active {
+    if (!self.musicStates) self.musicStates = [NSMutableArray array];
+    [self.musicStates addObject:@(active)];
+    return YES;
+}
 // The controller defers a preference snapshot to the main queue while a composition is live, so a block
 // scheduled by one test can land in another test's run loop. Without this the fake raises an unrecognized
 // selector from a completely unrelated test, which is how it surfaced.
@@ -497,6 +512,8 @@ static void TestKeyLatencyIsLoggedWithoutTheKey() {
 
 @interface ModeController : MSIMEInputController
 @property(nonatomic) NSUInteger preparationCalls;
+// Plays secure event input, which is window-server state a test cannot turn on.
+@property(nonatomic) BOOL secureInput;
 @property(nonatomic) NSUInteger paletteCalls;
 @property(nonatomic) NSUInteger screenKeyboardCalls;
 @property(nonatomic) NSUInteger restartCalls;
@@ -507,6 +524,7 @@ static void TestKeyLatencyIsLoggedWithoutTheKey() {
     ++self.preparationCalls;
     if ([self valueForKey:@"session"]) [super prepareSession];
 }
+- (BOOL)secureEventInputActive { return self.secureInput; }
 - (void)showSystemCharacterPalette { ++self.paletteCalls; }
 - (void)showScreenKeyboard:(id)sender { (void)sender; ++self.screenKeyboardCalls; }
 - (void)restartCurrentInputMethod { ++self.restartCalls; }
@@ -1651,12 +1669,12 @@ static void TestFullWidth(NSUserDefaults *defaults, MSIMEAppearancePreferences *
 // and if that request is ever dropped, nothing else here notices: a phrase being assembled would go
 // back to arriving in the document one piece at a time, which looks like ordinary typing.
 static void TestSessionOptions() {
-    assert(!MSIMESessionOptions(nil));
-    assert(!MSIMESessionOptions((NSDictionary *)@"not a dictionary"));
+    assert(!MSIMESessionOptions(nil, nil));
+    assert(!MSIMESessionOptions((NSDictionary *)@"not a dictionary", @"/synthetic/sound-packs"));
 
     NSDictionary *file = @{@"api_version":@1, @"resources":@"/synthetic/resources",
         @"preferences":@{@"scheme":@"quanpin"}};
-    NSDictionary *requested = MSIMESessionOptions(file);
+    NSDictionary *requested = MSIMESessionOptions(file, nil);
     assert([requested[@"phrase_preedit"] isEqual:@YES]);
     // Everything the file carried is passed through untouched, including nested objects.
     for (NSString *key in file) assert([requested[key] isEqual:file[key]]);
@@ -1667,8 +1685,26 @@ static void TestSessionOptions() {
 
     // An options file that already says something about it does not get to say no: this host draws
     // the field, and a stale file predates the behaviour entirely.
-    NSDictionary *stale = MSIMESessionOptions(@{@"api_version":@1, @"phrase_preedit":@NO});
+    NSDictionary *stale = MSIMESessionOptions(@{@"api_version":@1, @"phrase_preedit":@NO}, nil);
     assert([stale[@"phrase_preedit"] isEqual:@YES]);
+
+    // The built-in sound packs live in the bundle, while resources is EngineResources in Application Support, so the host library cannot find them beside it: the bundle's directory is named, unless the options file names one itself.
+    NSDictionary *sounds = MSIMESessionOptions(file, @"/synthetic/bundle/Contents/Resources/sound-packs");
+    assert([sounds[@"sound_packs"] isEqual:@"/synthetic/bundle/Contents/Resources/sound-packs"]);
+    assert(sounds.count == file.count + 2 && !file[@"sound_packs"]);
+    NSDictionary *named = MSIMESessionOptions(@{@"api_version":@1, @"sound_packs":@"/configured/sound-packs"}, @"/synthetic/sound-packs");
+    assert([named[@"sound_packs"] isEqual:@"/configured/sound-packs"]);
+
+    NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    NSString *bundlePath = [root stringByAppendingPathComponent:@"Synthetic.bundle"];
+    NSString *resources = [bundlePath stringByAppendingPathComponent:@"Contents/Resources"];
+    assert([NSFileManager.defaultManager createDirectoryAtPath:resources withIntermediateDirectories:YES attributes:nil error:nil]);
+    assert([@{@"CFBundleIdentifier": @"app.msime.synthetic"} writeToURL:[NSURL fileURLWithPath:[bundlePath stringByAppendingPathComponent:@"Contents/Info.plist"]] error:nil]);
+    assert(!MSIMEBundleSoundPacks([NSBundle bundleWithPath:bundlePath]));
+    assert([NSFileManager.defaultManager createDirectoryAtPath:[resources stringByAppendingPathComponent:@"sound-packs"] withIntermediateDirectories:NO attributes:nil error:nil]);
+    NSString *found = MSIMEBundleSoundPacks([NSBundle bundleWithPath:bundlePath]);
+    assert([found.lastPathComponent isEqual:@"sound-packs"] && found.isAbsolutePath);
+    [NSFileManager.defaultManager removeItemAtPath:root error:nil];
 }
 
 static void TestKeypadDecimal(MSIMEAppearancePreferences *appearance) {
@@ -2579,6 +2615,100 @@ static void TestStaleClientDeactivation() {
     MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
 
+// Key sounds, the commit sound and background music, as the controller asks the session for them. The session decides whether anything is switched on; what is pinned here is which key class each key reports, that auto-repeat, key-up and secure event input stay silent, that dictated text and results the Engine computed are kept out of what counts as typing, and that music follows the controller that is actually active.
+static void TestSoundsFollowKeysCommitsAndActivation() {
+    NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    assert([NSFileManager.defaultManager createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil]);
+    NSString *suite = [@"msime.sounds." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *appearance = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    appearance.fullWidthInput = NO;
+    ModeController *controller = [ModeController alloc];
+    ShortcutSession *session = [ShortcutSession new];
+    ShortcutClient *client = [ShortcutClient new];
+    client.insertions = [NSMutableArray array];
+    [controller setValue:appearance forKey:@"appearance"];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:client forKey:@"activeClient"];
+    [controller setValue:root forKey:@"preferencesDirectory"];
+    NSDictionary *idle = @{ @"focused": @YES, @"editing_text": @"", @"candidates": @[], @"scheme": @0 };
+    [controller setValue:idle forKey:@"view"];
+    session.nextTransition = @{ @"handled": @YES, @"commit": NSNull.null, @"view": idle };
+    NSEvent *(^key)(NSEventType, unsigned short, NSString *, BOOL) = ^NSEvent *(NSEventType type, unsigned short code, NSString *characters, BOOL repeat) {
+        return [NSEvent keyEventWithType:type location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0
+                                 context:nil characters:characters charactersIgnoringModifiers:characters isARepeat:repeat keyCode:code];
+    };
+
+    // Space, both enter keys and backspace have classes of their own; letters and digits play the default.
+    for (NSArray *press in @[@[@0, @"a"], @[@49, @" "], @[@36, @"\r"], @[@76, @"\x03"], @[@51, @"\x7f"], @[@18, @"1"]])
+        [controller handleEvent:key(NSEventTypeKeyDown, [press[0] unsignedShortValue], press[1], NO) client:client];
+    assert(([session.keySounds isEqual:@[@0, @1, @2, @2, @3, @0]]));
+    // A held key is one press, and releasing it is not another.
+    [controller handleEvent:key(NSEventTypeKeyDown, 0, @"a", YES) client:client];
+    [controller handleEvent:key(NSEventTypeKeyUp, 0, @"a", NO) client:client];
+    assert(session.keySounds.count == 6);
+    // English mode is silent, as it is on Windows and Linux.
+    appearance.englishMode = YES;
+    [controller handleEvent:key(NSEventTypeKeyDown, 0, @"a", NO) client:client];
+    assert(session.keySounds.count == 6);
+    appearance.englishMode = NO;
+
+    // Activation lets music play; secure event input stops it and silences every key and commit until it is off again.
+    [controller claimBackgroundMusic];
+    assert(([session.musicStates isEqual:@[@YES]]));
+    controller.secureInput = YES;
+    session.nextTransition = @{ @"handled": @YES, @"commit": @"密码", @"view": idle };
+    [controller handleEvent:key(NSEventTypeKeyDown, 0, @"a", NO) client:client];
+    [controller handleEvent:key(NSEventTypeKeyDown, 11, @"b", NO) client:client];
+    assert(session.keySounds.count == 6 && session.commitSounds == 0);
+    assert(([session.musicStates isEqual:@[@YES, @NO]]));
+    controller.secureInput = NO;
+    [controller handleEvent:key(NSEventTypeKeyDown, 8, @"c", NO) client:client];
+    assert(session.keySounds.count == 7 && session.commitSounds == 1);
+    assert(([session.musicStates isEqual:@[@YES, @NO, @YES]]));
+
+    // A result the expression, command or mention mode produced makes the commit sound but is not typing; ordinary text is both.
+    PassthroughStatisticsCall(root, @{@"operation": @"set_enabled", @"enabled": @YES});
+    MSIMEReloadTypingStatisticsEnabled(root);
+    assert(MSIMETypingStatisticsEnabled.load(std::memory_order_relaxed));
+    [controller apply:@{ @"handled": @YES, @"commit": @"一百二十三", @"view": idle,
+                         @"commit_context": @{ @"scheme": @0, @"local_mode": @"expression", @"typing_statistics": @NO } }];
+    assert(session.commitSounds == 2);
+    assert([PassthroughStatisticsDetail(root)[@"characters"][@"han"] integerValue] == 0);
+    [controller apply:@{ @"handled": @YES, @"commit": @"你好", @"view": idle,
+                         @"commit_context": @{ @"scheme": @0, @"local_mode": @"none", @"typing_statistics": @YES } }];
+    assert(session.commitSounds == 3);
+    assert([PassthroughStatisticsDetail(root)[@"characters"][@"han"] integerValue] == 2);
+    MSIMETypingStatisticsEnabled.store(false, std::memory_order_relaxed);
+    // Dictated text lands through the same path, and is not a keystroke to answer.
+    [controller setValue:@(static_cast<NSInteger>(msime::mac::TypingSource::Voice)) forKey:@"typingSourceOverride"];
+    [controller apply:@{ @"handled": @YES, @"commit": @"语音", @"view": idle }];
+    assert(session.commitSounds == 3);
+
+    // Only the controller music last followed may stop it: the next client's activation can arrive before the previous one's deactivation.
+    ModeController *next = [ModeController alloc];
+    ShortcutSession *nextSession = [ShortcutSession new];
+    [next setValue:appearance forKey:@"appearance"];
+    [next setValue:nextSession forKey:@"session"];
+    [next claimBackgroundMusic];
+    assert(([nextSession.musicStates isEqual:@[@YES]]));
+    Method base = class_getInstanceMethod(IMKInputController.class, @selector(deactivateServer:));
+    IMP original = method_setImplementation(base, (IMP)RecordBaseDeactivation);
+    [controller deactivateServer:client];
+    assert(session.musicStates.count == 3 && nextSession.musicStates.count == 1);
+    // A late deactivation for a client that is no longer this controller's does not reach music either.
+    ShortcutClient *stale = [ShortcutClient new];
+    [next setValue:client forKey:@"activeClient"];
+    [next deactivateServer:stale];
+    assert(nextSession.musicStates.count == 1);
+    [next deactivateServer:client];
+    assert(([nextSession.musicStates isEqual:@[@YES, @NO]]));
+    method_setImplementation(base, original);
+
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+    [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+}
+
 @interface ControlledPreferenceRead : NSObject
 @property(nonatomic, strong) dispatch_semaphore_t started;
 @property(nonatomic, strong) dispatch_semaphore_t released;
@@ -2717,12 +2847,16 @@ static void TestPreferenceRevisionSkipsUnchangedDocuments() {
     [controller setValue:client forKey:@"activeClient"];
     [controller setValue:session forKey:@"session"];
     [controller setValue:@"/synthetic-preferences" forKey:@"preferencesDirectory"];
+    // Music switched on while nothing else was sounding starts only once the player hears the input method is active, so each applied document says so again; an unchanged one is not applied and says nothing.
+    [controller claimBackgroundMusic];
+    assert(session.musicStates.count == 1);
 
     [controller reloadPreferences];
     assert(dispatch_semaphore_wait(controller.reads[0].started, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
     dispatch_semaphore_signal(controller.reads[0].released);
     WaitForPreferenceCompletions(controller, 1);
     assert(controller.appliedPreferences.count == 1 && session.updates == 1);
+    assert(([session.musicStates isEqual:@[@YES, @YES]]));
 
     // The second read finds the same revision: nothing is applied and the Engine is not disturbed.
     [controller reloadPreferences];
@@ -2739,6 +2873,8 @@ static void TestPreferenceRevisionSkipsUnchangedDocuments() {
     WaitForPreferenceCompletions(controller, 3);
     assert(controller.appliedPreferences.count == 2 && session.updates == 2);
     assert([controller.appliedPreferences[1][@"chinese_punctuation"] isEqual:@NO]);
+    assert(session.musicStates.count == 3);
+    [controller releaseBackgroundMusic];
 
     // A local edit invalidating what was applied - so a document rolled back to a revision this
     // session already saw is applied again - is the load state's own rule, pinned next to it in
@@ -7598,6 +7734,8 @@ int main(int argc, char **argv) {
         // physical ANSI equal key; it must not become candidate paging.
         NSMutableDictionary *unicodePagingView = [pageView mutableCopy];
         unicodePagingView[@"local_mode"] = @"unicode";
+        // What the Engine reports in Unicode mode; the digit routes below read this, not the mode's name.
+        unicodePagingView[@"spelling_symbols"] = @"0123456789";
         [controller setValue:unicodePagingView forKey:@"view"];
         [controller renderCandidates];
         layoutPanel.requestedVisible = YES;
@@ -7629,6 +7767,43 @@ int main(int argc, char **argv) {
             assert([controller handleEvent:plainDigit client:client]);
             assert(session.selectCalls == selectCallsBeforeUnicode + 1);
             assert(session.asciiCalls == asciiCallsBeforeUnicode + 1 && session.lastASCII == '2');
+        }
+        // Expression mode (V) spells with digits and the operators + - * / . ( ) % ^, which the view lists in spelling_symbols. Every one of them has to reach the Engine even where this host reads the same key as something else: '-' is the default minus/equal page key, '.' the comma/period one, and on a US layout Shift+5, 6, 8, 9 and 0 are % ^ * ( ). A Shift+digit that types something the mode does not spell with still picks a candidate.
+        {
+            NSMutableDictionary *expressionView = [pageView mutableCopy];
+            expressionView[@"local_mode"] = @"expression";
+            expressionView[@"spelling_symbols"] = @"0123456789+-*/.()%^";
+            const NSInteger pageShortcutBeforeExpression = appearance.pageShortcut;
+            NSDictionary *transitionBeforeExpression = session.nextTransition;
+            NSEvent *(^expressionKey)(unsigned short, NSString *, NSString *, NSEventModifierFlags) =
+                ^NSEvent *(unsigned short code, NSString *characters, NSString *ignoring, NSEventModifierFlags flags) {
+                    return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:0 context:nil characters:characters charactersIgnoringModifiers:ignoring isARepeat:NO keyCode:code];
+                };
+            for (NSNumber *shortcut in @[@0, @2]) {
+                appearance.pageShortcut = shortcut.integerValue;
+                for (NSArray *key in @[@[@27, @"-", @"-", @0], @[@47, @".", @".", @0], @[@18, @"1", @"1", @0], @[@25, @"(", @"9", @(NSEventModifierFlagShift)],
+                                       @[@23, @"%", @"5", @(NSEventModifierFlagShift)], @[@44, @"/", @"/", @0]]) {
+                    [controller setValue:expressionView forKey:@"view"];
+                    [controller renderCandidates];
+                    layoutPanel.requestedVisible = YES;
+                    session.nextTransition = @{ @"handled": @YES, @"commit": NSNull.null, @"view": expressionView };
+                    session.lastCommand = UINT32_MAX;
+                    const NSUInteger selects = session.selectCalls, ascii = session.asciiCalls;
+                    NSString *characters = key[1];
+                    assert([controller handleEvent:expressionKey([key[0] unsignedShortValue], characters, key[2], [key[3] unsignedIntegerValue]) client:client]);
+                    assert(session.lastCommand == UINT32_MAX && session.selectCalls == selects);
+                    assert(session.asciiCalls == ascii + 1 && session.lastASCII == [characters characterAtIndex:0]);
+                }
+            }
+            [controller setValue:expressionView forKey:@"view"];
+            [controller renderCandidates];
+            layoutPanel.requestedVisible = YES;
+            const NSUInteger selectsBeforeShiftedDigit = session.selectCalls, asciiBeforeShiftedDigit = session.asciiCalls;
+            assert([controller handleEvent:expressionKey(19, @"@", @"2", NSEventModifierFlagShift) client:client]);
+            assert(session.selectCalls == selectsBeforeShiftedDigit + 1 && session.selectedIndex == 1);
+            assert(session.asciiCalls == asciiBeforeShiftedDigit);
+            appearance.pageShortcut = pageShortcutBeforeExpression;
+            session.nextTransition = transitionBeforeExpression;
         }
         [controller setValue:pageView forKey:@"view"];
         [controller renderCandidates];
@@ -8063,6 +8238,7 @@ int main(int argc, char **argv) {
         TestModifierTaps();
         TestModifierTapSurvivesALostRelease();
         TestStaleClientDeactivation();
+        TestSoundsFollowKeysCommitsAndActivation();
         TestPreferenceClientGeneration();
         TestPreferenceRevisionSkipsUnchangedDocuments();
         TestUnreadablePreferencesAreRecoveredOnce();

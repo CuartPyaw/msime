@@ -10,9 +10,10 @@ use crate::error::{EngineError, Result};
 use crate::paths::RuntimePaths;
 use crate::session::SessionOptions;
 use crate::types::{
-    autocorrect_type, fuzzy_rule, EnglishInputOptions, FrequencyAdjustmentMode,
-    FrequencyAdjustmentOptions, FuzzyPinyinOptions, LocalModeOptions, MixedExpressiveOptions,
-    SchemeType, SentenceAssociationOptions, ShuangpinProfileKind, WubiInputOptions,
+    autocorrect_type, fuzzy_rule, CommandTableEntry, EnglishInputOptions, FrequencyAdjustmentMode,
+    FrequencyAdjustmentOptions, FuzzyPinyinOptions, LocalModeOptions, MentionEntry,
+    MixedExpressiveOptions, SchemeType, SentenceAssociationOptions, ShuangpinProfileKind,
+    WubiInputOptions,
 };
 use crate::user_dictionary::generation::prepare_runtime_paths;
 
@@ -58,13 +59,23 @@ pub struct EngineOptions {
     pub local_super_jianpin: bool,
     pub local_temporary_english: bool,
     pub local_temporary_japanese: bool,
+    /// `V`: calculator, Chinese numerals and dates.
+    pub local_expression: bool,
+    /// `/`: built-in commands and `command_table`.
+    pub local_command: bool,
+    /// `@`: `mention_entries`.
+    pub local_mention: bool,
+    /// The `/` mode's commands beyond the built-in ones. Rows the engine cannot use are dropped, and at most `local::command::TABLE_LIMIT` are kept.
+    pub command_table: Vec<CommandTableEntry>,
+    /// The `@` mode's names and places, the user's own list. Entries the engine cannot use are dropped, and at most `local::mention::LIST_LIMIT` are kept.
+    pub mention_entries: Vec<MentionEntry>,
     pub sentence_association: SentenceAssociationOptions,
     pub rescoring_context: String,
     /// Ask for every whole-sentence reading; the runtime reorders and crops them.
     pub sentence_alternatives: bool,
 }
 
-/// Stage the generation (`prepare_runtime_paths`) and fill the product defaults: quanpin, xiaohe, learning off, autocorrect and fuzzy off, helpcode on with `ziranma`, frequency `promote` 1/1, mixed English from 5 letters, every local mode on, and explicit values for the fields the C++ left default-initialised (`shuangpin_preedit_uses_raw = true`, `wubi_mixed_pinyin = false`, `sentence_association` default, `sentence_alternatives = false`).
+/// Stage the generation (`prepare_runtime_paths`) and fill the product defaults: quanpin, xiaohe, learning off, autocorrect and fuzzy off, helpcode on with `ziranma`, frequency `promote` 1/1, mixed English from 5 letters, every Shift+letter local mode of the reference on and the expression, command and mention modes off with empty tables, and explicit values for the fields the C++ left default-initialised (`shuangpin_preedit_uses_raw = true`, `wubi_mixed_pinyin = false`, `sentence_association` default, `sentence_alternatives = false`).
 pub fn prepare_options(
     resources: &str,
     user_data: &str,
@@ -113,6 +124,11 @@ pub fn prepare_options(
         local_super_jianpin: true,
         local_temporary_english: true,
         local_temporary_japanese: true,
+        local_expression: false,
+        local_command: false,
+        local_mention: false,
+        command_table: Vec::new(),
+        mention_entries: Vec::new(),
         sentence_association: SentenceAssociationOptions::default(),
         rescoring_context: String::new(),
         sentence_alternatives: false,
@@ -176,7 +192,12 @@ pub fn session_options(options: &EngineOptions) -> Result<SessionOptions> {
         super_jianpin: options.local_super_jianpin,
         temporary_english: options.local_temporary_english,
         temporary_japanese: options.local_temporary_japanese,
+        expression: options.local_expression,
+        command: options.local_command,
+        mention: options.local_mention,
     };
+    session.command_table = options.command_table.clone();
+    session.mention_entries = options.mention_entries.clone();
     session.sentence_alternatives = options.sentence_alternatives;
     session.sentence_association = options.sentence_association;
     session.rescoring_context = options.rescoring_context.clone();

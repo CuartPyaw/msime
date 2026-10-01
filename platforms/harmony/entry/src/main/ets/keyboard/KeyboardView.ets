@@ -43,6 +43,9 @@ import { CandidateTranslationStyle } from './candidate/CandidateTranslationStyle
 import { CandidateSkinPolicy } from './candidate/CandidateSkinPolicy';
 import { CandidateWheelPolicy } from './candidate/CandidateWheelPolicy';
 import { KeyboardMetrics } from './KeyboardMetrics';
+import {
+  COMBO_IDLE_RESET_MILLIS, FLASH_MILLIS, TypingEffect, TypingEffectPolicy
+} from './TypingEffectPolicy';
 import { KeyboardGeometry } from './KeyboardGeometry';
 import {
   KeyboardLayoutDragAxis, KeyboardLayoutDragPolicy
@@ -386,6 +389,14 @@ struct KeyboardView {
   /** Which row of the expanded panel is showing its gloss, or -1. Its own index space. */
   @State expandedGloss: number = -1;
   @State availableWidth: number = 0;
+  /** The candidate card's typing-effect flash: its opacity, animated back to 0 after each key. */
+  @State effectFlash: number = 0;
+  /** The combo badge's text, empty while there is no combo to show. */
+  @State effectBadge: string = '';
+  /** Power mode swells the badge on each counted key and lets it settle back. */
+  @State effectBadgeScale: number = 1;
+  /** The candidate card's height, so the flash covers exactly the card and not the decoration above it. */
+  @State effectCardHeight: number = 0;
   @State caseMode: LetterCaseMode = LetterCaseMode.LOWERCASE;
   @State skin: KeyboardSkin = KeyboardSkin.fromTheme('system', 'system', null, false);
   @State scheme: SchemeDefinition = KeyboardScheme.QUANPIN;
@@ -427,6 +438,8 @@ struct KeyboardView {
   private backspaceRepeated: boolean = false;
   private dragged: boolean = false;
   private diagnosticTimer: number = -1;
+  /** Clears the combo badge once the combo has ended for want of keys. */
+  private effectTimer: number = -1;
   private pendingRemoval: number = -1;
   private flickX: number = 0;
   private flickY: number = 0;
@@ -600,12 +613,58 @@ struct KeyboardView {
         this.show(SURFACE_NONE);
       }
     };
+    KeyboardSession.shared.onTypingEffect = (effect: TypingEffect, intensity: number, key: boolean): void => {
+      this.showTypingEffect(effect, intensity, key);
+    };
+  }
+
+  /** Draw one typing-effect answer: flash the candidate card for a key, swell the badge in power mode, and show the combo until it ends. */
+  private showTypingEffect(effect: TypingEffect, intensity: number, key: boolean): void {
+    const peak: number = key ? TypingEffectPolicy.flashOpacity(effect, intensity) : 0;
+    if (peak > 0) {
+      this.effectFlash = peak;
+      this.getUIContext().animateTo({ duration: FLASH_MILLIS, curve: Curve.EaseOut }, (): void => {
+        this.effectFlash = 0;
+      });
+    }
+    const scale: number = key ? TypingEffectPolicy.badgeScale(effect, intensity) : 1;
+    if (scale > 1) {
+      this.effectBadgeScale = scale;
+      this.getUIContext().animateTo({ duration: FLASH_MILLIS * 2, curve: Curve.EaseOut }, (): void => {
+        this.effectBadgeScale = 1;
+      });
+    }
+    this.effectBadge = TypingEffectPolicy.badge(effect.count);
+    // A commit counts nothing, so it neither starts nor extends the idle wait; host-api ends the combo after the same idle time since the last counted key, and the badge goes with it.
+    if (!key) {
+      return;
+    }
+    if (this.effectTimer !== -1) {
+      clearTimeout(this.effectTimer);
+      this.effectTimer = -1;
+    }
+    if (this.effectBadge.length > 0) {
+      this.effectTimer = setTimeout((): void => {
+        this.effectTimer = -1;
+        this.effectBadge = '';
+      }, COMBO_IDLE_RESET_MILLIS);
+    }
+  }
+
+  /** Whether the combo badge sits on the composition line; without that line it is drawn over the card's corner instead. */
+  private comboOnCompositionLine(): boolean {
+    return KeyboardFormFactor.isDesktop() && this.settings.candidateShowPreedit;
   }
 
   aboutToDisappear(): void {
     KeyboardSession.shared.onChanged = undefined;
     KeyboardSession.shared.onClipboardHistoryChanged = undefined;
     KeyboardSession.shared.onVoiceInputChanged = undefined;
+    KeyboardSession.shared.onTypingEffect = undefined;
+    if (this.effectTimer !== -1) {
+      clearTimeout(this.effectTimer);
+      this.effectTimer = -1;
+    }
     KeyboardSession.shared.onEditorChanged = undefined;
     KeyboardSession.shared.onViewPreferencesReloaded = undefined;
     KeyboardSession.shared.onReplyContextChanged = undefined;
@@ -1914,6 +1973,9 @@ struct KeyboardView {
           Blank()
         }
         Blank()
+        if (this.effectBadge.length > 0 && this.comboOnCompositionLine()) {
+          this.comboBadge()
+        }
         if (this.showsCandidatePager()) {
           this.candidatePager()
         }
@@ -1956,7 +2018,29 @@ struct KeyboardView {
       .borderColor(this.candidateColors().border)
       .onAreaChange((_old: Area, now: Area): void => {
         this.availableWidth = Number(now.width);
+        this.effectCardHeight = Number(now.height);
       })
+      // The typing-effect flash: an accent wash over the card that fades after each key. Always present on a 2in1 at opacity 0, so a fade is never cut short by the node going away; it takes no touches.
+      if (KeyboardFormFactor.isDesktop()) {
+        Column()
+          .position({ x: 0, y: this.settings.candidateDecorationTopVp })
+          .width('100%')
+          .height(this.effectCardHeight)
+          .backgroundColor(this.candidateAccentColor())
+          .borderRadius(this.settings.candidateCornerRadiusVp ?? KeyboardMetrics.CANDIDATE_CARD_CORNER_VP)
+          .opacity(this.effectFlash)
+          .hitTestBehavior(HitTestMode.Transparent)
+        if (this.effectBadge.length > 0 && !this.comboOnCompositionLine()) {
+          Row() {
+            this.comboBadge()
+          }
+          .position({ x: 0, y: this.settings.candidateDecorationTopVp })
+          .width('100%')
+          .justifyContent(FlexAlign.End)
+          .padding({ right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+          .hitTestBehavior(HitTestMode.Transparent)
+        }
+      }
       // After the card, so it is drawn over the card's top edge: that overlap is the whole point of the decoration.
       if (this.settings.candidateDecorationImage !== null && this.candidateDecorationRect() !== null) {
         Image(this.settings.candidateDecorationImage)
@@ -1968,6 +2052,22 @@ struct KeyboardView {
       }
     }
     .width('100%')
+  }
+
+  /** The typing combo: its count in the accent colour, swelling in power mode. */
+  @Builder
+  comboBadge() {
+    Text(this.effectBadge)
+      .fontSize(Math.max(this.settings.candidatePreeditFontSize - 2, 10))
+      .fontColor(this.candidateAccentColor())
+      .fontFamily(this.candidateFontFamily())
+      .fontWeight(FontWeight.Medium)
+      .maxLines(1)
+      .flexShrink(0)
+      .margin({ left: CandidateLogoPolicy.GAP_VP, right: CandidateLogoPolicy.GAP_VP })
+      .scale({ x: this.effectBadgeScale, y: this.effectBadgeScale })
+      .hitTestBehavior(HitTestMode.Transparent)
+      .accessibilityText(this.effectBadge)
   }
 
   /** OCR results use the shared candidate lane, but select through the recognizer rather than Engine. */

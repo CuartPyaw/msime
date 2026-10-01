@@ -143,6 +143,10 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/msime-engin
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/helpcodes/ENGINE-NOTICE.md" "${MSIME_LEGAL_DIRECTORY}/msime-engine-helpcode-NOTICE.md" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/helpcodes/NOTICE.md" "${MSIME_LEGAL_DIRECTORY}/msime-helpcode-jiajia-NOTICE.md" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/Zinnia-LICENSE.txt" "${MSIME_LEGAL_DIRECTORY}/Zinnia-LICENSE.txt" COPYONLY)
+# The place names `@` mode offers, compiled into the engine from modood/Administrative-divisions-of-China (WTFPL).
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/Administrative-divisions-of-China-WTFPL.txt" "${MSIME_LEGAL_DIRECTORY}/Administrative-divisions-of-China-WTFPL.txt" COPYONLY)
+# symphonia and triple_buffer, which host-api links in for key sounds and music, and rink-core, which the engine links in for V-mode unit conversion, are MPL-2.0: the licence text ships with the binary, and THIRD_PARTY_NOTICES.txt says where their source is.
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/MPL-2.0.txt" "${MSIME_LEGAL_DIRECTORY}/MPL-2.0.txt" COPYONLY)
 # The on-device speech runtime staged into Contents/Frameworks below. The upstream archive carries no license file, so the texts come from the copies the other desktops ship: sherpa-onnx's beside its vendored C header, ONNX Runtime's pinned under platforms/linux.
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/voice/third_party/sherpa-onnx/LICENSE" "${MSIME_LEGAL_DIRECTORY}/sherpa-onnx-Apache-2.0.txt" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../linux/data/licenses/onnxruntime-MIT.txt" "${MSIME_LEGAL_DIRECTORY}/onnxruntime-MIT.txt" COPYONLY)
@@ -175,6 +179,18 @@ set(MSIME_VOICE_CUE_RESOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/../windows/installer/assets/audios/end.mp3")
 target_sources(MSIMEClientInputMethod PRIVATE ${MSIME_VOICE_CUE_RESOURCES})
 set_source_files_properties(${MSIME_VOICE_CUE_RESOURCES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/audios")
+# The built-in sound packs, synthesized by scripts/generate_sound_packs.py, one folder per pack under Resources/sound-packs: the directory the input method and the settings page name to client-core as the built-in pack root. Beside EngineResources rather than in it, because that directory has to hold exactly what the dictionary lock pins.
+# Every folder there is staged, so a pack the generator adds ships without being named here too.
+file(GLOB MSIME_SOUND_PACK_DIRECTORIES LIST_DIRECTORIES true CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/sound-packs/*")
+foreach(MSIME_SOUND_PACK_DIRECTORY ${MSIME_SOUND_PACK_DIRECTORIES})
+  if(NOT IS_DIRECTORY "${MSIME_SOUND_PACK_DIRECTORY}")
+    continue()
+  endif()
+  get_filename_component(MSIME_SOUND_PACK "${MSIME_SOUND_PACK_DIRECTORY}" NAME)
+  file(GLOB MSIME_SOUND_PACK_FILES CONFIGURE_DEPENDS "${MSIME_SOUND_PACK_DIRECTORY}/*")
+  target_sources(MSIMEClientInputMethod PRIVATE ${MSIME_SOUND_PACK_FILES})
+  set_source_files_properties(${MSIME_SOUND_PACK_FILES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/sound-packs/${MSIME_SOUND_PACK}")
+endforeach()
 # LaunchServices takes the Dock and menu bar name from a localized InfoPlist.strings, not from the
 # CFBundleDisplayName in the plist; without these the Dock falls back to the executable's filename.
 # The TIS identifier keys name the entry in the system input menu.
@@ -1054,3 +1070,24 @@ foreach(msime_target IN LISTS MSIME_VOICE_SERVICE_TARGETS)
     target_link_libraries(${msime_target} PRIVATE msime-voice-local-asr)
   endif()
 endforeach()
+
+# InputController.mm draws typing effects through TypingEffectPanel.mm, which animates with Core Animation. Every target compiling the controller next to its HUD panel - the input method and each controller test - takes the panel and QuartzCore, found by source like the loops above so a new controller test cannot miss it.
+get_property(MSIME_TYPING_EFFECT_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(msime_target IN LISTS MSIME_TYPING_EFFECT_TARGETS)
+  get_target_property(msime_target_sources ${msime_target} SOURCES)
+  if(NOT msime_target_sources OR NOT "src/input/InputModeHUDPanel.mm" IN_LIST msime_target_sources)
+    continue()
+  endif()
+  if(NOT "src/input/InputController.mm" IN_LIST msime_target_sources
+     AND NOT "src/core/FloatingToolbarPanel.mm" IN_LIST msime_target_sources)
+    continue()
+  endif()
+  target_sources(${msime_target} PRIVATE src/input/TypingEffectPanel.mm)
+  target_link_libraries(${msime_target} PRIVATE "-framework QuartzCore")
+endforeach()
+
+# The typing effect panel on its own: the packed answer decoded, the Reduce Motion and Low Power fallback, and the idle state that leaves no emitter running and no window on screen.
+add_executable(typing-effect-panel-test tests/input/TypingEffectPanelTest.mm src/input/TypingEffectPanel.mm)
+target_compile_options(typing-effect-panel-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(typing-effect-panel-test PRIVATE "-framework AppKit" "-framework QuartzCore")
+add_test(NAME typing-effect-panel COMMAND typing-effect-panel-test)

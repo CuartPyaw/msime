@@ -1,6 +1,7 @@
 //! Caret editing, the editing text, segment boundaries and caret-prefix decoding (core-session.md §5.9, overlays.md §7.6).
 
 use super::input::InputSession;
+use crate::local::GENERATED_MODE_INPUT_LIMIT;
 use crate::shuangpin::query::{
     detect_active_double_helpcode_length, segment_raw_boundaries,
     trim_trailing_letters_preserve_delimiters,
@@ -99,6 +100,17 @@ impl InputSession {
                 | LocalInputMode::Kaomoji
                 | LocalInputMode::TemporaryJapanese => accepted = accepted || value == b'\'',
                 LocalInputMode::SuperJianpin | LocalInputMode::TemporaryEnglish => {}
+                LocalInputMode::Expression => {
+                    accepted = text.len() < GENERATED_MODE_INPUT_LIMIT
+                        && self
+                            .local_mode
+                            .spelling_symbols()
+                            .as_bytes()
+                            .contains(&value);
+                }
+                LocalInputMode::Command | LocalInputMode::Mention => {
+                    accepted = text.len() < GENERATED_MODE_INPUT_LIMIT && lower;
+                }
             }
         }
         if !accepted {

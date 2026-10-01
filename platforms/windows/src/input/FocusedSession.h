@@ -12,10 +12,10 @@ namespace msime::windows {
 // without touching the shared store; the default writes it there.
 using TypingStatisticsSink =
     std::function<void(const std::string &, TypingSource)>;
-// Hands one record to the shared store on a detached thread. An empty directory or text records nothing; so does a store whose statistics are switched off, because the shared entry point checks that itself.
+// Hands one record to the shared store on a detached thread. An empty directory or text records nothing; so does a store whose statistics are switched off, because the shared entry point checks that itself. `quiet` keeps a milestone's achievement jingle silent (see `typing_statistics_record_request`).
 void record_typing_statistics_async(const std::string &directory,
                                     const std::string &text,
-                                    TypingSource source);
+                                    TypingSource source, bool quiet = false);
 enum class HideCandidateDisposition { Rejected, Cancelled, Suppressed };
 
 // One registered client's queue-owned adapter. No pipe I/O runs here; the
@@ -120,9 +120,11 @@ private:
   struct Commit {
     std::string text;
     TypingSource source = TypingSource::Unknown;
+    // False for the text the V, "/" and "@" modes generate; see transition_counts_as_typing.
+    bool typing = true;
   };
   std::optional<Commit> pending_commit() const;
-  // Records a commit that has been confirmed as delivered.
+  // Records a commit that has been confirmed as delivered, and plays its commit sound.
   void record_commit(const std::optional<Commit> &delivered);
   static std::string typing_statistics_directory(const std::string &options);
   FocusGate &gate_;

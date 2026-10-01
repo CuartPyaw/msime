@@ -5,6 +5,7 @@
 #include "CursorResource.h"
 #include "NativeFontAlias.h"
 #include "ServerResources.h"
+#include "TypingEffectSignal.h"
 #include "WindowShadow.h"
 #include <algorithm>
 #include <iterator>
@@ -33,6 +34,10 @@ bool installed_font(const std::wstring &family) {
   return found;
 }
 constexpr wchar_t class_name[] = L"MSIME.Client.Preview.Candidates";
+// The typing flash repaints at about 30 frames a second while it fades, then its timer is killed; the combo timer fires once, when the count it shows goes stale.
+constexpr UINT_PTR typing_flash_timer = 0x4501;
+constexpr UINT_PTR typing_combo_timer = 0x4502;
+constexpr UINT typing_flash_frame_millis = 30;
 // Affect only this UI operation; restore the caller's thread context even on
 // failure. The created HWND retains PMv2 awareness for its entire lifetime.
 struct DpiScope {
@@ -255,6 +260,7 @@ CandidateWindow::CandidateWindow(Reader reader, Click click, unsigned font_size,
                             nullptr, descriptor.hInstance, this);
   if (!window_)
     throw std::runtime_error("Candidate window unavailable");
+  TypingEffectSignal::instance().attach(window_);
 }
 CandidateWindow::Apartment::Apartment() {
   const HRESULT entered =
@@ -270,8 +276,10 @@ CandidateWindow::Apartment::~Apartment() {
     CoUninitialize();
 }
 CandidateWindow::~CandidateWindow() {
-  if (window_)
+  if (window_) {
+    TypingEffectSignal::instance().detach(window_);
     DestroyWindow(window_);
+  }
   if (logo_)
     DestroyIcon(logo_);
 }
@@ -593,6 +601,39 @@ CandidateWindow::wrap_measure(const CandidatePresentation &value) {
                           width, font_fallback_.Get());
   };
 }
+void CandidateWindow::take_typing_effect() {
+  const std::optional<uint32_t> packed = TypingEffectSignal::instance().take();
+  if (!packed)
+    return;
+  // A 0 decodes to no combo and no flash, which kills both timers below and clears a count still on the card.
+  effect_ = decode_typing_effect(*packed);
+  effect_started_ = GetTickCount64();
+  // Windows' "Show animations" switch is its reduced motion setting: with it off the card does not flash, and the combo count still shows.
+  BOOL animations = TRUE;
+  if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0))
+    animations = TRUE;
+  effect_flashing_ = animations && typing_effect_flash_alpha(effect_, effect_intensity_, 0) > 0.0f;
+  if (effect_flashing_)
+    SetTimer(window_, typing_flash_timer, typing_flash_frame_millis, nullptr);
+  else
+    KillTimer(window_, typing_flash_timer);
+  if (effect_.combo >= 2)
+    SetTimer(window_, typing_combo_timer, typing_effect_combo_millis, nullptr);
+  else
+    KillTimer(window_, typing_combo_timer);
+  if (IsWindowVisible(window_))
+    InvalidateRect(window_, nullptr, FALSE);
+}
+void CandidateWindow::typing_effect_tick(UINT_PTR timer) {
+  if (timer == typing_combo_timer) {
+    KillTimer(window_, typing_combo_timer);
+  } else if (GetTickCount64() - effect_started_ >= typing_effect_flash_millis) {
+    KillTimer(window_, typing_flash_timer);
+    effect_flashing_ = false;
+  }
+  if (IsWindowVisible(window_))
+    InvalidateRect(window_, nullptr, FALSE);
+}
 void CandidateWindow::paint() {
   DpiScope dpi_scope;
   Painting painting(window_);
@@ -669,6 +710,8 @@ void CandidateWindow::paint() {
                             std::size(shadow_passes));
   const D2D1_ROUNDED_RECT card{card_rect, radius, radius};
   target->FillRoundedRectangle(card, brush(palette_.surface));
+  const uint64_t effect_elapsed = GetTickCount64() - effect_started_;
+  const float flash = effect_flashing_ ? typing_effect_flash_alpha(effect_, effect_intensity_, effect_elapsed) : 0.0f;
   // The package background sits on the surface and under the border and the text, masked by the card's rounded outline.
   if (!background_.image.empty() && background_.opacity > 0.0f) {
     D2D1_SIZE_F natural{};
@@ -695,6 +738,16 @@ void CandidateWindow::paint() {
   }
   target->DrawRoundedRectangle(card, brush(palette_.border),
                                palette_.border_width);
+  // The typing flash: a faint accent wash over the surface, under the text, and an accent outline that grows with the style. Both fade with the flash.
+  if (flash > 0.0f) {
+    auto wash = palette_.accent;
+    wash.a = flash * 0.12f;
+    target->FillRoundedRectangle(card, brush(wash));
+    auto outline = palette_.accent;
+    outline.a = flash;
+    target->DrawRoundedRectangle(card, brush(outline),
+                                 palette_.border_width + static_cast<float>(static_cast<uint32_t>(effect_.style)));
+  }
   // The mascot, drawn last so it sits over the card's top edge - that overlap
   // is the whole point of the decoration.
   if (!decoration_image_.empty() && decoration_offset_ > 0.0f) {
@@ -749,15 +802,35 @@ void CandidateWindow::paint() {
                       format(metrics.pager_font, DWRITE_TEXT_ALIGNMENT_CENTER),
                       box(pager->next), brush(palette_.number));
   }
+  const D2D1_RECT_F preedit_rect{
+      static_cast<float>(frame.card_left + candidate_preedit_left(metrics)),
+      static_cast<float>(frame.card_top + metrics.pad_y),
+      static_cast<float>(frame.card_left +
+                         (pager ? pager->left - metrics.pager_gap
+                                : frame.card_width - metrics.pad_x / 2.0)),
+      static_cast<float>(frame.card_top) +
+          static_cast<float>(metrics.pad_y + metrics.preedit_row)};
+  // The combo count, right-aligned at the end of the preedit row before the pager. Drawn only where it fits beside the reading, so it never covers what the user is typing.
+  if (typing_effect_shows_combo(effect_.combo, effect_elapsed)) {
+    const auto combo = L"\u00D7" + std::to_wstring(effect_.combo);
+    const double combo_width = measured_width(
+        device_, combo, font_family_, static_cast<float>(metrics.pager_font),
+        font_fallback_.Get(), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const double reading_width =
+        show_preedit_ ? measured_width(device_, wide(value->preedit), font_family_,
+                                       static_cast<float>(preedit_font_size_),
+                                       font_fallback_.Get(), DWRITE_FONT_WEIGHT_SEMI_BOLD)
+                      : 0.0;
+    if (static_cast<double>(preedit_rect.left) + reading_width + metrics.pager_gap + combo_width <=
+        static_cast<double>(preedit_rect.right))
+      target->DrawText(combo.c_str(), static_cast<UINT32>(combo.size()),
+                        format(metrics.pager_font, DWRITE_TEXT_ALIGNMENT_TRAILING, false,
+                               false, DWRITE_FONT_WEIGHT_SEMI_BOLD),
+                        preedit_rect, brush(flash > 0.0f && effect_.tier_up ? palette_.accent : palette_.number),
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
+  }
   if (show_preedit_) {
-    const D2D1_RECT_F rect{
-        static_cast<float>(frame.card_left + candidate_preedit_left(metrics)),
-        static_cast<float>(frame.card_top + metrics.pad_y),
-        static_cast<float>(frame.card_left +
-                           (pager ? pager->left - metrics.pager_gap
-                                  : frame.card_width - metrics.pad_x / 2.0)),
-        static_cast<float>(frame.card_top) +
-            static_cast<float>(metrics.pad_y + metrics.preedit_row)};
+    const D2D1_RECT_F &rect = preedit_rect;
     const auto text = wide(value->preedit);
     // Same clamp, same reason as the candidate rows below: a long enough reading would otherwise be drawn past the card, or under the pager.
     if (rect.right > rect.left)
@@ -1127,6 +1200,14 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND window, UINT message,
         return message == WM_POWERBROADCAST ? TRUE : 0;
       case WM_PAINT:
         self->paint();
+        return 0;
+      case typing_effect_message:
+        self->take_typing_effect();
+        return 0;
+      case WM_TIMER:
+        if (wparam != typing_flash_timer && wparam != typing_combo_timer)
+          break;
+        self->typing_effect_tick(static_cast<UINT_PTR>(wparam));
         return 0;
       case WM_CLOSE:
         self->hide();

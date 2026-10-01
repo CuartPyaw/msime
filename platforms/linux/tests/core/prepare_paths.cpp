@@ -20,6 +20,12 @@ int main() {
          custom_expected.string());
   assert(msime_linux::installed_resource_directory(executable, "/etc/passwd").empty());
   assert(msime_linux::installed_resource_directory("bin/msime-linux-prepare").empty());
+  // The built-in sound packs sit beside the resource bundle and resolve the same way, only once installed.
+  assert(msime_linux::installed_sound_pack_directory(executable).empty());
+  std::filesystem::create_directories(root / "share/msime-client/sound-packs");
+  assert(msime_linux::installed_sound_pack_directory(executable) ==
+         std::filesystem::canonical(root / "share/msime-client/sound-packs").string());
+  assert(msime_linux::installed_sound_pack_directory("bin/msime-linux-ibus").empty());
 
   std::filesystem::remove_all(root, error);
   return 0;
