@@ -85,6 +85,13 @@ function installCommand(
     : `codex mcp add msime -- ${program}`;
 }
 
+/** Removes an earlier registration: both assistants refuse to add a name that is already there, so changing the permissions means removing it first. */
+function removeCommand(assistant: "claude_code" | "codex"): string {
+  return assistant === "claude_code"
+    ? "claude mcp remove --scope user msime"
+    : "codex mcp remove msime";
+}
+
 /** The host's JSON entry with the chosen flags added to `args`; the entry as the host wrote it when no flag is chosen or it is not the expected shape. */
 function configWithFlags(config: string, flags: readonly McpFlag[]): string {
   if (flags.length === 0) return config;
@@ -261,6 +268,16 @@ export function McpConnectSection({
                     {installCommand(shownTab, server, flags)}
                   </pre>
                   {copyButton(shownTab, "复制命令", installCommand(shownTab, server, flags))}
+                  <p className={settings.managerNote}>之前添加过的，先运行这条：</p>
+                  <pre
+                    className={command}
+                    aria-label={
+                      shownTab === "claude_code" ? "Claude Code 移除命令" : "Codex 移除命令"
+                    }
+                  >
+                    {removeCommand(shownTab)}
+                  </pre>
+                  {copyButton(`${shownTab}-remove`, "复制移除命令", removeCommand(shownTab))}
                 </>
               )}
               {client && (

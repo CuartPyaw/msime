@@ -2096,7 +2096,7 @@ fn preferences_recovery_serializes_the_fields_the_settings_page_reads() {
     assert!(untouched["backupPath"].is_null());
 }
 
-/// A re-check from the setup guide reads the input source list and the system-wide input method directory again and reports the rest of the start-time result unchanged, without running the install a second time.
+/// A re-check from the settings page reads the input source list and the system-wide input method directory again and reports the rest of the start-time result unchanged, without running the install a second time.
 #[cfg(target_os = "macos")]
 #[test]
 fn input_source_status_rereads_only_what_the_user_can_change() {

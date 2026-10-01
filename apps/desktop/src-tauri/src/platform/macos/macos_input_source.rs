@@ -294,7 +294,7 @@ fn product_bundles_in(input_methods: &Path) -> Vec<PathBuf> {
     .collect()
 }
 
-/// Copies of this input method in `/Library/Input Methods`, which the user has to remove with an administrator password: the settings app does not ask for one. Cheap enough to call on every status request, so the setup guide notices when they are gone.
+/// Copies of this input method in `/Library/Input Methods`, which the user has to remove with an administrator password: the settings app does not ask for one. Cheap enough to call on every status request, so the settings page notices when they are gone.
 pub(crate) fn system_bundles() -> Vec<PathBuf> {
     product_bundles_in(Path::new(SYSTEM_INPUT_METHODS))
 }

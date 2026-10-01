@@ -543,12 +543,6 @@ export {
   type LinuxSetupLine,
   type LinuxSetupStatus,
 } from "./account/linux-setup-page";
-export {
-  MacosInputSourceGuide,
-  macosInputSourceGuideNeeded,
-  INPUT_SOURCE_RECHECK_MS,
-  type MacosInputSourceGuideClient,
-} from "./account/macos-input-source-guide";
 export { SettingsStartupPage } from "./settings/settings-startup-page";
 export {
   HelpcodeSettingsPage,
@@ -1680,7 +1674,7 @@ export interface SettingsClient {
   installInputSource?: () => Promise<void>;
   /** macOS installs or refreshes the input method on every start; this reports what that did. */
   inputSourceStartup?: {
-    /** Resolves once the start-time check has finished; `null` when it did not run for this launch. Whether the source is enabled is read afresh on every call, and nothing is installed again, so the setup guide calls this repeatedly. */
+    /** Resolves once the start-time check has finished; `null` when it did not run for this launch. Whether the source is enabled is read afresh on every call, and nothing is installed again, so it is safe to call repeatedly. */
     status(): Promise<InputSourceStartupStatus | null>;
     /** Opens the System Settings page where input sources are added and enabled. */
     openSettings(): Promise<void>;
@@ -2952,12 +2946,7 @@ export function SettingsPage(props: SettingsPageProps) {
                       }
                     : undefined
                 }
-                // macOS replays its input method setup guide rather than the mobile walkthrough, so it needs the start-time status behind it.
-                onReplayOnboarding={
-                  mobilePlatform || (macosPlatform && client.inputSourceStartup)
-                    ? onReplayOnboarding
-                    : undefined
-                }
+                onReplayOnboarding={mobilePlatform ? onReplayOnboarding : undefined}
               />
             )}
             {client.chat && page === "chat" && (
@@ -2976,6 +2965,7 @@ export function SettingsPage(props: SettingsPageProps) {
                 candidateSkins={client.communityCandidateSkins}
                 localSkins={client.scanSkinCatalog}
                 openSkinDirectory={client.openSkinDirectory}
+                readSkinImage={client.readSkinImage}
                 importsSkin={client.host?.skin_directory_import === true}
                 onOpenSkinPage={() => selectPage("skin")}
                 theme={keyboardPreviewTheme}

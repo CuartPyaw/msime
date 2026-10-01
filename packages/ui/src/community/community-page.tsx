@@ -15,6 +15,7 @@ import {
 } from "./community-candidate-skins";
 import { CandidateSkinSyncStatus, useCandidateSkinSync } from "./candidate-skin-sync";
 import { ExternalSkinDirectoryRow, useSkinCatalog, type SkinCatalog } from "../skin/external-skins";
+import type { SkinImageReader } from "../skin/skin-image";
 import { GroupList } from "../core/platform-controls";
 import * as settings from "../settings/settings-style";
 
@@ -26,6 +27,8 @@ export interface CommunityPageProps {
   /** The installed external skins, which the candidate gallery publishes from and checks before replacing one. */
   localSkins?: () => Promise<SkinCatalog>;
   openSkinDirectory?: () => Promise<void>;
+  /** Reads an installed package's images, so publishing can draw a preview for a package without one. */
+  readSkinImage?: SkinImageReader;
   /** The host imports a skin the user points at instead of opening the skin directory (`HostSurface.skin_directory_import`). */
   importsSkin?: boolean;
   /** Opens 主题, where an installed candidate skin is enabled. */
@@ -90,6 +93,7 @@ function CommunityGallery({
   candidateSkins,
   localSkins,
   openSkinDirectory,
+  readSkinImage,
   onOpenSkinPage,
   theme,
   initialMine = false,
@@ -152,6 +156,7 @@ function CommunityGallery({
         client={candidateSkins}
         localSkins={localSkins}
         openSkinDirectory={openSkinDirectory}
+        readSkinImage={readSkinImage}
         onOpenSkinPage={onOpenSkinPage}
         onInstalled={onInstalled}
         onLogin={onLogin}

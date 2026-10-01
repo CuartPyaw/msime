@@ -161,6 +161,24 @@ pub async fn candidate_skin_community_pack_preview(
     .map_err(|_| CommandError { code: "storage" })?
 }
 
+/// Save a preview the page drew for an installed package that has none, then rescan, so the package can be shared and every listing shows its new preview. The page sends only the image; the host decides where it goes and adds it to the manifest.
+#[tauri::command]
+pub async fn candidate_skin_community_add_preview(
+    directory: State<'_, SkinDirectoryState>,
+    runtime: State<'_, RuntimeOptionsState>,
+    skin_id: String,
+    bytes: Vec<u8>,
+) -> Result<SkinCatalogResponse, CommandError> {
+    let root = directory.0.clone();
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        candidate_community::add_preview(&root, &skin_id, &bytes).map_err(package_error)?;
+        Ok(crate::rescan_skin_catalog(root, &runtime))
+    })
+    .await
+    .map_err(|_| CommandError { code: "storage" })?
+}
+
 #[tauri::command]
 pub async fn candidate_skin_community_publish(
     state: State<'_, CandidateSkinCommunityState>,

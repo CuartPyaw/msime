@@ -1814,6 +1814,31 @@ test("macOS reports the start-time input method refresh and a source that still 
   expect(screen.queryByRole("status", { name: "水杉输入法安装状态" })).toBeNull();
 });
 
+test("macOS names a system-wide copy of the input method even when everything else is current", async () => {
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(initial),
+        save: vi.fn(),
+        inputSourceStartup: {
+          status: vi.fn().mockResolvedValue({
+            action: "up_to_date",
+            enabled: true,
+            bundled_version: "0.50.0 (1)",
+            installed_version: "0.50.0 (1)",
+            system_bundles: ["/Library/Input Methods/水杉输入法.app"],
+          }),
+          openSettings: vi.fn(),
+        },
+        host: { platform: "macos" } as HostCapabilities,
+      }}
+    />,
+  );
+  const banner = await screen.findByRole("status", { name: "水杉输入法安装状态" });
+  expect(within(banner).getByText(/\/Library\/Input Methods\/水杉输入法\.app/)).toBeDefined();
+  expect(within(banner).queryByRole("button", { name: "打开键盘设置" })).toBeNull();
+});
+
 test("macOS stays quiet when the input method is current and enabled, and points to the manual button on failure", async () => {
   const quiet = vi.fn().mockResolvedValue({
     action: "up_to_date",

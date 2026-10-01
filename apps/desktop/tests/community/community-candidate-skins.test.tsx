@@ -12,6 +12,9 @@ import {
   type SkinCatalog,
 } from "@msime/ui";
 
+const renderSkinPreview = vi.hoisted(() => vi.fn());
+vi.mock("../../../../packages/ui/src/skin/skin-preview-render", () => ({ renderSkinPreview }));
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -93,6 +96,7 @@ function client(
       fileCount: 2,
       size: 1572864,
     }),
+    addPreview: vi.fn().mockResolvedValue(catalog(["ink-wash"])),
     publish: vi.fn().mockResolvedValue(first),
     rate: vi.fn().mockResolvedValue({ stars: 4 }),
     unpublish: vi.fn().mockResolvedValue({ deleted: true }),
@@ -410,6 +414,83 @@ test("publish dialog: a missing license shows only the sentence and 打开目录
   expect(screen.queryByRole("button", { name: "公开发布" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
   expect(openSkinDirectory).toHaveBeenCalledOnce();
+});
+
+test("publish dialog: a package without a preview can have one drawn and saved", async () => {
+  const missing = catalog(["ink-wash"]);
+  missing.packages[0].preview = null;
+  const packPreview = vi
+    .fn()
+    .mockRejectedValueOnce({ code: "candidate_skin_preview_required" })
+    .mockResolvedValue({
+      suggestedName: "水墨",
+      license: { code: "MIT", assets: "CC-BY-4.0", source: null },
+      fileCount: 1,
+      size: 2048,
+    });
+  const communityClient = client({ packPreview });
+  const readImage = vi.fn();
+  renderSkinPreview.mockResolvedValueOnce([137, 80, 78, 71]);
+  render(
+    <CandidateSkinPublishDialog
+      client={communityClient}
+      localSkins={vi.fn().mockResolvedValue(missing)}
+      initialSkinId="ink-wash"
+      openSkinDirectory={vi.fn()}
+      readImage={readImage}
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  expect(await screen.findByText(/这款皮肤还没有预览图/)).not.toBeNull();
+  expect(screen.queryByText(/skin\.toml/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "生成预览图" }));
+  await waitFor(() =>
+    expect(communityClient.addPreview).toHaveBeenCalledWith("ink-wash", [137, 80, 78, 71]),
+  );
+  expect(renderSkinPreview).toHaveBeenCalledWith(missing.packages[0], readImage);
+  expect(await screen.findByRole("textbox", { name: "发布皮肤名称" })).not.toBeNull();
+  expect(packPreview).toHaveBeenCalledTimes(2);
+});
+
+test("publish dialog: a preview that cannot be drawn says so and keeps the button", async () => {
+  const missing = catalog(["ink-wash"]);
+  missing.packages[0].preview = null;
+  const communityClient = client({
+    packPreview: vi.fn().mockRejectedValue({ code: "candidate_skin_preview_required" }),
+  });
+  renderSkinPreview.mockRejectedValueOnce(new Error("canvas unavailable"));
+  render(
+    <CandidateSkinPublishDialog
+      client={communityClient}
+      localSkins={vi.fn().mockResolvedValue(missing)}
+      initialSkinId="ink-wash"
+      readImage={vi.fn()}
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "生成预览图" }));
+  expect(await screen.findByText(/生成预览图失败/)).not.toBeNull();
+  expect(communityClient.addPreview).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "生成预览图" })).not.toBeNull();
+});
+
+test("publish dialog: without an image reader a missing preview is explained", async () => {
+  const communityClient = client({
+    packPreview: vi.fn().mockRejectedValue({ code: "candidate_skin_preview_required" }),
+  });
+  render(
+    <CandidateSkinPublishDialog
+      client={communityClient}
+      localSkins={vi.fn().mockResolvedValue(catalog(["ink-wash"]))}
+      initialSkinId="ink-wash"
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  expect(await screen.findByText(/用 preview 指定/)).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "生成预览图" })).toBeNull();
 });
 
 test("publish dialog: 公开发布 waits for the rights box and a valid name", async () => {

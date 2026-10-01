@@ -135,6 +135,24 @@ test("the install commands are built from the host's paths and follow the permis
   });
 });
 
+test("each assistant tab offers the command that removes an earlier registration", async () => {
+  const copyText = vi.fn(async () => {});
+  await openDeveloper({ mcpServerStatus: async () => status(), copyText });
+  const group = await screen.findByRole("group", { name: "连接 AI 助手" });
+  expect(within(group).getByLabelText("Claude Code 移除命令").textContent).toBe(
+    "claude mcp remove --scope user msime",
+  );
+  fireEvent.click(within(group).getByRole("button", { name: "复制移除命令" }));
+  await waitFor(() =>
+    expect(copyText).toHaveBeenCalledWith("claude mcp remove --scope user msime"),
+  );
+  // Only the button that was pressed reads as copied.
+  expect(within(group).getByRole("button", { name: "复制命令" })).toBeTruthy();
+
+  fireEvent.click(within(group).getByRole("radio", { name: "Codex" }));
+  expect(within(group).getByLabelText("Codex 移除命令").textContent).toBe("codex mcp remove msime");
+});
+
 test("paths with spaces are quoted for the shell they are pasted into", async () => {
   const posix = {
     ...status(),

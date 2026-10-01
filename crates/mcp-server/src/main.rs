@@ -6,6 +6,7 @@ mod bounded;
 mod config;
 mod diagnostics;
 mod preferences;
+mod prompts;
 mod server;
 mod skins;
 mod statistics;

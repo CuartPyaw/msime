@@ -263,6 +263,71 @@ fn pack_refuses_server_builtin_and_invalid_packages() {
     assert_eq!(pack(root.path(), "missing"), Err(PACKAGE));
 }
 
+#[test]
+fn add_preview_makes_a_package_without_one_shareable() {
+    let root = tempfile::tempdir().unwrap();
+    let skin = write_skin(
+        root.path(),
+        "sakura",
+        "",
+        DECORATION_IMAGE,
+        BACKGROUND_TABLE,
+        LICENSE,
+    );
+    let original = fs::read_to_string(skin.join("skin.toml")).unwrap();
+    // An unreferenced file already called preview.png is the author's and stays as it is.
+    fs::write(skin.join(PREVIEW), b"keep").unwrap();
+    assert_eq!(pack(root.path(), "sakura"), Err(PREVIEW_REQUIRED));
+
+    assert_eq!(
+        add_preview(root.path(), "sakura", &png(500)),
+        Ok("preview-2.png".to_owned())
+    );
+    assert_eq!(fs::read(skin.join(PREVIEW)).unwrap(), b"keep");
+    assert_eq!(fs::read(skin.join("preview-2.png")).unwrap(), png(500));
+    assert_eq!(
+        fs::read_to_string(skin.join("skin.toml")).unwrap(),
+        format!("preview = \"preview-2.png\"\n{original}")
+    );
+    assert!(!skin.join(".skin.toml.preview").exists());
+    let packed = pack(root.path(), "sakura").unwrap();
+    assert!(packed.files.contains_key("preview-2.png"));
+    // A package that has a preview keeps it.
+    assert_eq!(add_preview(root.path(), "sakura", &png(500)), Err(PACKAGE));
+
+    write_skin(root.path(), "jpeg", "", DECORATION_IMAGE, "", LICENSE);
+    fs::remove_file(root.path().join("jpeg").join(PREVIEW)).unwrap();
+    assert_eq!(
+        add_preview(root.path(), "jpeg", &jpeg(500)),
+        Ok("preview.jpg".to_owned())
+    );
+}
+
+#[test]
+fn add_preview_refuses_without_writing() {
+    let root = tempfile::tempdir().unwrap();
+    let skin = write_skin(root.path(), "sakura", "", DECORATION_IMAGE, "", LICENSE);
+    fs::remove_file(skin.join(PREVIEW)).unwrap();
+    let before = snapshot(&skin);
+    assert_eq!(
+        add_preview(root.path(), "sakura", b"not an image"),
+        Err(IMAGE_INVALID)
+    );
+    assert_eq!(
+        add_preview(root.path(), "sakura", &png(MAX_PREVIEW_BYTES + 1)),
+        Err(TOO_LARGE)
+    );
+    assert_eq!(add_preview(root.path(), "missing", &png(500)), Err(PACKAGE));
+    assert_eq!(snapshot(&skin), before);
+
+    // Decorated with no image of its own, the catalog would draw the new preview in the decoration band.
+    let bare = write_skin(root.path(), "bare", "", "", "", LICENSE);
+    fs::remove_file(bare.join(PREVIEW)).unwrap();
+    let before = snapshot(&bare);
+    assert_eq!(add_preview(root.path(), "bare", &png(500)), Err(PACKAGE));
+    assert_eq!(snapshot(&bare), before);
+}
+
 #[cfg(unix)]
 #[test]
 fn pack_refuses_a_symlinked_image() {

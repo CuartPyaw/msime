@@ -43,6 +43,7 @@ export function mount() {
       fileCount: 1,
       size: 2048,
     }),
+    addPreview: unavailable,
     publish: unavailable,
     rate: unavailable,
     unpublish: unavailable,

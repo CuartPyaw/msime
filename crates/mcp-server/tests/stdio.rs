@@ -1,6 +1,6 @@
 //! The server as an agent sees it: the built binary spoken to over stdio by the SDK's own client, against a synthetic dictionary and state directory.
 
-use rmcp::model::{CallToolRequestParams, CallToolResult};
+use rmcp::model::{CallToolRequestParams, CallToolResult, GetPromptRequestParams};
 use rmcp::service::RunningService;
 use rmcp::{RoleClient, ServiceExt};
 use serde_json::{json, Value};
@@ -398,6 +398,72 @@ async fn an_agent_imports_reweighs_and_explains_dictionary_words() {
             .is_empty()
     );
 
+    client.cancel().await.unwrap();
+}
+
+async fn prompt_names(client: &RunningService<RoleClient, ()>) -> Vec<String> {
+    let mut names: Vec<String> = client
+        .list_all_prompts()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|prompt| prompt.name)
+        .collect();
+    names.sort();
+    names
+}
+
+/// The text of the single message a prompt expands to.
+async fn prompt_text(
+    client: &RunningService<RoleClient, ()>,
+    name: &str,
+    arguments: Value,
+) -> String {
+    let result = client
+        .get_prompt(
+            GetPromptRequestParams::new(name)
+                .with_arguments(arguments.as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    let result = serde_json::to_value(result).unwrap();
+    let messages = result["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["role"], "user");
+    messages[0]["content"]["text"].as_str().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn prompts_follow_the_tools_they_need() {
+    let directory = tempfile::tempdir().unwrap();
+    let options = fixture(directory.path());
+
+    // Without --allow-write there is no create_candidate_skin, so no make_skin either.
+    let (client, _child) = start(&options, &[]).await;
+    assert_eq!(prompt_names(&client).await, ["diagnose"]);
+    let text = prompt_text(&client, "diagnose", json!({ "problem": "候选窗不见了" })).await;
+    assert!(text.contains("The user reports: 候选窗不见了"));
+    assert!(text.contains("read_diagnostic_log"));
+    // A skipped argument arrives as nothing or as an empty string; either way the assistant asks.
+    for arguments in [json!({}), json!({ "problem": "  " })] {
+        assert!(prompt_text(&client, "diagnose", arguments)
+            .await
+            .contains("Ask the user"));
+    }
+    assert!(client
+        .get_prompt(GetPromptRequestParams::new("make_skin"))
+        .await
+        .is_err());
+    client.cancel().await.unwrap();
+
+    let (client, _child) = start(&options, &["--allow-write"]).await;
+    assert_eq!(prompt_names(&client).await, ["diagnose", "make_skin"]);
+    let text = prompt_text(&client, "make_skin", json!({ "style": "dark teal, calm" })).await;
+    assert!(text.contains("The user wants this skin: dark teal, calm"));
+    assert!(text.contains("create_candidate_skin"));
+    assert!(prompt_text(&client, "make_skin", json!({}))
+        .await
+        .contains("Ask the user"));
     client.cancel().await.unwrap();
 }
 

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { boundedGraphemes } from "../core/text";
 import { randomUuid } from "../core/random-id";
-import type { SkinCatalog } from "../skin/external-skins";
+import { errorCode } from "../core/error-code";
+import type { ExternalSkin, SkinCatalog } from "../skin/external-skins";
+import type { SkinImageReader } from "../skin/skin-image";
+import { renderSkinPreview } from "../skin/skin-preview-render";
 import {
   candidateSkinMegabytes,
   candidateSkinMessage,
@@ -43,6 +46,7 @@ export function CandidateSkinPublishDialog({
   localSkins,
   initialSkinId,
   openSkinDirectory,
+  readImage,
   onClose,
   onPublished,
   onLogin,
@@ -52,6 +56,8 @@ export function CandidateSkinPublishDialog({
   localSkins?: () => Promise<SkinCatalog>;
   initialSkinId?: string;
   openSkinDirectory?: () => Promise<void>;
+  /** Reads a package's images, so a package without a preview can have one drawn from its own; absent, it is only told to add one. */
+  readImage?: SkinImageReader;
   onClose: () => void;
   onPublished: (skin: CommunityCandidateSkin) => void | Promise<void>;
   /** Where to send someone who has to sign in before publishing; absent leaves the sentence alone. */
@@ -60,10 +66,16 @@ export function CandidateSkinPublishDialog({
   const [options, setOptions] = useState<LocalSkinOption[]>(
     initialSkinId ? [{ id: initialSkinId, name: initialSkinId }] : [],
   );
+  const [packages, setPackages] = useState<ExternalSkin[]>([]);
   const [optionsLoading, setOptionsLoading] = useState(Boolean(localSkins));
   const [skinId, setSkinId] = useState(initialSkinId ?? "");
   const [pack, setPack] = useState<CandidateSkinPackPreview | null>(null);
   const [packError, setPackError] = useState("");
+  const [packCode, setPackCode] = useState<string | undefined>();
+  // Bumped once a drawn preview is saved, so the package is checked again.
+  const [packRevision, setPackRevision] = useState(0);
+  const [drawing, setDrawing] = useState(false);
+  const [drawFailed, setDrawFailed] = useState(false);
   const [packLoading, setPackLoading] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -88,6 +100,7 @@ export function CandidateSkinPublishDialog({
         .then((catalog) => {
           if (!active) return;
           const loaded = catalog.packages.map((item) => ({ id: item.id, name: item.name }));
+          setPackages(catalog.packages);
           setOptions(loaded);
           setSkinId((current) =>
             current && loaded.some((item) => item.id === current) ? current : (loaded[0]?.id ?? ""),
@@ -110,6 +123,8 @@ export function CandidateSkinPublishDialog({
     const generation = ++packGeneration.current;
     setPack(null);
     setPackError("");
+    setPackCode(undefined);
+    setDrawFailed(false);
     setAgreed(false);
     setPublicationId(randomUuid());
     if (!skinId) {
@@ -128,7 +143,9 @@ export function CandidateSkinPublishDialog({
         }
       })
       .catch((packFailure) => {
-        if (generation === packGeneration.current) setPackError(candidateSkinMessage(packFailure));
+        if (generation !== packGeneration.current) return;
+        setPackError(candidateSkinMessage(packFailure));
+        setPackCode(errorCode(packFailure));
       })
       .finally(() => {
         if (generation === packGeneration.current) setPackLoading(false);
@@ -136,7 +153,33 @@ export function CandidateSkinPublishDialog({
     return () => {
       packGeneration.current++;
     };
-  }, [client, skinId, visibility]);
+  }, [client, skinId, visibility, packRevision]);
+
+  // A decorated package without an image of its own draws its preview as the decoration, so a drawn preview would change its look; the host refuses it too.
+  const previewless =
+    packCode === "candidate_skin_preview_required"
+      ? packages.find(
+          (item) =>
+            item.id === skinId &&
+            !(item.decorationTopDip > 0 && item.decorationWidthDip > 0 && !item.decorationImage),
+        )
+      : undefined;
+  const drawPreview = async () => {
+    if (!previewless || !readImage || drawing) return;
+    const generation = packGeneration.current;
+    setDrawing(true);
+    setDrawFailed(false);
+    try {
+      const bytes = await renderSkinPreview(previewless, readImage);
+      const catalog = await client.addPreview(previewless.id, bytes);
+      setPackages(catalog.packages);
+      setPackRevision((revision) => revision + 1);
+    } catch {
+      if (generation === packGeneration.current) setDrawFailed(true);
+    } finally {
+      setDrawing(false);
+    }
+  };
 
   const normalizedName = name.trim();
   const normalizedDescription = description.trim();
@@ -259,7 +302,38 @@ export function CandidateSkinPublishDialog({
           </label>
         </fieldset>
         {packLoading && <p role="status">正在检查皮肤包…</p>}
-        {packError && (
+        {packError && previewless && readImage && (
+          <div className={style.confirmation} role="alert">
+            <p>
+              这款皮肤还没有预览图，社区要用它展示皮肤。可以按皮肤自己的配色和图片生成一张，保存到皮肤文件夹后继续发布。
+            </p>
+            {drawFailed && (
+              <p>生成预览图失败，请重试，或自己在 skin.toml 中用 preview 指定一张图片。</p>
+            )}
+            <div className={style.confirmationActions}>
+              {openSkinDirectory && (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={drawing}
+                  onClick={() => void openFolder()}
+                >
+                  打开目录
+                </button>
+              )}
+              <button
+                type="button"
+                className="primary"
+                disabled={drawing}
+                onClick={() => void drawPreview()}
+              >
+                {drawing ? "正在生成…" : "生成预览图"}
+              </button>
+            </div>
+            {openFailed && <p>无法打开皮肤目录，请重试。</p>}
+          </div>
+        )}
+        {packError && !(previewless && readImage) && (
           <div className={style.confirmation} role="alert">
             <p>{packError}</p>
             {openSkinDirectory && (
