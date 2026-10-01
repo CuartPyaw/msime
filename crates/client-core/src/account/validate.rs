@@ -623,6 +623,14 @@ pub(super) fn validate_user(user: &AccountUser) -> Result<(), AccountError> {
     .map_err(|_| AccountError::Invalid)?;
     if !crate::text::is_bounded_chars(&user.display_name, 64)
         || !crate::text::is_bounded_text(&user.created_at, 128)
+        || user
+            .email
+            .as_ref()
+            .is_some_and(|email| !crate::text::is_bounded_text(email, 320))
+        || user
+            .avatar_url
+            .as_ref()
+            .is_some_and(|url| !crate::text::is_bounded_text(url, 2048))
     {
         return Err(AccountError::Invalid);
     }

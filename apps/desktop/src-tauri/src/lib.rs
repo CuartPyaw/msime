@@ -5204,6 +5204,12 @@ pub fn run() {
             android_account::account_rename,
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
             desktop_account::account_rename,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            desktop_account::account_avatar,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            desktop_account::account_choose_avatar,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            desktop_account::account_remove_avatar,
             #[cfg(target_os = "android")]
             android_account::account_logout,
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { runAsyncAction } from "../core/async-action";
+import { errorCode } from "../core/error-code";
 import { GroupList, Row } from "../core/platform-controls";
 import * as doc from "../settings/document-style";
 import * as account from "./account-style";
+import { AccountAvatar } from "./account-avatar";
 import { accountProviderName, preferredAccountName } from "./account-labels";
 import { accountMessage, isAccountCancellation } from "./account-errors";
 import { AccountConfirmation } from "./account-confirmation";
@@ -14,6 +16,12 @@ export type AccountUser = {
   id: string;
   displayName: string;
   createdAt: string;
+  /** The verified email of a linked Google account. */
+  email?: string;
+  /** Changes whenever the avatar does; the image itself comes from `AccountClient.avatar`, since the page loads no remote image. */
+  avatarUrl?: string;
+  /** The avatar is one the user uploaded, which they can remove, rather than their Google picture. */
+  avatarUploaded?: boolean;
 };
 
 export type AccountProviders = {
@@ -77,6 +85,12 @@ export interface AccountClient {
   googleCancel?: () => Promise<void>;
   profile(): Promise<AccountProfile>;
   rename(displayName: string): Promise<AccountProfile>;
+  /** The signed-in user's avatar as a `data:` URL, or null without one. Absent on hosts that do not fetch avatars, which show the name's first character. */
+  avatar?: () => Promise<string | null>;
+  /** Opens the platform's file dialog for a PNG or JPEG and uploads it; null when the user closes the dialog. The page never names a path. */
+  chooseAvatar?: () => Promise<AccountProfile | null>;
+  /** Removes the uploaded avatar; the Google picture, if any, shows again. */
+  removeAvatar?: () => Promise<AccountProfile>;
   logout(all: boolean): Promise<void>;
   deleteAccount(): Promise<void>;
   clearExpired(): Promise<void>;
@@ -223,9 +237,12 @@ function MobileAccountProfilePage({
         </p>
       )}
       <section className={`${account.section} ${account.profilePreviewLarge}`}>
-        <div className={account.avatar("large")} aria-hidden="true">
-          {(normalizedName || "水杉用户").slice(0, 1)}
-        </div>
+        <AccountAvatar
+          user={user}
+          name={normalizedName || "水杉用户"}
+          load={client.avatar}
+          size="large"
+        />
         <h2 className={account.heading}>{normalizedName || "你的昵称"}</h2>
         <p className={account.muted}>在水杉，留下你的名字</p>
       </section>
@@ -272,6 +289,12 @@ function MobileAccountProfilePage({
               </button>
             </dd>
           </div>
+          {user.email && (
+            <div>
+              <dt>邮箱</dt>
+              <dd>{user.email}</dd>
+            </div>
+          )}
           <div>
             <dt>登录方式</dt>
             <dd>{profile?.providers.map(accountProviderName).join("、") || "正在读取"}</dd>
@@ -1002,6 +1025,38 @@ function AccountDetailsPage({
       setNotice("昵称已更新。");
     });
 
+  // Only the user and profile change: the nickname field keeps whatever is being typed in the dialog.
+  const applyAvatar = (updated: AccountProfile) => {
+    setProfile(updated);
+    setUser(updated.user);
+  };
+
+  const chooseAvatar = () =>
+    void perform(async () => {
+      const generation = clientGeneration.current;
+      let updated: AccountProfile | null | undefined;
+      try {
+        updated = await client.chooseAvatar?.();
+      } catch (error) {
+        // The host refuses a file that is not a small PNG or JPEG as an invalid request; say what was wrong with it rather than with "the input".
+        if (errorCode(error) === "account_invalid") throw { code: "account_avatar_invalid" };
+        throw error;
+      }
+      if (!updated || !mounted.current || generation !== clientGeneration.current) return;
+      applyAvatar(updated);
+      setNotice("头像已更新。");
+    });
+
+  const removeAvatar = () =>
+    void perform(async () => {
+      const generation = clientGeneration.current;
+      if (!client.removeAvatar) return;
+      const updated = await client.removeAvatar();
+      if (!mounted.current || generation !== clientGeneration.current) return;
+      applyAvatar(updated);
+      setNotice("已移除头像。");
+    });
+
   const copyAccountId = () => {
     copyAccountIdToClipboard({
       id: user?.id,
@@ -1136,12 +1191,10 @@ function AccountDetailsPage({
             }
           }}
         >
-          <div className={account.avatar("medium")} aria-hidden="true">
-            {preferredAccountName(user).slice(0, 1)}
-          </div>
+          <AccountAvatar user={user} load={client.avatar} size="medium" />
           <div>
             <h2 className={account.heading}>{preferredAccountName(user)}</h2>
-            <p className={account.note}>水杉账号已登录</p>
+            <p className={account.note}>{user.email ?? "水杉账号已登录"}</p>
           </div>
           <span className={account.profileChevron} aria-hidden="true">
             ›
@@ -1347,11 +1400,35 @@ function AccountDetailsPage({
               </button>
             </div>
             <div className={account.profilePreview}>
-              <div className={account.avatar("small")} aria-hidden="true">
-                {preferredAccountName(user).slice(0, 1)}
-              </div>
+              {client.chooseAvatar ? (
+                <button
+                  type="button"
+                  className={account.avatarButton}
+                  disabled={busy}
+                  aria-label="更换头像"
+                  title="更换头像"
+                  onClick={chooseAvatar}
+                >
+                  <AccountAvatar user={user} load={client.avatar} size="small" />
+                </button>
+              ) : (
+                <AccountAvatar user={user} load={client.avatar} size="small" />
+              )}
               <strong>{name.trim() || "你的昵称"}</strong>
+              {user.avatarUploaded && client.removeAvatar && (
+                <button
+                  type="button"
+                  className={account.link}
+                  disabled={busy}
+                  onClick={removeAvatar}
+                >
+                  移除头像
+                </button>
+              )}
             </div>
+            {client.chooseAvatar && (
+              <p className={account.muted}>点头像可更换，支持 1 MiB 以内的 PNG 或 JPEG。</p>
+            )}
             <label className={account.field}>
               社区昵称
               <input
@@ -1373,6 +1450,12 @@ function AccountDetailsPage({
                   </button>
                 </dd>
               </div>
+              {user.email && (
+                <div>
+                  <dt>邮箱</dt>
+                  <dd>{user.email}</dd>
+                </div>
+              )}
               <div>
                 <dt>登录方式</dt>
                 <dd>{profile?.providers.map(accountProviderName).join("、") || "正在读取"}</dd>

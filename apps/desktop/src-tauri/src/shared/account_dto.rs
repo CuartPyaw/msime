@@ -20,14 +20,31 @@ pub(crate) struct UserResponse {
     id: String,
     display_name: String,
     created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    email: Option<String>,
+    /// Not loadable by the page itself, whose content security policy blocks remote images; it changes whenever the avatar does, so the page uses it to know when to ask the host for the image again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    avatar_url: Option<String>,
+    /// Whether the avatar is one the user uploaded, which the page can offer to remove, rather than the Google picture.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    avatar_uploaded: bool,
 }
 
 impl From<AccountUser> for UserResponse {
     fn from(user: AccountUser) -> Self {
+        // A URL this client would never fetch is not passed on either, so the page cannot show a placeholder for an avatar that will not load.
+        let avatar_url = user
+            .avatar_url
+            .filter(|url| msime_client_core::account::account_avatar_url_allowed(url));
         Self {
             id: user.id,
             display_name: user.display_name,
             created_at: user.created_at,
+            email: user.email,
+            avatar_uploaded: avatar_url
+                .as_deref()
+                .is_some_and(msime_client_core::account::account_avatar_is_uploaded),
+            avatar_url,
         }
     }
 }
@@ -175,6 +192,8 @@ mod tests {
             id: "synthetic-user".into(),
             display_name: "测试账号".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
+            email: None,
+            avatar_url: None,
         }
     }
 
@@ -192,6 +211,34 @@ mod tests {
         // A signed-out status is `{ user: null }`, which the webview's `user?: AccountUser | null` accepts.
         let signed_out = serde_json::to_value(StatusResponse { user: None }).unwrap();
         assert_eq!(signed_out, json!({"user":null}));
+
+        // The Google email and the avatar reach the page in camelCase; an avatar from a host the client never fetches does not.
+        let mut google = user();
+        google.email = Some("person@example.test".into());
+        google.avatar_url = Some("https://media.msime.app/avatars/abc.jpg".into());
+        assert_eq!(
+            serde_json::to_value(StatusResponse {
+                user: Some(google.clone().into())
+            })
+            .unwrap()["user"],
+            json!({"id":"synthetic-user","displayName":"测试账号","createdAt":"2026-01-01T00:00:00Z","email":"person@example.test","avatarUrl":"https://media.msime.app/avatars/abc.jpg","avatarUploaded":true})
+        );
+        google.avatar_url = Some("https://lh3.googleusercontent.com/a/person".into());
+        let from_google = serde_json::to_value(StatusResponse {
+            user: Some(google.clone().into()),
+        })
+        .unwrap();
+        assert_eq!(
+            from_google["user"]["avatarUrl"],
+            "https://lh3.googleusercontent.com/a/person"
+        );
+        assert!(from_google["user"].get("avatarUploaded").is_none());
+        google.avatar_url = Some("https://example.test/elsewhere.png".into());
+        let elsewhere = serde_json::to_value(StatusResponse {
+            user: Some(google.into()),
+        })
+        .unwrap();
+        assert!(elsewhere["user"].get("avatarUrl").is_none());
 
         let challenge = serde_json::to_value(ChallengeResponse::from(AccountChallenge {
             challenge_id: "synthetic-challenge".into(),

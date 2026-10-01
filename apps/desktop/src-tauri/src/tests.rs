@@ -1972,6 +1972,8 @@ fn linux_account_storage_round_trips_an_owner_only_session() {
                 id: "synthetic-id".into(),
                 display_name: "合成用户".into(),
                 created_at: "2026-01-01T00:00:00Z".into(),
+                email: None,
+                avatar_url: None,
             },
         },
         expires_at_unix_ms: 1_700_000_000_000,

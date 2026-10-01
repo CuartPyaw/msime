@@ -13,6 +13,20 @@ pub trait AccountApi: Send + Sync + 'static {
     fn logout(&self, access_token: &str, all: bool) -> Result<(), AccountError>;
     fn delete_account(&self, access_token: &str) -> Result<(), AccountError>;
 
+    /// Replaces the user's uploaded avatar with `image`, a PNG or JPEG already read by [`read_account_avatar_upload`].
+    fn upload_avatar(
+        &self,
+        _image: &AccountAvatarImage,
+        _access_token: &str,
+    ) -> Result<(), AccountError> {
+        Err(AccountError::Unavailable)
+    }
+
+    /// Removes the user's uploaded avatar; the Google picture, if any, shows again.
+    fn delete_avatar(&self, _access_token: &str) -> Result<(), AccountError> {
+        Err(AccountError::Unavailable)
+    }
+
     fn chat_models(&self, _access_token: &str) -> Result<AccountChatModels, AccountError> {
         Err(AccountError::Unavailable)
     }

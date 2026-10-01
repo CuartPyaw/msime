@@ -42,6 +42,9 @@ export const link =
   "cursor-pointer border-0 bg-transparent p-0 text-xs [color:var(--p-sub)] not-disabled:hover:[color:var(--p-text)] not-disabled:hover:underline disabled:cursor-default disabled:opacity-60";
 
 export const hero = "flex items-center gap-4";
+/** The edit dialog's avatar, which opens the file dialog: round like the avatar it holds, with a focus ring and no button chrome. */
+export const avatarButton =
+  "m-0 cursor-pointer rounded-full border-0 bg-transparent p-0 not-disabled:hover:opacity-85 disabled:cursor-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 export const avatar = (size: "small" | "medium" | "large") =>
   `grid place-items-center rounded-full bg-accent-strong font-[650] text-white ${
     size === "large"

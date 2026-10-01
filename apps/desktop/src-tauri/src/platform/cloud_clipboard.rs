@@ -192,6 +192,8 @@ mod tests {
                     id: "synthetic-user".into(),
                     display_name: "合成用户".into(),
                     created_at: "2026-01-01T00:00:00Z".into(),
+                    email: None,
+                    avatar_url: None,
                 },
             },
             // An hour ahead: inside the thirty days a stored session may claim, and past the early-refresh window, so the session never asks the backend to refresh.
