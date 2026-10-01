@@ -48,8 +48,12 @@ pub fn prepare_runtime_paths(
     {
         return Err(EngineError::invalid(diagnostics::RUNTIME_ROOTS_OVERLAP));
     }
+    reject_redirected_directory(user_data)?;
+    reject_redirected_directory(cache)?;
     fs::create_dir_all(user_data)?;
     fs::create_dir_all(cache)?;
+    reject_redirected_directory(user_data)?;
+    reject_redirected_directory(cache)?;
 
     if result.dictionaries.join(assets::GENERATION_READY).exists() {
         for name in [assets::MAIN_DICTIONARY, assets::ENGLISH_DICTIONARY] {
@@ -226,6 +230,33 @@ fn append_lexically(base: &mut PathBuf, rest: &[Component<'_>]) {
     }
 }
 
+fn reject_redirected_directory(path: &Path) -> std::io::Result<()> {
+    for ancestor in path.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                #[cfg(target_os = "macos")]
+                if ancestor == Path::new("/var") || ancestor == Path::new("/tmp") {
+                    continue;
+                }
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "runtime directory has a symbolic-link ancestor",
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    "runtime directory parent is not a directory",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
 /// One root contains the other, compared by whole components (RP:34-37).
 pub(super) fn roots_overlap(first: &Path, second: &Path) -> bool {
     first.starts_with(second) || second.starts_with(first)
@@ -312,6 +343,24 @@ mod tests {
             .to_string()
             .starts_with(diagnostics::RUNTIME_COPY_FAILED));
         assert!(!root.path().join("user/dictionaries/v1").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn user_and_cache_roots_reject_symlinked_directories() {
+        use std::os::unix::fs::symlink;
+
+        for linked_name in ["user", "cache"] {
+            let root = tempfile::tempdir().unwrap();
+            let resources = resources(root.path());
+            let outside = tempfile::tempdir().unwrap();
+            let user = root.path().join("user");
+            let cache = root.path().join("cache");
+            symlink(outside.path(), root.path().join(linked_name)).unwrap();
+
+            assert!(prepare_runtime_paths(&resources, &user, &cache, "v1").is_err());
+            assert!(!outside.path().join("dictionaries").exists());
+        }
     }
 
     // test_runtime_isolation.cpp:140-168.
