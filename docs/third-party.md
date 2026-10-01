@@ -34,6 +34,7 @@
 | `rubato` | 5 | MIT OR Apache-2.0 | 把采集到的音频重采样到识别所需的采样率 |
 | `exmex` | 0.21 | MIT OR Apache-2.0 | V模式的算式求值（`crates/engine/src/local/expression.rs`），只注册四则运算、`%` 取余和 `^` 乘方。它带进 `regex` 与 `smallvec`，两者原本就在锁文件里 |
 | `chinese-number`（关闭默认特性，只开 `std`、`number-to-chinese`） | 0.8 | MIT | V模式把数字写成中文小写、大写与金额（同一文件）。传递依赖 `chinese-variant`（MIT）、`enum-ordinalize`（MIT）、`num-bigint`（MIT OR Apache-2.0） |
+| `rink-core`（关闭默认特性，只开 `bundle-files`） | 0.9 | MPL-2.0；它内嵌的单位库 `definitions.units` 分叉自 GNU Units 的数据库，为 GPL-3.0-or-later（Free Software Foundation），与本仓库的 GPL-3.0 兼容 | V模式的单位换算（`crates/engine/src/local/units.rs`），例如 `3jin'g` 把 3 斤换成克。`bundle-files` 把单位库编进库里，单位上下文在第一次用到时才加载；汇率要联网取数据，从不加载，所以不换算货币。带进 `num-rational`（MIT OR Apache-2.0）与 `strsim`（MIT）。源码在 crates.io 的对应版本，上游仓库是 [codeberg.org/tiffany/rink](https://codeberg.org/tiffany/rink)。MPL-2.0 的履行方式与下文音效包一节的 `symphonia` 相同 |
 
 ## 随包资源（`resources/desktop-dictionary.lock.json`）
 
@@ -114,15 +115,15 @@ print(json.loads(f.read(n))["__metadata__"]["attribution"])
 
 ## 自带音效包与插件包（`resources/sound-packs/`、`client-core::plugins`）
 
-内置的两套音效包是本项目自己的作品，随各平台安装包分发，放在资源目录的旁边（资源目录必须与锁文件完全一致）。
+内置的九套音效包和两套背景音乐包是本项目自己的作品，随各平台安装包分发，放在资源目录的旁边（资源目录必须与锁文件完全一致）。它们的标识登记在 `client-core::plugins` 的 `BUILTIN_SOUND_PACKS` 与 `BUILTIN_MUSIC_PACKS`，这些标识保留给内置包，用户导入的包不能占用。
 
 | 项 | 值 |
 | --- | --- |
-| 文件 | `default/`：普通键、空格、回车、退格、上屏与里程碑共 6 段 WAV；`twinkle/`：1 段音色 `tone.wav`，按键时按清单里的半音序列变调演奏 |
+| 文件 | `default/`：普通键、空格、回车、退格、上屏与里程碑共 6 段 WAV；`msime-typewriter/`、`msime-bubble/`、`msime-8bit/`、`msime-woodblock/`：普通键、空格、回车、退格与上屏各 1 段 WAV；`twinkle/`、`msime-pentatonic/`、`msime-canon/`、`msime-ode-to-joy/`：1 段音色 `tone.wav`，按键时按清单里的半音序列变调演奏；`msime-music-lofi/`、`msime-music-ambient/`：各 1 段 36 秒的无缝循环曲目（`lofi.wav`、`ambient.wav`） |
 | 来源 | `scripts/generate_sound_packs.py` 用正弦、衰减包络和定种子的噪声逐样本合成，不录音、不下载任何素材 |
 | 许可证 | CC0-1.0，写在各包的 `plugin.toml` 里 |
 | 核对方式 | `scripts/test-sound-packs.py` 把样本重新合成一遍，与提交的文件逐样本比对（容差为 16 位量化的 1 级），不一致就失败，所以手工替换的样本进不来 |
-| 旋律 | `twinkle` 的音符序列是《小星星》（法国民谣 "Ah! vous dirai-je, maman"，18 世纪），属公有领域 |
+| 旋律 | `twinkle` 的音符序列是《小星星》（法国民谣 "Ah! vous dirai-je, maman"，18 世纪）；`msime-canon` 取自帕赫贝尔《D 大调卡农》（约 1680 年）的上声部；`msime-ode-to-joy` 是贝多芬第九交响曲（1824 年）的《欢乐颂》主题；`msime-pentatonic` 只是 C 大调五声音阶的上下行。前三者都属公有领域，曲目说明写在各自 `plugin.toml` 的注释里。两段背景音乐也是生成脚本按程序写出的和声与节奏，不取材于任何既有作品 |
 
 第三方插件包（音效、背景音乐、/指令表）由用户自行导入，本仓库不分发。每个包必须在清单里声明 `license`，设置页原样显示；包里只能有清单、清单点名的 WAV/Ogg 和文本说明，不能带任何可执行内容，`permissions` 必须为空。
 
@@ -198,6 +199,7 @@ kaikki 每周覆盖同一个 URL，所以能复现构建的是 `filtered_input`�
 
 | 组件 | 许可证 | 位置与说明 |
 | --- | --- | --- |
+| [modood/Administrative-divisions-of-China](https://github.com/modood/Administrative-divisions-of-China) 的省、地、县三级行政区划，提交 `c49d495b40ac73eb1a66f6eeae5f8fd10696f035` | WTFPL（全文在 `resources/licenses/Administrative-divisions-of-China-WTFPL.txt`）；上游整理自国家统计局公布的统计用区划代码与城乡划分代码 | `crates/engine/src/local/places.tsv`，`@` 模式在用户自己的列表之后补充的内置地名（3302 个，约 126 KB，`include_str!` 编进引擎）。`msime-dict-build places` 读 `dist/provinces.csv`、`dist/cities.csv`、`dist/areas.csv` 三个文件生成这张表，三者的 URL、长度与 SHA-256 固定在 `resources/dictionary-sources.lock.json` 的 `places/` 条目；拼音由生成器按字注音，再用 `crates/dict-builder/src/places.rs` 的 `READINGS` 纠正地名专用读音。只取地名和上级关系，不带区划代码。设置里「@ 地名」默认关闭 |
 | [OpenCC](https://github.com/BYVoid/OpenCC) 词典，提交 `26753884f1984add422f3b0249ccee8613deaff6` | Apache-2.0 | `crates/client-core/data/opencc/`，许可证全文在同目录 `LICENSE`。`STPhrases.txt`、`STCharacters.txt`、`CJK_Compatibility_Ideographs.txt` 原样取自该提交的 `data/dictionary/`；`STPhrases_GeneratedFromRegionalPhrases.txt` 是该提交的 OpenCC 构建产物（`data/scripts/generate_st_phrases_from_regional_phrases.py` 用 `t2s.json` 生成），本仓不重新生成。提交号与来源 MSIME-Windows 的 `vendor/opencc` 子模块一致。只使用数据，不链接 OpenCC 的 C++ 库；`chinese_conversion.rs` 按 `s2t.json` 的规则实现转换。Windows 通知由 `Collect-Notices.ps1` 一并收集 |
 
 ## 本地语音识别

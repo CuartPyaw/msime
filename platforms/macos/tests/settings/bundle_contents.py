@@ -162,9 +162,12 @@ def main() -> int:
     for notice in ("sherpa-onnx-Apache-2.0.txt", "onnxruntime-MIT.txt", "onnxruntime-ThirdPartyNotices.txt"):
         if not (contents / "Resources" / "Licenses" / notice).is_file():
             failures.append(f"Contents/Resources/Licenses/{notice} is missing; the bundled speech runtime ships without its licence")
-    # The sound player links MPL-2.0 crates (symphonia, triple_buffer) into the input method.
+    # The sound player links MPL-2.0 crates (symphonia, triple_buffer) into the input method, and the engine links rink-core.
     if not (contents / "Resources" / "Licenses" / "MPL-2.0.txt").is_file():
-        failures.append("Contents/Resources/Licenses/MPL-2.0.txt is missing; the MPL-2.0 crates of the sound player ship without their licence")
+        failures.append("Contents/Resources/Licenses/MPL-2.0.txt is missing; the MPL-2.0 crates of the sound player and unit conversion ship without their licence")
+    # The engine embeds the place names `@` mode offers from modood/Administrative-divisions-of-China.
+    if not (contents / "Resources" / "Licenses" / "Administrative-divisions-of-China-WTFPL.txt").is_file():
+        failures.append("Contents/Resources/Licenses/Administrative-divisions-of-China-WTFPL.txt is missing; the built-in place names ship without their licence")
 
     if failures:
         for failure in failures:

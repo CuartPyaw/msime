@@ -11,7 +11,8 @@ try {
     # Collect-Notices.ps1 reads the notices committed beside the data and code they cover, and the handwriting model's licence where scripts/fetch_handwriting_model.py puts it.
     $repositoryNotices = @('resources/licenses/msime-engine-dictionary-NOTICE.md', 'resources/helpcodes/ENGINE-NOTICE.md',
         'resources/helpcodes/NOTICE.md', 'target/handwriting-model/HandwritingModel-LICENSE.txt',
-        'resources/licenses/Zinnia-LICENSE.txt', 'platforms/windows/third_party/miniaudio/LICENSE',
+        'resources/licenses/Zinnia-LICENSE.txt', 'resources/licenses/Administrative-divisions-of-China-WTFPL.txt',
+        'platforms/windows/third_party/miniaudio/LICENSE',
         'crates/client-core/data/opencc/LICENSE')
     foreach ($relative in $repositoryNotices) {
         $path = Join-Path $root $relative
