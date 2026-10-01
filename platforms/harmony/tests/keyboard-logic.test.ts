@@ -220,6 +220,12 @@ import {
   dictionaryChangePageChanged,
 } from "../entry/src/main/ets/account/AccountCloudBridge";
 import {
+  CrashDestination,
+  CrashReport,
+  TelemetryPolicy,
+} from "../entry/src/main/ets/telemetry/TelemetryPolicy";
+import { NoticePolicy } from "../entry/src/main/ets/notices/NoticePolicy";
+import {
   CLOUD_CLIPBOARD_EMPTY,
   CLOUD_CLIPBOARD_FAILED,
   CLOUD_CLIPBOARD_LOADING,
@@ -12434,3 +12440,144 @@ group("a picked pack is copied for import only within client-core's bounds", () 
     "the staged archive keeps the extension client-core goes by, whatever the picked name",
   );
 });
+
+group("usage reporting reads HiAppEvent crash reports without leaking directories", () => {
+  const native = TelemetryPolicy.crashReport(
+    JSON.stringify({
+      time: 1760000000000,
+      crash_type: "NativeCrash",
+      pid: 4321,
+      exception: {
+        message: "",
+        signal: { signo: 11, code: 1, address: "0x0" },
+        thread_name: "msime",
+        frames: [
+          {
+            symbol: "msime_client_create+24",
+            file: "/data/storage/el1/bundle/libs/arm64/libmsimeclient.so",
+            pc: "000000000001a2b0",
+          },
+          { file: "/system/lib/ld-musl-aarch64.so.1", pc: "00000000000c4f10" },
+          {},
+        ],
+      },
+    }),
+  );
+  check(native !== null, "a native crash is read");
+  check(native?.message === "SIGSEGV (code 1)", "the signal is named; the address is left out");
+  check(
+    native?.stack === "libmsimeclient.so+0x1a2b0 msime_client_create+24\nld-musl-aarch64.so.1+0xc4f10",
+    "frames keep the file name and pc, never the directory, and an empty frame is skipped",
+  );
+  check(native?.pid === 4321 && native?.time === 1760000000000, "and it says which process crashed when");
+
+  const javascript = TelemetryPolicy.crashReport(
+    JSON.stringify({
+      time: 5,
+      crash_type: "JsError",
+      pid: 7,
+      exception: {
+        name: "TypeError",
+        message: "Cannot read property 'x' of undefined\nsecond line",
+        stack: "    at view (entry/src/main/ets/keyboard/KeyboardView.ts:10:3)\n",
+      },
+    }),
+  );
+  check(
+    javascript?.message === "TypeError: Cannot read property 'x' of undefined",
+    "a JavaScript crash keeps the error name and the first line of its message",
+  );
+  check(javascript?.stack.startsWith("at view") === true, "and its stack, trimmed");
+
+  check(TelemetryPolicy.crashReport("not json") === null, "an unreadable report is ignored");
+  check(
+    TelemetryPolicy.crashReport(JSON.stringify({ time: 1, pid: 1, crash_type: "AppFreeze", exception: {} })) === null,
+    "and so is anything other than a crash",
+  );
+  check(
+    TelemetryPolicy.crashReport(JSON.stringify({ time: 1, crash_type: "JsError", exception: {} })) === null,
+    "a report without a process id cannot be attributed and is ignored",
+  );
+});
+
+group("a crash belongs to the unfinished keyboard session only before this keyboard begins its own", () => {
+  const report: CrashReport = { pid: 99, time: 1, message: "SIGABRT", stack: "" };
+  check(
+    TelemetryPolicy.destination(report, 99, false) === CrashDestination.Session,
+    "the previous keyboard process's crash, before begin, is that session's crash",
+  );
+  check(
+    TelemetryPolicy.destination(report, 99, true) === CrashDestination.Standalone,
+    "after begin the marker is this run's, so the crash stands alone",
+  );
+  check(
+    TelemetryPolicy.destination(report, 12, false) === CrashDestination.Standalone,
+    "another process's crash (the settings application) never closes the keyboard session",
+  );
+  check(
+    TelemetryPolicy.destination(report, null, false) === CrashDestination.Standalone,
+    "with no remembered keyboard process nothing is attributed",
+  );
+  check(
+    TelemetryPolicy.standaloneRecordName(report) === "harmony-99-1.crash",
+    "a standalone record is named by process and time, so a report delivered twice is written once",
+  );
+  check(TelemetryPolicy.recordText(report) === "SIGABRT\n", "a record is the summary line, then the frames");
+  check(TelemetryPolicy.rememberedPid('{"pid":4321}') === 4321, "the remembered process id is read");
+  check(TelemetryPolicy.rememberedPid("{}") === null, "and a file without one is no process");
+});
+
+group("usage reporting is cleared only by a saved document that turns it off", () => {
+  const saved = '{"ok":true,"value":{"revision":3}}';
+  check(
+    TelemetryPolicy.reportingTurnedOff('{"format_version":1,"preferences":{"usage_reporting":false}}', saved),
+    "an explicit false that was saved turns reporting off",
+  );
+  check(
+    !TelemetryPolicy.reportingTurnedOff('{"format_version":1,"preferences":{}}', saved),
+    "an absent key is the default, which is on",
+  );
+  check(
+    !TelemetryPolicy.reportingTurnedOff(
+      '{"format_version":1,"preferences":{"usage_reporting":false}}',
+      '{"ok":false,"error":"conflict"}',
+    ),
+    "a save the store refused changed nothing",
+  );
+  check(TelemetryPolicy.flushDue(0, 1000), "a keyboard that has not sent yet sends");
+  check(!TelemetryPolicy.flushDue(1000, 1000 + 60 * 60 * 1000), "an hour later it waits");
+  check(TelemetryPolicy.flushDue(1000, 1000 + 6 * 60 * 60 * 1000), "six hours later it sends again");
+  check(TelemetryPolicy.flushDue(5000, 1000), "a clock that went back does not stop it for good");
+});
+
+group("notices are shown from client-core's answer and their links leave the application", () => {
+  const items = NoticePolicy.items(
+    JSON.stringify({
+      ok: true,
+      value: {
+        items: [
+          { id: "n2", title: "新版本", body: "**粗体**", html: "<p><strong>粗体</strong></p>" },
+          { id: "", title: "no id", html: "" },
+          { id: "n1", title: "维护", html: "<p>今晚维护</p>" },
+        ],
+      },
+    }),
+  );
+  check(items.length === 2 && items[0].id === "n2", "valid notices keep their order, newest first");
+  check(NoticePolicy.items('{"ok":false,"error":"x"}').length === 0, "a refusal shows nothing");
+  check(NoticePolicy.items("garbage").length === 0, "and so does an unreadable answer");
+  check(NoticePolicy.without(items, "n2").map((item) => item.id).join() === "n1", "a dismissed notice leaves the card");
+  check(NoticePolicy.accepted('{"ok":true,"value":true}'), "a saved dismissal is recognised");
+  check(!NoticePolicy.accepted('{"ok":false,"error":"x"}'), "and a refused one is not");
+  const page = NoticePolicy.page("<p>hi</p>");
+  check(page.includes("default-src 'none'"), "the card's page can load nothing and run nothing");
+  check(page.includes("<body><p>hi</p></body>"), "and carries the rendered body as given");
+  check(NoticePolicy.externalLink("https://msime.app/x") === "https://msime.app/x", "a web link opens outside");
+  check(NoticePolicy.externalLink("mailto:a@b.c") === "mailto:a@b.c", "and so does a mail link");
+  check(NoticePolicy.externalLink("javascript:alert(1)") === null, "anything else is not followed");
+  check(NoticePolicy.externalLink("file:///data/x") === null, "not even a local file");
+  check(NoticePolicy.ownPage("data:text/html;base64,AAAA"), "the card's own page loads in place");
+  check(NoticePolicy.ownPage("about:blank"), "as does its blank start");
+  check(!NoticePolicy.ownPage("https://msime.app"), "a link does not");
+});
+
