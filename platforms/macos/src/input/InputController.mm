@@ -2870,6 +2870,8 @@ static const NSTimeInterval kSettledRerankDelay = 0.15;
 static MSIMEPreferenceSaveState MSIMESharedPreferenceSaveState;
 // The controller behind the queued save, which runs it when the one in flight finishes, whether or not the controller that started that one is still alive.
 static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
+// The controller whose client has the focus. Every controller observes the shared appearance and the one that registered first saves a change, usually a controller whose client lost focus long ago, so after the save this is the one that has to load the document into its session.
+static __weak MSIMEInputController *MSIMEFocusedController;
 - (void)persistAppearancePreferences {
     if (!_preferencesDirectory) return;
     if (!MSIMESharedPreferenceSaveState.request()) { MSIMEQueuedPreferenceSaver = self; return; }
@@ -2901,7 +2903,12 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
             const bool again = MSIMESharedPreferenceSaveState.finish();
             MSIMEInputController *controller = weakSelf;
             if (!saved || saveError) msime_macos_diagnostic_write("preferences_save_failed");
-            else if (controller) [controller reloadPreferences];
+            else {
+                if (controller) [controller reloadPreferences];
+                // A switch from 한 to 中 is a scheme change that only reaches the Engine through this document. Left to the focused controller's one-second poll, the keys typed meanwhile composed Hangul, and a syllable in progress then held the new scheme back until it ended, so the user kept typing Korean after the menu bar said 中.
+                MSIMEInputController *focused = MSIMEFocusedController;
+                if (focused && focused != controller) [focused reloadPreferences];
+            }
             if (again) {
                 MSIMEInputController *next = MSIMEQueuedPreferenceSaver ?: controller;
                 MSIMEQueuedPreferenceSaver = nil;
@@ -4142,6 +4149,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
                             darkSkin:[_appearance toolbarSkinForDark:YES]];
     [_toolbar activateForDelegate:self visible:_appearance.floatingToolbarEnabled];
     _activeClient = sender;
+    MSIMEFocusedController = self;
     _preferenceLoadState.reset();
     [[NSNotificationCenter defaultCenter] removeObserver:self name:MSIMEClientSessionDidReplaceSnapshotNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(snapshotSessionReplaced:) name:MSIMEClientSessionDidReplaceSnapshotNotification object:nil];
@@ -4677,6 +4685,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     [self resetCandidateAnchor];
     [self hideCandidatePanel:"focus_out"];
     _activeClient = nil;
+    if (MSIMEFocusedController == self) MSIMEFocusedController = nil;
     [super deactivateServer:sender];
 }
 
@@ -5072,6 +5081,7 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
         // Clear the previous client's marked text before accepting the new focus.
         [self apply:[_session setFocused:NO error:nil]];
         _activeClient = sender;
+        MSIMEFocusedController = self;
         // Whatever the previous client was last given says nothing about this one.
         [self invalidateSmartPunctuationShadow];
         [_appearance activateInputModeForApplication:[sender respondsToSelector:@selector(bundleIdentifier)] ? [sender bundleIdentifier] : nil];

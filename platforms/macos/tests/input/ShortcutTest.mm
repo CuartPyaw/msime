@@ -2823,6 +2823,43 @@ static void TestPreferenceClientGeneration() {
     }
 }
 
+@interface ReloadCountingController : ModeController
+@property(nonatomic) NSUInteger reloads;
+@end
+@implementation ReloadCountingController
+- (void)reloadPreferences {
+    ++self.reloads;
+    [super reloadPreferences];
+}
+@end
+
+// Every controller observes the shared appearance, so a change is saved by whichever one registered first, usually a controller whose client lost focus long ago. Reloading only that one after the save left the focused session on what it had: a mode switch from 한 to 中 reached its Engine with the next one-second poll, and the keys typed before it composed Hangul, a syllable that then held the new scheme back until it ended. The controller that has the focus loads the saved document as soon as the save is done.
+static void TestSavedPreferencesReachTheFocusedController() {
+    NSString *suite = [@"msime.preference-focus-save." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    ReloadCountingController *saver = [ReloadCountingController alloc];
+    [saver setValue:prefs forKey:@"appearance"];
+    [saver setValue:root forKey:@"preferencesDirectory"];
+    ReloadCountingController *focused = [ReloadCountingController alloc];
+    [focused setValue:prefs forKey:@"appearance"];
+    ShortcutClient *client = [ShortcutClient new];
+    assert(![focused handleEvent:TapEvent(NSEventTypeFlagsChanged, 56, 0, 1) client:client]);
+    focused.reloads = 0;
+    saver.reloads = 0;
+    [saver persistAppearancePreferences];
+    SettleWindowLayout();
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    while (focused.reloads == 0 && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    assert(saver.reloads == 1 && focused.reloads == 1);
+    NSError *error = nil;
+    assert([MSIMEClientSession loadPreferencesInDirectory:root error:&error] && !error);
+    [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+}
+
 // The poll reads the preferences document once a second, and most of those reads find exactly what
 // was applied a second ago. Applying it again walks every preference, goes back into the Engine and
 // writes a diagnostic line - once a second, for nothing. It also buried the diagnostic log under
@@ -8410,6 +8447,7 @@ int main(int argc, char **argv) {
         TestStaleClientDeactivation();
         TestSoundsFollowKeysCommitsAndActivation();
         TestPreferenceClientGeneration();
+        TestSavedPreferencesReachTheFocusedController();
         TestPreferenceRevisionSkipsUnchangedDocuments();
         TestUnreadablePreferencesAreRecoveredOnce();
         TestProviderSettingsPersistTheSharedSnapshot();
