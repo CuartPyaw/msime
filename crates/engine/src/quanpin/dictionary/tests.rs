@@ -83,6 +83,15 @@ fn path_cache_key_borrows_the_segmentation_when_present() {
 }
 
 #[test]
+fn truncating_a_joined_prefix_drops_only_the_last_segment() {
+    let mut segmentation = "ni'hao'ma".to_owned();
+    truncate_last_segment(&mut segmentation);
+    assert_eq!(segmentation, "ni'hao");
+    truncate_last_segment(&mut segmentation);
+    assert_eq!(segmentation, "ni");
+}
+
+#[test]
 fn fuzzy_cache_key_hash_checks_rules_and_segmentation() {
     let cached = CachedFuzzyCandidates {
         rules: 0x7ff,

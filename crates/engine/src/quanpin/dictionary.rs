@@ -555,9 +555,12 @@ impl QuanpinDictionary {
             return self.query_single_path(raw, segmentation, segments);
         }
         let mut result = Vec::new();
+        let mut partial_segmentation = join_segments(segments);
         for count in (1..=segments.len()).rev() {
+            if count < segments.len() {
+                truncate_last_segment(&mut partial_segmentation);
+            }
             let partial = &segments[..count];
-            let partial_segmentation = join_segments(partial);
             let mut rows = self.query_single_path(raw, &partial_segmentation, partial);
             if count == segments.len() {
                 // The same-length table often holds only leftovers: all of ping'guo is 苹果 1143881, 评过 1180, 平果 169, 平锅 1, while 苹果电脑 21495 and 苹果公司 19725 sit in tbl_4_p, which a same-length query never sees, so the second seat went to a rare homophone. Continuations join the group by weight, which comes from one corpus and compares across tables. `pinyin` stays the typed string (composition advance consumes only what was typed) and `canonical_pinyin` keeps the full reading for persistence.
@@ -847,6 +850,14 @@ impl QuanpinDictionary {
             self.personal_scored_keys
                 .retain(|key| series_cache.contains(key));
         }
+    }
+}
+
+fn truncate_last_segment(segmentation: &mut String) {
+    if let Some(boundary) = segmentation.rfind('\'') {
+        segmentation.truncate(boundary);
+    } else {
+        segmentation.clear();
     }
 }
 
