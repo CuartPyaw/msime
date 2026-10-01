@@ -1,5 +1,9 @@
 //! Vietnamese input: Telex or VNI keystrokes transformed into Vietnamese letters with tone marks. The composition is the text itself; there are no candidates and nothing is learned.
 
+pub mod scheme;
+
+pub use scheme::VietnameseScheme;
+
 /// How keystrokes spell diacritics and tones. The ordinal is the host ABI value (`EngineOptions::vietnamese_input_method`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
