@@ -50,6 +50,14 @@ function client(overrides: Partial<CommunityResourceClient> = {}): CommunityReso
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
 test("loads a resource kind with exact search and scope, then removes duplicate pages", async () => {
   const first = base("dictionary");
   const second = base("dictionary", "10000000-0000-4000-8000-000000000002");
@@ -404,6 +412,28 @@ test("publishing a reply requires explicit rights confirmation", async () => {
       0,
     ),
   );
+});
+
+test("resource editor ignores a same-tick duplicate submission", async () => {
+  const pending = deferred<void>();
+  const publish = vi.fn().mockReturnValue(pending.promise);
+  render(<CommunityResourcesPage client={client({ publish })} kind="reply" />);
+  fireEvent.click(await screen.findByRole("button", { name: "发布作品" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "社区作品名称" }), {
+    target: { value: "重复提交回复" },
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "社区回复提示词" }), {
+    target: { value: "请简洁回复" },
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "确认拥有发布内容权利" }));
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "公开发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "公开发布" }));
+  });
+  expect(publish).toHaveBeenCalledOnce();
+  pending.resolve();
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "发布回复" })).toBeNull());
 });
 
 test("resource editor keeps a new entry after removing an existing entry in one batch", async () => {
