@@ -97,6 +97,7 @@ import { SettingsFormFooter } from "./settings/settings-form-footer";
 import { SettingsPageStatus } from "./settings/settings-page-status";
 import type { InputSourceStartupStatus } from "./settings/input-source-startup-notice";
 import { SettingsFormFrame } from "./settings/settings-form-frame";
+import { NoticeBanner, type NoticesClient } from "./settings/notice-banner";
 import { WindowTitlebar } from "./settings/window-titlebar";
 import { useProviderCredentials } from "./settings/use-provider-credentials";
 import { useFeedbackReport } from "./settings/use-feedback-report";
@@ -202,6 +203,12 @@ export {
   type UseSettingsDictionaryStateOptions,
 } from "./settings/use-settings-dictionary-state";
 export { SettingsFormFrame, type SettingsFormFrameProps } from "./settings/settings-form-frame";
+export {
+  NoticeBanner,
+  noticeBodyHtml,
+  type AppNotice,
+  type NoticesClient,
+} from "./settings/notice-banner";
 export { SettingsInputPage, type SettingsInputPageProps } from "./settings/settings-input-page";
 export {
   settingsPageCatalog,
@@ -1777,6 +1784,8 @@ export interface SettingsClient {
   openPreferencesDirectory?: () => Promise<void>;
   readAppVersion?: () => Promise<string>;
   openExternalUrl?: (url: string) => Promise<void>;
+  /** The console's app notices; the host fetches and caches the feed and remembers dismissals. Absent shows none. */
+  notices?: NoticesClient;
   /** macOS opens the versioned third-party notices shipped with the app bundle. */
   openThirdPartyLicenses?: () => Promise<void>;
   /** macOS keeps the native shuangpin keymap panel preference outside shared Engine preferences. */
@@ -3045,6 +3054,9 @@ export function SettingsPage(props: SettingsPageProps) {
               onOpenSettings={statusActions.onOpenSettings}
               onDismiss={statusActions.onDismiss}
             />
+            {client.notices && (
+              <NoticeBanner client={client.notices} openExternalUrl={openExternalUrl} />
+            )}
             {client.home && draft && page === "home" && (
               <HomePage
                 preferences={draft}
