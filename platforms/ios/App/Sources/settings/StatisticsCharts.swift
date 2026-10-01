@@ -183,17 +183,7 @@ struct StatisticsHeatmap: View {
     }.padding(.top, 15)
   }
 
-  private var legend: some View {
-    HStack(spacing: 5) {
-      Text("少").font(.caption2).foregroundStyle(.secondary)
-      ForEach([0.0, 0.25, 0.5, 0.75, 1.0], id: \.self) { level in
-        RoundedRectangle(cornerRadius: 2)
-          .fill(level == 0 ? Color.secondary.opacity(0.12) : accent.opacity(0.25 + 0.75 * level))
-          .frame(width: 12, height: 12)
-      }
-      Text("多").font(.caption2).foregroundStyle(.secondary)
-    }
-  }
+  private var legend: some View { StatisticsHeatLegend(accent: accent) }
 
   @ViewBuilder private func cellView(_ date: Date?, maximum: Int) -> some View {
     if let date {
@@ -201,7 +191,7 @@ struct StatisticsHeatmap: View {
       let level = Double(value) / Double(maximum)
       Button { onSelect(date) } label: {
         RoundedRectangle(cornerRadius: 3)
-          .fill(value == 0 ? Color.secondary.opacity(0.12) : accent.opacity(0.25 + 0.75 * level))
+          .fill(StatisticsHeatLegend.fill(value == 0 ? 0 : level, accent: accent))
           .frame(width: Self.cell, height: Self.cell)
           .overlay(RoundedRectangle(cornerRadius: 3)
             .strokeBorder(MetasequoiaTheme.cone, lineWidth: isSelected(date) ? 2 : 0))
@@ -219,6 +209,111 @@ struct StatisticsHeatmap: View {
   private func isSelected(_ date: Date) -> Bool {
     guard let selected else { return false }
     return calendar.isDate(date, inSameDayAs: selected)
+  }
+}
+
+/// 热力图的深浅和「少…多」图例。日历热力图和按键热力图共用一套,同一种深浅在两张图里是同一个意思。
+struct StatisticsHeatLegend: View {
+  let accent: Color
+
+  /// `level` 是这一格和最多那一格之比,0 到 1;0 是没有记录,画成最浅的一档。
+  static func fill(_ level: Double, accent: Color) -> Color {
+    level == 0 ? Color.secondary.opacity(0.12) : accent.opacity(0.25 + 0.75 * level)
+  }
+
+  var body: some View {
+    HStack(spacing: 5) {
+      Text("少").font(.caption2).foregroundStyle(.secondary)
+      ForEach([0.0, 0.25, 0.5, 0.75, 1.0], id: \.self) { level in
+        RoundedRectangle(cornerRadius: 2)
+          .fill(Self.fill(level, accent: accent))
+          .frame(width: 12, height: 12)
+      }
+      Text("多").font(.caption2).foregroundStyle(.secondary)
+    }.accessibilityHidden(true)
+  }
+}
+
+/// 按键热力图:照触屏键盘的样子画 26 键和底排,有九键记录时再画一个九宫格。一个键越常按颜色越深,深浅和日历热力图同一套。
+///
+/// 只画键盘上有位置的键;其余按过的键(数字、标点、符号键等)由页面另列成「其他键」。
+struct StatisticsKeyboardHeatmap: View {
+  let heatmap: TypingKeyHeatmap
+  let accent: Color
+
+  private static let keyHeight: CGFloat = 40
+  private static let spacing: CGFloat = 5
+  /// 一排按十个字母键的宽度排;Shift、删除、空格这些宽键占几个字母键。
+  private static let rowUnits: CGFloat = 10
+
+  private static func units(_ id: String) -> CGFloat {
+    switch id {
+    case TypingKeyID.space: return 5
+    case TypingKeyID.shift, TypingKeyID.backspace: return 1.5
+    case TypingKeyID.layer, TypingKeyID.globe, TypingKeyID.language, TypingKeyID.enter: return 1.25
+    default: return 1
+    }
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      GeometryReader { geometry in
+        let unit = (geometry.size.width - Self.spacing * (Self.rowUnits - 1)) / Self.rowUnits
+        VStack(spacing: Self.spacing) {
+          ForEach(TypingKeyHeatmap.keyboardRows, id: \.self) { row in
+            HStack(spacing: Self.spacing) {
+              ForEach(row, id: \.self) { id in
+                let units = Self.units(id)
+                keyCell(id, title: TypingKeyID.label(id), subtitle: nil)
+                  .frame(width: unit * units + Self.spacing * (units - 1))
+              }
+            }.frame(maxWidth: .infinity)
+          }
+        }
+      }
+      .frame(height: Self.keyHeight * CGFloat(TypingKeyHeatmap.keyboardRows.count)
+        + Self.spacing * CGFloat(TypingKeyHeatmap.keyboardRows.count - 1))
+      .accessibilityElement(children: .contain)
+      .accessibilityLabel("按键热力图")
+      .accessibilityIdentifier("statisticsKeyboard")
+      if heatmap.showsNineKey {
+        Text("九键").font(.caption).foregroundStyle(.secondary)
+        VStack(spacing: Self.spacing) {
+          ForEach(TypingKeyHeatmap.nineKeyRows, id: \.self) { row in
+            HStack(spacing: Self.spacing) {
+              ForEach(row, id: \.self) { id in
+                keyCell(id, title: String(id.dropFirst(4)), subtitle: TypingKeyHeatmap.nineKeySubtitle(id))
+                  .frame(width: 64)
+              }
+            }
+          }
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("九键热力图")
+        .accessibilityIdentifier("statisticsNineKey")
+      }
+      StatisticsHeatLegend(accent: accent)
+    }
+  }
+
+  private func keyCell(_ id: String, title: String, subtitle: String?) -> some View {
+    let level = heatmap.level(id)
+    return RoundedRectangle(cornerRadius: 6)
+      .fill(StatisticsHeatLegend.fill(level, accent: accent))
+      .overlay {
+        VStack(spacing: 0) {
+          Text(title).font(.system(size: title.count > 2 ? 11 : 15, weight: .medium))
+          if let subtitle, !subtitle.isEmpty { Text(subtitle).font(.system(size: 9)) }
+        }
+        .lineLimit(1).minimumScaleFactor(0.6)
+        // 深的几档上,黑字看不清。
+        .foregroundStyle(level > 0.55 ? Color.white : Color.primary)
+      }
+      .frame(height: Self.keyHeight)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(TypingKeyHeatmap.accessibilityLabel(id, count: heatmap.count(id)))
+      .accessibilityIdentifier("statisticsKey_\(id)")
   }
 }
 
