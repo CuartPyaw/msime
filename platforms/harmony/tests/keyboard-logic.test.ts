@@ -634,6 +634,14 @@ group("projects the same form factor into every settings capability", () => {
     !phone.panelShortcuts && !phone.candidateFollowCursor && !phone.inputModeHud,
     "phone settings hide the controls only a candidate window uses",
   );
+  check(
+    !phone.candidateWindowOpacity && !phone.candidateCornerRadius,
+    "phone settings hide the candidate card opacity and radius the strip ignores",
+  );
+  check(
+    desktop.candidateWindowOpacity && desktop.candidateCornerRadius,
+    "2-in-1 settings offer the candidate card opacity and radius",
+  );
   // An attached keyboard is routed on a phone too: the mode chords are bound on every device, and number-row selection and the voice hotkeys have no desktop check. Their switches have to be reachable wherever they act.
   check(
     phone.modeSwitchShortcuts && phone.numberRowSelection && phone.voiceHotkeys,
@@ -5830,6 +5838,21 @@ group("shared colours are reordered for ArkUI once, at parse time", () => {
     GlobalTheme.arkColor(null) === null && GlobalTheme.arkColor(undefined) === null,
     "absent is null",
   );
+});
+
+group("the candidate window opacity multiplies a colour's own alpha", () => {
+  check(
+    GlobalTheme.withOpacity("#FFFFFF", 1) === "#FFFFFF",
+    "an opaque window leaves the colour alone",
+  );
+  check(GlobalTheme.withOpacity("#262626", 0.5) === "#80262626", "six digits count as opaque");
+  check(
+    GlobalTheme.withOpacity("#14ffffff", 0.5) === "#0AFFFFFF",
+    "an existing alpha is scaled, alpha first",
+  );
+  check(GlobalTheme.withOpacity("#FFFFFF", 2) === "#FFFFFF", "the factor is clamped to 1");
+  check(GlobalTheme.withOpacity("#00000000", 0.5) === "#00000000", "transparent stays transparent");
+  check(GlobalTheme.withOpacity("red", 0.5) === "red", "a malformed colour is not guessed at");
 });
 
 group("a fixed appearance decides every surface's mode", () => {
