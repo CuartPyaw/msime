@@ -59,6 +59,10 @@ fn options(root: &Path) -> EngineOptions {
         },
         rescoring_context: String::new(),
         sentence_alternatives: true,
+        vietnamese_input_method: 0,
+        vietnamese_tone_style: 0,
+        cantonese_dictionary: String::new(),
+        zhuyin_dictionary: String::new(),
     }
 }
 
@@ -661,6 +665,13 @@ fn invalid_options_return_errors_instead_of_unwinding_into_rust() {
     value.frequency_mode = "sometimes".into();
     assert_eq!(message(&value), "Unsupported frequency mode");
     value.frequency_mode = "promote".into();
+    value.vietnamese_input_method = 2;
+    assert_eq!(message(&value), "Unsupported Vietnamese input method");
+    value.vietnamese_input_method = 1;
+    value.vietnamese_tone_style = 2;
+    assert_eq!(message(&value), "Unsupported Vietnamese tone style");
+    value.vietnamese_tone_style = 1;
+    assert!(Session::new(&value).is_ok());
     value.resources = "relative".into();
     assert_eq!(message(&value), "Runtime directories must be absolute");
 }
@@ -906,6 +917,130 @@ fn real_engine_composes_korean_with_the_hangul_as_its_reading() {
     session.character(b'k', false).unwrap();
     let result = session.punctuation(b',').unwrap();
     assert_eq!((result.handled, result.commit.as_str()), (true, "가,"));
+}
+
+#[test]
+fn the_korean_hanja_list_reports_itself_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 4;
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"gks");
+    let snapshot = session.snapshot().unwrap();
+    assert!(!snapshot.candidate_list_open);
+    assert!(snapshot.candidates.is_empty());
+
+    assert!(session.command(Command::ConvertHanja).unwrap().handled);
+    let snapshot = session.snapshot().unwrap();
+    assert!(snapshot.candidate_list_open);
+    assert!(snapshot
+        .candidates
+        .iter()
+        .any(|candidate| candidate == "韓"));
+
+    // The same command closes it again.
+    assert!(session.command(Command::ConvertHanja).unwrap().handled);
+    let snapshot = session.snapshot().unwrap();
+    assert!(!snapshot.candidate_list_open);
+    assert!(snapshot.candidates.is_empty());
+}
+
+#[test]
+fn schemes_without_an_openable_list_never_report_one_open() {
+    let dir = tempfile::tempdir().unwrap();
+    for scheme in 0..4 {
+        let mut value = options(dir.path());
+        value.scheme = scheme;
+        let mut session = Session::new(&value).unwrap();
+        type_text(&mut session, b"ka");
+        assert!(!session.command(Command::ConvertHanja).unwrap().handled);
+        assert!(!session.snapshot().unwrap().candidate_list_open);
+    }
+}
+
+#[test]
+fn cantonese_is_unavailable_without_its_dictionary() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 5;
+    let error = Session::new(&value).err().expect("no cantonese.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    value.cantonese_dictionary = dir.path().join("missing.db").to_str().unwrap().to_owned();
+    let error = Session::new(&value).err().expect("missing cantonese.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    assert!(!dir.path().join("missing.db").exists());
+}
+
+#[test]
+fn zhuyin_is_unavailable_without_its_dictionary() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 6;
+    let error = Session::new(&value).err().expect("no zhuyin.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    value.zhuyin_dictionary = dir.path().join("missing.db").to_str().unwrap().to_owned();
+    let error = Session::new(&value).err().expect("missing zhuyin.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    assert!(!dir.path().join("missing.db").exists());
+}
+
+#[test]
+fn zhuyin_command_sixteen_opens_a_list_whose_selection_commits_nothing() {
+    use crate::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("zhuyin.db");
+    let connection = Connection::open(&path).unwrap();
+    connection.execute_batch(SCHEMA).unwrap();
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('ㄋㄧˇ');\
+             INSERT INTO entries VALUES ('ㄋㄧˇ','你',1000),('ㄋㄧˇ','妳',300);",
+        )
+        .unwrap();
+    drop(connection);
+    let mut value = options(dir.path());
+    value.scheme = 6;
+    value.zhuyin_dictionary = path.to_str().unwrap().to_owned();
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"su3");
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.preedit, "你");
+    assert_eq!(snapshot.reading, "你");
+    assert_eq!(snapshot.editing_text, "su3");
+    assert!(!snapshot.candidate_list_open);
+
+    assert!(session.command(Command::ConvertHanja).unwrap().handled);
+    let snapshot = session.snapshot().unwrap();
+    assert!(snapshot.candidate_list_open);
+    assert_eq!(snapshot.candidates, ["你", "妳"]);
+
+    let result = session.select(1).unwrap();
+    assert!(result.handled);
+    assert!(!result.has_commit);
+    let snapshot = session.snapshot().unwrap();
+    assert!(!snapshot.candidate_list_open);
+    assert_eq!(snapshot.preedit, "妳");
+
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert_eq!((result.handled, result.commit.as_str()), (true, "妳"));
 }
 
 #[test]
@@ -1199,8 +1334,18 @@ fn session_options_map_every_host_field() {
     value.sentence_association.neural_keyboard = true;
     value.rescoring_context = "上文".into();
     value.sentence_alternatives = false;
+    value.vietnamese_input_method = 1;
+    value.vietnamese_tone_style = 1;
     let mapped = super::options::session_options(&value).unwrap();
     assert_eq!(mapped.paths.dictionaries, Path::new(&value.dictionaries));
+    assert_eq!(
+        mapped.vietnamese_input_method,
+        crate::vietnamese::InputMethod::Vni
+    );
+    assert_eq!(
+        mapped.vietnamese_tone_style,
+        crate::vietnamese::ToneStyle::Classic
+    );
     assert_eq!(mapped.scheme, crate::SchemeType::Shuangpin);
     assert_eq!(
         mapped.shuangpin_profile,

@@ -27,6 +27,12 @@ pub enum InputScheme {
     Japanese,
     /// Korean Hangul on the Dubeolsik layout. The Engine ordinal is 4.
     Korean,
+    /// Cantonese in toneless Jyutping, read from `cantonese.db`. A Chinese scheme. The Engine ordinal is 5.
+    Cantonese,
+    /// Bopomofo on the Dachen layout, read from `zhuyin.db`. A Chinese scheme. The Engine ordinal is 6.
+    Zhuyin,
+    /// Vietnamese through Telex or VNI, set in `vietnamese`. The Engine ordinal is 7.
+    Vietnamese,
 }
 
 /// Presentation layout for touch keyboard hosts. Desktop hosts preserve but ignore it.
@@ -426,6 +432,51 @@ pub enum ChineseScheme {
     Quanpin,
     Shuangpin,
     Wubi,
+    Cantonese,
+    Zhuyin,
+}
+
+impl From<ChineseScheme> for InputScheme {
+    fn from(scheme: ChineseScheme) -> Self {
+        match scheme {
+            ChineseScheme::Quanpin => Self::Quanpin,
+            ChineseScheme::Shuangpin => Self::Shuangpin,
+            ChineseScheme::Wubi => Self::Wubi,
+            ChineseScheme::Cantonese => Self::Cantonese,
+            ChineseScheme::Zhuyin => Self::Zhuyin,
+        }
+    }
+}
+
+/// How Vietnamese letters and tones are typed. The Engine code is the declaration order (`vietnamese_input_method`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VietnameseInputMethod {
+    #[default]
+    Telex,
+    Vni,
+}
+
+/// Where the tone mark goes in an `oa`, `oe` or `uy` syllable: modern places it on the second vowel (hoà), classic on the first (hòa). The Engine code is the declaration order (`vietnamese_tone_style`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VietnameseToneStyle {
+    #[default]
+    Modern,
+    Classic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct VietnamesePreferences {
+    pub input_method: VietnameseInputMethod,
+    pub tone_style: VietnameseToneStyle,
+}
+
+impl VietnamesePreferences {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -616,13 +667,16 @@ pub struct Preferences {
     /// The optional buttons on the touch keyboard's toolbar, the counterpart of the floating toolbar's component switches. The voice entry stays under `touch_voice_shortcut`.
     #[serde(default)]
     pub touch_toolbar: TouchToolbarPreferences,
-    /// Retained when the active scheme is Japanese or Korean. Absent in legacy documents.
+    /// Retained when the active scheme is Japanese, Korean or Vietnamese. Absent in legacy documents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_chinese_scheme: Option<ChineseScheme>,
     #[serde(default)]
     pub shuangpin_profile: ShuangpinProfile,
     #[serde(default = "enabled_by_default")]
     pub shuangpin_preedit_uses_raw: bool,
+    /// The Vietnamese input method and tone placement. Left out of the document at its default, so an untouched document still loads in a build that predates the key.
+    #[serde(default, skip_serializing_if = "VietnamesePreferences::is_default")]
+    pub vietnamese: VietnamesePreferences,
     pub candidate_page_size: u8,
     /// Linux IBus can release the number row to the application while a
     /// candidate list is visible. Other hosts preserve this preference even
@@ -1664,6 +1718,7 @@ impl Default for Preferences {
             last_chinese_scheme: None,
             shuangpin_profile: ShuangpinProfile::default(),
             shuangpin_preedit_uses_raw: true,
+            vietnamese: VietnamesePreferences::default(),
             candidate_page_size: 6,
             number_row_selection: true,
             candidate_font_size: default_candidate_font_size(),

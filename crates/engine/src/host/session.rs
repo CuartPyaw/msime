@@ -46,7 +46,7 @@ pub enum Command {
     CommitReading = 10,
     /// Commit the letters as typed without learning them as an English word.
     CommitRawWithoutLearning = 11,
-    /// Korean only: open or close the composing syllable's Hanja list.
+    /// Open or close the active scheme's candidate list (the Korean Hanja list, the Zhuyin conversion list); unhandled in a scheme without one. Hosts may call it `MSIME_OPEN_CANDIDATE_LIST`.
     ConvertHanja = 12,
 }
 
@@ -63,7 +63,7 @@ pub struct EngineSnapshot {
     pub microsoft_shuangpin: bool,
     pub shuangpin_profile: String,
     pub preedit: String,
-    /// The kana reading in Japanese, the composed Hangul in Korean, else empty.
+    /// The kana reading in Japanese, the composed Hangul in Korean, the converted text plus the pending bopomofo in Zhuyin, else empty.
     pub reading: String,
     pub editing_text: String,
     pub caret_position: usize,
@@ -78,6 +78,8 @@ pub struct EngineSnapshot {
     pub candidate_positions: Vec<u8>,
     pub candidate_corrected: Vec<bool>,
     pub candidate_answers_key: Vec<bool>,
+    /// The scheme's openable candidate list is showing (the Korean Hanja list, the Zhuyin conversion list); candidates are its rows while it is.
+    pub candidate_list_open: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -152,11 +154,11 @@ impl Session {
     /// With the annotation rule of bridge.cpp:914-929.
     pub fn snapshot(&self) -> Result<EngineSnapshot> {
         let value = self.inner.snapshot();
-        let pinyin_scheme = value.scheme.is_pinyin();
+        let helpcode_scheme = value.scheme.helpcode();
         let uppercase_all = value.scheme == SchemeType::Quanpin;
         // Rows the engine generated in the expression, command and mention modes are not spelled by pinyin; their annotations are the engine's own.
         let keymap = self.helpcode_keymap.as_deref().filter(|_| {
-            self.helpcode_enabled && pinyin_scheme && !value.local_mode.generates_text()
+            self.helpcode_enabled && helpcode_scheme && !value.local_mode.generates_text()
         });
         let count = value.candidates.len();
         let mut output = EngineSnapshot {
@@ -168,10 +170,7 @@ impl Session {
             microsoft_shuangpin: self.microsoft_shuangpin,
             shuangpin_profile: self.shuangpin_profile.clone(),
             preedit: value.preedit,
-            reading: if matches!(
-                value.scheme,
-                SchemeType::JapaneseRomaji | SchemeType::Korean
-            ) {
+            reading: if value.scheme.draws_reading() {
                 value.normalized_segmentation
             } else {
                 String::new()
@@ -194,6 +193,7 @@ impl Session {
             candidate_positions: Vec::with_capacity(count),
             candidate_corrected: Vec::with_capacity(count),
             candidate_answers_key: Vec::with_capacity(count),
+            candidate_list_open: value.candidate_list_open,
         };
         for (index, candidate) in value.candidates.into_iter().enumerate() {
             let mut annotation = value
@@ -478,7 +478,7 @@ impl Session {
     /// Windows learns an entered word only on Enter: letters committed raw in dedicated English, a local mode, or pinyin that is not a complete syllable sequence are learned as an English word (bridge.cpp:1332-1359).
     fn commit_raw_with_policy(&mut self) -> EngineResult {
         let before = self.inner.snapshot();
-        let chinese_scheme = before.scheme.is_pinyin();
+        let chinese_scheme = before.scheme.learns_english_words();
         let complete_pure_pinyin = chinese_scheme && {
             let segmentation = if before.normalized_segmentation.is_empty() {
                 &before.raw_segmentation

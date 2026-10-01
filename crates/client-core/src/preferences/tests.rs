@@ -1755,6 +1755,124 @@ fn remembered_chinese_scheme_roundtrips_without_changing_legacy_files() {
 }
 
 #[test]
+fn cantonese_zhuyin_and_vietnamese_schemes_round_trip_under_their_wire_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    for (revision, (scheme, name)) in [
+        (InputScheme::Cantonese, "cantonese"),
+        (InputScheme::Zhuyin, "zhuyin"),
+        (InputScheme::Vietnamese, "vietnamese"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let saved = store
+            .save(
+                revision as u64,
+                Preferences {
+                    scheme,
+                    ..Preferences::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(store.load().unwrap(), saved);
+        assert_eq!(
+            serde_json::to_value(&saved.preferences).unwrap()["scheme"],
+            name
+        );
+    }
+    // Cantonese and Zhuyin are Chinese schemes to return to; Vietnamese is not.
+    for (revision, (scheme, name)) in [
+        (ChineseScheme::Cantonese, "cantonese"),
+        (ChineseScheme::Zhuyin, "zhuyin"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let saved = store
+            .save(
+                revision as u64 + 3,
+                Preferences {
+                    scheme: InputScheme::Vietnamese,
+                    last_chinese_scheme: Some(scheme),
+                    ..Preferences::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(store.load().unwrap(), saved);
+        assert_eq!(
+            serde_json::to_value(&saved.preferences).unwrap()["last_chinese_scheme"],
+            name
+        );
+    }
+    assert!(serde_json::from_value::<ChineseScheme>("vietnamese".into()).is_err());
+    assert_eq!(
+        InputScheme::from(ChineseScheme::Cantonese),
+        InputScheme::Cantonese
+    );
+    assert_eq!(
+        InputScheme::from(ChineseScheme::Zhuyin),
+        InputScheme::Zhuyin
+    );
+}
+
+#[test]
+fn vietnamese_preferences_default_and_stay_out_of_an_untouched_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let defaults = serde_json::to_value(PreferencesSnapshot::default()).unwrap();
+    assert!(defaults["preferences"].get("vietnamese").is_none());
+    let bytes = serde_json::to_vec(&defaults).unwrap();
+    fs::write(store.path(), &bytes).unwrap();
+    let loaded = store.load().unwrap();
+    assert_eq!(
+        loaded.preferences.vietnamese,
+        VietnamesePreferences {
+            input_method: VietnameseInputMethod::Telex,
+            tone_style: VietnameseToneStyle::Modern,
+        }
+    );
+    assert_eq!(fs::read(store.path()).unwrap(), bytes);
+    // A saved document that leaves Vietnamese alone is written without the key.
+    let saved = store.save(0, loaded.preferences).unwrap();
+    assert!(serde_json::to_value(&saved).unwrap()["preferences"]
+        .get("vietnamese")
+        .is_none());
+    let preferences = Preferences {
+        vietnamese: VietnamesePreferences {
+            input_method: VietnameseInputMethod::Vni,
+            tone_style: VietnameseToneStyle::Classic,
+        },
+        ..Preferences::default()
+    };
+    let saved = store.save(saved.revision, preferences).unwrap();
+    assert_eq!(store.load().unwrap(), saved);
+    assert_eq!(
+        serde_json::to_value(&saved.preferences).unwrap()["vietnamese"],
+        serde_json::json!({ "input_method": "vni", "tone_style": "classic" })
+    );
+    // One member set leaves the other at its default.
+    let partial: VietnamesePreferences =
+        serde_json::from_value(serde_json::json!({ "tone_style": "classic" })).unwrap();
+    assert_eq!(partial.input_method, VietnameseInputMethod::Telex);
+    assert_eq!(partial.tone_style, VietnameseToneStyle::Classic);
+}
+
+#[test]
+fn vietnamese_preferences_reject_unknown_members_and_values() {
+    for invalid in [
+        serde_json::json!({ "input_method": "telex", "layout": "us" }),
+        serde_json::json!({ "input_method": "viqr" }),
+        serde_json::json!({ "tone_style": "old" }),
+    ] {
+        assert!(serde_json::from_value::<VietnamesePreferences>(invalid.clone()).is_err());
+        let mut document = serde_json::to_value(Preferences::default()).unwrap();
+        document["vietnamese"] = invalid;
+        assert!(serde_json::from_value::<Preferences>(document).is_err());
+    }
+}
+
+#[test]
 fn touch_keyboard_layout_defaults_and_roundtrips_without_rewriting_legacy_files() {
     let dir = tempfile::tempdir().unwrap();
     let store = PreferencesStore::new(dir.path());

@@ -118,3 +118,79 @@ test("grouped mode renders the same scheme details with platform rows", () => {
   expect(screen.getByRole("radiogroup")).toBeTruthy();
   expect(screen.queryByRole("combobox", { name: "双拼方案" })).toBeNull();
 });
+
+test.each([
+  ["cantonese", "粤拼方案", "粤拼"],
+  ["zhuyin", "注音键盘", "大千"],
+] as const)(
+  "%s shows its read-only scheme row and no pinyin or Wubi rows",
+  (scheme, title, label) => {
+    for (const grouped of [true, false]) {
+      render(
+        <InputSchemeDetailsSection
+          grouped={grouped}
+          scheme={scheme}
+          shuangpinProfile="xiaohe"
+          macos
+          hasTouchKeyboardSchemes={false}
+          onShuangpinProfileChange={vi.fn()}
+        />,
+      );
+      expect(screen.getAllByText(title).length).toBeGreaterThanOrEqual(1);
+      expect((screen.getByRole("radio", { name: label }) as HTMLInputElement).checked).toBe(true);
+      expect(screen.queryByRole("combobox", { name: "双拼方案" })).toBeNull();
+      expect(screen.queryByRole("combobox", { name: "五笔方案" })).toBeNull();
+      expect(screen.queryByRole("radio", { name: "Telex" })).toBeNull();
+      cleanup();
+    }
+  },
+);
+
+test("Vietnamese input method and tone placement are live controls", () => {
+  for (const grouped of [true, false]) {
+    const onVietnameseChange = vi.fn();
+    render(
+      <InputSchemeDetailsSection
+        grouped={grouped}
+        scheme="vietnamese"
+        shuangpinProfile="xiaohe"
+        macos
+        hasTouchKeyboardSchemes={false}
+        onShuangpinProfileChange={vi.fn()}
+        onVietnameseChange={onVietnameseChange}
+      />,
+    );
+    expect((screen.getByRole("radio", { name: "Telex" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("radio", { name: "新式 hoà" }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect(screen.queryByRole("combobox", { name: "双拼方案" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "VNI" }));
+    expect(onVietnameseChange).toHaveBeenLastCalledWith({
+      input_method: "vni",
+      tone_style: "modern",
+    });
+    fireEvent.click(screen.getByRole("radio", { name: "旧式 hòa" }));
+    expect(onVietnameseChange).toHaveBeenLastCalledWith({
+      input_method: "telex",
+      tone_style: "classic",
+    });
+    cleanup();
+  }
+});
+
+test("Vietnamese controls show the document's options", () => {
+  render(
+    <InputSchemeDetailsSection
+      grouped
+      scheme="vietnamese"
+      shuangpinProfile="xiaohe"
+      macos={false}
+      hasTouchKeyboardSchemes={false}
+      vietnamese={{ input_method: "vni", tone_style: "classic" }}
+      onShuangpinProfileChange={vi.fn()}
+    />,
+  );
+  expect((screen.getByRole("radio", { name: "VNI" }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole("radio", { name: "旧式 hòa" }) as HTMLInputElement).checked).toBe(true);
+});

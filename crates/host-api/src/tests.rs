@@ -219,6 +219,10 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         },
         rescoring_context: String::new(),
         sentence_alternatives: true,
+        vietnamese_input_method: 0,
+        vietnamese_tone_style: 0,
+        cantonese_dictionary: String::new(),
+        zhuyin_dictionary: String::new(),
     };
     apply_local_mode_resource_gates(&mut options);
     assert!(options.local_unicode);
@@ -1290,6 +1294,149 @@ fn nine_key_mode_and_spelling_identity_cross_the_host_boundary() {
         true
     );
     read(msime_client_destroy(persisted));
+}
+
+#[test]
+fn a_fallen_back_scheme_starts_in_the_nine_key_mode_a_rebuild_gives_it() {
+    // Cantonese without its dictionary runs as Quanpin, so a nine-key layout starts nine-key at creation exactly as the next preferences rebuild would leave it.
+    let dir = tempfile::tempdir().unwrap();
+    let preferences = Preferences {
+        scheme: InputScheme::Cantonese,
+        last_chinese_scheme: None,
+        touch_keyboard_layout: TouchKeyboardLayout::NineKey,
+        ..chinese_preferences()
+    };
+    let handle = test_host_preferences(dir.path(), preferences.clone());
+    let view = read(msime_client_view(handle));
+    assert_eq!(view["value"]["scheme"], 0);
+    assert_eq!(view["value"]["nine_key"], true);
+    let rebuilt = update(handle, 1, &preferences);
+    assert_eq!(rebuilt["value"]["view"]["scheme"], 0);
+    assert_eq!(rebuilt["value"]["view"]["nine_key"], true);
+    read(msime_client_destroy(handle));
+}
+
+#[test]
+fn nine_key_mode_follows_only_the_scheme_the_grid_spells() {
+    // The nine-key grid spells quanpin syllables only (`SchemeType::nine_key`): a nine-key layout starts nine-key in quanpin and stays off in every other scheme, at creation and on a rebuild alike.
+    for scheme in [
+        InputScheme::Quanpin,
+        InputScheme::Shuangpin,
+        InputScheme::Wubi,
+        InputScheme::Japanese,
+        InputScheme::Korean,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let preferences = Preferences {
+            scheme,
+            touch_keyboard_layout: TouchKeyboardLayout::NineKey,
+            ..chinese_preferences()
+        };
+        let handle = test_host_preferences(dir.path(), preferences.clone());
+        let expected = scheme == InputScheme::Quanpin;
+        assert_eq!(
+            read(msime_client_view(handle))["value"]["nine_key"],
+            expected,
+            "{scheme:?} at creation"
+        );
+        let rebuilt = update(
+            handle,
+            1,
+            &Preferences {
+                candidate_page_size: 4,
+                ..preferences
+            },
+        );
+        assert_eq!(
+            rebuilt["value"]["view"]["nine_key"], expected,
+            "{scheme:?} after a rebuild"
+        );
+        read(msime_client_destroy(handle));
+    }
+}
+
+#[test]
+fn the_repeat_gesture_arms_except_in_schemes_that_write_no_chinese_marks() {
+    // The repeat gesture turns an ASCII mark into a Chinese one. It never arms in Korean or Vietnamese, which write only ASCII marks, or in Zhuyin, whose punctuation keys spell bopomofo; Japanese arms as it did before the new schemes. Cantonese and Zhuyin are left out because this host installs no language dictionaries, so the runtime would not run them.
+    for (scheme, arms) in [
+        (InputScheme::Quanpin, true),
+        (InputScheme::Shuangpin, true),
+        (InputScheme::Wubi, true),
+        (InputScheme::Japanese, true),
+        (InputScheme::Korean, false),
+        (InputScheme::Vietnamese, false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let handle = test_host_preferences(
+            dir.path(),
+            Preferences {
+                scheme,
+                smart_punctuation: true,
+                smart_punctuation_repeat: true,
+                ..chinese_preferences()
+            },
+        );
+        let arm = json!({"ascii": b'.', "commit": ".", "timestamp_ms": 1, "editor_generation": 1, "auto_closed_pair": false}).to_string();
+        // SAFETY: the buffer outlives the call.
+        let armed =
+            read(unsafe { msime_client_smart_punctuation_arm(handle, arm.as_ptr(), arm.len()) });
+        assert_eq!(armed["ok"], true);
+        assert_eq!(!armed["value"]["repeat"].is_null(), arms, "{scheme:?}");
+        read(msime_client_destroy(handle));
+    }
+}
+
+#[test]
+fn japanese_candidates_ask_for_no_translation() {
+    // Only the schemes that show glosses (`SchemeType::shows_glosses`) plan a translation query; Japanese candidates never carry one. Quanpin under the same preferences is the positive control, so the gate tested here is the scheme predicate and nothing earlier. Quanpin types a Unicode code point because the test host installs no dictionary.
+    let cases: [(InputScheme, &[u8], bool); 2] = [
+        (InputScheme::Quanpin, b"U4e2d", true),
+        (InputScheme::Japanese, b"a", false),
+    ];
+    for (scheme, keys, expected) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let handle = test_host_preferences(
+            dir.path(),
+            Preferences {
+                scheme,
+                candidate_translations: true,
+                ..chinese_preferences()
+            },
+        );
+        read(msime_client_focus(handle, true));
+        let mut view = Value::Null;
+        for byte in keys {
+            view = read(msime_client_character(
+                handle,
+                *byte,
+                byte.is_ascii_uppercase(),
+            ))["value"]["view"]
+                .clone();
+        }
+        assert!(
+            !view["candidates"].as_array().unwrap().is_empty(),
+            "{scheme:?} offered no candidates"
+        );
+        assert_eq!(
+            !read(msime_client_translation_query(handle))["value"].is_null(),
+            expected,
+            "{scheme:?}"
+        );
+        read(msime_client_destroy(handle));
+    }
+}
+
+#[test]
+fn the_c_header_aliases_the_candidate_list_command_and_extends_the_scheme_legend() {
+    const HEADER: &str = include_str!("../include/msime_client.h");
+    // One command number under two names: hosts written for Korean keep MSIME_CONVERT_HANJA, and the dispatch reads 16 either way.
+    assert!(HEADER.contains("MSIME_CONVERT_HANJA = 16,"));
+    assert!(HEADER.contains("MSIME_OPEN_CANDIDATE_LIST = 16,"));
+    // platforms/android/check-host.sh greps the Korean legend line, so it stays as it was.
+    assert!(HEADER.contains("4 korean (preferences scheme \"korean\")"));
+    for legend in ["5 cantonese", "6 zhuyin", "7 vietnamese"] {
+        assert!(HEADER.contains(legend), "{legend} missing from the legend");
+    }
 }
 
 #[test]
@@ -6015,6 +6162,306 @@ fn a_settled_model_beside_the_resources_is_discovered() {
 }
 
 #[test]
+fn language_dictionaries_beside_the_resources_are_discovered() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).expect("resources");
+    assert_eq!(
+        super::language_dictionaries_beside(&resources),
+        LanguageDictionaries::default()
+    );
+
+    let beside = root.path().join("language-dictionaries");
+    // A directory of the right name is not a dictionary.
+    std::fs::create_dir_all(beside.join("zhuyin.db")).expect("decoy");
+    std::fs::write(beside.join("cantonese.db"), b"sqlite").expect("cantonese");
+    assert_eq!(
+        super::language_dictionaries_beside(&resources),
+        LanguageDictionaries {
+            cantonese: Some(beside.join("cantonese.db")),
+            zhuyin: None,
+        }
+    );
+
+    std::fs::remove_dir(beside.join("zhuyin.db")).expect("decoy");
+    std::fs::write(beside.join("zhuyin.db"), b"sqlite").expect("zhuyin");
+    assert_eq!(
+        super::language_dictionaries_beside(&resources),
+        LanguageDictionaries {
+            cantonese: Some(beside.join("cantonese.db")),
+            zhuyin: Some(beside.join("zhuyin.db")),
+        }
+    );
+}
+
+#[test]
+fn effective_scheme_falls_back_to_the_last_chinese_scheme_then_quanpin() {
+    use msime_client_core::preferences::ChineseScheme;
+    use InputScheme::*;
+    let all = [
+        Quanpin, Shuangpin, Wubi, Japanese, Korean, Cantonese, Zhuyin, Vietnamese,
+    ];
+    let base = &all[..5];
+    let none = LanguageDictionaries::default();
+    let cantonese_only = LanguageDictionaries {
+        cantonese: Some("/dictionaries/cantonese.db".into()),
+        zhuyin: None,
+    };
+    let both = LanguageDictionaries {
+        cantonese: Some("/dictionaries/cantonese.db".into()),
+        zhuyin: Some("/dictionaries/zhuyin.db".into()),
+    };
+    const OFFERED: Option<&str> = None;
+    const NOT_OFFERED: Option<&str> = Some("this host does not offer it");
+    const NO_DICTIONARY: Option<&str> = Some("its dictionary is not installed");
+    for (scheme, last, supported, dictionaries, expected, reason) in [
+        // A scheme that can run is kept.
+        (Wubi, None, base, &none, Wubi, OFFERED),
+        (Vietnamese, None, &all[..], &none, Vietnamese, OFFERED),
+        (Cantonese, None, &all[..], &both, Cantonese, OFFERED),
+        (
+            Zhuyin,
+            Some(ChineseScheme::Wubi),
+            &all[..],
+            &both,
+            Zhuyin,
+            OFFERED,
+        ),
+        // An unsupported scheme returns to the last Chinese scheme, else 全拼.
+        (
+            Vietnamese,
+            Some(ChineseScheme::Wubi),
+            base,
+            &both,
+            Wubi,
+            NOT_OFFERED,
+        ),
+        (Vietnamese, None, base, &both, Quanpin, NOT_OFFERED),
+        (
+            Wubi,
+            Some(ChineseScheme::Wubi),
+            &[Quanpin][..],
+            &none,
+            Quanpin,
+            NOT_OFFERED,
+        ),
+        // The last Chinese scheme is itself checked: unsupported or without its dictionary, 全拼.
+        (
+            Vietnamese,
+            Some(ChineseScheme::Cantonese),
+            base,
+            &both,
+            Quanpin,
+            NOT_OFFERED,
+        ),
+        (
+            Japanese,
+            Some(ChineseScheme::Zhuyin),
+            &[Quanpin, Zhuyin][..],
+            &cantonese_only,
+            Quanpin,
+            NOT_OFFERED,
+        ),
+        // Cantonese and Zhuyin without their dictionary fall back even where they are supported.
+        (
+            Cantonese,
+            Some(ChineseScheme::Shuangpin),
+            &all[..],
+            &none,
+            Shuangpin,
+            NO_DICTIONARY,
+        ),
+        (Cantonese, None, &all[..], &none, Quanpin, NO_DICTIONARY),
+        (
+            Zhuyin,
+            Some(ChineseScheme::Cantonese),
+            &all[..],
+            &cantonese_only,
+            Cantonese,
+            NO_DICTIONARY,
+        ),
+        (
+            Cantonese,
+            Some(ChineseScheme::Zhuyin),
+            &all[..],
+            &cantonese_only,
+            Cantonese,
+            OFFERED,
+        ),
+        (
+            Zhuyin,
+            Some(ChineseScheme::Zhuyin),
+            &all[..],
+            &cantonese_only,
+            Quanpin,
+            NO_DICTIONARY,
+        ),
+    ] {
+        let preferences = Preferences {
+            scheme,
+            last_chinese_scheme: last,
+            ..Preferences::default()
+        };
+        let (effective, diagnostic) = effective_scheme(&preferences, supported, dictionaries);
+        assert_eq!(effective, expected, "{scheme:?} after {last:?}");
+        match (diagnostic, reason, effective == scheme) {
+            (None, _, true) => {}
+            (Some(diagnostic), Some(reason), false) => {
+                assert!(diagnostic.contains(reason), "{diagnostic}");
+                assert!(
+                    diagnostic.contains(&format!("{expected:?}")),
+                    "{diagnostic}"
+                );
+            }
+            (diagnostic, _, _) => panic!("{scheme:?} after {last:?}: {diagnostic:?}"),
+        }
+    }
+}
+
+#[test]
+fn host_options_carry_vietnamese_settings_and_language_dictionaries_to_the_engine() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let directory = root.path().join("language-dictionaries");
+    std::fs::create_dir_all(&directory).expect("directory");
+    std::fs::write(directory.join("cantonese.db"), b"sqlite").expect("cantonese");
+    let preferences = Preferences {
+        scheme: InputScheme::Vietnamese,
+        last_chinese_scheme: Some(msime_client_core::preferences::ChineseScheme::Wubi),
+        vietnamese: VietnamesePreferences {
+            input_method: VietnameseInputMethod::Vni,
+            tone_style: VietnameseToneStyle::Classic,
+        },
+        ..Preferences::default()
+    };
+    let document = json!({ "api_version": 1, "resources": "/r", "user_data": "/u", "cache": "/c", "dictionaries": "/d", "preferences": preferences, "language_dictionaries": directory });
+    let options = serde_json::from_value::<HostOptions>(document.clone())
+        .expect("host options")
+        .into_engine_options();
+    assert_eq!(options.vietnamese_input_method, 1);
+    assert_eq!(options.vietnamese_tone_style, 1);
+    assert_eq!(
+        options.cantonese_dictionary,
+        directory.join("cantonese.db").to_str().unwrap()
+    );
+    assert_eq!(options.zhuyin_dictionary, "");
+    // Production passes `compiled_input_schemes()`, which offers the scheme or returns to the last Chinese one.
+    let expected = if compiled_input_schemes().contains(&InputScheme::Vietnamese) {
+        7
+    } else {
+        2
+    };
+    assert_eq!(options.scheme, expected);
+
+    // A document from before the field still loads, with no dictionaries and default Vietnamese settings.
+    let mut legacy = document;
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("language_dictionaries");
+    legacy["preferences"] = serde_json::to_value(Preferences {
+        scheme: InputScheme::Cantonese,
+        ..Preferences::default()
+    })
+    .unwrap();
+    let options = serde_json::from_value::<HostOptions>(legacy)
+        .expect("legacy host options")
+        .into_engine_options();
+    assert_eq!(options.cantonese_dictionary, "");
+    assert_eq!(options.zhuyin_dictionary, "");
+    assert_eq!(options.vietnamese_input_method, 0);
+    assert_eq!(options.vietnamese_tone_style, 0);
+    // Cantonese with no dictionary never reaches the Engine; the 全拼 helpcode comes with the fallback.
+    assert_eq!(options.scheme, 0);
+    assert_eq!(
+        options.helpcode,
+        Preferences::default().quanpin_helpcode.enabled
+    );
+}
+
+/// Cantonese and Zhuyin run on macOS once their dictionary is installed beside the resources, and fall back without it; Vietnamese needs no data and runs on macOS regardless. Every other build falls back from all three.
+#[test]
+fn installed_language_dictionaries_enable_their_schemes_on_macos() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).expect("resources");
+    let engine_scheme = |scheme: InputScheme| {
+        let preferences = Preferences {
+            scheme,
+            last_chinese_scheme: Some(msime_client_core::preferences::ChineseScheme::Wubi),
+            ..Preferences::default()
+        };
+        let document = json!({ "api_version": 1, "resources": resources, "user_data": "/u", "cache": "/c", "dictionaries": "/d", "preferences": preferences, "language_dictionaries": super::installed_language_dictionaries(&resources) });
+        serde_json::from_value::<HostOptions>(document)
+            .expect("host options")
+            .into_engine_options()
+            .scheme
+    };
+    let macos = cfg!(target_os = "macos");
+    // Without the directory both fall back to the last Chinese scheme, 五笔.
+    assert_eq!(super::installed_language_dictionaries(&resources), None);
+    assert_eq!(engine_scheme(InputScheme::Cantonese), 2);
+    assert_eq!(engine_scheme(InputScheme::Zhuyin), 2);
+    assert_eq!(
+        engine_scheme(InputScheme::Vietnamese),
+        if macos { 7 } else { 2 }
+    );
+
+    let beside = root.path().join("language-dictionaries");
+    std::fs::create_dir_all(&beside).expect("beside");
+    std::fs::write(beside.join("cantonese.db"), b"sqlite").expect("cantonese");
+    std::fs::write(beside.join("zhuyin.db"), b"sqlite").expect("zhuyin");
+    assert_eq!(
+        super::installed_language_dictionaries(&resources).as_deref(),
+        beside.to_str()
+    );
+    assert_eq!(
+        engine_scheme(InputScheme::Cantonese),
+        if macos { 5 } else { 2 }
+    );
+    assert_eq!(
+        engine_scheme(InputScheme::Zhuyin),
+        if macos { 6 } else { 2 }
+    );
+    assert_eq!(
+        engine_scheme(InputScheme::Vietnamese),
+        if macos { 7 } else { 2 }
+    );
+}
+
+#[test]
+fn a_scheme_this_build_does_not_run_falls_back_and_says_why() {
+    let dir = tempfile::tempdir().unwrap();
+    let handle = test_host_preferences(
+        dir.path(),
+        Preferences {
+            scheme: InputScheme::Cantonese,
+            ..chinese_preferences()
+        },
+    );
+    // No dictionary is installed beside these resources, so the session runs 全拼.
+    SESSIONS.with(|sessions| assert_eq!(sessions.borrow()[&handle].options.scheme, 0));
+
+    let zhuyin = Preferences {
+        scheme: InputScheme::Zhuyin,
+        last_chinese_scheme: Some(msime_client_core::preferences::ChineseScheme::Wubi),
+        ..chinese_preferences()
+    };
+    let updated = update(handle, 1, &zhuyin);
+    assert_eq!(updated["ok"], true);
+    assert_eq!(updated["value"]["deferred"], false);
+    let diagnostic = updated["value"]["diagnostic"].as_str().unwrap();
+    assert!(diagnostic.contains("Zhuyin"), "{diagnostic}");
+    assert!(diagnostic.contains("Wubi"), "{diagnostic}");
+    SESSIONS.with(|sessions| assert_eq!(sessions.borrow()[&handle].options.scheme, 2));
+
+    // A scheme that runs reports nothing.
+    let quanpin = chinese_preferences();
+    let updated = update(handle, 2, &quanpin);
+    assert!(updated["value"].get("diagnostic").is_none());
+    read(msime_client_destroy(handle));
+}
+
+#[test]
 fn translation_queries_only_clear_chinese_candidates_for_the_network() {
     // A gloss model has nothing to say about a Latin letter, a digit or an emoji, and asking spends the
     // account's bounded quota to put noise under candidates that should carry no gloss. The flag gates the
@@ -6601,6 +7048,114 @@ fn current_or_unfamiliar_options_are_not_prepared() {
         .unwrap();
         assert_eq!(refreshed, None);
     }
+}
+
+/// Options published before the Cantonese and Zhuyin dictionaries were installed learn about them at the next refresh, and forget them once they are gone, without a new dictionary generation. A directory the document names elsewhere is the host's own choice and is kept.
+#[test]
+fn refresh_keeps_the_language_dictionaries_in_step_with_the_installed_package() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).expect("resources");
+    let beside = root.path().join("language-dictionaries");
+    let current = json!({
+        "resources": resources,
+        "user_data": "/s/user",
+        "dictionaries": "/s/user/dictionaries/new",
+        "preferences_directory": "/s",
+    });
+    let refresh = |document: &Value| super::with_installed_language_dictionaries(document).unwrap();
+    assert_eq!(refresh(&current), None);
+
+    // An empty directory installs nothing.
+    std::fs::create_dir_all(&beside).expect("beside");
+    assert_eq!(refresh(&current), None);
+
+    std::fs::write(beside.join("zhuyin.db"), b"sqlite").expect("zhuyin");
+    let mut installed = current.clone();
+    installed["language_dictionaries"] = json!(beside);
+    assert_eq!(refresh(&current), Some(installed.clone()));
+    assert_eq!(refresh(&installed), None);
+
+    let mut elsewhere = current.clone();
+    elsewhere["language_dictionaries"] = json!("/opt/language-dictionaries");
+    assert_eq!(refresh(&elsewhere), None);
+
+    // A document outside the prepared layout is not guessed at.
+    let mut moved = current.clone();
+    moved["user_data"] = json!("/t/user");
+    assert_eq!(refresh(&moved), None);
+
+    std::fs::remove_file(beside.join("zhuyin.db")).expect("uninstall");
+    assert_eq!(refresh(&installed), Some(current.clone()));
+}
+
+/// The language directory follows the resources a stale generation was prepared from, not the ones the old document recorded.
+#[test]
+fn a_prepared_generation_records_the_language_dictionaries_beside_its_new_resources() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let old = root.path().join("old").join("resources");
+    let new = root.path().join("new").join("resources");
+    std::fs::create_dir_all(&old).expect("old");
+    std::fs::create_dir_all(&new).expect("new");
+    let beside = root.path().join("new").join("language-dictionaries");
+    std::fs::create_dir_all(&beside).expect("beside");
+    std::fs::write(beside.join("cantonese.db"), b"sqlite").expect("cantonese");
+    let stale = json!({
+        "resources": old,
+        "user_data": "/s/user",
+        "dictionaries": "/s/user/dictionaries/old",
+        "preferences_directory": "/s",
+    });
+    let prepared = super::refreshed_host_options(&stale, "new", |_, _| {
+        Ok(json!({ "resources": new, "dictionaries": "/s/user/dictionaries/new" }))
+    })
+    .unwrap()
+    .unwrap();
+    assert_eq!(prepared.get("language_dictionaries"), None);
+    let refreshed = super::with_installed_language_dictionaries(&prepared)
+        .unwrap()
+        .unwrap();
+    assert_eq!(refreshed["language_dictionaries"], json!(beside));
+}
+
+/// The settings app's refresh never adds `language_dictionaries`: an input method that predates the key may still be running and re-reads the file for every session, and it rejects unknown keys. Only the input method's own refresh records the key.
+#[test]
+fn only_the_input_method_refresh_records_the_language_dictionaries() {
+    let directory = tempfile::tempdir().unwrap();
+    let resources = directory.path().join("resources");
+    std::fs::create_dir(&resources).unwrap();
+    let beside = directory.path().join("language-dictionaries");
+    std::fs::create_dir(&beside).unwrap();
+    std::fs::write(beside.join("zhuyin.db"), b"sqlite").unwrap();
+    let state = directory.path().join("state");
+    std::fs::create_dir(&state).unwrap();
+    let generation = serde_json::from_str::<ResourceSet>(include_str!(
+        "../../../resources/desktop-dictionary.lock.json"
+    ))
+    .unwrap()
+    .generation()
+    .unwrap();
+    let document = json!({
+        "api_version": 1,
+        "resources": resources,
+        "user_data": state.join("user"),
+        "cache": state.join("cache"),
+        "dictionaries": state.join("user").join("dictionaries").join(generation),
+        "preferences_directory": state,
+        "preferences": {},
+    });
+    let options = state.join("runtime-options.json");
+    std::fs::write(&options, serde_json::to_vec(&document).unwrap()).unwrap();
+
+    assert!(!super::refresh_host_options(&options).unwrap());
+    let read = || serde_json::from_slice::<Value>(&std::fs::read(&options).unwrap()).unwrap();
+    assert_eq!(read(), document);
+
+    assert!(super::refresh_host_options_with_language_dictionaries(&options).unwrap());
+    let mut expected = document.clone();
+    expected["language_dictionaries"] = json!(beside);
+    assert_eq!(read(), expected);
+    assert!(!super::refresh_host_options_with_language_dictionaries(&options).unwrap());
 }
 
 #[test]

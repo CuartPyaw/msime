@@ -37,6 +37,8 @@ FOUNDATION_EXPORT NSString *const MSIMEAppearanceInputModeOnlyKey;
 @property(nonatomic, copy) NSString *inputScheme;
 /// The Chinese scheme to go back to when leaving japanese or korean: the current scheme while it is Chinese, otherwise the one left for japanese or korean here or the shared `last_chinese_scheme`, 全拼 when neither is known.
 @property(nonatomic, readonly) NSString *lastChineseScheme;
+/// The scheme the input method last showed a system input mode for, kept in this Mac's defaults and never in the shared document. The input controller compares the scheme running now with it, so a scheme picked while the input method was not running, or one whose dictionary was installed after it was picked, still reads as a change on the next sync and gets its opt-in mode enabled; the scheme it already names enables nothing.
+@property(nonatomic, copy) NSString *lastSyncedInputScheme;
 @property(nonatomic, copy) NSString *shuangpinProfile;
 @property(nonatomic) BOOL shuangpinPreeditUsesRaw;
 /// Allow Pinyin fallback when a Wubi code has no Wubi candidates.

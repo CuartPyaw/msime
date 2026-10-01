@@ -3,6 +3,7 @@ import { useSettingsForm } from "../settings-form-context";
 import * as settings from "../settings-style";
 import { GroupList, Row, Switch } from "../../core/platform-controls";
 import { InputSchemeSettingsContent } from "../input-scheme-settings-content";
+import { supportedInputSchemes } from "../input-scheme-options";
 import { InputSharedSettingsSection } from "../input-shared-settings-section";
 import { LocalModesSection } from "../local-modes-section";
 import { CharacterWidthRow } from "../punctuation-section";
@@ -13,6 +14,7 @@ import { createSettingsDraftActions } from "../settings-draft-actions";
 export function InputSettingsPage() {
   const {
     client,
+    host,
     iosPlatform,
     mobilePlatform,
     macosPlatform,
@@ -51,6 +53,7 @@ export function InputSettingsPage() {
           touchKeyboardSchemes={touchKeyboardSchemes}
           selectedTouchKeyboardScheme={selectedTouchKeyboardScheme}
           macos={macosPlatform}
+          inputSchemes={supportedInputSchemes(host)}
           macosShuangpinKeymap={
             macosPlatform && client.loadMacosShuangpinKeymap && macosShuangpinKeymap !== undefined
               ? macosShuangpinKeymap

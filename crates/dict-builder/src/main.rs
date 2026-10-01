@@ -6,13 +6,16 @@
 //! msime-dict-build --list
 //! msime-dict-build places --cache <dir> [--out <places.tsv>] [--offline]
 //! msime-dict-build hanja --cache <dir> [--out <hanja.tsv>] [--offline]
+//! msime-dict-build languages --cache <dir> [--out <dir>] [--offline]
 //! msime-dict-build check-words [--base <words.txt> --head <words.txt>] [--translations-base <translations.txt> --translations-head <translations.txt>] [--english-base <english.txt> --english-head <english.txt>] [--msime-db <msime.db>] [--english-db <english.db>] [--json <report.json>] [--markdown <summary.md>]
 //! ```
 
+mod cantonese;
 mod check_words;
 mod english;
 mod hanja;
 mod japanese;
+mod languages;
 mod licensing;
 mod msime;
 mod ngram;
@@ -23,6 +26,7 @@ mod product;
 mod sources;
 mod sqlite;
 mod text;
+mod zhuyin;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -126,6 +130,8 @@ enum Command {
     Places(Places),
     /// Write the Korean Hanja table (crates/engine/src/korean/hanja.tsv) from the libhangul hanja.txt pinned under hanja/ in the sources lock.
     Hanja(Hanja),
+    /// Write the dictionaries that ship beside the resource set (cantonese.db, zhuyin.db) with their licence texts and checksums, from the sources pinned under cantonese/ and zhuyin/ in the sources lock.
+    Languages(Languages),
 }
 
 #[derive(Args)]
@@ -201,6 +207,41 @@ fn build_hanja(arguments: &Hanja) -> Result<()> {
     eprintln!(
         "[done] {} readings of {syllables} syllables -> {}",
         readings.len(),
+        arguments.out.display()
+    );
+    Ok(())
+}
+
+#[derive(Args)]
+struct Languages {
+    /// Where pinned sources are downloaded and reused from.
+    #[arg(long)]
+    cache: PathBuf,
+    /// Where the dictionaries, licence texts and checksums are written.
+    #[arg(long, default_value_os_t = repository_root().join("target/language-dictionaries"))]
+    out: PathBuf,
+    /// Fail instead of downloading a source that is not cached.
+    #[arg(long)]
+    offline: bool,
+    /// The msime checkout the sources lock and licence texts are read from.
+    #[arg(long, default_value_os_t = repository_root())]
+    repository: PathBuf,
+}
+
+fn build_languages(arguments: &Languages) -> Result<()> {
+    let root = &arguments.repository;
+    let sources = Sources {
+        lock: Lock::load(&root.join("resources/dictionary-sources.lock.json"))?,
+        repository_inputs: root.join("resources/dictionary-sources"),
+        cache: arguments.cache.clone(),
+        offline: arguments.offline,
+    };
+    for summary in languages::build(&sources, &root.join("resources/licenses"), &arguments.out)? {
+        eprintln!("[done] {summary}");
+    }
+    eprintln!(
+        "[done] wrote {} in {}",
+        languages::SUMS,
         arguments.out.display()
     );
     Ok(())
@@ -540,6 +581,9 @@ fn main() -> Result<()> {
     }
     if let Some(Command::Hanja(hanja)) = &arguments.command {
         return build_hanja(hanja);
+    }
+    if let Some(Command::Languages(languages)) = &arguments.command {
+        return build_languages(languages);
     }
     if let Some(Command::CheckWords(check)) = &arguments.command {
         match check_words(check) {

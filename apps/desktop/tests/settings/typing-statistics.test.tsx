@@ -475,6 +475,31 @@ test("Korean input has its own scheme and language slices", async () => {
   expect(screen.getByLabelText(/^韩语模式 5 字符/)).not.toBeNull();
 });
 
+test("Cantonese and Zhuyin count as Chinese mode and Vietnamese has its own slice", async () => {
+  const sources = { cantonese: 3, zhuyin: 2, quanpin: 1, vietnamese: 4 };
+  const statistics: TypingStatistics = {
+    enabled: true,
+    total: 10,
+    days: { [key(0)]: 10 },
+    detail: { characters: { han: 6, latin: 4 }, sources },
+    dailyDetails: { [key(0)]: { characters: { han: 6, latin: 4 }, sources } },
+  };
+  const typingStatistics = {
+    load: vi.fn().mockResolvedValue(status(statistics)),
+    setEnabled: vi.fn(),
+    reset: vi.fn(),
+  };
+  render(<SettingsPage client={{ ...baseClient(), typingStatistics }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "统计" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "方案" }));
+  expect(screen.getByLabelText(/^粤拼 3 字符/)).not.toBeNull();
+  expect(screen.getByLabelText(/^注音 2 字符/)).not.toBeNull();
+  expect(screen.getByLabelText(/^越南语 4 字符/)).not.toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "模式" }));
+  expect(screen.getByLabelText(/^中文模式 6 字符/)).not.toBeNull();
+  expect(screen.getByLabelText(/^越南语模式 4 字符/)).not.toBeNull();
+});
+
 test("desktop statistics draw an ANSI key heatmap for the cumulative or selected-day scope", async () => {
   const statistics: TypingStatistics = {
     ...initialStatistics(),

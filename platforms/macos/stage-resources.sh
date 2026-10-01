@@ -4,7 +4,7 @@ umask 077
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$repo_root"
-source_dir=${1:?usage: stage-resources.sh <verified-resource-directory> [settled-model-directory] [offline-glosses-directory]}
+source_dir=${1:?usage: stage-resources.sh <verified-resource-directory> [settled-model-directory] [offline-glosses-directory] [language-dictionaries-directory]}
 source_dir=$(cd "$source_dir" && pwd)
 destination="$repo_root/target/macos/EngineResources"
 
@@ -62,5 +62,32 @@ if compgen -G "$glosses_source/zh-*.db" >/dev/null && [ -f "$glosses_source/offl
   echo "offline glosses staged: $glosses_destination"
 else
   echo "no offline glosses at $glosses_source; candidates are glossed offline in English only"
+fi
+
+# Optional: the Cantonese and Zhuyin dictionaries fetched by scripts/fetch_language_dictionaries.py (or built by `msime-dict-build languages`). prepare_host_configuration finds them beside the resource directory and names them in the runtime options; a scheme whose dictionary is missing is shown as unavailable and falls back. Each dictionary is staged only with its licence text, which must travel with the data.
+languages_source=${4:-$repo_root/target/language-dictionaries}
+languages_destination="$repo_root/target/macos/language-dictionaries"
+rm -rf "$languages_destination"
+staged_languages=()
+for pair in cantonese.db:rime_cantonese_LICENSE.txt zhuyin.db:libchewing_data_LICENSE.txt; do
+  database=${pair%%:*}
+  license=${pair#*:}
+  [ -f "$languages_source/$database" ] || continue
+  if [ ! -f "$languages_source/$license" ]; then
+    echo "$languages_source/$database has no $license beside it; refusing to ship the data without its licence" >&2
+    exit 1
+  fi
+  mkdir -p "$languages_destination"
+  cp "$languages_source/$database" "$languages_source/$license" "$languages_destination/"
+  staged_languages+=("$database")
+done
+if [ "${#staged_languages[@]}" -gt 0 ]; then
+  echo "language dictionaries staged (${staged_languages[*]}): $languages_destination"
+else
+  echo "no language dictionaries at $languages_source; Cantonese and Zhuyin stay unavailable"
+fi
+if [ "${MSIME_REQUIRE_LANGUAGE_DICTIONARIES:-0}" = 1 ] && [ "${#staged_languages[@]}" -ne 2 ]; then
+  echo "MSIME_REQUIRE_LANGUAGE_DICTIONARIES=1 but cantonese.db and zhuyin.db were not both staged from $languages_source" >&2
+  exit 1
 fi
 echo "macOS resources staged from the pinned dictionary release: $destination"

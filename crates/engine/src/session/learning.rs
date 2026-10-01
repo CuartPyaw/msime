@@ -19,7 +19,7 @@ use crate::pinyin::typos::syllable_typo_kind;
 use crate::text::{count_utf8_chars, is_all_han, is_han};
 use crate::types::{
     CandidateSource, FrequencyAdjustmentMode, FrequencyAdjustmentOptions, LocalInputMode,
-    PersonalDictionaryKind, SchemeType, WordItem,
+    PersonalDictionaryKind, WordItem,
 };
 use crate::user_dictionary::journal::is_user_deleted;
 use crate::user_dictionary::picks::{clear_pick_transition, record_pick_transition};
@@ -86,7 +86,12 @@ impl InputSession {
         if self.frequency.mode == FrequencyAdjustmentMode::Disabled || index == 0 {
             return None;
         }
-        if !selected.source.is_dictionary() || self.is_japanese() {
+        if !selected.source.is_dictionary()
+            || !self
+                .engine
+                .current_scheme_type()
+                .learns_into_main_dictionary()
+        {
             return None;
         }
         self.adjust_candidate_frequency(index, self.frequency, false)
@@ -203,7 +208,10 @@ impl InputSession {
         // Local shortcuts and English/Japanese modes also use Generated candidates, but they are not pinyin sentences and must never enter the pinyin user dictionary. A native wubi row is not one either, while a pinyin row beside it in a mixed list is (overlays.md §3.3).
         if self.local_mode != LocalInputMode::None
             || self.dedicated_english
-            || self.is_japanese()
+            || !self
+                .engine
+                .current_scheme_type()
+                .learns_into_main_dictionary()
             || Self::is_wubi_native_candidate(selected)
         {
             return None;
@@ -260,7 +268,7 @@ impl InputSession {
         if selected.source != CandidateSource::Generated
             || !selected.sentence_association
             || selected.corrected_from.is_empty()
-            || self.scheme() != SchemeType::Quanpin
+            || !self.scheme().supports_autocorrect()
         {
             return None;
         }
@@ -288,7 +296,7 @@ impl InputSession {
     /// On CommitRaw while a correction is offered (input_session_composition.cpp:629-656).
     pub(super) fn learn_rejected_correction(&mut self) -> Option<String> {
         if !self.learning_enabled
-            || self.scheme() != SchemeType::Quanpin
+            || !self.scheme().supports_autocorrect()
             || self.local_mode != LocalInputMode::None
             || self.dedicated_english
             || self.autocorrect_types == 0
@@ -439,7 +447,7 @@ impl InputSession {
             && self.personal_context_enabled
             && self.local_mode == LocalInputMode::None
             && !self.dedicated_english
-            && self.scheme().is_pinyin()
+            && self.scheme().reranks_with_sentence_model()
     }
 }
 
@@ -454,7 +462,7 @@ mod tests {
     use super::*;
     use crate::paths::RuntimePaths;
     use crate::session::{Clock, Session, SessionOptions};
-    use crate::types::{autocorrect_type, ShuangpinProfileKind};
+    use crate::types::{autocorrect_type, SchemeType, ShuangpinProfileKind};
     use crate::user_dictionary::ngram_store::flush_all;
 
     struct Fixture {
@@ -685,7 +693,7 @@ mod tests {
             });
             type_text(&mut session, "nihc");
             select_word(&mut session, "拟好");
-            session.switch_scheme(SchemeType::Wubi);
+            session.switch_scheme(SchemeType::Wubi).unwrap();
             type_text(&mut session, "aaaa");
             select_word(&mut session, "或");
         }
@@ -703,7 +711,7 @@ mod tests {
         });
         type_text(&mut session, "nihc");
         assert_eq!(words(&session)[0], "拟好");
-        session.switch_scheme(SchemeType::Wubi);
+        session.switch_scheme(SchemeType::Wubi).unwrap();
         type_text(&mut session, "aaaa");
         assert_eq!(words(&session)[0], "或");
     }

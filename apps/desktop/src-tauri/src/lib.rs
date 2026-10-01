@@ -186,13 +186,38 @@ fn requested_surface_route() -> Option<SurfaceRoute> {
 }
 
 #[tauri::command]
-fn host_capabilities() -> HostCapabilities {
+fn host_capabilities(app: tauri::AppHandle) -> HostCapabilities {
     let mut capabilities = HostCapabilities::for_platform(host_platform());
     // Font enumeration is a build-time capability, not a platform assumption.
     capabilities.system_fonts = font_catalog_supported();
     capabilities.os_version = macos_product_version();
     capabilities.candidate_panel_limit = linux_candidate_panel_limit();
+    let host_options = app
+        .try_state::<DictionaryHostOptions>()
+        .and_then(|options| options.snapshot().ok());
+    drop_uninstalled_language_schemes(&mut capabilities, host_options.as_ref());
     capabilities
+}
+
+/// Cantonese and Zhuyin each read a dictionary the package installs beside the Engine resources, which the HostOptions document names in `language_dictionaries` only when one is there. Without its dictionary host-api falls back from the scheme, so the page shows it unavailable instead of offering a choice that never takes effect. Every other scheme needs nothing beyond the resources.
+fn drop_uninstalled_language_schemes(
+    capabilities: &mut HostCapabilities,
+    host_options: Option<&Value>,
+) {
+    use msime_client_core::preferences::InputScheme;
+    let directory = host_options
+        .and_then(|document| document.get("language_dictionaries"))
+        .and_then(Value::as_str)
+        .map(std::path::Path::new)
+        .filter(|directory| directory.is_absolute());
+    capabilities.input_schemes.retain(|scheme| {
+        let dictionary = match scheme {
+            InputScheme::Cantonese => "cantonese.db",
+            InputScheme::Zhuyin => "zhuyin.db",
+            _ => return true,
+        };
+        directory.is_some_and(|directory| directory.join(dictionary).is_file())
+    });
 }
 
 /// What the running Linux host found about the desktop's candidate panel. Only the host knows which panel draws its list - GNOME Shell's popup, a Fcitx5 theme the user picked, the desktop's Kimpanel - so it writes that finding to a per-session file and the page reads it here instead of guessing from the desktop name.

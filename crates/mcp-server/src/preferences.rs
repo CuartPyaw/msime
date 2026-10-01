@@ -20,9 +20,12 @@ pub enum Scheme {
     Wubi,
     Japanese,
     Korean,
+    Cantonese,
+    Zhuyin,
+    Vietnamese,
 }
 
-/// The schemes an agent may switch to. Japanese and Korean are left to the user: Japanese needs its own dictionary, and both need a way back that the agent cannot see.
+/// The schemes an agent may switch to. Japanese, Korean, Cantonese, Zhuyin and Vietnamese are left to the user: Japanese, Cantonese and Zhuyin need their own dictionary, which a host may not have, and every one of them needs a way back that the agent cannot see.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[schemars(crate = "rmcp::schemars")]
 #[serde(rename_all = "snake_case")]
@@ -74,6 +77,9 @@ impl From<InputScheme> for Scheme {
             InputScheme::Wubi => Self::Wubi,
             InputScheme::Japanese => Self::Japanese,
             InputScheme::Korean => Self::Korean,
+            InputScheme::Cantonese => Self::Cantonese,
+            InputScheme::Zhuyin => Self::Zhuyin,
+            InputScheme::Vietnamese => Self::Vietnamese,
         }
     }
 }
@@ -479,6 +485,9 @@ mod tests {
             InputScheme::Wubi,
             InputScheme::Japanese,
             InputScheme::Korean,
+            InputScheme::Cantonese,
+            InputScheme::Zhuyin,
+            InputScheme::Vietnamese,
         ] {
             same(json!(Scheme::from(scheme)), json!(scheme));
         }

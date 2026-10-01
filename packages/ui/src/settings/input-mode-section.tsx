@@ -1,7 +1,15 @@
+import type { ChineseScheme, InputScheme } from "../index";
 import { Row, Segmented } from "../core/platform-controls";
+import {
+  baseInputSchemes,
+  fallbackChineseScheme,
+  isChineseScheme,
+  nonChineseSchemes,
+} from "./input-scheme-options";
+import { schemeTitle } from "./label-helpers";
 
-export type InputModeScheme = "quanpin" | "shuangpin" | "wubi" | "japanese" | "korean";
-export type InputModeChineseScheme = Exclude<InputModeScheme, "japanese" | "korean">;
+export type InputModeScheme = InputScheme;
+export type InputModeChineseScheme = ChineseScheme;
 
 export interface InputModeSectionProps {
   scheme: InputModeScheme;
@@ -12,41 +20,53 @@ export interface InputModeSectionProps {
       last_chinese_scheme: InputModeChineseScheme | null;
     }>,
   ) => void;
+  /** The schemes the host offers (`HostCapabilities.input_schemes`); a mode outside it is shown disabled. Defaults to the five every host offers. */
+  supportedSchemes?: readonly InputScheme[];
   /** Hosts that choose among touch keyboard schemes instead keep this row out of sight. */
   hidden?: boolean;
 }
 
-const inputModeOptions = [
-  { value: "chinese", label: "中文" },
-  { value: "japanese", label: "日文" },
-  { value: "korean", label: "韩文" },
-] as const;
+type InputMode = "chinese" | (typeof nonChineseSchemes)[number];
 
-/** Whether the scheme is one of the Chinese schemes Japanese and Korean return to; switching between those two keeps the one already remembered. */
-function isChineseScheme(scheme: InputModeScheme): scheme is InputModeChineseScheme {
-  return scheme !== "japanese" && scheme !== "korean";
-}
+const inputModeLabels: Record<InputMode, string> = {
+  chinese: "中文",
+  japanese: "日文",
+  korean: "韩文",
+  vietnamese: "越南文",
+};
 
-/** Chinese/Japanese/Korean input mode selector with remembered Chinese scheme: the first row of the 方案 group. */
+/** Chinese/Japanese/Korean/Vietnamese input mode selector with remembered Chinese scheme: the first row of the 方案 group. */
 export function InputModeSection({
   scheme,
   lastChineseScheme,
   onChange,
+  supportedSchemes = baseInputSchemes,
   hidden,
 }: InputModeSectionProps) {
+  const unsupported = nonChineseSchemes.filter((mode) => !supportedSchemes.includes(mode));
+  const options = (["chinese", ...nonChineseSchemes] as const).map((mode) => ({
+    value: mode,
+    label: inputModeLabels[mode],
+    disabled: mode !== "chinese" && unsupported.includes(mode),
+  }));
+  const chineseFallback = fallbackChineseScheme(lastChineseScheme, supportedSchemes);
+  const base = "切换中文、日文、韩文或越南文输入，并保留各模式上次选择的方案";
+  // A document naming a mode this host does not offer runs host-api's fallback scheme, and the row says which.
+  const description =
+    !isChineseScheme(scheme) && unsupported.includes(scheme)
+      ? `此平台暂不支持${inputModeLabels[scheme]}，已回退到${schemeTitle(chineseFallback)}`
+      : unsupported.length > 0
+        ? `${base}；此平台暂不支持${unsupported.map((mode) => inputModeLabels[mode]).join("、")}`
+        : base;
   return (
-    <Row
-      title="输入模式"
-      description="切换中文、日文或韩文输入，并保留各模式上次选择的方案"
-      hidden={hidden}
-    >
+    <Row title="输入模式" description={description} hidden={hidden}>
       <Segmented
-        options={inputModeOptions}
+        options={options}
         value={isChineseScheme(scheme) ? "chinese" : scheme}
         onChange={(mode) =>
           onChange(
             mode === "chinese"
-              ? { scheme: lastChineseScheme ?? "quanpin" }
+              ? { scheme: chineseFallback }
               : {
                   last_chinese_scheme: isChineseScheme(scheme) ? scheme : lastChineseScheme,
                   scheme: mode,

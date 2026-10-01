@@ -84,14 +84,14 @@ int main(int argc, const char *argv[]) {
         [[[MSIMEVoiceAudioMuter alloc] init] restore];
         __attribute__((objc_precise_lifetime)) IMKServer *server = [[IMKServer alloc] initWithName:@"MSIMEClientPreviewConnection" bundleIdentifier:NSBundle.mainBundle.bundleIdentifier];
         if (!server) return 1;
-        // Turn on, once each, the input modes this version added and the install that brought it did not register.
+        // Turn on, once each, the input modes this version added and the install that brought it did not register. The opt-in modes are only recorded, and turned off once if the system turned them on.
         NSString *const offeredModesKey = @"MSIMEOfferedInputModes";
         NSArray *offeredModes = [NSUserDefaults.standardUserDefaults arrayForKey:offeredModesKey];
         NSArray<NSString *> *offered = MSIMEEnableNewInputModes(NSBundle.mainBundle.bundleIdentifier, offeredModes,
             TISCreateInputSourceList,
             [](TISInputSourceRef source, CFStringRef key) -> void * {
                 return (void *)TISGetInputSourceProperty(source, key);
-            }, TISEnableInputSource);
+            }, TISEnableInputSource, TISDisableInputSource);
         if (![offered isEqualToArray:offeredModes]) [NSUserDefaults.standardUserDefaults setObject:offered forKey:offeredModesKey];
         __attribute__((objc_precise_lifetime)) MSIMEInputSourceMonitor *sourceMonitor =
             [[MSIMEInputSourceMonitor alloc] initWithCenter:NSDistributedNotificationCenter.defaultCenter

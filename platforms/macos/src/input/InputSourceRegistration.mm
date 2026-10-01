@@ -96,7 +96,8 @@ OSStatus MSIMERegisterAndEnableInputSources(NSURL *bundleURL, NSString *bundleId
             TISInputSourceRef source = (TISInputSourceRef)CFArrayGetValueAtIndex(sources, i);
             void *property = propertyGetter(source, kTISPropertyInputSourceID);
             if (!property || CFGetTypeID(property) != CFStringGetTypeID() ||
-                ![(__bridge NSString *)property hasPrefix:modePrefix]) continue;
+                ![(__bridge NSString *)property hasPrefix:modePrefix] ||
+                MSIMEIsOptInInputModeID((__bridge NSString *)property)) continue;
             status = enabler(source); if (status != noErr) { CFRelease(sources); return status; }
             primary = source;
             enabled = true;
@@ -104,12 +105,14 @@ OSStatus MSIMERegisterAndEnableInputSources(NSURL *bundleURL, NSString *bundleId
         }
     }
     if (!enabled) { CFRelease(sources); return fnfErr; }
+    // The opt-in modes are left as registration found them: off on a fresh install, and on only where the user picked their scheme before.
     for (CFIndex i = 0; i < CFArrayGetCount(sources); ++i) {
         TISInputSourceRef source = (TISInputSourceRef)CFArrayGetValueAtIndex(sources, i);
         if (source == primary) continue;
         void *property = propertyGetter(source, kTISPropertyInputSourceID);
-        if (!property || CFGetTypeID(property) != CFStringGetTypeID() ||
-            ![(__bridge NSString *)property isEqualToString:bundleIdentifier]) {
+        const BOOL identified = property && CFGetTypeID(property) == CFStringGetTypeID();
+        if (identified && MSIMEIsOptInInputModeID((__bridge NSString *)property)) continue;
+        if (!identified || ![(__bridge NSString *)property isEqualToString:bundleIdentifier]) {
             status = enabler(source); if (status != noErr) { CFRelease(sources); return status; }
         }
     }
@@ -119,12 +122,13 @@ OSStatus MSIMERegisterAndEnableInputSources(NSURL *bundleURL, NSString *bundleId
 NSArray<NSString *> *MSIMEEnableNewInputModes(NSString *bundleIdentifier, NSArray<NSString *> *offered,
                                               MSIMEInputSourceLister lister,
                                               MSIMEInputSourcePropertyGetter propertyGetter,
-                                              MSIMEInputSourceEnabler enabler) {
+                                              MSIMEInputSourceEnabler enabler,
+                                              MSIMEInputSourceEnabler disabler) {
     // Without a record this is the first launch that keeps one. The modes every install before it registered and enabled count as offered, so a user who removed one of those keeps it removed; the modes added since are the ones an update that did not re-register left off.
     NSMutableOrderedSet<NSString *> *record = [NSMutableOrderedSet orderedSetWithArray:offered ?: @[
         MSIMEChineseInputModeID, MSIMEEnglishInputModeID, MSIMEJapaneseInputModeID, MSIMEKoreanInputModeID
     ]];
-    if (!bundleIdentifier.length || !lister || !propertyGetter || !enabler) return record.array;
+    if (!bundleIdentifier.length || !lister || !propertyGetter || !enabler || !disabler) return record.array;
     NSDictionary *filter = @{(__bridge NSString *)kTISPropertyBundleID: bundleIdentifier,
                              (__bridge NSString *)kTISPropertyInputSourceIsEnableCapable: @YES};
     CFArrayRef sources = lister((__bridge CFDictionaryRef)filter, true);
@@ -138,11 +142,28 @@ NSArray<NSString *> *MSIMEEnableNewInputModes(NSString *bundleIdentifier, NSArra
         if (![identifier hasPrefix:modePrefix] || [record containsObject:identifier]) continue;
         void *enabled = propertyGetter(source, kTISPropertyInputSourceIsEnabled);
         const BOOL alreadyEnabled = enabled && CFGetTypeID(enabled) == CFBooleanGetTypeID() && CFBooleanGetValue((CFBooleanRef)enabled);
+        // An opt-in mode is recorded without being enabled, so no later launch enables it either. One the system enabled by itself, ignoring its tsInputModeDefaultStateKey, is turned off this once; it is recorded whatever that returns, because the next launch could no longer tell the system's doing from the user picking the scheme.
+        if (MSIMEIsOptInInputModeID(identifier)) {
+            if (alreadyEnabled) disabler(source);
+            [record addObject:identifier];
+            continue;
+        }
         // A mode that could not be enabled stays unrecorded, so the next launch tries again.
         if (alreadyEnabled || enabler(source) == noErr) [record addObject:identifier];
     }
     CFRelease(sources);
     return record.array;
+}
+
+OSStatus MSIMEEnableInputMode(NSString *identifier, MSIMEInputSourceLister lister, MSIMEInputSourceEnabler enabler) {
+    if (!identifier.length || !lister || !enabler) return paramErr;
+    // includeAllInstalled, because the mode being enabled is by definition not in the enabled list yet.
+    NSDictionary *filter = @{(__bridge NSString *)kTISPropertyInputSourceID: identifier};
+    CFArrayRef sources = lister((__bridge CFDictionaryRef)filter, true);
+    if (!sources) return fnfErr;
+    const OSStatus status = CFArrayGetCount(sources) > 0 ? enabler((TISInputSourceRef)CFArrayGetValueAtIndex(sources, 0)) : fnfErr;
+    CFRelease(sources);
+    return status;
 }
 
 BOOL MSIMEInputSourceIsEnabled(NSString *identifier) {

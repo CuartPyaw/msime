@@ -21,3 +21,18 @@ test("traditional output switch is disabled by default", () => {
 
   expect((screen.getByLabelText("简繁输入") as HTMLInputElement).checked).toBe(false);
 });
+
+test.each(["cantonese", "zhuyin"] as const)(
+  "%s says the switch does not change its Traditional output",
+  (scheme) => {
+    render(<TraditionalChineseOutputSection value={false} scheme={scheme} onChange={vi.fn()} />);
+
+    expect(screen.getByText(/粤拼与注音直接输出繁体，此开关不影响它们/)).toBeTruthy();
+  },
+);
+
+test("pinyin schemes keep the plain description", () => {
+  render(<TraditionalChineseOutputSection value={false} scheme="quanpin" onChange={vi.fn()} />);
+
+  expect(screen.queryByText(/粤拼与注音/)).toBeNull();
+});

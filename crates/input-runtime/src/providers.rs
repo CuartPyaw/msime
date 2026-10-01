@@ -3,16 +3,26 @@
 //! keystroke path.
 
 use super::*;
+use msime_engine::SchemeType;
 
 /// Build the default cloud request for an eligible online query. Hosts perform
 /// the actual network I/O through their injected transport and then submit the
 /// result to `Runtime::apply_online_candidate`.
 pub fn cloud_request_url(query: &OnlineQuery) -> Option<String> {
-    // Korean syllables are already the text; no cloud provider converts them.
-    if !query.cloud_eligible || !query.cloud_candidates || query.scheme == KOREAN_SCHEME {
+    if !cloud_query_allowed(query) {
         return None;
     }
-    msime_client_core::cloud::candidates::build_google_url(&query.query_text, query.scheme == 3)
+    msime_client_core::cloud::candidates::build_google_url(
+        &query.query_text,
+        SchemeType::from_u8(query.scheme) == Some(SchemeType::JapaneseRomaji),
+    )
+}
+
+/// Whether a cloud provider may answer `query`: the query asks for cloud candidates and its scheme is one a cloud provider converts. Korean syllables, for one, are already the text, so a query claiming eligibility for them is refused, as is one naming a scheme the Engine does not have.
+fn cloud_query_allowed(query: &OnlineQuery) -> bool {
+    query.cloud_eligible
+        && query.cloud_candidates
+        && SchemeType::from_u8(query.scheme).is_some_and(SchemeType::cloud_eligible)
 }
 
 /// Convert a host-fetched Google response into a bounded online result.
@@ -20,7 +30,7 @@ pub fn cloud_candidate_from_response(
     query: OnlineQuery,
     response: &[u8],
 ) -> Option<OnlineCandidate> {
-    if !query.cloud_eligible || !query.cloud_candidates || query.scheme == KOREAN_SCHEME {
+    if !cloud_query_allowed(&query) {
         return None;
     }
     let text = msime_client_core::cloud::candidates::parse_google_response(response)?;

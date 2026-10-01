@@ -7,9 +7,11 @@ pub mod registry;
 pub mod scheme;
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::assets;
+use crate::error::Result;
 use crate::helpcode::SharedKeymap;
 use crate::paths::RuntimePaths;
 use crate::pinyin::autocorrect::autocorrect_suppression_key;
@@ -25,6 +27,10 @@ use crate::types::{
     SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
 };
 use crate::user_dictionary::typo_profile::PersonalTypoProfile;
+use crate::vietnamese::{
+    InputMethod as VietnameseInputMethod, ToneStyle as VietnameseToneStyle, VietnameseScheme,
+};
+use crate::zhuyin::scheme::{ZhuyinKey, ZhuyinScheme};
 
 use registry::ProviderRegistry;
 use scheme::Scheme;
@@ -49,6 +55,8 @@ pub struct ImeSession {
     registry: ProviderRegistry,
     state: CompositionState,
     profile: ShuangpinProfileKind,
+    vietnamese_method: VietnameseInputMethod,
+    vietnamese_style: VietnameseToneStyle,
     wubi_options: WubiInputOptions,
     /// Mixed wubi only: a pinyin candidate was picked out of this composition, so the rest decodes as quanpin until the composition ends (product decision 2026-09-30, the intent of test_wubi_mixed_input_session.cpp:194-212). Cleared by `reset`, `switch_scheme`, turning mixed input off, and an emptied composition.
     pinyin_tail: bool,
@@ -63,13 +71,32 @@ pub struct ImeSession {
 }
 
 impl ImeSession {
-    /// ime_session.cpp:42-49.
-    pub fn new(scheme: SchemeType, profile: ShuangpinProfileKind, paths: &RuntimePaths) -> Self {
+    /// ime_session.cpp:42-49. `cantonese_dictionary` and `zhuyin_dictionary` are where `cantonese.db` and `zhuyin.db` are, each read only when its scheme is activated; starting in Cantonese or Zhuyin fails as `switch_scheme` does when its file cannot be opened.
+    pub fn new(
+        scheme: SchemeType,
+        profile: ShuangpinProfileKind,
+        paths: &RuntimePaths,
+        cantonese_dictionary: PathBuf,
+        zhuyin_dictionary: PathBuf,
+    ) -> Result<Self> {
+        let mut registry =
+            ProviderRegistry::new(profile, paths, cantonese_dictionary, zhuyin_dictionary);
+        registry.activate(scheme)?;
+        let zhuyin = registry.take_dictionary(scheme);
         let mut session = Self {
-            scheme: Scheme::new(scheme, profile),
-            registry: ProviderRegistry::new(profile, paths),
+            scheme: Scheme::new(
+                scheme,
+                profile,
+                VietnameseInputMethod::default(),
+                VietnameseToneStyle::default(),
+                registry.cantonese_inventory(),
+                zhuyin,
+            )?,
+            registry,
             state: CompositionState::default(),
             profile,
+            vietnamese_method: VietnameseInputMethod::default(),
+            vietnamese_style: VietnameseToneStyle::default(),
             wubi_options: WubiInputOptions::default(),
             pinyin_tail: false,
             autocorrect_types: 0,
@@ -82,7 +109,7 @@ impl ImeSession {
             typo_profile: PersonalTypoProfile::shared(&paths.user(assets::USER_JOURNAL)),
         };
         session.bind_wubi_scheme();
-        session
+        Ok(session)
     }
 
     pub fn candidates(&self) -> &[WordItem] {
@@ -109,12 +136,43 @@ impl ImeSession {
         self.refresh_candidates();
     }
 
-    /// A new scheme and an empty state.
-    pub fn switch_scheme(&mut self, scheme: SchemeType) {
-        self.scheme = Scheme::new(scheme, self.profile);
+    /// Opens what `scheme` reads (`cantonese.db` for Cantonese, `zhuyin.db` for Zhuyin) without switching to it, so a caller can learn that the scheme is unavailable before it discards anything; `switch_scheme` to an activated scheme cannot fail. A live Zhuyin scheme already holds `zhuyin.db`, so activating Zhuyin again opens nothing.
+    pub fn activate(&mut self, scheme: SchemeType) -> Result<()> {
+        if scheme == SchemeType::Zhuyin && self.scheme.as_zhuyin().is_some() {
+            return Ok(());
+        }
+        self.registry.activate(scheme)
+    }
+
+    /// A new scheme and an empty state. Cantonese and Zhuyin open their dictionary the first time they are activated and keep it for the session; when that fails (`LANGUAGE_DICTIONARY_UNAVAILABLE`, `LANGUAGE_DICTIONARY_VERSION_UNSUPPORTED`) the scheme is unavailable and the current scheme and its composition stay as they were.
+    pub fn switch_scheme(&mut self, scheme: SchemeType) -> Result<()> {
+        self.activate(scheme)?;
+        if let Some(zhuyin) = self
+            .scheme
+            .as_zhuyin_mut()
+            .filter(|_| scheme == SchemeType::Zhuyin)
+        {
+            // The live editor holds `zhuyin.db`; an idle editor over the same connection is the new scheme.
+            zhuyin.reset();
+        } else {
+            let next = Scheme::new(
+                scheme,
+                self.profile,
+                self.vietnamese_method,
+                self.vietnamese_style,
+                self.registry.cantonese_inventory(),
+                self.registry.take_dictionary(scheme),
+            )?;
+            if let Some(dictionary) =
+                std::mem::replace(&mut self.scheme, next).into_zhuyin_dictionary()
+            {
+                self.registry.return_dictionary(dictionary);
+            }
+        }
         self.bind_wubi_scheme();
         self.state = CompositionState::default();
         self.pinyin_tail = false;
+        Ok(())
     }
 
     pub fn reset(&mut self) {
@@ -190,6 +248,103 @@ impl ImeSession {
         korean.take_committed()
     }
 
+    /// The Telex or VNI method and the tone style Vietnamese spells with. A composing Vietnamese word keeps its keystrokes and is shown again under the new rules, or as the raw keys if the first Esc already showed them.
+    pub fn set_vietnamese_options(
+        &mut self,
+        method: VietnameseInputMethod,
+        style: VietnameseToneStyle,
+    ) {
+        self.vietnamese_method = method;
+        self.vietnamese_style = style;
+        let Scheme::Vietnamese(vietnamese) = &mut self.scheme else {
+            return;
+        };
+        let raw = vietnamese.raw().to_owned();
+        let locked = vietnamese.raw_locked();
+        *vietnamese = VietnameseScheme::new(method, style);
+        vietnamese.set_raw_input(&raw, &raw);
+        if locked {
+            vietnamese.restore_raw();
+        }
+        self.refresh_candidates();
+    }
+
+    /// The first Esc of a Vietnamese word: the display becomes the raw keystrokes. False for every other scheme, with nothing composing, or when the raw keys already show, so the caller cancels instead.
+    pub fn restore_vietnamese_raw(&mut self) -> bool {
+        let Scheme::Vietnamese(vietnamese) = &mut self.scheme else {
+            return false;
+        };
+        if !vietnamese.restore_raw() {
+            return false;
+        }
+        self.refresh_candidates();
+        true
+    }
+
+    /// The non-letter keys the composing Vietnamese word spells with (VNI's digits); empty for every other scheme.
+    pub fn vietnamese_spelling_symbols(&self) -> &'static str {
+        match &self.scheme {
+            Scheme::Vietnamese(vietnamese) => vietnamese.spelling_symbols(),
+            _ => "",
+        }
+    }
+
+    /// Takes the letters a selected Cantonese row covers out of the composition and answers what is left; returns whether letters are left composing.
+    pub fn select_cantonese(&mut self, item: &WordItem) -> bool {
+        let composing = self.scheme.select_cantonese(item);
+        self.refresh_candidates();
+        composing
+    }
+
+    /// Hands one key to the Zhuyin editor and shows its new state; returns whether the editor claimed the key. False for every other scheme. Text the key committed waits in `take_zhuyin_committed`.
+    pub fn handle_zhuyin_key(&mut self, key: ZhuyinKey) -> Result<bool> {
+        let Some(zhuyin) = self.scheme.as_zhuyin_mut() else {
+            return Ok(false);
+        };
+        let claimed = zhuyin.handle_key(key);
+        self.refresh_candidates();
+        claimed
+    }
+
+    /// Pins the text of Zhuyin list row `index` and closes the list, committing nothing; false when no Zhuyin list is open or it has no such row.
+    pub fn select_zhuyin(&mut self, index: usize) -> Result<bool> {
+        let Some(zhuyin) = self.scheme.as_zhuyin_mut() else {
+            return Ok(false);
+        };
+        let selected = zhuyin.select(index);
+        self.refresh_candidates();
+        selected
+    }
+
+    /// The text the last Zhuyin key committed (Enter, Shift punctuation, an auto-shift); empty for every other scheme.
+    pub fn take_zhuyin_committed(&mut self) -> String {
+        self.scheme
+            .as_zhuyin_mut()
+            .map(ZhuyinScheme::take_committed)
+            .unwrap_or_default()
+    }
+
+    /// Ends the Zhuyin composition and returns its converted text; the pending syllable is dropped. Empty for every other scheme.
+    pub fn take_zhuyin_text(&mut self) -> String {
+        let Some(zhuyin) = self.scheme.as_zhuyin_mut() else {
+            return String::new();
+        };
+        let text = zhuyin.take_text();
+        self.refresh_candidates();
+        text
+    }
+
+    pub fn zhuyin_list_open(&self) -> bool {
+        self.scheme.as_zhuyin().is_some_and(ZhuyinScheme::list_open)
+    }
+
+    /// The non-letter keys the Zhuyin editor claims in its state; empty for every other scheme.
+    pub fn zhuyin_spelling_symbols(&self) -> &'static str {
+        self.scheme
+            .as_zhuyin()
+            .map_or("", ZhuyinScheme::spelling_symbols)
+    }
+
     /// Whether the active scheme is wubi and its code is exactly four letters.
     pub fn wubi_has_complete_code(&self) -> bool {
         self.scheme
@@ -220,9 +375,18 @@ impl ImeSession {
                 .expand_initial_candidates(&request, candidates)
     }
 
-    /// The request a scratch scheme of the current type builds for `raw`, with the session's switches applied.
+    /// The request a scratch scheme of the current type builds for `raw`, with the session's switches applied. The current scheme was activated before it became current, so building its scratch twin cannot fail, except for Zhuyin, whose `zhuyin.db` connection belongs to the live editor: an invalid request stands for both, and Zhuyin keeps its caret at the end, so it never decodes a caret prefix.
     fn raw_request(&self, raw: &str, raw_with_cases: &str) -> QueryRequest {
-        let mut scratch = Scheme::new(self.current_scheme_type(), self.profile);
+        let Ok(mut scratch) = Scheme::new(
+            self.current_scheme_type(),
+            self.profile,
+            self.vietnamese_method,
+            self.vietnamese_style,
+            self.registry.cantonese_inventory(),
+            None,
+        ) else {
+            return QueryRequest::default();
+        };
         if let Some(wubi) = scratch.as_wubi_mut() {
             wubi.set_mixed_pinyin_allowed(self.wubi_options.mixed_pinyin);
             wubi.set_extended_length_allowed(self.wubi_options.mixed_pinyin);
@@ -316,7 +480,14 @@ impl ImeSession {
             return;
         }
 
-        let decoded = self.decode(&request);
+        // The Zhuyin list is the editor's own: its rows exist only while the user has it open.
+        let decoded = match self.scheme.as_zhuyin() {
+            Some(zhuyin) => Decoded {
+                candidates: zhuyin_rows(zhuyin),
+                wubi_table_answered: false,
+            },
+            None => self.decode(&request),
+        };
         // A fifth letter is only allowed once the table has failed the code typed so far.
         let extended = self.wubi_options.mixed_pinyin && !decoded.wubi_table_answered;
         if let Some(wubi) = self.scheme.as_wubi_mut() {
@@ -413,6 +584,20 @@ impl ImeSession {
             wubi.set_mixed_pinyin_allowed(mixed_pinyin);
         }
     }
+}
+
+/// The open Zhuyin list as session rows, in list order. Each row is keyed by nothing: Zhuyin learns nothing, so no row is ever written back under a reading.
+fn zhuyin_rows(zhuyin: &ZhuyinScheme) -> Vec<WordItem> {
+    zhuyin
+        .candidates()
+        .iter()
+        .map(|candidate| {
+            let mut item =
+                WordItem::new("", candidate.text.clone(), 0, CandidateSource::Database, "");
+            item.scheme = SchemeType::Zhuyin;
+            item
+        })
+        .collect()
 }
 
 /// A row for the whole code answers it; the prefix rows the wubi query also returns do not, so they must not suppress the pinyin fallback.
