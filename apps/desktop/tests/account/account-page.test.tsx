@@ -188,6 +188,27 @@ test("mobile accounts keep profile editing and session actions on the pushed pro
   await waitFor(() => expect(client.clearExpired).toHaveBeenCalledTimes(1));
 });
 
+test("mobile profile ignores a same-tick duplicate nickname save", async () => {
+  const pending = deferred<AccountProfile>();
+  const rename = vi.fn().mockReturnValue(pending.promise);
+  const client = account({
+    status: vi.fn().mockResolvedValue({ user }),
+    rename,
+  });
+  render(<AccountPage client={client} platform="ios" />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  const name = screen.getByRole("textbox", { name: "编辑社区昵称" });
+  fireEvent.change(name, { target: { value: "移动端新昵称" } });
+  const save = screen.getByRole("button", { name: "保存昵称" });
+  act(() => {
+    fireEvent.click(save);
+    fireEvent.click(save);
+  });
+  expect(rename).toHaveBeenCalledOnce();
+  pending.resolve({ user: { ...user, displayName: "移动端新昵称" }, providers: ["email"] });
+  await waitFor(() => expect(screen.getByText("昵称已更新。")).not.toBeNull());
+});
+
 test("a mobile profile rename response from a replaced client is ignored", async () => {
   let resolveOld!: (value: AccountProfile) => void;
   const oldClient = account({
