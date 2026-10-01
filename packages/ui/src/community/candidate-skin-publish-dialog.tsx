@@ -187,12 +187,15 @@ export function CandidateSkinPublishDialog({
     try {
       const bytes = await renderSkinPreview(previewless, readImage);
       const catalog = await client.addPreview(previewless.id, bytes);
+      if (generation !== clientGeneration.current || generation !== packGeneration.current) return;
       setPackages(catalog.packages);
       setPackRevision((revision) => revision + 1);
     } catch {
-      if (generation === packGeneration.current) setDrawFailed(true);
+      if (generation === packGeneration.current && generation === clientGeneration.current)
+        setDrawFailed(true);
     } finally {
-      setDrawing(false);
+      if (generation === packGeneration.current && generation === clientGeneration.current)
+        setDrawing(false);
     }
   };
 
@@ -208,12 +211,15 @@ export function CandidateSkinPublishDialog({
     setLicenseFailed(false);
     try {
       const catalog = await client.addLicense(skinId, licenseValue);
+      if (generation !== clientGeneration.current || generation !== packGeneration.current) return;
       setPackages(catalog.packages);
       setPackRevision((revision) => revision + 1);
     } catch {
-      if (generation === packGeneration.current) setLicenseFailed(true);
+      if (generation === packGeneration.current && generation === clientGeneration.current)
+        setLicenseFailed(true);
     } finally {
-      setWritingLicense(false);
+      if (generation === packGeneration.current && generation === clientGeneration.current)
+        setWritingLicense(false);
     }
   };
 
