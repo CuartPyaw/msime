@@ -35,6 +35,7 @@
 | `exmex` | 0.21 | MIT OR Apache-2.0 | V模式的算式求值（`crates/engine/src/local/expression.rs`），只注册四则运算、`%` 取余和 `^` 乘方。它带进 `regex` 与 `smallvec`，两者原本就在锁文件里 |
 | `chinese-number`（关闭默认特性，只开 `std`、`number-to-chinese`） | 0.8 | MIT | V模式把数字写成中文小写、大写与金额（同一文件）。传递依赖 `chinese-variant`（MIT）、`enum-ordinalize`（MIT）、`num-bigint`（MIT OR Apache-2.0） |
 | `rink-core`（关闭默认特性，只开 `bundle-files`） | 0.9 | MPL-2.0；它内嵌的单位库 `definitions.units` 分叉自 GNU Units 的数据库，为 GPL-3.0-or-later（Free Software Foundation），与本仓库的 GPL-3.0 兼容 | V模式的单位换算（`crates/engine/src/local/units.rs`），例如 `3jin'g` 把 3 斤换成克。`bundle-files` 把单位库编进库里，单位上下文在第一次用到时才加载；汇率要联网取数据，从不加载，所以不换算货币。带进 `num-rational`（MIT OR Apache-2.0）与 `strsim`（MIT）。源码在 crates.io 的对应版本，上游仓库是 [codeberg.org/tiffany/rink](https://codeberg.org/tiffany/rink)。MPL-2.0 的履行方式与下文音效包一节的 `symphonia` 相同 |
+| `vi`（固定 `=0.8.0`） | 0.8.0 | MIT（crate 以 `license-file` 声明，Copyright 2020 Hung Nguyen） | 越南语方案的 Telex 与 VNI 变换（`crates/engine/src/vietnamese/`）。固定到补丁版本，上游的小版本发布不会悄悄改变输入行为。带进 `phf` 0.11，与 workspace 已有的 `phf` 0.13 并存。上游仓库是 [ZeroX-DG/vi-rs](https://github.com/ZeroX-DG/vi-rs) |
 
 ## 随包资源（`resources/desktop-dictionary.lock.json`）
 
@@ -194,6 +195,17 @@ kaikki 每周覆盖同一个 URL，所以能复现构建的是 `filtered_input`�
 **分发义务**：这些文件是维基词典文本的改编作品，发布时必须随附 `offline-glosses-NOTICE.txt`，并保持 CC BY-SA 4.0。App Store 这类带 DRM 的渠道与 CC BY-SA 4.0 第 2(a)(5) 条「不得附加有效技术措施」之间的关系，和已随包分发的 bigram/trigram 是同一个问题，需要维护者判断。
 
 退出方式：不安装 `offline-glosses/` 即可。释义退回只用 `english.db` 和在线翻译（macOS 26 及以上在没有选择翻译服务时还有系统自带的离线翻译，见 [PRIVACY.md](../PRIVACY.md#候选翻译macos-与-linux-新装默认用水杉账号)），其余功能不受影响。
+
+## 粤语与注音的数据（rime-cantonese、libchewing-data）
+
+粤语（粤拼）与注音（大千）两个方案的音节和词条来自两份固定提交的上游数据，由 `msime-dict-build languages` 转换成 `cantonese.db` 与 `zhuyin.db`。两份数据库放在资源目录的兄弟目录 `language-dictionaries/`，不进 `desktop-dictionary.lock.json`，上面「九个产物」不变；理由与 `offline-glosses/` 相同：资源目录必须和词库锁逐字节一致，而且只有 macOS 提供这两个方案。数据库不在时，这两个方案显示为不可用。
+
+| 组件 | 许可证 | 位置与说明 |
+| --- | --- | --- |
+| [rime/rime-cantonese](https://github.com/rime/rime-cantonese) 的 `jyut6ping3.chars.dict.yaml`、`jyut6ping3.words.dict.yaml`、`essay-cantonese.txt`，提交 `259f0e48bba840c3a2e0d117539e96937f3d89bc` | CC BY 4.0（作者为粤语计算语言学基础建设组 CanCLID；拼写采用香港语言学学会 LSHK 的粤拼方案）。全文、署名与改动说明在 `resources/licenses/rime-cantonese-CC-BY-4.0.txt` | 转换成 `cantonese.db`：去掉声调数字、音节以空格连接，字频与词频取自 `essay-cantonese.txt`。按 ODbL 发布的 `jyut6ping3.maps.dict.yaml`、来源不明且没有读音的 `jyut6ping3.phrase.dict.yaml` 和 `jyut6ping3.lettered.dict.yaml` 都不读取、不分发。CC BY 4.0 要求署名并说明改动，许可证文件已写明两者 |
+| [chewing/libchewing-data](https://github.com/chewing/libchewing-data) 的 `dict/chewing/tsi.csv`、`dict/chewing/word.csv`，提交 `c44e81aef24b06f1509f19e1be54c99812d0c43f` | LGPL-2.1-or-later（两个文件的文件头 `dc:license` 声明，Copyright (c) 2025 libchewing Core Team）。全文、版权行与固定提交的源码地址在 `resources/licenses/libchewing-data-LGPL-2.1.txt` | 转换成 `zhuyin.db`：词条按 `tsi.csv` 的词频排序，`word.csv` 补全单字。仓库里其他文件不使用；注音从不读 `msime.db`，也不经过简繁转换。上游数据原样未改时，随附许可证全文、版权行和固定提交的源码地址即满足 LGPL 的源码提供义务；若转换本身算作修改，对应的源码是本仓库以 GPL-3.0 发布的 `crates/dict-builder`。这一判断未经法务审阅 |
+
+两份数据的 URL、长度与 SHA-256 固定在 `resources/dictionary-sources.lock.json`。许可证文本经各平台的通知渠道分发，与下一节的 libhangul 汉字表相同：Windows 的 `Collect-Notices.ps1`，macOS 输入法包的 `Resources/Licenses`（`CMakeLists.txt` 与 `THIRD_PARTY_NOTICES.txt`），Linux 安装的声明（`CMakeLists.txt` 与 `data/THIRD_PARTY_NOTICES.txt`），Android 的 `assets/native-notices`（`build-native.sh`），iOS App 的资源（`project.yml`），HarmonyOS 的 `resfile/licenses`（`stage-resources.sh`）。除 macOS 外的平台目前不提供这两个方案，也不带数据库，但这些方案的代码随每一份引擎分发，统一一份渠道清单检查起来最简单。`scripts/test-language-data-notices.py` 检查许可证文本和这几处渠道都还在。
 
 ## 编译进共享库的数据
 

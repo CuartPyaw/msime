@@ -171,6 +171,10 @@ def main() -> int:
     # The engine embeds the Korean Hanja table from libhangul, whose BSD-3-Clause licence requires the notice in binary distributions.
     if not (contents / "Resources" / "Licenses" / "libhangul-hanja-BSD-3-Clause.txt").is_file():
         failures.append("Contents/Resources/Licenses/libhangul-hanja-BSD-3-Clause.txt is missing; the built-in Korean Hanja table ships without its licence")
+    # Cantonese and Zhuyin read dictionaries built from rime-cantonese (CC BY 4.0) and libchewing-data (LGPL-2.1-or-later). The notices ship unconditionally, so a build that later gains the dictionaries is never without them.
+    for notice in ("rime-cantonese-CC-BY-4.0.txt", "libchewing-data-LGPL-2.1.txt"):
+        if not (contents / "Resources" / "Licenses" / notice).is_file():
+            failures.append(f"Contents/Resources/Licenses/{notice} is missing; Cantonese and Zhuyin ship without the licence of their data")
 
     if failures:
         for failure in failures:
