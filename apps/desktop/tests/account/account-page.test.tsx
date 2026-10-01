@@ -73,7 +73,10 @@ test("code login trims the target, requires six ASCII digits and loads the profi
   await waitFor(() => expect(client.login).toHaveBeenCalledWith("fixture-challenge", "123456"));
   expect(await screen.findByText("水杉测试用户")).not.toBeNull();
   expect(onLoginComplete).toHaveBeenCalledOnce();
-  expect(screen.getByText("邮箱")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "编辑个人资料" }));
+  expect(
+    within(screen.getByRole("dialog", { name: "编辑个人资料" })).getByText("邮箱"),
+  ).not.toBeNull();
   expect(screen.queryByText("fixture-challenge")).toBeNull();
 });
 
@@ -106,10 +109,14 @@ test("profile rename, logout-all confirmation and account deletion use explicit 
     rename: vi.fn().mockResolvedValue({ user: renamed, providers: ["email"] }),
   });
   render(<AccountPage client={client} />);
-  const name = await screen.findByRole("textbox", { name: "社区昵称" });
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  // The profile dialog is the only place the nickname is edited; the page itself has no second nickname field.
+  expect(screen.getAllByRole("textbox", { name: /社区昵称/ })).toHaveLength(1);
+  const name = screen.getByRole("textbox", { name: "编辑社区昵称" });
   fireEvent.change(name, { target: { value: "  新昵称  " } });
-  fireEvent.click(screen.getByRole("button", { name: "保存昵称" }));
+  fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
   await waitFor(() => expect(client.rename).toHaveBeenCalledWith("新昵称"));
+  expect(await screen.findByText("昵称已更新。")).not.toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "退出所有设备" }));
   expect(screen.getByRole("alertdialog", { name: "确认退出所有设备" })).not.toBeNull();
@@ -157,18 +164,21 @@ test("a desktop profile rename response from a replaced client is ignored", asyn
     status: vi.fn().mockResolvedValue({ user }),
   });
   const view = render(<AccountPage client={oldClient} />);
-  const name = await screen.findByRole("textbox", { name: "社区昵称" });
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  const name = screen.getByRole("textbox", { name: "编辑社区昵称" });
   fireEvent.change(name, { target: { value: "旧客户端昵称" } });
-  fireEvent.click(screen.getByRole("button", { name: "保存昵称" }));
+  fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
   await waitFor(() => expect(oldClient.rename).toHaveBeenCalledWith("旧客户端昵称"));
 
   view.rerender(<AccountPage client={nextClient} />);
-  await screen.findByRole("textbox", { name: "社区昵称" });
+  await screen.findByRole("button", { name: "编辑个人资料" });
   await act(async () => {
     resolveOld({ user: { ...user, displayName: "响应旧昵称" }, providers: ["email"] });
     await Promise.resolve();
     await Promise.resolve();
   });
+  expect(screen.queryByText("响应旧昵称")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "编辑个人资料" }));
   expect(screen.queryByDisplayValue("响应旧昵称")).toBeNull();
 });
 
@@ -225,9 +235,7 @@ test("Harmony 2-in-1 uses desktop account controls even though its platform is H
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });
   render(<AccountPage client={client} platform="harmony" mobile={false} />);
 
-  expect(await screen.findByRole("heading", { name: "个人资料" })).not.toBeNull();
-  expect(screen.getByRole("heading", { name: "账号" })).not.toBeNull();
-  expect(screen.getByRole("button", { name: "保存昵称" })).not.toBeNull();
+  expect(await screen.findByRole("heading", { name: "账号" })).not.toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "编辑个人资料" }));
   expect(await screen.findByRole("dialog", { name: "编辑个人资料" })).not.toBeNull();
 });
@@ -246,8 +254,8 @@ test("settings passes the Harmony 2-in-1 form factor into the account page", asy
     />,
   );
 
-  expect(await screen.findByRole("heading", { name: "个人资料" })).not.toBeNull();
-  expect(screen.getByRole("heading", { name: "账号" })).not.toBeNull();
+  expect(await screen.findByRole("heading", { name: "账号" })).not.toBeNull();
+  expect(screen.getByRole("button", { name: "编辑个人资料" })).not.toBeNull();
 });
 
 test("the mobile login sheet exposes its caller's cancel action", async () => {
@@ -383,7 +391,10 @@ test("desktop Google sign-in runs through the native account client", async () =
   await waitFor(() => expect(googleLogin).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(onLoginComplete).toHaveBeenCalledTimes(1));
   expect(client.profile).toHaveBeenCalled();
-  expect(await screen.findByText("Google")).not.toBeNull();
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  expect(
+    await within(screen.getByRole("dialog", { name: "编辑个人资料" })).findByText("Google"),
+  ).not.toBeNull();
   expect(client.requestCode).not.toHaveBeenCalled();
   expect(screen.queryByText(/token|code|state/i)).toBeNull();
 });
@@ -508,7 +519,7 @@ test("mobile profile card opens a back-stack page with account actions", async (
 test("account deletion requires its destructive confirmation", async () => {
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });
   render(<AccountPage client={client} />);
-  await screen.findByRole("textbox", { name: "社区昵称" });
+  await screen.findByRole("button", { name: "编辑个人资料" });
   fireEvent.click(screen.getByRole("button", { name: "注销账号" }));
   expect(client.deleteAccount).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "确认注销账号" }));
@@ -543,7 +554,7 @@ test("an aborted profile request leaves the account page quiet", async () => {
       .mockRejectedValue(new DOMException("The user aborted a request.", "AbortError")),
   });
   render(<AccountPage client={client} />);
-  expect(await screen.findByRole("heading", { name: "个人资料" })).not.toBeNull();
+  expect(await screen.findByRole("heading", { name: "账号" })).not.toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
