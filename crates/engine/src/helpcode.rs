@@ -177,8 +177,9 @@ fn parse_helpcode_table(bytes: &[u8]) -> HashMap<String, String> {
 
 /// The annotation shown beside a candidate: a single character's full code, or the first letters of the first and last Han characters' codes; wrapped in parentheses; uppercase entirely when `uppercase_all`, else only the second letter (helpcode_utils.cpp:189-241). Empty when a code is missing.
 pub fn compute_helpcodes(word: &str, uppercase_all: bool, keymap: &HelpcodeKeymap) -> String {
-    let mut code = if count_han_chars(word) == 1 {
-        keymap.code(word).unwrap_or_default().to_owned()
+    let single = count_han_chars(word) == 1;
+    let (first, last) = if single {
+        (keymap.code(word), None)
     } else {
         let (Some(first), Some(last)) = (
             keymap.code(first_han_char(word)),
@@ -186,17 +187,38 @@ pub fn compute_helpcodes(word: &str, uppercase_all: bool, keymap: &HelpcodeKeyma
         ) else {
             return String::new();
         };
-        format!("{}{}", &first[..1], &last[..1])
+        (Some(first), Some(last))
     };
-    if code.is_empty() {
-        return code;
+    let Some(first) = first else {
+        return String::new();
+    };
+    if first.is_empty() {
+        return String::new();
     }
-    if uppercase_all {
-        code.make_ascii_uppercase();
-    } else if code.len() >= 2 {
-        code[1..2].make_ascii_uppercase();
+    let capacity = if single { first.len() + 2 } else { 4 };
+    let mut result = String::with_capacity(capacity);
+    result.push('(');
+    if single {
+        for (index, character) in first.chars().enumerate() {
+            result.push(if uppercase_all || index == 1 {
+                character.to_ascii_uppercase()
+            } else {
+                character
+            });
+        }
+    } else {
+        let character = first.chars().next().expect("helpcode is non-empty");
+        result.push(if uppercase_all {
+            character.to_ascii_uppercase()
+        } else {
+            character
+        });
+        let last = last.expect("multi-character helpcode has a last code");
+        let character = last.chars().next().expect("helpcode is non-empty");
+        result.push(character.to_ascii_uppercase());
     }
-    format!("({code})")
+    result.push(')');
+    result
 }
 
 /// Longer than one letter, not double mode, last letter uppercase.
@@ -527,10 +549,16 @@ mod tests {
     #[test]
     fn annotations() {
         let map = keymap(&[("阿", "ek"), ("姨", "nr"), ("一", "y")]);
-        assert_eq!(compute_helpcodes("阿", false, &map), "(eK)");
-        assert_eq!(compute_helpcodes("阿", true, &map), "(EK)");
+        let single = compute_helpcodes("阿", false, &map);
+        assert_eq!(single, "(eK)");
+        assert_eq!(single.capacity(), single.len());
+        let uppercase = compute_helpcodes("阿", true, &map);
+        assert_eq!(uppercase, "(EK)");
+        assert_eq!(uppercase.capacity(), uppercase.len());
         assert_eq!(compute_helpcodes("一", false, &map), "(y)");
-        assert_eq!(compute_helpcodes("阿姨", false, &map), "(eN)");
+        let pair = compute_helpcodes("阿姨", false, &map);
+        assert_eq!(pair, "(eN)");
+        assert_eq!(pair.capacity(), pair.len());
         assert_eq!(compute_helpcodes("A阿姨B", true, &map), "(EN)");
         assert_eq!(compute_helpcodes("阿好", false, &map), "");
         assert_eq!(compute_helpcodes("好", false, &map), "");
