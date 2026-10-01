@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ChatPage, type ChatClient, type ChatMessage } from "@msime/ui";
 import { answerConfirm } from "../support/confirm";
 
@@ -15,6 +15,14 @@ function client(overrides: Partial<ChatClient> = {}): ChatClient {
     complete: async (_messages: ChatMessage[], _model: string) => "fixture reply",
     ...overrides,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
 }
 
 test("loads models, sends a message, and starts a new conversation", async () => {
@@ -59,6 +67,26 @@ test("a message over the host's byte bound is refused before it is sent", async 
   expect((screen.getByRole("textbox", { name: "聊天消息" }) as HTMLTextAreaElement).value).toBe(
     long,
   );
+});
+
+test("sending ignores a same-tick duplicate submission", async () => {
+  const pending = deferred<string>();
+  const complete = vi.fn().mockReturnValue(pending.promise);
+  render(<ChatPage client={client({ complete })} />);
+  await screen.findByRole("combobox", { name: "聊天模型" });
+  fireEvent.change(screen.getByRole("textbox", { name: "聊天消息" }), {
+    target: { value: "duplicate fixture" },
+  });
+  const send = screen.getByRole("button", { name: "发送" });
+  act(() => {
+    fireEvent.click(send);
+    fireEvent.click(send);
+  });
+  expect(complete).toHaveBeenCalledOnce();
+  await act(async () => {
+    pending.resolve("fixture reply");
+  });
+  await screen.findByText("fixture reply");
 });
 
 test("shows an actionable error and retries the latest user message", async () => {
