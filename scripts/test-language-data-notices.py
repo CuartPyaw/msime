@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that the licences of the Cantonese and Zhuyin data travel through every platform's notice channel.
 
-The Cantonese (Jyutping) and Zhuyin (Dachen) schemes take their syllables and words from rime-cantonese (CC BY 4.0) and libchewing-data (LGPL-2.1-or-later). CC BY 4.0 requires the attribution and a note of the changes to travel with the adapted data, and the LGPL requires the licence text, the copyright notice and a pointer to the source. Only macOS and the mobile hosts offer the two schemes and ship their dictionaries, but the scheme code is in the engine every platform ships, so every platform's notice channel carries both texts, the way the libhangul Hanja table's does (scripts/test-korean-hanja-table.py), and one channel list keeps this check simple.
+The Cantonese (Jyutping) and Zhuyin (Dachen) schemes take their syllables and words from rime-cantonese (CC BY 4.0) and libchewing-data (LGPL-2.1-or-later). CC BY 4.0 requires the attribution and a note of the changes to travel with the adapted data, and the LGPL requires the licence text, the copyright notice and a pointer to the source. Every host offers the two schemes and ships their dictionaries, each beside the resources with its licence text in the same directory, and the scheme code is in the engine every platform ships, so every platform's notice channel carries both texts, the way the libhangul Hanja table's does (scripts/test-korean-hanja-table.py), and one channel list keeps this check simple.
 
 The licence files name the upstream commit they cover. When resources/dictionary-sources.lock.json pins a source, every pin of that repository has to be at the same commit, so a re-pin that forgets the notice fails here; a source the lock does not pin yet prints a skip line.
 """
@@ -41,9 +41,9 @@ NOTICE_CHANNELS = {
 }
 # The overviews say what each text covers, so they also have to name the pinned commit.
 OVERVIEWS = ("platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt", "platforms/linux/data/THIRD_PARTY_NOTICES.txt", "platforms/windows/Collect-Notices.ps1", "docs/third-party.md")
-# The vi crate behind Vietnamese mode is MIT. Windows and Linux collect crate licences from Cargo metadata, so only the macOS bundle, where Vietnamese ships and crates are listed by hand, carries its text explicitly.
+# The vi crate behind Vietnamese mode is MIT. The macOS bundle and the Windows package, where Vietnamese ships and notices are listed by hand, carry its text explicitly.
 VI_LICENCE = "resources/licenses/vi-MIT.txt"
-VI_CHANNELS = ("platforms/macos/CMakeLists.txt", "platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt", "platforms/macos/tests/settings/bundle_contents.py")
+VI_CHANNELS = ("platforms/macos/CMakeLists.txt", "platforms/macos/resources/Licenses/THIRD_PARTY_NOTICES.txt", "platforms/macos/tests/settings/bundle_contents.py", "platforms/windows/Collect-Notices.ps1", "platforms/windows/tests/tools/collect_notices.ps1")
 failures = []
 
 
@@ -89,7 +89,7 @@ def main() -> int:
         for failure in failures:
             print(f"FAIL: {failure}")
         return 1
-    print(f"language data notices: {len(LICENCES)} licences in {len(NOTICE_CHANNELS)} channels, vi in {len(VI_CHANNELS)} macOS channels")
+    print(f"language data notices: {len(LICENCES)} licences in {len(NOTICE_CHANNELS)} channels, vi in {len(VI_CHANNELS)} macOS and Windows channels")
     return 0
 
 

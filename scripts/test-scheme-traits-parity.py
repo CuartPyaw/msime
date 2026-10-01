@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Scheme traits agree across the engine, the macOS and Linux hosts and the settings page.
+"""Scheme traits agree across the engine, the macOS, Windows and Linux hosts and the settings page.
 
-The engine's `SchemeType` const fns (crates/engine/src/types.rs) are the one source of truth for what differs between input schemes, and input-runtime and host-api call them directly. Two places cannot: the macOS controller and the Linux IBus and Fcitx5 hosts decide from a view's `scheme` number in C++, so each platform's `InputSchemeTraits.h` copies the predicates the view does not publish, and the settings page is TypeScript, so it keeps its own lists of which schemes are Chinese. Each copy compiles and passes its own tests on its own values, and a scheme added or moved on one side alone shows up only as a key that behaves like the wrong language.
+The engine's `SchemeType` const fns (crates/engine/src/types.rs) are the one source of truth for what differs between input schemes, and input-runtime and host-api call them directly. Two places cannot: the macOS controller, the Windows Server and TIP, and the Linux IBus and Fcitx5 hosts decide from a view's `scheme` number in C++, so each platform's `InputSchemeTraits.h` copies the predicates the view does not publish, and the settings page is TypeScript, so it keeps its own lists of which schemes are Chinese. Each copy compiles and passes its own tests on its own values, and a scheme added or moved on one side alone shows up only as a key that behaves like the wrong language.
 
 The Android input service decides from the same number in Java, so `InputSchemeTraits.java` copies the predicates it needs the same way and is checked the same way as the header.
 
@@ -28,6 +28,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ENGINE = ROOT / "crates/engine/src/types.rs"
 HEADERS = (
     ROOT / "platforms/macos/src/input/InputSchemeTraits.h",
+    ROOT / "platforms/windows/common/InputSchemeTraits.h",
     ROOT / "platforms/linux/src/core/InputSchemeTraits.h",
 )
 ANDROID = ROOT / "platforms/android/java/app/msime/android/policy/InputSchemeTraits.java"

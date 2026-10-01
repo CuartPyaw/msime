@@ -6408,9 +6408,9 @@ fn host_options_carry_vietnamese_settings_and_language_dictionaries_to_the_engin
     );
 }
 
-/// Cantonese and Zhuyin run on every build but Windows once their dictionary is installed beside the resources, and fall back without it; Vietnamese needs no data and runs there regardless. Windows falls back from all three.
+/// Cantonese and Zhuyin run on every build once their dictionary is installed beside the resources, and fall back without it; Vietnamese needs no data and runs regardless.
 #[test]
-fn installed_language_dictionaries_enable_their_schemes_outside_windows() {
+fn installed_language_dictionaries_enable_their_schemes() {
     let root = tempfile::tempdir().expect("tempdir");
     let resources = root.path().join("resources");
     std::fs::create_dir_all(&resources).expect("resources");
@@ -6426,15 +6426,11 @@ fn installed_language_dictionaries_enable_their_schemes_outside_windows() {
             .into_engine_options()
             .scheme
     };
-    let runs = !cfg!(windows);
     // Without the directory both fall back to the last Chinese scheme, 五笔.
     assert_eq!(super::installed_language_dictionaries(&resources), None);
     assert_eq!(engine_scheme(InputScheme::Cantonese), 2);
     assert_eq!(engine_scheme(InputScheme::Zhuyin), 2);
-    assert_eq!(
-        engine_scheme(InputScheme::Vietnamese),
-        if runs { 7 } else { 2 }
-    );
+    assert_eq!(engine_scheme(InputScheme::Vietnamese), 7);
 
     let beside = root.path().join("language-dictionaries");
     std::fs::create_dir_all(&beside).expect("beside");
@@ -6444,15 +6440,9 @@ fn installed_language_dictionaries_enable_their_schemes_outside_windows() {
         super::installed_language_dictionaries(&resources).as_deref(),
         beside.to_str()
     );
-    assert_eq!(
-        engine_scheme(InputScheme::Cantonese),
-        if runs { 5 } else { 2 }
-    );
-    assert_eq!(engine_scheme(InputScheme::Zhuyin), if runs { 6 } else { 2 });
-    assert_eq!(
-        engine_scheme(InputScheme::Vietnamese),
-        if runs { 7 } else { 2 }
-    );
+    assert_eq!(engine_scheme(InputScheme::Cantonese), 5);
+    assert_eq!(engine_scheme(InputScheme::Zhuyin), 6);
+    assert_eq!(engine_scheme(InputScheme::Vietnamese), 7);
 }
 
 #[test]

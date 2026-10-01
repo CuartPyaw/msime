@@ -343,10 +343,11 @@ fn capabilities_round_trip_and_reject_unknown_keys() {
 }
 
 #[test]
-fn every_host_but_windows_offers_cantonese_zhuyin_and_vietnamese() {
+fn every_host_offers_cantonese_zhuyin_and_vietnamese() {
     use crate::preferences::InputScheme;
     for platform in [
         HostPlatform::Macos,
+        HostPlatform::Windows,
         HostPlatform::Linux,
         HostPlatform::Android,
         HostPlatform::Ios,
@@ -362,16 +363,6 @@ fn every_host_but_windows_offers_cantonese_zhuyin_and_vietnamese() {
             assert!(schemes.contains(&scheme), "{platform:?} {scheme:?}");
         }
     }
-    assert_eq!(
-        HostCapabilities::for_platform(HostPlatform::Windows).input_schemes,
-        [
-            InputScheme::Quanpin,
-            InputScheme::Shuangpin,
-            InputScheme::Wubi,
-            InputScheme::Japanese,
-            InputScheme::Korean,
-        ]
-    );
 }
 
 #[test]
@@ -385,13 +376,19 @@ fn capabilities_without_input_schemes_offer_the_base_five() {
     let decoded: HostCapabilities = serde_json::from_value(document).expect("deserializes");
     assert_eq!(
         decoded.input_schemes,
-        HostCapabilities::for_platform(HostPlatform::Windows).input_schemes
+        [
+            InputScheme::Quanpin,
+            InputScheme::Shuangpin,
+            InputScheme::Wubi,
+            InputScheme::Japanese,
+            InputScheme::Korean,
+        ]
     );
 }
 
 #[test]
 fn a_build_compiles_the_schemes_its_platform_offers() {
-    // Every target but Windows compiles all eight: macOS, desktop Linux, Android, iOS and HarmonyOS, which builds for `target_os = "linux"` but is told apart by `target_env = "ohos"`.
+    // Every target compiles all eight.
     let platform = if cfg!(target_os = "macos") {
         HostPlatform::Macos
     } else if cfg!(target_os = "android") {
