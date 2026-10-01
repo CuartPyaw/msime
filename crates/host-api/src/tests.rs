@@ -1317,6 +1317,113 @@ fn a_fallen_back_scheme_starts_in_the_nine_key_mode_a_rebuild_gives_it() {
 }
 
 #[test]
+fn nine_key_mode_follows_only_the_scheme_the_grid_spells() {
+    // The nine-key grid spells quanpin syllables only (`SchemeType::nine_key`): a nine-key layout starts nine-key in quanpin and stays off in every other scheme, at creation and on a rebuild alike.
+    for scheme in [
+        InputScheme::Quanpin,
+        InputScheme::Shuangpin,
+        InputScheme::Wubi,
+        InputScheme::Japanese,
+        InputScheme::Korean,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let preferences = Preferences {
+            scheme,
+            touch_keyboard_layout: TouchKeyboardLayout::NineKey,
+            ..chinese_preferences()
+        };
+        let handle = test_host_preferences(dir.path(), preferences.clone());
+        let expected = scheme == InputScheme::Quanpin;
+        assert_eq!(
+            read(msime_client_view(handle))["value"]["nine_key"],
+            expected,
+            "{scheme:?} at creation"
+        );
+        let rebuilt = update(
+            handle,
+            1,
+            &Preferences {
+                candidate_page_size: 4,
+                ..preferences
+            },
+        );
+        assert_eq!(
+            rebuilt["value"]["view"]["nine_key"], expected,
+            "{scheme:?} after a rebuild"
+        );
+        read(msime_client_destroy(handle));
+    }
+}
+
+#[test]
+fn the_repeat_gesture_arms_only_in_schemes_with_host_smart_punctuation() {
+    // The repeat gesture is host smart punctuation (`SchemeType::host_smart_punctuation`), the same gate the punctuation route reads: it arms in the pinyin and wubi schemes, never in Japanese or Korean.
+    for (scheme, arms) in [
+        (InputScheme::Quanpin, true),
+        (InputScheme::Shuangpin, true),
+        (InputScheme::Wubi, true),
+        (InputScheme::Japanese, false),
+        (InputScheme::Korean, false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let handle = test_host_preferences(
+            dir.path(),
+            Preferences {
+                scheme,
+                smart_punctuation: true,
+                smart_punctuation_repeat: true,
+                ..chinese_preferences()
+            },
+        );
+        let arm = json!({"ascii": b'.', "commit": ".", "timestamp_ms": 1, "editor_generation": 1, "auto_closed_pair": false}).to_string();
+        // SAFETY: the buffer outlives the call.
+        let armed =
+            read(unsafe { msime_client_smart_punctuation_arm(handle, arm.as_ptr(), arm.len()) });
+        assert_eq!(armed["ok"], true);
+        assert_eq!(!armed["value"]["repeat"].is_null(), arms, "{scheme:?}");
+        read(msime_client_destroy(handle));
+    }
+}
+
+#[test]
+fn japanese_candidates_ask_for_no_translation() {
+    // Only the schemes that show glosses (`SchemeType::shows_glosses`) plan a translation query; Japanese candidates never carry one.
+    let dir = tempfile::tempdir().unwrap();
+    let handle = test_host_preferences(
+        dir.path(),
+        Preferences {
+            scheme: InputScheme::Japanese,
+            candidate_translations: true,
+            ..chinese_preferences()
+        },
+    );
+    read(msime_client_focus(handle, true));
+    let typed = read(msime_client_character(handle, b'a', false));
+    assert!(!typed["value"]["view"]["candidates"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        read(msime_client_translation_query(handle))["value"],
+        Value::Null
+    );
+    read(msime_client_destroy(handle));
+}
+
+#[test]
+fn the_c_header_aliases_the_candidate_list_command_and_extends_the_scheme_legend() {
+    const HEADER: &str = include_str!("../include/msime_client.h");
+    // One command number under two names: hosts written for Korean keep MSIME_CONVERT_HANJA, and the dispatch reads 16 either way.
+    assert!(HEADER.contains("MSIME_CONVERT_HANJA = 16,"));
+    assert!(HEADER.contains("MSIME_OPEN_CANDIDATE_LIST = 16,"));
+    // platforms/android/check-host.sh greps the Korean legend line, so it stays as it was.
+    assert!(HEADER.contains("4 korean (preferences scheme \"korean\")"));
+    for legend in ["5 cantonese", "6 zhuyin", "7 vietnamese"] {
+        assert!(HEADER.contains(legend), "{legend} missing from the legend");
+    }
+}
+
+#[test]
 fn nine_key_digits_offer_ranked_english_across_the_host_boundary() {
     use msime_client_core::preferences::MixedInputPreferences;
 

@@ -31,13 +31,13 @@ use msime_client_core::voice::doubao_frame::{
 };
 use msime_client_core::voice::VoiceSessionState;
 use msime_engine::host::{CandidateEdge, Command, EngineOptions, Session};
+use msime_engine::SchemeType;
 use msime_input_runtime::HandwritingQuery;
 #[cfg(unix)]
 use msime_input_runtime::UnixSocketProvider;
 use msime_input_runtime::{
     Action, AiAssistantProviderConfig, CandidateId, CharacterWidth, NineKeySpellingId,
     OnlineCandidate, OnlineQuery, Reranker, Runtime, SentenceModel, Transition, TranslationService,
-    KOREAN_SCHEME,
 };
 #[cfg(unix)]
 use msime_input_runtime::{EmojiPanelQuery, TranslationQuery};
@@ -432,12 +432,13 @@ impl HostSession {
         }
         let layout_changed =
             snapshot.preferences.touch_keyboard_layout != self.applied.touch_keyboard_layout;
-        let next_nine_key_override = if options.scheme == 0 && !layout_changed {
+        let nine_key_scheme = SchemeType::from_u8(options.scheme).is_some_and(SchemeType::nine_key);
+        let next_nine_key_override = if nine_key_scheme && !layout_changed {
             self.nine_key_override
         } else {
             None
         };
-        let nine_key_mode = options.scheme == 0
+        let nine_key_mode = nine_key_scheme
             && next_nine_key_override.unwrap_or(matches!(
                 snapshot.preferences.touch_keyboard_layout,
                 TouchKeyboardLayout::NineKey
@@ -508,11 +509,12 @@ impl HostSession {
             let prior = result.diagnostic.take().unwrap_or_default();
             result.diagnostic = Some(format!("{prior} {note}").trim().to_owned());
         }
-        // A replacement changes the view generation, never the completed commit. Korean writes half-width ASCII punctuation and digits whatever the width switch says; the dedicated English mode keeps its own rules in every scheme, so its commits are widened as they are under a Chinese scheme.
-        let korean_text = result.view.scheme == KOREAN_SCHEME
+        // A replacement changes the view generation, never the completed commit. A scheme that does not widen (Korean) writes half-width ASCII punctuation and digits whatever the width switch says; the dedicated English mode keeps its own rules in every scheme, so its commits are widened as they are under a Chinese scheme.
+        let half_width_text = SchemeType::from_u8(result.view.scheme)
+            .is_some_and(|scheme| !scheme.widens_full_width())
             && !result.view.dedicated_english
             && result.view.local_mode == "none";
-        if result.view.character_width == CharacterWidth::Fullwidth && !korean_text {
+        if result.view.character_width == CharacterWidth::Fullwidth && !half_width_text {
             if let Some(c) = result.commit.as_mut() {
                 *c = c
                     .chars()
