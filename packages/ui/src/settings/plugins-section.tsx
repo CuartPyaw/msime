@@ -267,11 +267,15 @@ export function PluginsSection({
   // After an import or removal that already succeeded: a failed reread is reported as such, not as a failed import or removal.
   const refresh = async () => {
     if (!client) return;
+    const generation = clientGeneration.current;
     try {
-      setCatalog(await client.catalog());
+      const next = await client.catalog();
+      if (generation !== clientGeneration.current) return;
+      setCatalog(next);
       setCatalogLoaded(true);
     } catch (error) {
-      onError(pluginErrorMessage(error, "无法读取扩展包列表，请重试。"));
+      if (generation === clientGeneration.current)
+        onError(pluginErrorMessage(error, "无法读取扩展包列表，请重试。"));
     }
   };
 
@@ -300,8 +304,9 @@ export function PluginsSection({
   }
 
   const importPack = async (source: "folder" | "archive") => {
-    await runPluginAction(async () => {
+    await runPluginAction(async (isCurrent) => {
       const imported = await client!.importPack(source);
+      if (!isCurrent()) return;
       if (imported) {
         setNotice(`已导入${kindLabels[imported.kind]}「${imported.name}」${imported.version}。`);
         await refresh();
@@ -317,8 +322,9 @@ export function PluginsSection({
       danger: true,
     });
     if (!confirmed) return;
-    await runPluginAction(async () => {
+    await runPluginAction(async (isCurrent) => {
       await client!.remove(pack.kind, pack.id);
+      if (!isCurrent()) return;
       onChange(withoutRemovedPack(preferences, pack.kind, pack.id));
       await refresh();
     }, "删除失败，请重试。");
@@ -341,9 +347,10 @@ export function PluginsSection({
     );
   const saveMentions = async () => {
     if (mentionIssue) return;
-    await runPluginAction(async () => {
+    await runPluginAction(async (isCurrent) => {
       const trimmed = mentions.map((entry) => ({ text: entry.text.trim(), key: entry.key }));
       await client!.saveMentions(trimmed);
+      if (!isCurrent()) return;
       setMentions(trimmed);
       setSavedMentions(trimmed);
     }, "名单未能保存，请重试。");
