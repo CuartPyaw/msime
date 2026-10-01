@@ -32,6 +32,8 @@ export interface SettingsFormFactorProjection {
   typingEffects: boolean;
   /** 背单词书目列出单词本插件：设置页把插件目录交给背单词入口；插件只能在 2in1 的插件页安装，所以只在 2in1 声明。 */
   wordbookPacks: boolean;
+  /** 表情面板的颜文字页和符号页列出符号集插件的组：插件只能在 2in1 的插件页安装，手机面板也不去读，所以只在 2in1 声明。 */
+  symbolSetPacks: boolean;
 }
 
 /** Keep the shared settings page aligned with the keyboard's actual device form factor. */
@@ -60,6 +62,7 @@ export class SettingsFormFactorCapabilities {
       pluginTriggers: desktop,
       typingEffects: desktop,
       wordbookPacks: desktop,
+      symbolSetPacks: desktop,
     };
   }
 }

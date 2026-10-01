@@ -32,6 +32,10 @@ import {
   normalizeGroups,
   normalizeSymbolGroups,
 } from "../entry/src/main/ets/keyboard/emoji/EmojiCatalogModel";
+import {
+  MAX_PLUGIN_SYMBOL_GROUPS,
+  PluginSymbolGroupPolicy,
+} from "../entry/src/main/ets/keyboard/emoji/PluginSymbolGroupPolicy";
 import { CandidateWrapPolicy } from "../entry/src/main/ets/keyboard/candidate/CandidateWrapPolicy";
 import { ExpandedCandidateLayout } from "../entry/src/main/ets/keyboard/candidate/ExpandedCandidateLayout";
 import { CandidateChipWidth } from "../entry/src/main/ets/keyboard/candidate/CandidateChipWidth";
@@ -948,6 +952,10 @@ group("projects the same form factor into every settings capability", () => {
   check(
     desktop.wordbookPacks && !phone.wordbookPacks,
     "only the 2-in-1, where packs are installed, lists wordbook packs in 背单词",
+  );
+  check(
+    desktop.symbolSetPacks && !phone.symbolSetPacks,
+    "only the 2-in-1, where packs are installed, shows symbol set packs in the emoji panel",
   );
   check(
     !phone.keySound && !phone.music && !phone.pluginTriggers && !phone.typingEffects,
@@ -6730,6 +6738,162 @@ group("engine catalog groups are bounded before reaching the touch panel", () =>
     "an oversized symbol list is rejected as empty",
   );
   check(normalizeSymbolGroups(undefined).length === 0, "a malformed symbol response is empty");
+});
+
+group("symbol set packs are appended after the built-in kaomoji and symbol groups", () => {
+  // 合成的插件回复：两个插件按名称排好序，组按清单顺序。
+  const plugins = PluginSymbolGroupPolicy.parse([
+    {
+      pack: "arrows-pack",
+      pack_name: "Math",
+      tab: "symbols",
+      title: "Arrows",
+      keywords: "arrow 箭头",
+      items: ["→", "←"],
+    },
+    {
+      pack: "arrows-pack",
+      pack_name: "Math",
+      tab: "kaomoji",
+      title: "Happy",
+      keywords: "",
+      items: ["(^_^)"],
+    },
+    {
+      pack: "arrows-pack",
+      pack_name: "Math",
+      tab: "symbols",
+      title: "More",
+      keywords: "",
+      items: ["→", "⇒"],
+    },
+    {
+      pack: "stars-pack",
+      pack_name: "星星",
+      tab: "symbols",
+      title: "Stars",
+      keywords: "star",
+      items: ["★"],
+    },
+    {
+      pack: "stars-pack",
+      pack_name: "星星",
+      tab: "kaomoji",
+      title: "Happy",
+      keywords: "smile",
+      items: ["(^o^)"],
+    },
+  ]);
+  check(
+    plugins.length === 5 && plugins[0].packName === "Math",
+    "valid plugin groups are kept in order",
+  );
+
+  const symbols = PluginSymbolGroupPolicy.symbolTabs(
+    [
+      { parent: "Math", title: "Math" },
+      { parent: "Math", title: "Numbers" },
+      { parent: "Arrows and lines", title: "Arrows" },
+    ],
+    plugins,
+  );
+  check(
+    symbols.map((tab) => tab.title).join(",") === "Math,Arrows,Math,星星",
+    "each built-in parent keeps its first title and each pack follows as its own parent named after it",
+  );
+  check(
+    symbols[0].catalogParent === "Math" && !symbols[0].plugin && symbols[0].items.length === 0,
+    "a built-in symbol tab is still read from the catalog by its parent",
+  );
+  check(
+    new Set(symbols.map((tab) => tab.key)).size === symbols.length,
+    "a pack named like a built-in parent still has its own tab key",
+  );
+  check(
+    symbols[2].plugin && symbols[2].items.map((item) => item.text).join("") === "→←→⇒",
+    "a pack's symbols groups run in manifest order with nothing deduplicated",
+  );
+  check(
+    symbols[2].items[0].annotation === "arrow 箭头" && symbols[2].items[2].annotation === "",
+    "each item carries its own group's keywords",
+  );
+
+  const kaomoji = PluginSymbolGroupPolicy.kaomojiTabs(["All", "Happy"], plugins);
+  check(
+    kaomoji.map((tab) => tab.title).join(",") === "All,Happy,Happy,Happy",
+    "plugin kaomoji groups follow the built-in ones, one tab per group, not merged by title",
+  );
+  check(
+    kaomoji[1].catalogGroup === "Happy" && kaomoji[2].plugin && kaomoji[2].catalogGroup === "",
+    "only built-in kaomoji tabs are read from the catalog",
+  );
+  check(
+    new Set(kaomoji.map((tab) => tab.key)).size === kaomoji.length,
+    "kaomoji tabs with the same title keep distinct keys",
+  );
+
+  const searched = PluginSymbolGroupPolicy.pluginItems(symbols);
+  check(
+    searched.length === 5 &&
+      searched.some((item) => EmojiPanelKeyPolicy.matches(item.text, item.annotation, "箭头")) &&
+      searched.some((item) => EmojiPanelKeyPolicy.matches(item.text, item.annotation, "STAR")) &&
+      searched.some((item) => EmojiPanelKeyPolicy.matches(item.text, item.annotation, "⇒")),
+    "plugin items are searched by their group's keywords and by their own text",
+  );
+
+  const empty = PluginSymbolGroupPolicy.symbolTabs([{ parent: "Math", title: "Math" }], []);
+  check(
+    empty.length === 1 && PluginSymbolGroupPolicy.kaomojiTabs(["All"], []).length === 1,
+    "without plugins the panel keeps only the built-in groups",
+  );
+  check(
+    PluginSymbolGroupPolicy.symbolTabs([], plugins)
+      .map((tab) => tab.title)
+      .join(",") === "Math,星星",
+    "plugin groups still show when the built-in catalog is unavailable",
+  );
+});
+
+group("plugin symbol groups are validated before they reach the panel", () => {
+  const valid = {
+    pack: "p",
+    pack_name: "P",
+    tab: "symbols",
+    title: "T",
+    keywords: "k",
+    items: ["a"],
+  };
+  const parsed = PluginSymbolGroupPolicy.parse([
+    valid,
+    { ...valid, tab: "emoji" },
+    { ...valid, title: "  " },
+    { ...valid, pack_name: "x".repeat(129) },
+    { ...valid, items: "a" },
+    { ...valid, items: ["", " ", "x".repeat(65), 7] },
+    { ...valid, keywords: 3, items: ["b", "", "c"] },
+    null,
+    "not an object",
+  ]);
+  check(
+    parsed.length === 2 && parsed[1].keywords === "" && parsed[1].items.join("") === "bc",
+    "bad groups and bad items are dropped, a missing keyword list reads as none",
+  );
+  check(
+    PluginSymbolGroupPolicy.parse(undefined).length === 0 &&
+      PluginSymbolGroupPolicy.parse({ plugin_symbol_groups: [valid] }).length === 0,
+    "a malformed reply leaves only the built-in groups",
+  );
+  check(
+    PluginSymbolGroupPolicy.parse(Array.from({ length: MAX_PLUGIN_SYMBOL_GROUPS + 5 }, () => valid))
+      .length === MAX_PLUGIN_SYMBOL_GROUPS,
+    "an oversized reply is cut at the group ceiling rather than discarded",
+  );
+  check(
+    PluginSymbolGroupPolicy.parse([
+      { ...valid, items: Array.from({ length: 600 }, (_u, i) => `${i}`) },
+    ])[0].items.length === 512,
+    "a group is cut at the item ceiling",
+  );
 });
 
 function clip(text: string, at: number, pinned = false): ClipboardHistoryItem {

@@ -111,6 +111,9 @@ import {
   normalizeGroups, normalizeSymbolGroups
 } from './emoji/EmojiCatalogModel';
 import {
+  PluginSymbolGroup, PluginSymbolGroupDocument, PluginSymbolGroupPolicy
+} from './emoji/PluginSymbolGroupPolicy';
+import {
   SmartPunctuationRepeatPolicy, SmartPunctuationRepeatSnapshot
 } from './input/SmartPunctuationRepeatPolicy';
 import { BackspaceHoldPolicy } from './input/BackspaceHoldPolicy';
@@ -308,6 +311,9 @@ interface EmojiQuery {
   list_symbol_groups: boolean;
   parent: string;
   search: string;
+  // 只有列符号集插件组时才带插件目录；其余请求传 null，native 按未提供处理。
+  list_plugin_symbol_groups: boolean;
+  plugins: string | null;
 }
 
 export interface EmojiRow {
@@ -345,6 +351,16 @@ interface EmojiSymbolGroups {
 interface EmojiSymbolGroupsResponse {
   ok: boolean;
   value: EmojiSymbolGroups;
+  error: string;
+}
+
+interface PluginSymbolGroups {
+  plugin_symbol_groups: PluginSymbolGroupDocument[];
+}
+
+interface PluginSymbolGroupsResponse {
+  ok: boolean;
+  value: PluginSymbolGroups;
   error: string;
 }
 
@@ -4942,7 +4958,9 @@ export class KeyboardSession implements HardwareKeyTarget {
       list_groups: false,
       list_symbol_groups: false,
       parent: parent,
-      search: search
+      search: search,
+      list_plugin_symbol_groups: false,
+      plugins: null
     };
     try {
       const response: EmojiResponse =
@@ -4969,7 +4987,9 @@ export class KeyboardSession implements HardwareKeyTarget {
       list_groups: true,
       list_symbol_groups: false,
       parent: '',
-      search: ''
+      search: '',
+      list_plugin_symbol_groups: false,
+      plugins: null
     };
     try {
       const raw: string = client.emojiCatalog(JSON.stringify(query), this.resourceDirectory);
@@ -4994,7 +5014,9 @@ export class KeyboardSession implements HardwareKeyTarget {
       list_groups: false,
       list_symbol_groups: true,
       parent: '',
-      search: ''
+      search: '',
+      list_plugin_symbol_groups: false,
+      plugins: null
     };
     try {
       const raw: string = client.emojiCatalog(JSON.stringify(query), this.resourceDirectory);
@@ -5005,6 +5027,42 @@ export class KeyboardSession implements HardwareKeyTarget {
       return normalizeSymbolGroups(response.value.symbol_groups);
     } catch (error) {
       KeyboardLog.error(`emoji symbol groups unavailable: ${describeError(error)}`);
+      return [];
+    }
+  }
+
+  /**
+   * 已安装符号集插件的组，读自 `<stateDirectory>/plugins`，与设置页交给插件管理的是同一个目录。
+   *
+   * 不依赖 `others.db`；读不出来时返回空表，表情面板照旧只显示内置内容。
+   */
+  pluginSymbolGroups(): PluginSymbolGroup[] {
+    if (this.stateDirectory.length === 0 || this.resourceDirectory.length === 0) {
+      return [];
+    }
+    const query: EmojiQuery = {
+      category: 'symbols',
+      limit: 1,
+      offset: 0,
+      group: '',
+      cursor: false,
+      list_groups: false,
+      list_symbol_groups: false,
+      parent: '',
+      search: '',
+      list_plugin_symbol_groups: true,
+      plugins: `${this.stateDirectory}/plugins`
+    };
+    try {
+      const raw: string = client.emojiCatalog(JSON.stringify(query), this.resourceDirectory);
+      const response: PluginSymbolGroupsResponse = JSON.parse(raw) as PluginSymbolGroupsResponse;
+      if (!response.ok) {
+        KeyboardLog.error(`plugin symbol groups refused: ${response.error}`);
+        return [];
+      }
+      return PluginSymbolGroupPolicy.parse(response.value.plugin_symbol_groups);
+    } catch (error) {
+      KeyboardLog.error(`plugin symbol groups unavailable: ${describeError(error)}`);
       return [];
     }
   }

@@ -1430,6 +1430,7 @@ class SettingsBridge {
       value['plugin_triggers'] = projection.pluginTriggers;
       value['typing_effects'] = projection.typingEffects;
       value['wordbook_packs'] = projection.wordbookPacks;
+      value['symbol_set_packs'] = projection.symbolSetPacks;
       if (release !== null) {
         value['os_version'] = release;
       }
