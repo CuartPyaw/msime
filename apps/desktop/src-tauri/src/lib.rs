@@ -2581,7 +2581,7 @@ struct InputSourceStartupStatus {
     enabled: Option<bool>,
     bundled_version: Option<String>,
     installed_version: Option<String>,
-    /// Copies of the input method in `/Library/Input Methods`, read at the time of the request like `enabled`. They compete with the user's copy and need an administrator to remove, which the setup guide asks the user to do.
+    /// Copies of the input method in `/Library/Input Methods`, read at the time of the request like `enabled`. They compete with the user's copy and need an administrator to remove, which the settings page status notice asks the user to do.
     system_bundles: Vec<String>,
 }
 
@@ -2661,7 +2661,7 @@ fn run_input_source_startup(
     Some(status)
 }
 
-/// The start-time result with `enabled` and `system_bundles` read at the time of the call rather than when that check ran. The setup guide asks again whenever the window regains focus and while it is waiting for the user to act in System Settings or Finder, so this must stay cheap: it never copies or registers anything, only waits for the one start-time check, reads the input source list and looks for a few paths.
+/// The start-time result with `enabled` and `system_bundles` read at the time of the call rather than when that check ran. The settings page may ask again at any time, so this must stay cheap: it never copies or registers anything, only waits for the one start-time check, reads the input source list and looks for a few paths.
 #[cfg(target_os = "macos")]
 fn input_source_status_now(
     state: &InputSourceStartupState,

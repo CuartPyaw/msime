@@ -62,6 +62,14 @@ export function InputSourceStartupNotice({
           </button>
         </p>
       )}
+      {status.system_bundles?.length ? (
+        <p>
+          「/Library/Input
+          Methods」里还有一份水杉输入法，会让输入法列表出现重复项，或用上较旧的版本。请在「访达」中按
+          Shift+Command+G 前往该文件夹，把 {status.system_bundles.join("、")}{" "}
+          移到废纸篓（需要管理员密码），然后注销并重新登录。
+        </p>
+      ) : null}
       <button type="button" className="secondary" onClick={onDismiss}>
         知道了
       </button>

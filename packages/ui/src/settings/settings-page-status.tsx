@@ -33,7 +33,9 @@ export function SettingsPageStatus({
     <>
       <SettingsStatusMessages busy={busy} onError={onError} {...statusProps} />
       {inputSourceStartup &&
-        (inputSourceStartup.action !== "up_to_date" || inputSourceStartup.enabled === false) && (
+        (inputSourceStartup.action !== "up_to_date" ||
+          inputSourceStartup.enabled === false ||
+          Boolean(inputSourceStartup.system_bundles?.length)) && (
           <InputSourceStartupNotice
             status={inputSourceStartup}
             onOpenSettings={onOpenSettings}

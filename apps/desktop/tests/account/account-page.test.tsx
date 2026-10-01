@@ -819,37 +819,24 @@ test("iOS exposes My and alternate icons without a fake account client", async (
   expect(screen.queryByText("欢迎来到水杉")).toBeNull();
 });
 
-test("macOS settings offer the input method setup guide again only when the start-time status is available", async () => {
+test("macOS settings offer no setup guide to replay; the status notice covers the input source", async () => {
   const replay = vi.fn();
-  const inputSourceStartup = {
-    status: vi.fn().mockResolvedValue(null),
-    openSettings: vi.fn().mockResolvedValue(undefined),
-  };
-  const macos = { platform: "macos" } as never;
-  const without = render(
-    <SettingsPage
-      client={{ load: async () => preferences, save: vi.fn(), account: account(), host: macos }}
-      initialPage="account"
-      onReplayOnboarding={replay}
-    />,
-  );
-  await screen.findByText("欢迎来到水杉");
-  expect(screen.queryByRole("button", { name: "重新查看新手引导" })).toBeNull();
-  without.unmount();
-
   render(
     <SettingsPage
       client={{
         load: async () => preferences,
         save: vi.fn(),
         account: account(),
-        host: macos,
-        inputSourceStartup,
+        host: { platform: "macos" } as never,
+        inputSourceStartup: {
+          status: vi.fn().mockResolvedValue(null),
+          openSettings: vi.fn().mockResolvedValue(undefined),
+        },
       }}
       initialPage="account"
       onReplayOnboarding={replay}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "重新查看新手引导" }));
-  expect(replay).toHaveBeenCalledOnce();
+  await screen.findByText("欢迎来到水杉");
+  expect(screen.queryByRole("button", { name: "重新查看新手引导" })).toBeNull();
 });
