@@ -558,6 +558,9 @@ pub struct Preferences {
     pub candidate_layout: CandidateLayout,
     #[serde(default)]
     pub candidate_preedit_style: CandidatePreeditStyle,
+    /// Show the current/total page text in Linux candidate panels, independently of preedit.
+    #[serde(default = "enabled_by_default")]
+    pub show_candidate_page_number: bool,
     #[serde(default)]
     pub tsf_preedit_style: PreeditStyle,
     #[serde(default)]
@@ -1642,6 +1645,7 @@ impl Default for Preferences {
             custom_theme: default_custom_theme(),
             candidate_layout: CandidateLayout::default(),
             candidate_preedit_style: CandidatePreeditStyle::default(),
+            show_candidate_page_number: true,
             tsf_preedit_style: PreeditStyle::default(),
             diagnostic_log: DiagnosticLogPreferences::default(),
             ui_backend: UiBackend::default(),

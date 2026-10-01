@@ -177,6 +177,14 @@ if(BUILD_TESTING)
           "${MSIME_FCITX5_TEST_RESOURCES}" "${MSIME_HOST_LIBRARY}"
           "$<TARGET_FILE:msime-fcitx5>")
       find_program(XVFB_RUN xvfb-run)
+      if(XVFB_RUN)
+        add_test(NAME fcitx5-page-number-visibility
+          COMMAND "${XVFB_RUN}" -a "${DBUS_RUN_SESSION}" --
+            "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/daemon.py"
+            "${MSIME_FCITX5_TEST_RESOURCES}" "${MSIME_HOST_LIBRARY}"
+            "$<TARGET_FILE:msime-fcitx5>" --page-number)
+        set_tests_properties(fcitx5-page-number-visibility PROPERTIES TIMEOUT 60)
+      endif()
       find_program(XDOTOOL xdotool)
       if(XVFB_RUN AND XDOTOOL)
         add_test(NAME fcitx5-gtk-editor

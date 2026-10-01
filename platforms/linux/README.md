@@ -241,7 +241,7 @@ Fcitx5 的候选表由 classicui 插件按主题绘制，宿主把同一份 Reso
 
 `tsf_preedit_style` 在 Linux IBus 中映射为：`raw` 显示 Engine 的 ASCII `editing_text`，`pinyin` 显示 Engine 的 `preedit`，`empty` 隐藏预编辑；设置热重载会更新当前会话的显示样式。IBus 预编辑（包括语音的流式预编辑）与 Fcitx5 一样整段加单下划线，是 Windows 组合串点状下划线（`TF_LS_DOT`）在 Linux 上的对应形式；`empty` 样式和清除预编辑时不带下划线。候选与上屏仍由 Engine 的共享状态决定。
 
-`candidate_preedit_style` 在 Linux 中映射为候选面板辅助文本：`pinyin` 在页码后显示当前拼音，`empty` 只显示页码和模式标签；设置热重载立即更新现有会话。
+`candidate_preedit_style` 在 Linux 中映射为候选面板辅助文本：`pinyin` 显示当前拼音，`empty` 隐藏拼音。`show_candidate_page_number` 独立控制当前页/总页数，默认 `true` 保持旧版行为；设置页「候选窗口 → 预编辑 → 显示页码」可以关闭它。两者都隐藏且没有模式标签或连击提示时，辅助行不显示。IBus 与 Fcitx5 都支持此设置，设置热重载立即更新现有会话，翻页快捷键和候选选择不受影响。
 
 双拼方案提供 IBus 属性“双拼原始预编辑”，对应共享 `shuangpin_preedit_uses_raw`：开启时预编辑保留原始双拼编码，关闭时显示 Engine 展开的拼音。该选项仅在双拼方案下可用；有共享偏好目录时按 revision 持久化并由 Engine 在组合空闲后应用，没有偏好目录时切换会结束当前组合并重建当前会话。
 

@@ -140,6 +140,7 @@ export function AppearanceSettingsPage() {
             preferences={draft}
             mobile={mobilePlatform}
             showShuangpinPreedit={showShuangpinPreedit}
+            showPageNumber={host?.candidate_page_number === true}
             inlinePreedit={mobileKeyboardFeedback?.inlinePreedit}
             inlinePreeditBusy={mobileKeyboardFeedbackBusy}
             onChange={appearanceActions.onPreferencesChange}

@@ -5870,9 +5870,10 @@ void FcitxState::refreshToolbar() {
 std::string FcitxState::candidateAux() const {
   std::string aux = std::to_string(view_.at("page").get<int>() + 1) +
       "/" + std::to_string(view_.at("page_count").get<int>());
+  if (!preferences_.value("show_candidate_page_number", true)) aux.clear();
   const auto mode = view_.value("local_mode", std::string("none"));
   if (const char *modeLabel = msime::linux_host::candidate_local_mode_label(mode))
-    aux += " · " + std::string(modeLabel);
+    aux += (aux.empty() ? "" : " · ") + std::string(modeLabel);
   if (preferences_.value("candidate_preedit_style", std::string("pinyin")) == "pinyin") {
     const auto candidatePreedit = view_.value("preedit", std::string{});
     if (!candidatePreedit.empty()) {
@@ -5880,11 +5881,11 @@ std::string FcitxState::candidateAux() const {
       const auto caret = std::min(editing.size(), view_.value("caret_position", editing.size()));
       const auto displayed = msime::linux_host::candidate_preedit_with_caret(
           candidatePreedit, editing, caret);
-      if (!displayed.empty()) aux += " · " + displayed;
+      if (!displayed.empty()) aux += (aux.empty() ? "" : " · ") + displayed;
     }
   }
   const auto combo = msime::linux_host::typing_combo_label(typing_combo_);
-  if (!combo.empty()) aux += " · " + combo;
+  if (!combo.empty()) aux += (aux.empty() ? "" : " · ") + combo;
   return aux;
 }
 
