@@ -1788,6 +1788,24 @@ struct KeyboardView {
     return colors;
   }
 
+  /** The 2in1 card's radius: the user's, then the package's, then the HarmonyOS PC window's 16. */
+  private candidateCardRadius(): number {
+    return this.settings.candidateCornerRadiusVp ?? KeyboardMetrics.CANDIDATE_CARD_CORNER_VP;
+  }
+
+  /** A 2in1 row's radius: never rounder than a card radius the user chose; a package's radius leaves the rows as they were drawn before the setting existed. */
+  private candidateItemRadius(): number {
+    return this.settings.candidateCornerRadiusUser
+      ? Math.min(KeyboardMetrics.CANDIDATE_ITEM_CORNER_VP, this.candidateCardRadius())
+      : KeyboardMetrics.CANDIDATE_ITEM_CORNER_VP;
+  }
+
+  /** A card fill or border with the user's window opacity applied; the touch strip is part of the keyboard and stays as it is. */
+  private candidateCardColor(colour: string): string {
+    return KeyboardFormFactor.isDesktop()
+      ? GlobalTheme.withOpacity(colour, this.settings.candidateWindowOpacity) : colour;
+  }
+
   private candidateTextColor(): string {
     return this.candidateColors().text;
   }
@@ -1898,7 +1916,7 @@ struct KeyboardView {
         .height('100%')
         .objectFit(this.settings.candidateBackgroundFit === 'contain' ? ImageFit.Contain
           : this.settings.candidateBackgroundFit === 'stretch' ? ImageFit.Fill : ImageFit.Cover)
-        .opacity(this.settings.candidateBackgroundOpacity)
+        .opacity(this.settings.candidateBackgroundOpacity * this.settings.candidateWindowOpacity)
     }
   }
 
@@ -2008,14 +2026,14 @@ struct KeyboardView {
     }
       .width('100%')
       .margin({ top: this.settings.candidateDecorationTopVp })
-      .backgroundColor(this.candidateColors().surface)
+      .backgroundColor(this.candidateCardColor(this.candidateColors().surface))
       .background(this.candidateBackground)
       .clip(this.settings.candidateBackgroundImage !== null)
       .borderRadius(KeyboardFormFactor.isDesktop()
-        ? (this.settings.candidateCornerRadiusVp ?? KeyboardMetrics.CANDIDATE_CARD_CORNER_VP)
+        ? this.candidateCardRadius()
         : KeyboardMetrics.STRIP_CORNER_VP)
       .borderWidth(KeyboardFormFactor.isDesktop() ? 1 : 0)
-      .borderColor(this.candidateColors().border)
+      .borderColor(this.candidateCardColor(this.candidateColors().border))
       .onAreaChange((_old: Area, now: Area): void => {
         this.availableWidth = Number(now.width);
         this.effectCardHeight = Number(now.height);
@@ -2286,7 +2304,7 @@ struct KeyboardView {
       .height(this.candidateRowHeight()).width(this.candidateChipWidth(candidate, index))
       .backgroundColor(index === this.hoveredCandidate ? this.candidateColors().hover
         : candidate.highlighted ? this.candidateColors().selected : TRANSPARENT)
-      .borderRadius(KeyboardFormFactor.isDesktop() ? KeyboardMetrics.CANDIDATE_ITEM_CORNER_VP : 0)
+      .borderRadius(KeyboardFormFactor.isDesktop() ? this.candidateItemRadius() : 0)
       .onClick(() => KeyboardSession.shared.choose(index))
       .onHover((isHover: boolean): void => { this.hoveredCandidate = isHover ? index : -1; })
       .gesture(LongPressGesture().onAction(() => this.openTouchCandidateMenu(index)))

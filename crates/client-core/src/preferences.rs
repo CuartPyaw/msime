@@ -630,6 +630,21 @@ pub struct Preferences {
     pub candidate_font_size: u8,
     #[serde(default = "default_candidate_preedit_font_size")]
     pub candidate_preedit_font_size: u8,
+    /// Overall size of the floating candidate window, 50-200 percent. The host multiplies `candidate_font_size` and every piece of window geometry (paddings, row heights, header, arrows, insets, shadow) by it. Left out of the document at 100 so an unchanged document still loads in a build that predates the key.
+    #[serde(
+        default = "default_candidate_scale_percent",
+        skip_serializing_if = "is_default_candidate_scale_percent"
+    )]
+    pub candidate_scale_percent: u16,
+    /// Opacity of the candidate card, 50-100 percent. It multiplies only the alpha of the card fill, its border and the skin background image; text, numbers and the selection highlight stay opaque. Left out of the document at 100 for the same reason as `candidate_scale_percent`.
+    #[serde(
+        default = "default_candidate_opacity_percent",
+        skip_serializing_if = "is_default_candidate_opacity_percent"
+    )]
+    pub candidate_opacity_percent: u8,
+    /// Corner radius of the candidate card in points (DIP on Windows), 0-32. It wins over the skin package's `corner_radius_dip`, which wins over the host's own constant; absent means the host or skin decides. Row and selection radii become the smaller of the host's row radius and this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_corner_radius: Option<u8>,
     #[serde(default = "default_candidate_font_family")]
     pub candidate_font_family: String,
     /// Optional leading face for the Windows candidate glyph fallback chain.
@@ -1542,6 +1557,22 @@ fn default_candidate_preedit_font_size() -> u8 {
     15
 }
 
+fn default_candidate_scale_percent() -> u16 {
+    100
+}
+
+fn is_default_candidate_scale_percent(value: &u16) -> bool {
+    *value == default_candidate_scale_percent()
+}
+
+fn default_candidate_opacity_percent() -> u8 {
+    100
+}
+
+fn is_default_candidate_opacity_percent(value: &u8) -> bool {
+    *value == default_candidate_opacity_percent()
+}
+
 fn default_touch_key_spacing_tenths() -> u8 {
     60
 }
@@ -1633,6 +1664,9 @@ impl Default for Preferences {
             number_row_selection: true,
             candidate_font_size: default_candidate_font_size(),
             candidate_preedit_font_size: default_candidate_preedit_font_size(),
+            candidate_scale_percent: default_candidate_scale_percent(),
+            candidate_opacity_percent: default_candidate_opacity_percent(),
+            candidate_corner_radius: None,
             candidate_font_family: default_candidate_font_family(),
             candidate_english_font: None,
             candidate_fallback_fonts: default_candidate_fallback_fonts(),
@@ -2089,6 +2123,14 @@ impl Preferences {
         if !(12..=32).contains(&self.candidate_preedit_font_size) {
             return Err(PreferencesError::InvalidCandidateFontSize);
         }
+        if !(50..=200).contains(&self.candidate_scale_percent)
+            || !(50..=100).contains(&self.candidate_opacity_percent)
+            || self
+                .candidate_corner_radius
+                .is_some_and(|radius| radius > 32)
+        {
+            return Err(PreferencesError::InvalidCandidateWindowStyle);
+        }
         // Font family names are Unicode display names, not paths or identifiers.
         // Keep the existing UTF-8 byte budget while allowing localized families.
         if !valid_font_family(&self.candidate_font_family) {
@@ -2167,6 +2209,8 @@ pub enum PreferencesError {
     InvalidCustomThemeBase,
     #[error("candidate font size must be between 12 and 32")]
     InvalidCandidateFontSize,
+    #[error("candidate window scale must be 50-200%, opacity 50-100% and corner radius 0-32")]
+    InvalidCandidateWindowStyle,
     #[error("candidate text color must be #RRGGBB or omitted")]
     InvalidCandidateTextColor,
     #[error("candidate number color must be #RRGGBB or omitted")]

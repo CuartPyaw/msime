@@ -458,7 +458,7 @@ pub struct ResolvedTheme {
 ///
 /// A custom theme is drawn over a base: the named package's manifest `base`, or else `custom.base`. A built-in base fixes the mode, so the package palette is the one for the base's own appearance and `dark` is ignored. The package is drawn only where its manifest says it may be: in a layout it does not declare, or a mode it does not declare, it contributes nothing and is not reported in `candidate_skin`, and the base is drawn with the pickers. A `system` base contributes no slots and follows `dark`.
 ///
-/// Candidate colours are layered: the base, then the package palette, then every picker the user set. A text picker also sets the numbers to that colour at `PICKED_NUMBER_ALPHA` unless the number picker is set. `secondary` is the package's `translation` colour, and otherwise follows `number`. Over a built-in base the slots that base derives keep following their sources unless the package or a picker set them: `selected` is `accent` at `SELECTED_ALPHA`, `hover` is `text` at `HOVER_ALPHA`, `selected_text` is `accent` and `selected_number` is `number`. A custom theme over `system` with no package slots and no pickers has no candidate palette at all and draws the platform's own.
+/// Candidate colours are layered: the base, then the package palette, then every picker the user set. A text picker also sets the numbers to that colour at `PICKED_NUMBER_ALPHA` unless the number picker is set. `secondary` is the package's `translation` colour, and otherwise follows `number`. Over a built-in base the slots that base derives keep following their sources unless the package or a picker set them: `selected` is `accent` at `SELECTED_ALPHA`, `hover` is `text` at `HOVER_ALPHA`, `selected_text` is `accent` and `selected_number` is `number`. When the selected picker is set, on any base, `selected_text` is black or white by that colour's luminance and `selected_number` is the same colour at `PICKED_NUMBER_ALPHA`, so the highlighted candidate stays readable whatever colour was picked. A custom theme over `system` with no package slots and no pickers has no candidate palette at all and draws the platform's own.
 ///
 /// The keyboard is the user's design when there is one, otherwise the base theme's keyboard (`None`, the platform keyboard, over `system`).
 pub fn resolve(
@@ -508,6 +508,11 @@ pub fn resolve(
         explicit.apply(Overrides::from_package(palette));
     }
     let pickers = Overrides::from_pickers(&custom.candidate_colors);
+    // A picked selection colour can be anything, so the text drawn on it is black or white by its luminance rather than the accent, which may vanish against it. Packages carry no selected text colour, so the picker is the only source this has to answer.
+    let picked_selected_text = pickers.selected.as_deref().map(|selected| {
+        let background = u32::from_str_radix(&selected[1..7], 16).unwrap_or_default();
+        rgb(super::ai::readable_text(background))
+    });
     let picked_number = match (&pickers.text, &pickers.number) {
         (Some(text), None) => Some(with_alpha(text, PICKED_NUMBER_ALPHA)),
         _ => None,
@@ -531,8 +536,11 @@ pub fn resolve(
                 .filter(|_| derived)
                 .map(|accent| with_alpha(accent, SELECTED_ALPHA))
         }),
-        selected_text: accent.clone().filter(|_| derived),
-        selected_number: number.clone().filter(|_| derived),
+        selected_number: match &picked_selected_text {
+            Some(text) => Some(with_alpha(text, PICKED_NUMBER_ALPHA)),
+            None => number.clone().filter(|_| derived),
+        },
+        selected_text: picked_selected_text.or_else(|| accent.clone().filter(|_| derived)),
         hover: explicit.hover.or_else(|| {
             text.as_deref()
                 .filter(|_| derived)

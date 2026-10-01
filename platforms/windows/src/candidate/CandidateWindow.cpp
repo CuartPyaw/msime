@@ -360,6 +360,16 @@ void CandidateWindow::set_layout(CandidateLayoutSettings settings) {
   wubi_code_hint_ = settings.wubi_code_hint;
   invalidate_geometry();
 }
+bool CandidateWindow::set_style(const CandidateWindowStyle &style) {
+  if (!style.valid())
+    return false;
+  if (style == style_)
+    return true;
+  style_ = style;
+  // A new scale changes every size measured in device pixels, and opacity and radius only show in a new frame; both start from a fresh layout.
+  invalidate_geometry();
+  return true;
+}
 void CandidateWindow::invalidate_geometry() {
   // Geometry can change without an Engine generation change. Never reuse old
   // hit rectangles or a pressed row; keep the input lease and pinned anchor.
@@ -479,7 +489,7 @@ CandidateBounds CandidateWindow::card_bounds(const CandidatePresentation &value,
   if (!fallback_families_.empty() && !font_fallback_)
     font_fallback_ = build_font_fallback(device_.GetDWriteFactory(),
                                         fallback_families_);
-  const double scale = static_cast<double>(dpi) / 96.0;
+  const double scale = layout_scale(dpi);
   CandidateCardInput input;
   input.horizontal = horizontal_;
   input.preedit_visible = show_preedit_;
@@ -646,6 +656,11 @@ void CandidateWindow::paint() {
   }
   if (value->candidates.size() > 9)
     throw std::invalid_argument("Oversized window page");
+  // The user's scale rides on the target's DPI, as the system scale does, so every DIP below - fonts, paddings, radius, shadow - grows with it and matches the size card_bounds gave the window. At 100% the window's own DPI stays the only source.
+  device_.SetDpiOverride(
+      style_.scale_percent == 100
+          ? 0.0f
+          : static_cast<float>(layout_scale(GetDpiForWindow(window_)) * 96.0));
   if (!device_.EnsureForComposition(window_))
     throw std::runtime_error("Candidate device unavailable");
   auto *target = device_.GetRenderTarget();
@@ -705,15 +720,19 @@ void CandidateWindow::paint() {
   const WindowShadowPass shadow_passes[] = {
       {8.0f, palette_.shadow_alpha, 0.0f, 8.0f},
   };
-  const float radius = skin_radius_.value_or(palette_.radius);
+  // The user's radius, else the package's, else the theme's.
+  const float radius = candidate_card_radius(style_, skin_radius_, palette_.radius);
+  const float row_radius = candidate_row_radius(style_, palette_.item_radius, radius);
   draw_window_shadow_passes(target, card_rect, radius, shadow_passes,
                             std::size(shadow_passes));
   const D2D1_ROUNDED_RECT card{card_rect, radius, radius};
-  target->FillRoundedRectangle(card, brush(palette_.surface));
+  // The user's opacity fades the card itself - surface, package background and border - and nothing drawn on it, so the text stays as legible as the theme made it.
+  target->FillRoundedRectangle(card, brush(candidate_faded(palette_.surface, style_)));
+  const float background_opacity = background_.opacity * style_.opacity();
   const uint64_t effect_elapsed = GetTickCount64() - effect_started_;
   const float flash = effect_flashing_ ? typing_effect_flash_alpha(effect_, effect_intensity_, effect_elapsed) : 0.0f;
   // The package background sits on the surface and under the border and the text, masked by the card's rounded outline.
-  if (!background_.image.empty() && background_.opacity > 0.0f) {
+  if (!background_.image.empty() && background_opacity > 0.0f) {
     D2D1_SIZE_F natural{};
     auto *bitmap = device_.GetBitmapFromFile(background_.image, &natural);
     const auto rects = candidate_background_rects(
@@ -731,12 +750,12 @@ void CandidateWindow::paint() {
       const auto &from = rects->source;
       const D2D1_RECT_F source{from.left, from.top, from.right, from.bottom};
       target->DrawBitmap(bitmap, D2D1_RECT_F{to.left, to.top, to.right, to.bottom},
-                         background_.opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                         background_opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
                          &source);
       target->PopLayer();
     }
   }
-  target->DrawRoundedRectangle(card, brush(palette_.border),
+  target->DrawRoundedRectangle(card, brush(candidate_faded(palette_.border, style_)),
                                palette_.border_width);
   // The typing flash: a faint accent wash over the surface, under the text, and an accent outline that grows with the style. Both fade with the flash.
   if (flash > 0.0f) {
@@ -776,7 +795,7 @@ void CandidateWindow::paint() {
   };
   // Loaded at the size it is drawn at, in real pixels, as the floating toolbar loads it, and skipped rather than substituted if the icon will not load.
   if (auto *logo = logo_bitmap(static_cast<int>(std::lround(
-          metrics.logo_side * GetDpiForWindow(window_) / 96.0))))
+          metrics.logo_side * layout_scale(GetDpiForWindow(window_))))))
     target->DrawBitmap(logo, box(candidate_logo_bounds(metrics)), 1.0f,
                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
   const auto label = pager_label(*value);
@@ -878,8 +897,7 @@ void CandidateWindow::paint() {
                            static_cast<float>(frame.card_left + row.right),
                            static_cast<float>(frame.card_top + row.bottom)};
     if (value->candidates[i].highlighted || hovered_ == i) {
-      const D2D1_ROUNDED_RECT selection{rect, palette_.item_radius,
-                                        palette_.item_radius};
+      const D2D1_ROUNDED_RECT selection{rect, row_radius, row_radius};
       target->FillRoundedRectangle(selection, brush(value->candidates[i].highlighted
                                                         ? palette_.selected
                                                         : palette_.hover));
@@ -976,7 +994,7 @@ std::optional<CandidateClick> CandidateWindow::hit(int x, int y) {
   RECT bounds{};
   if (!GetClientRect(window_, &bounds))
     return std::nullopt;
-  const double scale = painted_dpi_ ? painted_dpi_ / 96.0 : 1.0;
+  const double scale = layout_scale(painted_dpi_);
   // Convert from physical client pixels into the visible card. The transparent
   // blur margins and decoration are deliberately not interactive.
   const double card_x = x / scale - shadow_insets_.left;
@@ -999,7 +1017,7 @@ std::optional<CandidateClick> CandidateWindow::hit(int x, int y) {
 std::optional<bool> CandidateWindow::pager_hit(int x, int y) {
   if (!page_ || !painted_ || !painted_pager_ || !IsWindowVisible(window_))
     return std::nullopt;
-  const double scale = painted_dpi_ ? painted_dpi_ / 96.0 : 1.0;
+  const double scale = layout_scale(painted_dpi_);
   // The same conversion into the visible card as hit().
   const double card_x = x / scale - shadow_insets_.left;
   const double card_y =

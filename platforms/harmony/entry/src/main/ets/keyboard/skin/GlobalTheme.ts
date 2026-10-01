@@ -163,7 +163,9 @@ const NATIVE_CANDIDATE_DARK: CandidateColors = {
 };
 
 function isObject(value: Object | null | undefined): boolean {
-  return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value);
+  return (
+    value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value)
+  );
 }
 
 function field(value: Object, name: string): Object | null | undefined {
@@ -205,6 +207,31 @@ export class GlobalTheme {
       return ("#" + value.substring(7, 9) + value.substring(1, 7)).toUpperCase();
     }
     return null;
+  }
+
+  /**
+   * An ArkUI colour with its alpha multiplied by `factor`, which is clamped to 0..1: `#RRGGBB` counts as opaque, and a colour in any other form comes back unchanged rather than being guessed at.
+   */
+  static withOpacity(value: string, factor: number): string {
+    const scale: number = Number.isFinite(factor) ? Math.max(0, Math.min(1, factor)) : 1;
+    if (scale >= 1) {
+      return value;
+    }
+    let alpha: number;
+    let rgb: string;
+    if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
+      alpha = 255;
+      rgb = value.substring(1);
+    } else if (/^#[0-9A-Fa-f]{8}$/.test(value)) {
+      alpha = parseInt(value.substring(1, 3), 16);
+      rgb = value.substring(3);
+    } else {
+      return value;
+    }
+    const scaled: string = Math.round(alpha * scale)
+      .toString(16)
+      .toUpperCase();
+    return "#" + (scaled.length === 1 ? "0" + scaled : scaled) + rgb.toUpperCase();
   }
 
   /** A non-null appearance fixes the mode for every surface; otherwise the surface's own mode rule decides. */
@@ -272,8 +299,15 @@ export class GlobalTheme {
     const secondary: string | null = GlobalTheme.arkColor(text(value, "secondary"));
     const accent: string | null = GlobalTheme.arkColor(text(value, "accent"));
     const onAccent: string | null = GlobalTheme.arkColor(text(value, "on_accent"));
-    if (background === null || key === null || functionKey === null || foreground === null
-      || secondary === null || accent === null || onAccent === null) {
+    if (
+      background === null ||
+      key === null ||
+      functionKey === null ||
+      foreground === null ||
+      secondary === null ||
+      accent === null ||
+      onAccent === null
+    ) {
       return null;
     }
     return {

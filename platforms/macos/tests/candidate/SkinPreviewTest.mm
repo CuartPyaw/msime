@@ -201,6 +201,120 @@ static NSBitmapImageRep *Draw(MSIMECandidatePreviewView *preview) {
     return bitmap;
 }
 
+// 整体大小, 不透明度 and 圆角大小 travel through the shared document like the font settings beside them, the sliders write them, and the preview draws them; 字体预设 writes the family and the front of the fallback list in one change.
+static void TestCandidateWindowStyle(MSIMEAppearancePreferences *preferences, NSUserDefaults *defaults) {
+    NSView *root = preferences.window.contentView;
+    MSIMECandidatePreviewView *preview = (id)MSIMEFindPreferenceViewOfClass(root, MSIMECandidatePreviewView.class);
+    NSSlider *scale = (id)FindControl(root, @"整体大小");
+    NSSlider *opacity = (id)FindControl(root, @"不透明度");
+    NSSlider *radius = (id)FindControl(root, @"圆角大小");
+    NSButton *followSkin = (id)FindControl(root, @"圆角大小跟随皮肤");
+    NSPopUpButton *presets = (id)FindControl(root, @"字体预设");
+    assert(preview && [scale isKindOfClass:NSSlider.class] && [opacity isKindOfClass:NSSlider.class] && [radius isKindOfClass:NSSlider.class]);
+    assert([followSkin isKindOfClass:NSButton.class] && [presets isKindOfClass:NSPopUpButton.class] && presets.numberOfItems == 5);
+    assert(scale.minValue == 75 && scale.maxValue == 150 && opacity.minValue == 50 && opacity.maxValue == 100 && radius.minValue == 0 && radius.maxValue == 16);
+
+    // Untouched: 100%, 100% and the skin's own radius, published as such so that a restored section reaches the document too.
+    assert(preferences.candidateScalePercent == 100 && preferences.candidateOpacityPercent == 100 && preferences.candidateCornerRadius == nil);
+    NSDictionary *merged = [preferences sharedPreferencesByMerging:@{}];
+    assert([merged[@"candidate_scale_percent"] isEqual:@100] && [merged[@"candidate_opacity_percent"] isEqual:@100]);
+    assert(merged[@"candidate_corner_radius"] == NSNull.null && !followSkin.enabled);
+    const CGFloat baseHeight = preview.previewContentHeight;
+
+    // A document's values are honoured across the shared ranges, which are wider than the sliders'; anything outside them, or not a whole number, leaves the setting alone.
+    NSDictionary *valid = @{@"candidate_scale_percent": @200, @"candidate_opacity_percent": @50, @"candidate_corner_radius": @32};
+    [preferences applySharedCandidatePreferences:valid];
+    assert(preferences.candidateScalePercent == 200 && preferences.candidateOpacityPercent == 50 && [preferences.candidateCornerRadius isEqual:@32]);
+    for (NSArray *entry in @[ @[@"candidate_scale_percent", @49], @[@"candidate_scale_percent", @201], @[@"candidate_scale_percent", @YES],
+                              @[@"candidate_scale_percent", @120.5], @[@"candidate_opacity_percent", @49], @[@"candidate_opacity_percent", @101],
+                              @[@"candidate_corner_radius", @33], @[@"candidate_corner_radius", @(-1)], @[@"candidate_corner_radius", @"8"] ]) {
+        NSMutableDictionary *document = [valid mutableCopy];
+        document[entry[0]] = entry[1];
+        [preferences applySharedCandidatePreferences:document];
+        assert(preferences.candidateScalePercent == 200 && preferences.candidateOpacityPercent == 50 && [preferences.candidateCornerRadius isEqual:@32]);
+    }
+    // The shared serializer leaves a default out, so an omitted field is 100% or following the skin again, and so is an explicit null radius.
+    [preferences applySharedCandidatePreferences:@{}];
+    assert(preferences.candidateScalePercent == 100 && preferences.candidateOpacityPercent == 100 && preferences.candidateCornerRadius == nil);
+    [preferences applySharedCandidatePreferences:@{@"candidate_corner_radius": @8}];
+    assert([preferences.candidateCornerRadius isEqual:@8] && followSkin.enabled && radius.integerValue == 8);
+    [preferences applySharedCandidatePreferences:@{@"candidate_corner_radius": NSNull.null}];
+    assert(preferences.candidateCornerRadius == nil && !followSkin.enabled);
+
+    // The candidate window's skin carries the style; the resolved skin the toolbar and the colour wells read does not.
+    [preferences applySharedCandidatePreferences:@{@"candidate_scale_percent": @150, @"candidate_opacity_percent": @60, @"candidate_corner_radius": @4}];
+    assert(scale.integerValue == 150 && opacity.integerValue == 60 && radius.integerValue == 4);
+    const auto plain = [preferences resolvedSkinForDark:NO];
+    const auto styled = [preferences candidateWindowSkinForDark:NO];
+    assert(styled.tokens.radius == 6.0f && styled.tokens.pad == plain.tokens.pad * 1.5f);
+    assert(std::abs(styled.tokens.surface.a - plain.tokens.surface.a * 0.6f) < 0.0001f);
+    assert(styled.tokens.text.a == plain.tokens.text.a && styled.tokens.selected.a == plain.tokens.selected.a);
+    // The preview draws the panel at the window's scale, so it grows with it.
+    assert(preview.previewContentHeight > baseHeight);
+    Draw(preview);
+
+    // The sliders write the setting, stored here so it outlives the window, and 跟随皮肤 hands the radius back to the skin with an explicit null.
+    scale.integerValue = 125;
+    [NSApp sendAction:scale.action to:scale.target from:scale];
+    opacity.integerValue = 80;
+    [NSApp sendAction:opacity.action to:opacity.target from:opacity];
+    radius.integerValue = 12;
+    [NSApp sendAction:radius.action to:radius.target from:radius];
+    assert(preferences.candidateScalePercent == 125 && preferences.candidateOpacityPercent == 80 && [preferences.candidateCornerRadius isEqual:@12]);
+    MSIMEAppearancePreferences *reloaded = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults skinsRoot:preferences.skinsRoot];
+    assert(reloaded.candidateScalePercent == 125 && reloaded.candidateOpacityPercent == 80 && [reloaded.candidateCornerRadius isEqual:@12]);
+    // A fresh process whose first document has these at their defaults (reset on another surface) draws the defaults rather than the stale stored values, and publishes them as such.
+    [reloaded applySharedCandidatePreferences:@{}];
+    assert(reloaded.candidateScalePercent == 100 && reloaded.candidateOpacityPercent == 100 && reloaded.candidateCornerRadius == nil);
+    NSDictionary *fresh = [reloaded sharedPreferencesByMerging:@{}];
+    assert([fresh[@"candidate_scale_percent"] isEqual:@100] && fresh[@"candidate_corner_radius"] == NSNull.null);
+    NSDictionary *document = MSIMEMergePreferenceSnapshot(@{@"candidate_corner_radius": @3, @"unrelated": @7}, [preferences sharedPreferencesByMerging:@{}]);
+    assert([document[@"candidate_scale_percent"] isEqual:@125] && [document[@"candidate_opacity_percent"] isEqual:@80]);
+    assert([document[@"candidate_corner_radius"] isEqual:@12] && [document[@"unrelated"] isEqual:@7]);
+    [NSApp sendAction:followSkin.action to:followSkin.target from:followSkin];
+    assert(preferences.candidateCornerRadius == nil);
+    document = MSIMEMergePreferenceSnapshot(document, [preferences sharedPreferencesByMerging:@{}]);
+    assert(document[@"candidate_corner_radius"] == NSNull.null);
+    [preferences applySharedCandidatePreferences:document];
+    assert(preferences.candidateCornerRadius == nil && preferences.candidateScalePercent == 125);
+    // The setters refuse what the shared document would refuse.
+    preferences.candidateScalePercent = 49;
+    preferences.candidateOpacityPercent = 101;
+    preferences.candidateCornerRadius = @33;
+    assert(preferences.candidateScalePercent == 125 && preferences.candidateOpacityPercent == 80 && preferences.candidateCornerRadius == nil);
+
+    // 字体预设: this host's family for the preset, all of the preset's names at the front of the fallback list, then what the user had, without repeats.
+    preferences.fallbackFonts = @[@"Menlo", @"SimSun"];
+    [presets selectItemAtIndex:1];
+    [NSApp sendAction:presets.action to:presets.target from:presets];
+    assert([preferences.fontFamily isEqual:@"Songti SC"] && preferences.candidateFontPreset == 1 && presets.indexOfSelectedItem == 1);
+    assert(([preferences.fallbackFonts isEqual:@[@"Songti SC", @"SimSun", @"Noto Serif CJK SC", @"Noto Serif SC", @"Menlo"]]));
+    assert([[preferences sharedPreferencesByMerging:@{}][@"candidate_font_family"] isEqual:@"Songti SC"]);
+    // A full list keeps its length: the preset goes in front and the tail gives way.
+    NSMutableArray<NSString *> *full = [NSMutableArray array];
+    for (NSUInteger index = 0; index < 32; ++index) [full addObject:[NSString stringWithFormat:@"Synthetic Family %lu", (unsigned long)index]];
+    preferences.fallbackFonts = full;
+    preferences.candidateFontPreset = 3;
+    assert([preferences.fontFamily isEqual:@"Kaiti SC"] && preferences.fallbackFonts.count == 32);
+    assert(([[preferences.fallbackFonts subarrayWithRange:NSMakeRange(0, 5)] isEqual:@[@"Kaiti SC", @"KaiTi", @"STKaiti", @"AR PL UKai CN", @"Synthetic Family 0"]]));
+    // Another platform's name for a preset reads as that preset; any other family is no preset at all.
+    preferences.fontFamily = @"Microsoft YaHei";
+    assert(preferences.candidateFontPreset == 2 && presets.indexOfSelectedItem == 2);
+    preferences.fontFamily = @"Menlo";
+    assert(preferences.candidateFontPreset == -1 && presets.indexOfSelectedItem == -1);
+    // 默认 is the shared default pair as it stands, whatever was there before.
+    [presets selectItemAtIndex:0];
+    [NSApp sendAction:presets.action to:presets.target from:presets];
+    assert([preferences.fontFamily isEqual:@"Noto Sans SC"] && preferences.candidateFontPreset == 0);
+    assert(([preferences.fallbackFonts isEqual:@[@"Noto Sans SC", @"Microsoft YaHei"]]));
+
+    preferences.candidateScalePercent = 100;
+    preferences.candidateOpacityPercent = 100;
+    preferences.fallbackFonts = @[];
+    preferences.fontFamily = @"Segoe UI";
+    assert(std::abs(preview.previewContentHeight - baseHeight) < .01);
+}
+
 static void TestCandidateSurfaceTheme(MSIMEAppearancePreferences *preferences) {
     NSArray *names = @[NSAppearanceNameAqua, NSAppearanceNameDarkAqua];
     [preferences applySharedCandidatePreferences:@{@"theme": @"light", @"candidate_theme": @"dark"}];
@@ -422,6 +536,7 @@ int main(int argc, const char **argv) {
         preferences.fontFamily = @"Segoe UI";
         TestFallbackFonts(preferences, defaults);
         TestCloudImportCache(preferences, defaults);
+        TestCandidateWindowStyle(preferences, defaults);
         [preferences applySharedCandidatePreferences:@{@"navigation": @{@"minus_equal": @NO, @"brackets": @YES, @"tab": @NO}}];
         assert(![preferences navigationEnabled:@"minus_equal"] && [preferences navigationEnabled:@"brackets"] && ![preferences navigationEnabled:@"tab"]);
         NSButton *tabControl = (id)FindControl(preferences.window.contentView, @"Tab / Shift-Tab 翻页");

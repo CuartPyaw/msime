@@ -4961,11 +4961,13 @@ public:
     const auto resolved = resolveCandidateTheme(preferences, system_dark, catalog);
     const auto &colors = resolved.colors;
     const auto decoration = host::candidate_skin_decoration(catalog, resolved.candidate_skin);
-    const auto corner_radius = host::candidate_skin_corner_radius(catalog, resolved.candidate_skin);
+    const auto corner_radius = host::candidate_corner_radius(preferences, catalog, resolved.candidate_skin);
+    // Only the user's own radius pulls the highlight's corners in with the card.
+    const bool user_radius = host::candidate_corner_radius_preference(preferences).has_value();
     // The decoration's stamp stands in for its image, so an unchanged skin costs a stat per refresh, not a copy.
     // Read once: the icon only changes with the package, and a reinstall restarts Fcitx5 with it.
     static const auto logo = host::load_fcitx_theme_logo(MSIME_ICON_DIR);
-    auto theme = host::fcitx_candidate_theme(colors, resolved.dark, std::nullopt, corner_radius, logo) +
+    auto theme = host::fcitx_candidate_theme(colors, resolved.dark, std::nullopt, corner_radius, logo, user_radius) +
                  host::fcitx_overlay_stamp(decoration);
     if (theme == candidate_theme_applied_) return;
     auto *classicui = instance_->addonManager().addon("classicui", true);
@@ -4976,7 +4978,7 @@ public:
     const auto *selected_dark = current.valueByPath("DarkTheme");
     if (!host::fcitx_theme_replaceable(selected ? *selected : std::string{})) return;
     const auto file = host::fcitx_theme_file(std::getenv("XDG_DATA_HOME"), std::getenv("HOME"));
-    if (!file || !host::write_fcitx_candidate_theme(*file, colors, resolved.dark, decoration, corner_radius, logo)) return;
+    if (!file || !host::write_fcitx_candidate_theme(*file, colors, resolved.dark, decoration, corner_radius, logo, user_radius)) return;
     fcitx::RawConfig config;
     config.setValueByPath("Theme", std::string(host::kFcitxCandidateTheme));
     // Fcitx5 releases with a separate dark-mode theme would otherwise switch to their stock dark theme; MSIME already resolves "follow" against the system appearance itself.

@@ -21,6 +21,7 @@ import type { SkinImageReader } from "./skin-image";
 import { SkinCandidatePreview } from "./skin-candidate-preview";
 import { candidateFontSize, candidateFontStyle } from "../candidate/candidate-font-size";
 import { candidateFamilyStyle } from "../candidate/candidate-font-family";
+import { candidateOpacityPercent, candidateWindowStyle } from "../candidate/candidate-window-style";
 import * as settings from "../settings/settings-style";
 
 /** The host's own `resolve()` answer for `request`, when the host has a theme call; `undefined` until it arrives, when it fails, and for a request it was not asked for. */
@@ -93,7 +94,15 @@ function LoadedPreview({
     ...candidateFontStyle(preferences),
     ...candidateFamilyStyle(preferences),
     ...skinGeometryStyle(skin, theme),
+    // After the package geometry: the user's corner radius beats the package's, as on the hosts.
+    ...candidateWindowStyle(preferences),
   } as CSSProperties;
+  // The window opacity fades the package background along with the surface it lies on.
+  const opacity = candidateOpacityPercent(preferences.candidate_opacity_percent) / 100;
+  const drawnBackground = background.drawn && {
+    ...background.drawn,
+    opacity: background.drawn.opacity * opacity,
+  };
   return (
     <div className={decorated ? "external-skin-decorated" : undefined}>
       <div
@@ -114,7 +123,7 @@ function LoadedPreview({
             decorated={decorated}
             image={decodeFailed ? undefined : image?.url}
             onImageError={onImageError}
-            background={background.drawn}
+            background={drawnBackground}
             onBackgroundError={background.onError}
           />
         </div>

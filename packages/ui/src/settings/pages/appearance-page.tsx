@@ -14,6 +14,7 @@ import { appearanceSettingsPreferences } from "../appearance-settings-preference
 import { CandidatePanelLimitSection } from "../candidate-panel-limit-section";
 import { CandidateFontUnsupportedNotice } from "../candidate-font-unsupported-notice";
 import { createAppearanceSettingsActions } from "../appearance-settings-actions";
+import { CandidateWindowStyleSection } from "../candidate-window-style-section";
 
 /** The 候选窗口 page of the settings form (route id `appearance`). */
 export function AppearanceSettingsPage() {
@@ -27,6 +28,13 @@ export function AppearanceSettingsPage() {
     showCandidateEnglishFont,
     showShuangpinPreedit,
     showCandidateFollowCursor,
+    showCandidateRowColors,
+    showCandidateWindowScale,
+    showCandidateWindowOpacity,
+    showCandidateCornerRadius,
+    candidatePreviewTheme,
+    customColors,
+    onCandidateColorChange,
     snapshot,
     draft,
     setDraft,
@@ -62,6 +70,19 @@ export function AppearanceSettingsPage() {
       )}
       {/* The groups keep the reference window's order of these settings (following, fonts, page size and layout, preedit, paging); the design's 窗口布局 group leads with the layout instead. */}
       <div className={settings.groups}>
+        <CandidateWindowStyleSection
+          preferences={draft}
+          colors={customColors}
+          previewTheme={candidatePreviewTheme}
+          platform={host?.platform}
+          showFontPresets={showCandidateFontControls}
+          showRowColors={showCandidateRowColors}
+          showScale={showCandidateWindowScale}
+          showOpacity={showCandidateWindowOpacity}
+          showCornerRadius={showCandidateCornerRadius}
+          onChange={appearanceActions.onPreferencesChange}
+          onColorChange={onCandidateColorChange}
+        />
         {showCandidateFollowCursor && (
           <GroupList title="位置">
             <CandidateFollowCursorSection

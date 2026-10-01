@@ -171,6 +171,15 @@ pub struct HostCapabilities {
     /// The host outlines the candidate panel in the border colour. Separate from `candidate_selection_appearance` because Linux draws the border (the Fcitx5 classic UI theme carries it) while neither Linux panel has a hover state.
     #[serde(default)]
     pub candidate_border_color: bool,
+    /// The host draws its own floating candidate window and multiplies its font and geometry by `candidate_scale_percent`. A host whose list lives in a desktop panel, or in a strip on the keyboard that already follows the font size, has nothing else to scale.
+    #[serde(default)]
+    pub candidate_window_scale: bool,
+    /// The host can lower the alpha of its candidate card fill, border and skin background by `candidate_opacity_percent` while keeping text opaque. A panel the desktop draws, or a strip that is part of an opaque keyboard, cannot.
+    #[serde(default)]
+    pub candidate_window_opacity: bool,
+    /// The host rounds its candidate card by `candidate_corner_radius`, ahead of the skin package's radius and its own constant.
+    #[serde(default)]
+    pub candidate_corner_radius: bool,
     /// The host places its own candidate window and can therefore pin it where
     /// it first appeared. A host whose desktop owns the placement - IBus draws
     /// and positions the candidate list itself - cannot honour the choice, so
@@ -465,6 +474,19 @@ impl HostCapabilities {
                     | HostPlatform::Android
                     | HostPlatform::Ios
                     | HostPlatform::Linux
+            ),
+            // The Windows and macOS candidate windows are drawn by the host, so every style control reaches them. The Fcitx5 classic UI theme carries a corner radius but no scale, and on X11 without a compositor a translucent fill shows as black, so Linux offers only the radius. The HarmonyOS 2in1 candidate card takes a radius and a fill alpha but its size follows the font size alone. The iOS and Android candidate strips sit on the keyboard rather than float, so none of the three applies there.
+            candidate_window_scale: matches!(platform, HostPlatform::Windows | HostPlatform::Macos),
+            candidate_window_opacity: matches!(
+                platform,
+                HostPlatform::Windows | HostPlatform::Macos | HostPlatform::Harmony
+            ),
+            candidate_corner_radius: matches!(
+                platform,
+                HostPlatform::Windows
+                    | HostPlatform::Macos
+                    | HostPlatform::Linux
+                    | HostPlatform::Harmony
             ),
             // macOS CandidatePanel and the HarmonyOS candidate panel track the current insertion
             // rect themselves; expose the shared toggle on both hosts.

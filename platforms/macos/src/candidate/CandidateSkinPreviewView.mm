@@ -152,9 +152,10 @@ struct SkinPreviewMetrics
 };
 
 // The showcase draws the same panel as the single preview, twice over and with the toolbar beside it. It used to draw a panel of its own: the candidate font was clamped to 15pt and the two lists held five and four candidates whatever 每页候选 said, so ticking 同时预览横排、竖排与状态栏 quietly disconnected the preview from the two controls under it that it exists to answer for. Everything here now comes from the settings, and what does not fit is disclosed — the footer counts the candidates below the fifth row, and a row too wide for the column ends in an ellipsis.
+// `scale` is 整体大小: the panels are measured at 100% and take that much more room, because DrawScaledPreviewCandidates draws them at that size.
 SkinPreviewMetrics MakeShowcaseMetrics(NSInteger pageSize, CGFloat candidateFontSize, CGFloat decorationTop,
                                        CGFloat preeditFontSize, NSArray<NSString *> *words,
-                                       MSIMEAppearancePreferences *preferences)
+                                       MSIMEAppearancePreferences *preferences, CGFloat scale)
 {
     SkinPreviewMetrics metrics;
     metrics.fontSize = MAX(12.0, candidateFontSize);
@@ -168,9 +169,9 @@ SkinPreviewMetrics MakeShowcaseMetrics(NSInteger pageSize, CGFloat candidateFont
     metrics.rowHeight = PreviewCandidateHeight(words, font);
     metrics.decorationHeight = MAX(0.0, decorationTop);
     const CGFloat footer = PreviewPendingFooter(pageSize) != nil ? 18.0 : 0.0;
-    metrics.horizontalHeight = 6.0 + metrics.decorationHeight + metrics.preeditHeight + metrics.rowHeight + 6.0;
-    metrics.verticalHeight = 6.0 + metrics.decorationHeight + metrics.preeditHeight +
-                             PreviewVisibleRows(pageSize) * metrics.rowHeight + footer + 6.0;
+    metrics.horizontalHeight = (6.0 + metrics.decorationHeight + metrics.preeditHeight + metrics.rowHeight + 6.0) * scale;
+    metrics.verticalHeight = (6.0 + metrics.decorationHeight + metrics.preeditHeight +
+                              PreviewVisibleRows(pageSize) * metrics.rowHeight + footer + 6.0) * scale;
     const ToolbarPreviewInputs toolbar = ToolbarInputs(preferences);
     metrics.toolbarHeight = ToolbarPreviewSize(toolbar.components, toolbar.scalePercent, toolbar.fontSize).height;
     metrics.panelHeight = 0.0;
@@ -183,7 +184,7 @@ SkinPreviewMetrics MakeShowcaseMetrics(NSInteger pageSize, CGFloat candidateFont
 
 SkinPreviewMetrics MakeAppearanceMetrics(NSInteger panelStyle, NSInteger pageSize, CGFloat candidateFontSize,
                                          CGFloat decorationTop, CGFloat preeditFontSize,
-                                         NSArray<NSString *> *words, MSIMEAppearancePreferences *preferences)
+                                         NSArray<NSString *> *words, MSIMEAppearancePreferences *preferences, CGFloat scale)
 {
     SkinPreviewMetrics metrics;
     metrics.fontSize = MAX(12.0, candidateFontSize);
@@ -199,7 +200,7 @@ SkinPreviewMetrics MakeAppearanceMetrics(NSInteger panelStyle, NSInteger pageSiz
     const NSInteger visibleRows = panelStyle == 1 ? PreviewVisibleRows(pageSize) : 1;
     const CGFloat footer = (panelStyle == 1 && PreviewPendingFooter(pageSize) != nil) ? 18.0 : 0.0;
     metrics.panelHeight =
-        6.0 + metrics.decorationHeight + metrics.preeditHeight + visibleRows * metrics.rowHeight + footer + 6.0;
+        (6.0 + metrics.decorationHeight + metrics.preeditHeight + visibleRows * metrics.rowHeight + footer + 6.0) * scale;
     metrics.horizontalHeight = 0.0;
     metrics.verticalHeight = 0.0;
     metrics.toolbarHeight = 0.0;
@@ -375,6 +376,21 @@ void DrawPreviewCandidates(NSRect rect, const msime::mac::ResolvedSkin &skin, BO
     }
     [NSGraphicsContext restoreGraphicsState];
     DrawDecoration(chrome, pad, skin);
+}
+
+// The panel at 整体大小: laid out at 100% in a rect that much smaller and drawn magnified into `rect`, which is what the candidate window does by multiplying its fonts and lengths. A row that no longer fits the column at the larger size ends in an ellipsis as it would at 100% in a narrower column.
+void DrawScaledPreviewCandidates(NSRect rect, CGFloat scale, const msime::mac::ResolvedSkin &skin, BOOL vertical,
+                                 NSArray<NSString *> *words, CGFloat fontSize, CGFloat rowHeight, NSString *footer,
+                                 CGFloat preeditFontSize, MSIMEAppearancePreferences *preferences)
+{
+    [NSGraphicsContext saveGraphicsState];
+    NSAffineTransform *transform = [NSAffineTransform transform];
+    [transform translateXBy:NSMinX(rect) yBy:NSMinY(rect)];
+    [transform scaleBy:scale];
+    [transform concat];
+    DrawPreviewCandidates(NSMakeRect(0.0, 0.0, NSWidth(rect) / scale, NSHeight(rect) / scale), skin, vertical, words, fontSize,
+                          rowHeight, footer, preeditFontSize, preferences);
+    [NSGraphicsContext restoreGraphicsState];
 }
 
 // What each component puts on its button, in the order of FloatingToolbarComponentKeys(): a title, or the SF Symbol the panel gives the button instead. The four titled buttons carry the state they toggle, so these are the ones the panel starts in — Chinese input, Chinese punctuation, half width, simplified output.
@@ -624,6 +640,20 @@ NSDictionary<NSAttributedStringKey, id> *PreviewCaptionAttributes()
     return self.preferences.showsCandidatePreedit ? self.preferences.preeditFontSize : 0.0;
 }
 
+/// 整体大小 as a factor, 100% until there are preferences to read it from.
+- (CGFloat)previewScale
+{
+    return self.preferences != nil ? self.preferences.candidateScalePercent / 100.0 : 1.0;
+}
+
+/// The skin as the candidate window draws it, with the user's radius and opacity over it. The scale is left out of it here because the preview draws the whole panel magnified instead, the one place a uniform transform is the same thing as multiplying every length.
+- (msime::mac::ResolvedSkin)previewWindowSkin
+{
+    msime::mac::CandidateWindowStyle style = self.preferences != nil ? [self.preferences candidateWindowStyle] : msime::mac::CandidateWindowStyle{};
+    style.scale = 1.0;
+    return msime::mac::StyledCandidateSkin([self previewSkin], style);
+}
+
 - (void)setShowsLayoutShowcase:(BOOL)showsLayoutShowcase
 {
     _showsLayoutShowcase = showsLayoutShowcase;
@@ -676,11 +706,11 @@ NSDictionary<NSAttributedStringKey, id> *PreviewCaptionAttributes()
     if (_showsLayoutShowcase)
     {
         return MakeShowcaseMetrics(_pageSize, [self previewFontSize], skin.decorationTopDip,
-                                   [self previewPreeditFontSize], [self previewWords], self.preferences)
+                                   [self previewPreeditFontSize], [self previewWords], self.preferences, [self previewScale])
             .totalHeight;
     }
     return MakeAppearanceMetrics(_panelStyle, _pageSize, [self previewFontSize], skin.decorationTopDip,
-                                 [self previewPreeditFontSize], [self previewWords], self.preferences)
+                                 [self previewPreeditFontSize], [self previewWords], self.preferences, [self previewScale])
         .totalHeight;
 }
 
@@ -728,27 +758,28 @@ NSDictionary<NSAttributedStringKey, id> *PreviewCaptionAttributes()
     [canvasPath addClip];
 
     NSDictionary<NSAttributedStringKey, id> *captionAttributes = PreviewCaptionAttributes();
-    const msime::mac::ResolvedSkin skin = [self previewSkin];
+    const msime::mac::ResolvedSkin skin = [self previewWindowSkin];
+    const CGFloat scale = [self previewScale];
     NSArray<NSString *> *samples = [self previewWords];
     const CGFloat preeditFontSize = [self previewPreeditFontSize];
     const NSInteger count = MAX(_pageSize, (NSInteger)1);
     if (_showsLayoutShowcase)
     {
         const SkinPreviewMetrics metrics = MakeShowcaseMetrics(_pageSize, [self previewFontSize], skin.decorationTopDip,
-                                                              preeditFontSize, samples, self.preferences);
+                                                              preeditFontSize, samples, self.preferences, scale);
         NSArray<NSString *> *horizontal = PreviewPageWords(samples, count);
         NSArray<NSString *> *vertical = PreviewPageWords(samples, PreviewVisibleRows(count));
         CGFloat y = metrics.top;
         [@"横排候选" drawAtPoint:NSMakePoint(14.0, y) withAttributes:captionAttributes];
         y += metrics.captionHeight + metrics.captionGap;
-        DrawPreviewCandidates(NSMakeRect(14.0, y, NSWidth(self.bounds) - 28.0, metrics.horizontalHeight), skin, NO,
-                              horizontal, metrics.fontSize, metrics.rowHeight, nil, preeditFontSize, self.preferences);
+        DrawScaledPreviewCandidates(NSMakeRect(14.0, y, NSWidth(self.bounds) - 28.0, metrics.horizontalHeight), scale, skin, NO,
+                                    horizontal, metrics.fontSize, metrics.rowHeight, nil, preeditFontSize, self.preferences);
         y += metrics.horizontalHeight + metrics.sectionGap;
         [@"竖排候选" drawAtPoint:NSMakePoint(14.0, y) withAttributes:captionAttributes];
         y += metrics.captionHeight + metrics.captionGap;
-        DrawPreviewCandidates(NSMakeRect(14.0, y, NSWidth(self.bounds) - 28.0, metrics.verticalHeight), skin, YES,
-                              vertical, metrics.fontSize, metrics.rowHeight, PreviewPendingFooter(count),
-                              preeditFontSize, self.preferences);
+        DrawScaledPreviewCandidates(NSMakeRect(14.0, y, NSWidth(self.bounds) - 28.0, metrics.verticalHeight), scale, skin, YES,
+                                    vertical, metrics.fontSize, metrics.rowHeight, PreviewPendingFooter(count),
+                                    preeditFontSize, self.preferences);
         y += metrics.verticalHeight + metrics.sectionGap;
         [@"悬浮状态栏" drawAtPoint:NSMakePoint(14.0, y) withAttributes:captionAttributes];
         y += metrics.captionHeight + metrics.captionGap;
@@ -762,7 +793,7 @@ NSDictionary<NSAttributedStringKey, id> *PreviewCaptionAttributes()
 
     const SkinPreviewMetrics metrics =
         MakeAppearanceMetrics(_panelStyle, _pageSize, [self previewFontSize], skin.decorationTopDip, preeditFontSize,
-                              samples, self.preferences);
+                              samples, self.preferences, scale);
     const BOOL vertical = _panelStyle == 1;
     NSArray<NSString *> *words = PreviewPageWords(samples, vertical ? PreviewVisibleRows(count) : count);
     NSString *footer = vertical ? PreviewPendingFooter(count) : nil;
@@ -773,8 +804,8 @@ NSDictionary<NSAttributedStringKey, id> *PreviewCaptionAttributes()
     [pageSummary drawAtPoint:NSMakePoint(NSMaxX(canvas) - pageSummarySize.width - 14.0, y)
               withAttributes:captionAttributes];
     y += metrics.captionHeight + metrics.captionGap;
-    DrawPreviewCandidates(NSMakeRect(14.0, y, NSWidth(self.bounds) - 28.0, metrics.panelHeight), skin, vertical, words,
-                          metrics.fontSize, metrics.rowHeight, footer, preeditFontSize, self.preferences);
+    DrawScaledPreviewCandidates(NSMakeRect(14.0, y, NSWidth(self.bounds) - 28.0, metrics.panelHeight), scale, skin, vertical,
+                                words, metrics.fontSize, metrics.rowHeight, footer, preeditFontSize, self.preferences);
     [NSGraphicsContext restoreGraphicsState];
 }
 

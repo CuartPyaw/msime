@@ -655,6 +655,10 @@ interface PreparedPreferences {
   tsf_preedit_style?: string;
   candidate_font_size: number;
   candidate_preedit_font_size: number;
+  /** 50..100; absent in documents that never changed it, which means an opaque card. */
+  candidate_opacity_percent?: number;
+  /** 0..32 points; absent or null leaves the card to the skin package, then the host. */
+  candidate_corner_radius?: number | null;
   candidate_font_family: string;
   /** Named first so Latin comes from it and Han falls through; absent means one family answers. */
   candidate_english_font?: string | null;
@@ -780,12 +784,16 @@ export interface KeyboardPreferences {
   readonly candidateDecorationAspectRatio: number;
   /** Where the decoration sits along the card's top edge. */
   readonly candidateDecorationAlign: CandidateSkinAlign;
-  /** The drawn package's card radius; null keeps the host's. */
+  /** The card radius: the user's, then the drawn package's; null keeps the host's. */
   readonly candidateCornerRadiusVp: number | null;
+  /** Whether that radius is the user's own: only then do the rows round down with a card tighter than their own corners. */
+  readonly candidateCornerRadiusUser: boolean;
   /** Image-only data URL drawn over the card surface, clipped to the card. */
   readonly candidateBackgroundImage: string | null;
   readonly candidateBackgroundFit: CandidateSkinFit;
   readonly candidateBackgroundOpacity: number;
+  /** The user's 0.5..1 factor on the card's fill, border and background image; text and the selection stay opaque. */
+  readonly candidateWindowOpacity: number;
   readonly candidateDark: boolean;
   /** The shared switch when it is set, otherwise what the theme says; the Harmony window marks the row with a fill, not a bar. */
   readonly candidateSelectedBar: boolean;
@@ -1000,9 +1008,11 @@ export class KeyboardSession implements HardwareKeyTarget {
     candidateDecorationAspectRatio: 1,
     candidateDecorationAlign: 'right',
     candidateCornerRadiusVp: null,
+    candidateCornerRadiusUser: false,
     candidateBackgroundImage: null,
     candidateBackgroundFit: 'cover',
     candidateBackgroundOpacity: 1,
+    candidateWindowOpacity: 1,
     candidateDark: false,
     candidateSelectedBar: false,
     pairedPunctuation: true,
@@ -1224,6 +1234,16 @@ export class KeyboardSession implements HardwareKeyTarget {
       ? this.readCandidateSkinImage(this.stateDirectory, packageId,
         skinBackground === null ? null : skinBackground.relative)
       : NO_CANDIDATE_SKIN_IMAGE;
+    // The store validates both to the shared bounds; an out-of-range value from an older or foreign document is ignored rather than drawn.
+    const userRadius: number | null | undefined = preferences.candidate_corner_radius;
+    const userRadiusValid: boolean =
+      typeof userRadius === 'number' && Number.isFinite(userRadius) && userRadius >= 0 && userRadius <= 32;
+    const candidateRadius: number | null = userRadiusValid
+      ? userRadius as number
+      : packageId === null ? null : CandidateSkinCatalogPolicy.cornerRadiusVp(skinPackages, packageId);
+    const opacityPercent: number | undefined = preferences.candidate_opacity_percent;
+    const windowOpacity: number = typeof opacityPercent === 'number' && Number.isFinite(opacityPercent)
+      ? Math.max(50, Math.min(100, opacityPercent)) / 100 : 1;
     this.appearance = {
       dark: keyboardDark,
       globalThemeId: preferences.global_theme,
@@ -1236,11 +1256,12 @@ export class KeyboardSession implements HardwareKeyTarget {
       candidateDecorationWidthVp: skinImage.image === null ? 0 : (skinDecoration?.widthVp ?? 0),
       candidateDecorationAspectRatio: skinImage.aspectRatio,
       candidateDecorationAlign: skinDecoration === null ? 'right' : skinDecoration.align,
-      candidateCornerRadiusVp: packageId === null
-        ? null : CandidateSkinCatalogPolicy.cornerRadiusVp(skinPackages, packageId),
+      candidateCornerRadiusVp: candidateRadius,
+      candidateCornerRadiusUser: userRadiusValid,
       candidateBackgroundImage: backgroundImage.image,
       candidateBackgroundFit: skinBackground === null ? 'cover' : skinBackground.fit,
       candidateBackgroundOpacity: skinBackground === null ? 1 : skinBackground.opacity,
+      candidateWindowOpacity: windowOpacity,
       candidateDark: candidateDark,
       candidateSelectedBar: preferences.candidate_selected_bar ?? candidateColors.showSelectedBar,
       pairedPunctuation: preferences.paired_punctuation !== false,

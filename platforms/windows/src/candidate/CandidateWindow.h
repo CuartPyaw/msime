@@ -9,6 +9,7 @@
 #include "CandidateShadow.h"
 #include "CandidateSkin.h"
 #include "TypingEffectPolicy.h"
+#include "CandidateWindowStyle.h"
 #include <functional>
 #include <memory>
 // windows.h first: its DrawText macro has to reach the Direct2D declarations,
@@ -75,6 +76,8 @@ public:
   void set_skin_corner_radius(std::optional<float> radius) { skin_radius_ = radius; }
   // preferences.plugins.effect_intensity, 0-100: how bright the typing flash is. The style and the combo come with each key from the input thread (TypingEffectSignal).
   void set_effect_intensity(uint32_t intensity) { effect_intensity_ = (std::min)(intensity, 100u); }
+  // The user's scale, opacity and corner radius. Scale changes the card's size, so the next refresh lays it out again. Invalid values leave the previous style intact.
+  bool set_style(const CandidateWindowStyle &style);
   void hide();
   bool failed() const { return failed_; }
   HWND handle() const { return window_; }
@@ -93,6 +96,10 @@ private:
   void take_typing_effect();
   // Repaint for the next flash frame, and stop the timer once the flash has faded.
   void typing_effect_tick(UINT_PTR timer);
+  // Device pixels per DIP for a window DPI, including the user's scale. Layout, rendering, the logo and hit testing all read this one factor.
+  double layout_scale(unsigned dpi) const {
+    return static_cast<double>(dpi ? dpi : 96) / 96.0 * style_.scale();
+  }
   // The brand mark leading the preedit row, loaded at `pixels` square. Null when the icon will not load, and the row then draws no mark.
   ID2D1Bitmap *logo_bitmap(int pixels);
   std::optional<CandidateClick> hit(int x, int y);
@@ -153,6 +160,7 @@ private:
   CandidateSkinAlign decoration_align_ = CandidateSkinAlign::right;
   CandidateSkinBackground background_;
   std::optional<float> skin_radius_;
+  CandidateWindowStyle style_;
   // Pixels reserved above the card for the artwork, computed when the card is
   // sized and reused when it is painted so the two cannot disagree.
   float decoration_offset_ = 0.0f;

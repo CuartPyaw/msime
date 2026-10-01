@@ -18,6 +18,9 @@ export interface SettingsFormFactorProjection {
   /** A phone draws its candidates as one horizontal strip whatever the preference says; only the 2in1 candidate window can be a vertical list. */
   fixedCandidateLayout: "horizontal" | null;
   candidateFollowCursor: boolean;
+  /** The keyboard fades and rounds only the 2in1 candidate card; the phone strip keeps its own surface and corner, so these sliders would do nothing there. */
+  candidateWindowOpacity: boolean;
+  candidateCornerRadius: boolean;
   inputModeHud: boolean;
   /** Key sounds, the typing melody, commit and achievement sounds: played for a hardware keyboard on a 2in1, while a phone keeps its own key feedback. */
   keySound: boolean;
@@ -47,6 +50,8 @@ export class SettingsFormFactorCapabilities {
       voiceHotkeys: true,
       fixedCandidateLayout: desktop ? null : "horizontal",
       candidateFollowCursor: desktop,
+      candidateWindowOpacity: desktop,
+      candidateCornerRadius: desktop,
       inputModeHud: desktop,
       keySound: desktop,
       music: desktop,

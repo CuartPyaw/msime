@@ -310,5 +310,102 @@
     "expected": null,
     "name": "custom over system with nothing set draws the platform",
     "package": null
+  },
+  {
+    "base": "paper",
+    "colors": {
+      "selected": "#FFE680"
+    },
+    "dark": false,
+    "expected": {
+      "accent": "#2C7A4B",
+      "border": "#0000001F",
+      "hover": "#1A1E1B0F",
+      "number": "#6E6A5E",
+      "secondary": "#6E6A5E",
+      "selected": "#FFE680",
+      "selected_number": "#0000009D",
+      "selected_text": "#000000",
+      "show_selected_bar": null,
+      "surface": "#F7F5F0",
+      "text": "#1A1E1B"
+    },
+    "name": "a light selected picker over a built-in base reads in black",
+    "package": null
+  },
+  {
+    "base": "ink",
+    "colors": {
+      "selected": "#1A3D7C"
+    },
+    "dark": false,
+    "expected": {
+      "accent": "#FFFFFF",
+      "border": "#0000001F",
+      "hover": "#9A9A9A0F",
+      "number": "#9A9A9A",
+      "secondary": "#9A9A9A",
+      "selected": "#1A3D7C",
+      "selected_number": "#FFFFFF9D",
+      "selected_text": "#FFFFFF",
+      "show_selected_bar": null,
+      "surface": "#1A1A1A",
+      "text": "#9A9A9A"
+    },
+    "name": "a dark selected picker over a built-in base reads in white",
+    "package": null
+  },
+  {
+    "base": "system",
+    "colors": {
+      "selected": "#FFE680"
+    },
+    "dark": true,
+    "expected": {
+      "accent": null,
+      "border": null,
+      "hover": null,
+      "number": null,
+      "secondary": null,
+      "selected": "#FFE680",
+      "selected_number": "#0000009D",
+      "selected_text": "#000000",
+      "show_selected_bar": null,
+      "surface": null,
+      "text": null
+    },
+    "name": "a selected picker over system derives its own text",
+    "package": null
+  },
+  {
+    "base": "paper",
+    "colors": {
+      "selected": "#1A3D7C"
+    },
+    "dark": false,
+    "expected": {
+      "accent": "#AA0000",
+      "border": "#0000001F",
+      "hover": "#1A1E1B0F",
+      "number": "#6E6A5E",
+      "secondary": "#6E6A5E",
+      "selected": "#1A3D7C",
+      "selected_number": "#FFFFFF9D",
+      "selected_text": "#FFFFFF",
+      "show_selected_bar": null,
+      "surface": "#F7F5F0",
+      "text": "#1A1E1B"
+    },
+    "name": "a selected picker beats the package selected row and derives its text",
+    "package": {
+      "candidate": {
+        "dark": {},
+        "light": {
+          "accent": "#AA0000",
+          "selected": "#11111180"
+        }
+      },
+      "themes": ["light"]
+    }
   }
 ]

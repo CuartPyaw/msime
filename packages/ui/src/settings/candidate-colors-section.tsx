@@ -25,8 +25,8 @@ export interface CandidateColorsSectionProps {
 const linuxFcitxClassicColorNote =
   "Fcitx5 经典界面中编号跟随正文颜色、固定候选不单独着色，此项仅对 IBus 生效";
 
-/** One colour picker of the custom theme: the swatch, and a button that hands the slot back to the theme underneath. */
-function CandidateColorRow({
+/** One colour picker of the custom theme: the swatch, and a button that hands the slot back to the theme underneath. The 候选窗 section of the 候选窗口 page reuses it for its four colours. */
+export function CandidateColorRow({
   title,
   slot,
   value,

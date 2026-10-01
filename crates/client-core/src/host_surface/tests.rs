@@ -587,3 +587,38 @@ fn plugin_surfaces_are_claimed_only_by_the_hosts_that_wire_them() {
             .key_sound
     );
 }
+
+/// The candidate window style controls follow the surface each host draws: both desktop windows take all three, the Fcitx5 theme only a radius, the HarmonyOS 2in1 card a radius and a fill alpha, and the keyboard strips none.
+#[test]
+fn candidate_window_style_is_offered_where_the_host_draws_the_card() {
+    let flags = |platform| {
+        let capabilities = HostCapabilities::for_platform(platform);
+        (
+            capabilities.candidate_window_scale,
+            capabilities.candidate_window_opacity,
+            capabilities.candidate_corner_radius,
+        )
+    };
+    assert_eq!(flags(HostPlatform::Windows), (true, true, true));
+    assert_eq!(flags(HostPlatform::Macos), (true, true, true));
+    assert_eq!(flags(HostPlatform::Linux), (false, false, true));
+    assert_eq!(flags(HostPlatform::Harmony), (false, true, true));
+    assert_eq!(flags(HostPlatform::Android), (false, false, false));
+    assert_eq!(flags(HostPlatform::Ios), (false, false, false));
+
+    // A host built before these flags existed sends a document without them, and the page must then hide the controls.
+    let mut legacy =
+        serde_json::to_value(HostCapabilities::for_platform(HostPlatform::Windows)).unwrap();
+    let object = legacy.as_object_mut().unwrap();
+    for key in [
+        "candidate_window_scale",
+        "candidate_window_opacity",
+        "candidate_corner_radius",
+    ] {
+        assert_eq!(object.remove(key), Some(serde_json::Value::Bool(true)));
+    }
+    let decoded: HostCapabilities = serde_json::from_value(legacy).unwrap();
+    assert!(!decoded.candidate_window_scale);
+    assert!(!decoded.candidate_window_opacity);
+    assert!(!decoded.candidate_corner_radius);
+}

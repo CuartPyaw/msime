@@ -580,10 +580,34 @@
   &.skin-card-preview .candidate {
     font-family: var(--appearance-font-family, sans-serif);
     font-size: var(--appearance-font-size, 16px);
+    /* 整体大小: the hosts multiply the font and every geometry constant by the scale, which is what zoom does to the sample card. */
+    zoom: var(--msime-candidate-scale, 1);
   }
 
   & .candidate .pinyin {
     font-size: var(--appearance-preedit-font-size, 16px);
+  }
+
+  /* A row is never rounder than a card radius the user chose, the rule the hosts follow; a package's radius leaves the rows at their own corners. */
+  &.skin-card-preview .candidate .cand,
+  &.skin-card-preview .candidate .first {
+    border-radius: min(4px, var(--msime-candidate-user-radius, 4px));
+  }
+
+  /* 不透明度 fades only the card's fill and outline; text and the selected row stay opaque. Guarded because a `var()` inside an unsupported `color-mix()` would leave the card with no fill at all. */
+  @supports (background: color-mix(in srgb, red 50%, transparent)) {
+    &.skin-card-preview .candidate .container {
+      background: color-mix(
+        in srgb,
+        var(--cand-bg) var(--msime-candidate-opacity, 100%),
+        transparent
+      );
+      border-color: color-mix(
+        in srgb,
+        var(--cand-border) var(--msime-candidate-opacity, 100%),
+        transparent
+      );
+    }
   }
 }
 /*

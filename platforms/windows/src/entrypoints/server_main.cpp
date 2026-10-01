@@ -6,6 +6,7 @@
 #include "CandidateThemeSettings.h"
 #include "SkinResourceRevision.h"
 #include "CandidateWindow.h"
+#include "CandidateWindowStyleSettings.h"
 #include "ClipboardHistory.h"
 #include "DiagnosticListener.h"
 #include "DedicatedEnglishMailbox.h"
@@ -786,6 +787,7 @@ int wmain(int argc, wchar_t **argv) {
                                            click.desired);
         });
     auto candidate_fonts = std::make_shared<CandidateFontMailbox>();
+    auto candidate_style = std::make_shared<CandidateWindowStyleMailbox>();
     auto toolbar_settings = std::make_shared<FloatingToolbarMailbox>();
     auto candidate_theme = std::make_shared<CandidateThemeMailbox>();
     auto candidate_layout = std::make_shared<std::atomic<unsigned>>(
@@ -812,7 +814,7 @@ int wmain(int argc, wchar_t **argv) {
     options.preferences_directory = config.state_root.u8string();
     options.preferences_published =
         [&, voice_config, voice_config_mutex, voice_host_options, traditional_output,
-         toolbar_enabled, follow_cursor, effect_intensity, voice_theme, candidate_fonts,
+         toolbar_enabled, follow_cursor, effect_intensity, voice_theme, candidate_fonts, candidate_style,
          toolbar_theme, menu_theme, mode_scope_global, tsf_config, candidate_layout,
          tsf_config_mutex, tray_preferences, tray_preferences_mutex,
          tsf_config_dirty, candidate_theme, toolbar_settings](const PreferenceSnapshot &snapshot) {
@@ -827,6 +829,8 @@ int wmain(int argc, wchar_t **argv) {
             toolbar_settings->publish(snapshot.revision(), *settings);
           if (auto fonts = candidate_font_settings(preferences))
             candidate_fonts->publish(snapshot.revision(), std::move(*fonts));
+          if (auto style = candidate_window_style(preferences))
+            candidate_style->publish(snapshot.revision(), *style);
           if (auto layout = candidate_layout_settings(preferences))
             candidate_layout->store(layout->encode(), std::memory_order_release);
           traditional_output->store(
@@ -1531,6 +1535,8 @@ int wmain(int argc, wchar_t **argv) {
                                                              request->request));
       if (auto fonts = candidate_fonts->take())
         candidates.set_fonts(*fonts);
+      if (auto style = candidate_style->take())
+        candidates.set_style(*style);
       const auto next_candidate_layout = CandidateLayoutSettings::decode(
           candidate_layout->load(std::memory_order_acquire));
       candidates.set_layout(next_candidate_layout);

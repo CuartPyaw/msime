@@ -500,6 +500,79 @@ fn a_text_picker_carries_the_numbers_unless_they_are_picked() {
 }
 
 #[test]
+fn a_selected_picker_draws_readable_text_on_itself() {
+    let resolve_selected = |base: GlobalTheme, selected: &str, package: Option<&ThemePackage>| {
+        let custom = CustomTheme {
+            base,
+            candidate_skin: package.map(|package| package.id.clone()),
+            candidate_colors: CustomCandidateColors {
+                selected: Some(selected.into()),
+                accent: Some("#112233".into()),
+                text: Some("#445566".into()),
+                ..CustomCandidateColors::default()
+            },
+            ..CustomTheme::default()
+        };
+        resolve(
+            GlobalTheme::Custom,
+            &custom,
+            false,
+            CandidateLayout::Vertical,
+            package,
+        )
+        .candidate
+        .unwrap()
+    };
+
+    // A light selection takes black text, whatever the accent says.
+    let light = resolve_selected(GlobalTheme::Light, "#ffe680", None);
+    assert_eq!(light.selected.as_deref(), Some("#FFE680"));
+    assert_eq!(light.selected_text.as_deref(), Some("#000000"));
+    assert_eq!(light.selected_number.as_deref(), Some("#0000009D"));
+    // Unselected rows keep the picked colours.
+    assert_eq!(light.text.as_deref(), Some("#445566"));
+    assert_eq!(light.accent.as_deref(), Some("#112233"));
+
+    // A dark selection takes white text.
+    let dark = resolve_selected(GlobalTheme::Light, "#1a3d7c", None);
+    assert_eq!(dark.selected_text.as_deref(), Some("#FFFFFF"));
+    assert_eq!(dark.selected_number.as_deref(), Some("#FFFFFF9D"));
+
+    // Over system, where nothing is derived from the accent, the picked selection still brings its text.
+    let system = resolve_selected(GlobalTheme::System, "#1a3d7c", None);
+    assert_eq!(system.selected_text.as_deref(), Some("#FFFFFF"));
+    assert_eq!(system.selected_number.as_deref(), Some("#FFFFFF9D"));
+
+    // A package selection is not a picker: the accent still colours the text on it.
+    let custom = CustomTheme {
+        base: GlobalTheme::Light,
+        candidate_colors: CustomCandidateColors {
+            accent: Some("#112233".into()),
+            ..CustomCandidateColors::default()
+        },
+        ..sakura()
+    };
+    let mut packaged = package(GlobalTheme::Light, true, false);
+    packaged.light.as_mut().unwrap().selected = Some("#ffe680".into());
+    let candidate = resolve(
+        GlobalTheme::Custom,
+        &custom,
+        false,
+        CandidateLayout::Vertical,
+        Some(&packaged),
+    )
+    .candidate
+    .unwrap();
+    assert_eq!(candidate.selected.as_deref(), Some("#FFE680"));
+    assert_eq!(candidate.selected_text.as_deref(), Some("#112233"));
+
+    // The picker wins over the package selection and answers for its own colour.
+    let picked = resolve_selected(GlobalTheme::Light, "#000000", Some(&packaged));
+    assert_eq!(picked.selected.as_deref(), Some("#000000"));
+    assert_eq!(picked.selected_text.as_deref(), Some("#FFFFFF"));
+}
+
+#[test]
 fn custom_package_is_used_only_for_declared_modes_and_its_own_id() {
     let dark = resolve(
         GlobalTheme::Custom,
@@ -824,6 +897,27 @@ fn web_custom_theme_mirror_cases_match_resolve() {
         {
             "name": "custom over system with nothing set draws the platform",
             "base": "system", "dark": false, "package": null, "colors": {},
+        },
+        {
+            "name": "a light selected picker over a built-in base reads in black",
+            "base": "paper", "dark": false, "package": null,
+            "colors": {"selected": "#FFE680"},
+        },
+        {
+            "name": "a dark selected picker over a built-in base reads in white",
+            "base": "ink", "dark": false, "package": null,
+            "colors": {"selected": "#1A3D7C"},
+        },
+        {
+            "name": "a selected picker over system derives its own text",
+            "base": "system", "dark": true, "package": null,
+            "colors": {"selected": "#FFE680"},
+        },
+        {
+            "name": "a selected picker beats the package selected row and derives its text",
+            "base": "paper", "dark": false,
+            "package": {"themes": ["light"], "candidate": {"light": {"selected": "#11111180", "accent": "#AA0000"}, "dark": {}}},
+            "colors": {"selected": "#1A3D7C"},
         },
     ]);
     let palette = |value: &Value| CandidatePalette {
