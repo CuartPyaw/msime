@@ -125,6 +125,14 @@ export class TranslationPolicy {
     });
   }
 
+  /** 判断失败请求是否仍可释放当前签名，让同一候选页在下一次刷新时重试。 */
+  static shouldReleaseAfterFailure(requestSignature: string, currentSignature: string,
+    requestEpoch: number, currentEpoch: number, requestHandle: number,
+    currentHandle: number): boolean {
+    return requestEpoch === currentEpoch && requestHandle === currentHandle
+      && requestSignature.length > 0 && requestSignature === currentSignature;
+  }
+
   static providerScope(query: TranslationQuery): string {
     const provider: string = TranslationPolicy.provider(query);
     if (provider === "custom") return `custom:${query.custom_translation?.endpoint ?? ""}`;

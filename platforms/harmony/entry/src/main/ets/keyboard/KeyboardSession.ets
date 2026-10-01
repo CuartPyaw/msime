@@ -3897,14 +3897,15 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (this.translationTimer >= 0) clearTimeout(this.translationTimer);
     const epoch: number = ++this.translationEpoch;
     const handle: number = this.handle;
+    const requestSignature: string = signature;
     this.translationTimer = setTimeout((): void => {
       this.translationTimer = -1;
-      void this.fetchTranslations(handle, JSON.stringify(query), query, epoch);
+      void this.fetchTranslations(handle, JSON.stringify(query), query, epoch, requestSignature);
     }, TranslationPolicy.QUIET_INTERVAL_MS);
   }
 
   private async fetchTranslations(handle: number, queryDocument: string,
-    query: TranslationQuery, epoch: number): Promise<void> {
+    query: TranslationQuery, epoch: number, requestSignature: string): Promise<void> {
     if (!this.translationCurrent(handle, epoch)) return;
     const entries: TranslationEntry[] = [];
     if (query.english_gloss && typeof query.resources === 'string' && query.resources.length > 0) {
@@ -3914,15 +3915,26 @@ export class KeyboardSession implements HardwareKeyTarget {
     const deadline: number = Date.now() + 6000;
     const provider: string = TranslationPolicy.provider(query);
     for (const target of TranslationPolicy.targets(query)) {
-      if (!this.translationCurrent(handle, epoch) || Date.now() >= deadline) return;
+      if (!this.translationCurrent(handle, epoch)) return;
+      if (Date.now() >= deadline) {
+        this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
+        return;
+      }
       // This target's answers are gathered apart, so the offline dictionary can fill only the candidates the online provider left unanswered.
       const answered: TranslationEntry[] = [];
       if (!await this.fetchTargetTranslations(query, target, provider, entries, answered, epoch,
-        handle, deadline)) return;
+        handle, deadline)) {
+        this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
+        return;
+      }
       TranslationPolicy.fill(answered, offline.get(target) ?? []);
       for (const entry of answered) TranslationPolicy.append(entries, entry.text, entry.translation);
     }
-    if (!this.translationCurrent(handle, epoch) || entries.length === 0) return;
+    if (!this.translationCurrent(handle, epoch)) return;
+    if (entries.length === 0) {
+      if (provider.length > 0) this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
+      return;
+    }
     let appliedCurrent: boolean = false;
     try {
       const applied: NativeReply<OnlineApplyValue> = JSON.parse(client.applyTranslations(
@@ -3939,9 +3951,17 @@ export class KeyboardSession implements HardwareKeyTarget {
         };
         client.translationGlossSave(JSON.stringify(saveRequest), query.user_data);
       }
+      if (!appliedCurrent) this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
     } catch (error) {
       KeyboardLog.error(`candidate translations unavailable: ${describeError(error)}`);
+      this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
     }
+  }
+
+  private releaseTranslationSignatureIfCurrent(requestSignature: string, requestEpoch: number,
+    requestHandle: number): void {
+    if (TranslationPolicy.shouldReleaseAfterFailure(requestSignature, this.translationSignature,
+      requestEpoch, this.translationEpoch, requestHandle, this.handle)) this.translationSignature = '';
   }
 
   /** One target's online answers, added to `answered`. `entries` is read only for the English candidates the offline gloss already covers. False when the work went stale or ran out of time. */
