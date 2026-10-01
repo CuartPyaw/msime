@@ -73,6 +73,13 @@ struct CachedResolution {
     resolution: SeriesResolution,
 }
 
+#[derive(Clone)]
+struct CachedFuzzyCandidates {
+    rules: u32,
+    segmentation: String,
+    candidates: Vec<WordItem>,
+}
+
 /// The reference answered a failed write with `ERROR_CODE` and no message; callers map any failure to their own diagnostic.
 const DICTIONARY_UNAVAILABLE: &str = "Pinyin dictionary is unavailable";
 const ENTRY_REJECTED: &str = "Pinyin does not spell the word one syllable per character";
@@ -90,11 +97,13 @@ pub struct QuanpinDictionary {
     personal_scored_keys: HashSet<String>,
     /// Rows per segmentation (`query_single_path`).
     cache: FifoCache<String, Vec<WordItem>>,
-    /// Whole answers per series key, including `fuzzy:` keys and online rows.
+    /// Whole answers per series key, including online rows.
     series_cache: FifoCache<String, Vec<WordItem>>,
     segmentation_cache: FifoCache<String, Vec<String>>,
     /// Survives `reset_cache`: a resolution depends only on the input and the static correction tables, never on dictionary rows.
     resolution_cache: FifoCache<u64, CachedResolution>,
+    /// Fuzzy rows are dictionary-dependent, but their composite key is indexed by hash so a cache hit does not allocate a formatted string.
+    fuzzy_cache: FifoCache<u64, CachedFuzzyCandidates>,
     /// Rows of typo-variant span keys, empty answers included. Dictionary rows only, so it is cleared with the other caches.
     typo_span_cache: FifoCache<String, Vec<DictRow>>,
     rerankers: Vec<NeuralReranker>,
@@ -134,6 +143,7 @@ impl QuanpinDictionary {
             series_cache: FifoCache::new(CACHE_CAPACITY),
             segmentation_cache: FifoCache::new(CACHE_CAPACITY),
             resolution_cache: FifoCache::new(CACHE_CAPACITY),
+            fuzzy_cache: FifoCache::new(CACHE_CAPACITY),
             typo_span_cache: FifoCache::new(TYPO_SPAN_CACHE_CAPACITY),
             rerankers: Vec::new(),
             sentence_alternatives: false,
@@ -264,9 +274,11 @@ impl QuanpinDictionary {
             return Vec::new();
         }
         self.reset_cache_if_database_changed();
-        let cache_key = format!("fuzzy:{}:{segmentation}", options.rules);
-        if let Some(cached) = self.series_cache.get(&cache_key) {
-            return cached;
+        let hash = fuzzy_cache_hash(options.rules, segmentation);
+        if let Some(cached) = self.fuzzy_cache.get_ref(&hash) {
+            if fuzzy_cache_key_matches(cached, options.rules, segmentation) {
+                return cached.candidates.clone();
+            }
         }
         let segments = split_segments(segmentation);
         let mut result = Vec::with_capacity(FUZZY_PATH_BUDGET.saturating_mul(FUZZY_ROW_LIMIT));
@@ -297,7 +309,14 @@ impl QuanpinDictionary {
                 item
             }));
         }
-        self.series_cache.insert(cache_key, result.clone());
+        self.fuzzy_cache.insert(
+            hash,
+            CachedFuzzyCandidates {
+                rules: options.rules,
+                segmentation: segmentation.to_owned(),
+                candidates: result.clone(),
+            },
+        );
         result
     }
 
@@ -405,6 +424,7 @@ impl QuanpinDictionary {
         self.series_cache.clear();
         self.personal_scored_keys.clear();
         self.segmentation_cache.clear();
+        self.fuzzy_cache.clear();
         self.typo_span_cache.clear();
     }
 
@@ -865,6 +885,17 @@ fn fuzzy_segmentation<'a>(segmentation: &'a str, normalized_segments: &[String])
     } else {
         Cow::Borrowed(segmentation)
     }
+}
+
+fn fuzzy_cache_hash(rules: u32, segmentation: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    rules.hash(&mut hasher);
+    segmentation.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn fuzzy_cache_key_matches(cached: &CachedFuzzyCandidates, rules: u32, segmentation: &str) -> bool {
+    cached.rules == rules && cached.segmentation == segmentation
 }
 
 fn path_cache_key<'a>(raw: &'a str, segmentation: &'a str) -> &'a str {
