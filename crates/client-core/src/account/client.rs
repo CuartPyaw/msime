@@ -501,6 +501,11 @@ impl BackendAccountClient {
         if revision < 0 || !snapshot.is_absolute() || !crate::text::is_lower_hex(access_token, 64) {
             return Err(AccountError::Invalid);
         }
+        let parent = snapshot.parent().ok_or(AccountError::Invalid)?;
+        if !parent.is_absolute() {
+            return Err(AccountError::Invalid);
+        }
+        crate::storage::reject_symlink(parent).map_err(|_| AccountError::Invalid)?;
         let metadata = std::fs::symlink_metadata(snapshot).map_err(|_| AccountError::Invalid)?;
         if !metadata.file_type().is_file() {
             return Err(AccountError::Invalid);
