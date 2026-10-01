@@ -95,6 +95,7 @@ export function CandidateSkinPublishDialog({
   useEffect(() => {
     const generation = ++clientGeneration.current;
     let active = true;
+    setBusy(false);
     if (localSkins) {
       setOptionsLoading(true);
       void localSkins()

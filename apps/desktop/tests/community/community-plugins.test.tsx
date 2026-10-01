@@ -59,6 +59,14 @@ function catalog(packages: PluginPackage[]): () => Promise<PluginCatalogResult> 
   return vi.fn().mockResolvedValue({ packages, issues: [] });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 function client(overrides: Partial<CommunityPluginClient> = {}): CommunityPluginClient {
   return {
     list: vi.fn().mockResolvedValue({ plugins: [first], has_more: false }),
@@ -253,6 +261,47 @@ test("a successful publish releases the dialog busy state after the callback", a
   fireEvent.click(submit);
   await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
   await waitFor(() => expect(submit.disabled).toBe(false));
+});
+
+test("replacing the publish client releases a pending dialog action", async () => {
+  const pending = deferred<CommunityPlugin>();
+  const publish = vi.fn().mockReturnValue(pending.promise);
+  const initial = client({ publish });
+  const replacement = client();
+  const view = render(
+    <CommunityPluginPublishDialog
+      client={initial}
+      localPlugins={catalog([pack("sound", "rain")])}
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  const dialog = await screen.findByRole("dialog", { name: "发布扩展包" });
+  await within(dialog).findByRole("textbox", { name: "发布扩展包名称" });
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "确认拥有发布内容权利" }));
+  const submit = within(dialog).getByRole("button", { name: "公开发布" }) as HTMLButtonElement;
+  fireEvent.click(submit);
+  await waitFor(() => expect(submit.disabled).toBe(true));
+
+  view.rerender(
+    <CommunityPluginPublishDialog
+      client={replacement}
+      localPlugins={catalog([pack("sound", "rain")])}
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  await waitFor(() => {
+    const currentDialog = screen.getByRole("dialog", { name: "发布扩展包" });
+    expect(
+      (
+        within(currentDialog).getByRole("checkbox", {
+          name: "确认拥有发布内容权利",
+        }) as HTMLInputElement
+      ).disabled,
+    ).toBe(false);
+  });
+  pending.resolve(first);
 });
 
 test("editing the name after a failed publish draws a new publication id", async () => {
