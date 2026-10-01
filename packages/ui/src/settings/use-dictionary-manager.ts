@@ -142,18 +142,26 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
 
   async function removePhrase(entry: DictionaryEntry) {
     if (!client.dictionary || !mounted.current) return;
+    const generation = clientGeneration.current;
     const confirmed = await confirm({
       title: "删除词条",
       message: `“${entry.value}”（${entry.key}）将被删除，此操作无法撤销。`,
       confirmLabel: "删除",
       danger: true,
     });
-    if (!confirmed || !client.dictionary || !mounted.current) return;
+    if (
+      !confirmed ||
+      !client.dictionary ||
+      !mounted.current ||
+      clientGeneration.current !== generation
+    )
+      return;
     setPhraseBusy(true);
     setPhraseError("");
     setPhraseNotice("");
     try {
       await client.dictionary.edit(entry, null, randomRequestId("ui-remove"));
+      if (clientGeneration.current !== generation) return;
       const remaining = phrases.length - 1;
       const offset =
         remaining === 0 && phrasePage.offset > 0
@@ -161,7 +169,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
           : phrasePage.offset;
       await loadPhrases(dictionaryKind, offset);
     } catch (error) {
-      if (mounted.current)
+      if (mounted.current && clientGeneration.current === generation)
         setPhraseError(
           dictionaryErrorMessage(
             error,
@@ -169,7 +177,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
           ),
         );
     } finally {
-      if (mounted.current) setPhraseBusy(false);
+      if (mounted.current && clientGeneration.current === generation) setPhraseBusy(false);
     }
   }
 
