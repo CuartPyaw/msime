@@ -1,5 +1,5 @@
 #import "../settings/TestPreferenceSuite.h"
-// The candidate page layout as the panel applies it. CandidateItemLayoutTest covers the arithmetic; this renders real pages through the controller, because what matters is the frame a candidate button ends up with and the runs it draws: the card is at most half the screen's visible width, text, 辅助码 and glosses wider than their column wrap inside it, rows take their own heights, and a horizontal page breaks onto a new line instead of squeezing its candidates.
+// The candidate page layout as the panel applies it. CandidateItemLayoutTest covers the arithmetic; this renders real pages through the controller, because what matters is the frame a candidate button ends up with and the runs it draws: the card is at most half the screen's visible width (a horizontal page may grow past it to keep its glosses on one line), text, 辅助码 and glosses wider than their column wrap inside it, rows take their own heights, and a horizontal page breaks onto a new line instead of squeezing its candidates.
 //
 // It stands apart from shortcut-test, which imports the same controller, so a failure elsewhere in that suite cannot hide the layout assertions.
 #import "../../src/input/InputController.mm"
@@ -146,6 +146,32 @@ int main(void)
         assert(wrapped.itemLayout.textWrapped && wrapped.frame.size.height > oneLine * 1.5);
         assert(panel.frame.size.width <= MAX(halfScreen, floor(screen.size.width - 2 * MSIMECandidateScreenMargin)) + 0.5 && NSMaxX(wrapped.frame) <= panel.frame.size.width + 0.5);
         assert(NSMaxY(CandidateButton(panel.contentView, 1).frame) <= NSMinY(wrapped.frame) + 0.5);
+
+        // A horizontal page whose glosses are wider than half the screen grows past it instead of wrapping them, as long as the screen has room: every gloss keeps the single line a short one gets.
+        wideView[@"candidates"] = @[@{@"text": @"汉语", @"translation": @"Chinese", @"highlighted": @YES}];
+        [controller setValue:[wideView copy] forKey:@"view"];
+        [controller renderCandidates];
+        MSIMECandidateButton *shortGloss = CandidateButton(panel.contentView, 0);
+        const CGFloat glossLine = shortGloss.itemLayout.translation.height;
+        assert(glossLine > 0 && shortGloss.translationFont);
+        // Six glosses of a quarter of half the screen each: half again as wide as a half-screen card, still well inside the screen.
+        const CGFloat glossUnit = [@"gloss " sizeWithAttributes:@{NSFontAttributeName: shortGloss.translationFont}].width;
+        NSString *sentenceGloss = [@"" stringByPaddingToLength:(NSUInteger)MAX(8.0, ceil(halfScreen / 4 / glossUnit * 6)) withString:@"gloss " startingAtIndex:0];
+        NSMutableArray *glossPage = [NSMutableArray array];
+        while (glossPage.count < 6) [glossPage addObject:@{@"text": @"测试", @"translation": sentenceGloss}];
+        glossPage[0] = @{@"text": @"测试", @"translation": sentenceGloss, @"highlighted": @YES};
+        wideView[@"candidates"] = [glossPage copy];
+        [controller setValue:[wideView copy] forKey:@"view"];
+        [controller renderCandidates];
+        CGFloat glossTotal = 0;
+        for (NSInteger tag = 0; tag < 6; ++tag) {
+            MSIMECandidateButton *button = CandidateButton(panel.contentView, tag);
+            assert(button && fabs(button.itemLayout.translation.height - glossLine) < 0.5);
+            assert(fabs(NSMinY(button.frame) - NSMinY(CandidateButton(panel.contentView, 0).frame)) < 0.5);
+            glossTotal += button.itemLayout.translation.width;
+        }
+        assert(glossTotal > halfScreen && panel.frame.size.width > halfScreen + 0.5);
+        assert(panel.frame.size.width <= screen.size.width + 0.5);
 
         // Vertical: the card is capped at half the screen, a long sentence wraps into a taller row than its neighbours, and rows stack at their own heights.
         appearance.vertical = YES;
