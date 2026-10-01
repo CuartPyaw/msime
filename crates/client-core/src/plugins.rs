@@ -445,7 +445,8 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
             AudioLimits::NONE,
         ),
     };
-    check_files(directory, &files, &audio, limits)?;
+    let data: Vec<DataFile> = Vec::new();
+    check_files(directory, &files, &audio, limits, &data)?;
     Ok(PluginSummary {
         id,
         name,
@@ -473,6 +474,15 @@ impl AudioLimits {
         file_bytes: 0,
         total_bytes: 0,
     };
+}
+
+/// 清单点名的一个数据文件（辅助码表、单词表）。它必须存在、大小在 1..=`max_bytes` 之间、扩展名是 `extension`；它不按说明文件处理，也不做签名检查，内容由该类型自己的解析器通过 [`read_file`] 校验。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DataFile {
+    pub name: String,
+    pub max_bytes: u64,
+    /// 小写扩展名，不带点。
+    pub extension: &'static str,
 }
 
 /// The regular files of a pack directory, hidden names aside. Anything else in it - a subdirectory, a symbolic link, a device - refuses the pack, as does a name that is not one plain component or an entry count past `MAX_PACK_FILES`.
@@ -543,12 +553,13 @@ fn is_notice(name: &str) -> bool {
     matches!(extension(name).as_str(), "txt" | "md")
 }
 
-/// Every file is the manifest, an audio file the manifest names, or a notice; every named audio file is there, within `limits`, and starts the way its format does.
+/// 每个文件要么是清单，要么是清单点名的音频或数据文件，要么是说明文件；点名的音频文件都在、不超出 `limits`、文件头与格式相符；点名的数据文件都在、大小与扩展名符合 [`DataFile`] 的要求。
 fn check_files(
     directory: &Path,
     files: &PackFiles,
     audio: &[String],
     limits: AudioLimits,
+    data: &[DataFile],
 ) -> Result<(), String> {
     let mut distinct: Vec<&str> = audio.iter().map(String::as_str).collect();
     distinct.sort_unstable();
@@ -572,8 +583,25 @@ fn check_files(
     if total > limits.total_bytes {
         return Err("音频文件加起来太大".into());
     }
+    for file in data {
+        if distinct.contains(&file.name.as_str()) || file.name == MANIFEST_FILE {
+            return Err(format!("{} 不能同时用作别的文件", file.name));
+        }
+        if extension(&file.name) != file.extension {
+            return Err(format!("{} 的扩展名必须是 .{}", file.name, file.extension));
+        }
+        let size = *files
+            .get(&file.name)
+            .ok_or_else(|| format!("缺少数据文件 {}", file.name))?;
+        if size == 0 || size > file.max_bytes {
+            return Err(format!("{} 为空或太大", file.name));
+        }
+    }
     for (name, size) in files {
-        if name == MANIFEST_FILE || distinct.contains(&name.as_str()) {
+        if name == MANIFEST_FILE
+            || distinct.contains(&name.as_str())
+            || data.iter().any(|file| file.name == *name)
+        {
             continue;
         }
         if !is_notice(name) {

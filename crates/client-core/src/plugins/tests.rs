@@ -1499,3 +1499,51 @@ fn validate_applies_the_import_rules_without_installing() {
     left.sort();
     assert_eq!(left, ["typewriter"]);
 }
+
+#[test]
+fn data_files_are_checked_by_name_size_and_extension_not_as_notices() {
+    let pack = tempdir().unwrap();
+    let directory = pack.path();
+    fs::write(directory.join(MANIFEST_FILE), "x").unwrap();
+    // 比说明文件的上限大，作为数据文件仍然允许。
+    let table = vec![b'a'; MAX_NOTICE_BYTES as usize + 1];
+    fs::write(directory.join("table.txt"), &table).unwrap();
+    fs::write(directory.join("README.md"), "说明").unwrap();
+    let data = |name: &str, max_bytes: u64, extension: &'static str| DataFile {
+        name: name.into(),
+        max_bytes,
+        extension,
+    };
+    let check = |data: &[DataFile]| {
+        let files = list_files(directory).unwrap();
+        check_files(directory, &files, &[], AudioLimits::NONE, data)
+    };
+    check(&[data("table.txt", 1024 * 1024, "txt")]).unwrap();
+    // 不点名时它只是一个太大的说明文件。
+    assert_eq!(check(&[]).unwrap_err(), "table.txt 太大");
+    assert_eq!(
+        check(&[data("table.txt", MAX_NOTICE_BYTES, "txt")]).unwrap_err(),
+        "table.txt 为空或太大"
+    );
+    assert_eq!(
+        check(&[data("table.txt", 1024 * 1024, "tsv")]).unwrap_err(),
+        "table.txt 的扩展名必须是 .tsv"
+    );
+    assert_eq!(
+        check(&[data("words.tsv", 1024 * 1024, "tsv")]).unwrap_err(),
+        "缺少数据文件 words.tsv"
+    );
+    assert_eq!(
+        check(&[data(MANIFEST_FILE, 1024, "toml")]).unwrap_err(),
+        "plugin.toml 不能同时用作别的文件"
+    );
+    fs::write(directory.join("empty.txt"), "").unwrap();
+    assert_eq!(
+        check(&[
+            data("table.txt", 1024 * 1024, "txt"),
+            data("empty.txt", 1024, "txt")
+        ])
+        .unwrap_err(),
+        "empty.txt 为空或太大"
+    );
+}
