@@ -220,6 +220,19 @@ import {
   dictionaryChangePageChanged,
 } from "../entry/src/main/ets/account/AccountCloudBridge";
 import {
+  CLOUD_CLIPBOARD_EMPTY,
+  CLOUD_CLIPBOARD_FAILED,
+  CLOUD_CLIPBOARD_LOADING,
+  CLOUD_CLIPBOARD_SEND,
+  CLOUD_CLIPBOARD_SEND_FAILED,
+  CLOUD_CLIPBOARD_SENT,
+  CLOUD_CLIPBOARD_TAB,
+  CLOUD_CLIPBOARD_TOO_LONG,
+  CloudClipboardPolicy,
+  CloudClipboardSendOutcome,
+  CloudClipboardState,
+} from "../entry/src/main/ets/keyboard/clipboard/CloudClipboardPolicy";
+import {
   AiSkinCancelled,
   AiSkinFailure,
   AiSkinRun,
@@ -7342,6 +7355,539 @@ group("account access tokens rotate once and cannot outlive logout", () => {
     check(JSON.parse(reply).error === "account_cancelled", "logout rejects a late refresh result");
     check(lateStored === null, "a late refresh cannot restore cleared storage");
   });
+});
+
+group("the settings app and the keyboard never present a spent refresh token", () => {
+  const user = (id: string) => ({ id, display_name: "Test", created_at: "2026-01-01" });
+  const session = (access: string, refresh: string, expiresAt: number, id = "synthetic-user") =>
+    JSON.stringify({
+      access_token: access.repeat(64),
+      refresh_token: refresh.repeat(64),
+      token_type: "Bearer",
+      expires_at: expiresAt,
+      user: user(id),
+    });
+  const profile = JSON.stringify({ user: user("synthetic-user"), identities: [] });
+  // Both processes' locks on the one file, as an async mutex.
+  const sharedLock = () => {
+    let tail: Promise<void> = Promise.resolve();
+    return async <T>(body: () => Promise<T>): Promise<T> => {
+      const previous = tail;
+      let release: () => void = () => {};
+      tail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await body();
+      } finally {
+        release();
+      }
+    };
+  };
+  // The service: one live refresh token, rotated on use; presenting any other revokes the session.
+  const service = (initialRefresh: string) => {
+    const state = { live: initialRefresh.repeat(64), revoked: false, refreshes: 0, rotation: 0 };
+    const transport: AccountTransport = {
+      request: async (_method, path, token, body) => {
+        await Promise.resolve();
+        if (path === "/v1/auth/refresh") {
+          state.refreshes += 1;
+          if (state.revoked || body?.refresh_token !== state.live) {
+            state.revoked = true;
+            return { status: 401, body: "" };
+          }
+          state.rotation += 1;
+          const access = String(state.rotation).repeat(64);
+          state.live = String(state.rotation + 5).repeat(64);
+          return {
+            status: 200,
+            body: JSON.stringify({
+              access_token: access,
+              refresh_token: state.live,
+              token_type: "Bearer",
+              expires_in: 900,
+              user: user("synthetic-user"),
+            }),
+          };
+        }
+        return state.revoked || token === undefined
+          ? { status: 401, body: "" }
+          : { status: 200, body: profile };
+      },
+    };
+    return { state, transport };
+  };
+  const disk = (initial: string, lock: (<T>(body: () => Promise<T>) => Promise<T>) | undefined) => {
+    const box: { value: string | null } = { value: initial };
+    const store = (): AccountSessionStore => ({
+      load: () => box.value,
+      save: (value) => {
+        box.value = value;
+      },
+      clear: () => {
+        box.value = null;
+      },
+      exclusive: lock,
+    });
+    return { box, store };
+  };
+
+  // Both processes find the access token expired at the same moment.
+  const raced = service("b");
+  const racedDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  const settings = new AccountCloudBridge(raced.transport, racedDisk.store());
+  const keyboard = new AccountCloudBridge(raced.transport, racedDisk.store());
+  void Promise.all([
+    settings.handle('{"operation":"profile"}'),
+    keyboard.handle('{"operation":"profile"}'),
+  ]).then((replies) => {
+    check(
+      replies.every((reply) => JSON.parse(reply).ok === true),
+      "both processes stay signed in",
+    );
+    check(raced.state.refreshes === 1, "only one of them refreshes");
+    check(!raced.state.revoked, "the session is never revoked");
+    check(
+      racedDisk.box.value !== null &&
+        JSON.parse(racedDisk.box.value).refresh_token === raced.state.live,
+      "the live rotation is what is on disk",
+    );
+  });
+
+  // The keyboard read the file before the settings app rotated it.
+  const stale = service("d");
+  const staleDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  const staleKeyboard = new AccountCloudBridge(stale.transport, staleDisk.store());
+  staleDisk.box.value = session("c", "d", Date.now() + 600_000);
+  void staleKeyboard.handle('{"operation":"profile"}').then((reply) => {
+    check(JSON.parse(reply).ok === true, "a rotation saved by the other process is used");
+    check(stale.state.refreshes === 0, "and the spent token in memory is never presented");
+    check(!stale.state.revoked, "so the session survives a stale read");
+  });
+
+  // A document older than the one in memory, left by a write that failed, is not taken up.
+  const older = service("b");
+  const olderDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  const olderBridge = new AccountCloudBridge(older.transport, olderDisk.store());
+  olderDisk.box.value = session("c", "d", Date.now() - 60_000);
+  void olderBridge.handle('{"operation":"profile"}').then((reply) => {
+    check(JSON.parse(reply).ok === true, "the newer session in memory refreshes");
+    check(!older.state.revoked, "an older stored token is never presented");
+  });
+
+  // Another account on disk is the settings page's business, never adopted mid-request.
+  const switched = service("b");
+  const switchedDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  const switchedBridge = new AccountCloudBridge(switched.transport, switchedDisk.store());
+  switchedDisk.box.value = session("c", "d", Date.now() + 600_000, "other-user");
+  void switchedBridge.handle('{"operation":"profile"}').then((reply) => {
+    check(
+      JSON.parse(reply).error === "account_cancelled",
+      "another user's session is not taken up",
+    );
+    check(switched.state.refreshes === 0, "nor is the previous account's token refreshed");
+    check(
+      switchedDisk.box.value !== null &&
+        JSON.parse(switchedDisk.box.value).user.id === "other-user",
+      "so the new sign-in is never cleared by the old account's refusal",
+    );
+  });
+
+  // The settings page signs in as someone else while this process is refreshing the previous account.
+  const replaced = service("b");
+  const replacedDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  const replacing: AccountTransport = {
+    request: async (method, path, token, body) => {
+      if (path === "/v1/auth/refresh") {
+        replacedDisk.box.value = session("c", "d", Date.now() + 600_000, "other-user");
+      }
+      return await replaced.transport.request(method, path, token, body);
+    },
+  };
+  void new AccountCloudBridge(replacing, replacedDisk.store())
+    .handle('{"operation":"profile"}')
+    .then((reply) => {
+      check(
+        JSON.parse(reply).error === "account_cancelled",
+        "a rotation for the previous account is abandoned",
+      );
+      check(
+        replacedDisk.box.value !== null &&
+          JSON.parse(replacedDisk.box.value).user.id === "other-user",
+        "and never written over the new sign-in",
+      );
+    });
+
+  // Without the lock there is no refresh at all.
+  const unlocked = service("b");
+  const unlockedDisk = disk(session("a", "b", Date.now() - 1), async () => {
+    throw new Error("lock unavailable");
+  });
+  const unlockedBridge = new AccountCloudBridge(unlocked.transport, unlockedDisk.store());
+  void unlockedBridge.handle('{"operation":"profile"}').then((reply) => {
+    check(
+      JSON.parse(reply).error === "account_unavailable",
+      "a failed lock is a temporary failure",
+    );
+    check(unlocked.state.refreshes === 0, "no refresh is attempted outside the lock");
+    check(unlockedDisk.box.value !== null, "and the session is kept");
+  });
+
+  // A real expiry still signs out.
+  const expired = service("z");
+  const expiredDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  void new AccountCloudBridge(expired.transport, expiredDisk.store())
+    .handle('{"operation":"profile"}')
+    .then((reply) => {
+      check(JSON.parse(reply).error === "account_unauthorized", "a refused refresh signs out");
+      check(expiredDisk.box.value === null, "and clears the stored session");
+    });
+
+  // The keyboard's refresh is on the wire, holding the lock, when the settings page acts.
+  const tokens = (access: string, refresh: string, id = "synthetic-user") =>
+    JSON.stringify({
+      access_token: access.repeat(64),
+      refresh_token: refresh.repeat(64),
+      token_type: "Bearer",
+      expires_in: 900,
+      user: user(id),
+    });
+  const racing = (refreshReply: AccountTransportResponse, loginId = "synthetic-user") => {
+    const lock = sharedLock();
+    const shared = disk(session("a", "b", Date.now() - 1), lock);
+    const keyboardBridge = new AccountCloudBridge(
+      {
+        request: async (_method, path) => {
+          if (path === "/v1/auth/refresh") {
+            return await new Promise<AccountTransportResponse>((resolve) => {
+              pending.resolve = () => resolve(refreshReply);
+            });
+          }
+          return { status: 200, body: profile };
+        },
+      },
+      shared.store(),
+    );
+    shared.box.value = session("a", "b", Date.now() + 600_000);
+    const pending: { resolve?: () => void } = {};
+    const settingsBridge = new AccountCloudBridge(
+      {
+        request: async (_method, path) => {
+          // The settings page's own request reaches the service while the keyboard's refresh is still out; the refresh answers right after.
+          setTimeout(() => pending.resolve?.(), 0);
+          if (path === "/v1/auth/login") return { status: 200, body: tokens("7", "8", loginId) };
+          return { status: 200, body: "{}" };
+        },
+      },
+      shared.store(),
+    );
+    return { shared, keyboardBridge, settingsBridge };
+  };
+
+  const loggedOut = racing({ status: 200, body: tokens("c", "d") });
+  void Promise.all([
+    loggedOut.keyboardBridge.handle('{"operation":"profile"}'),
+    loggedOut.settingsBridge.handle('{"operation":"logout","all":false}'),
+  ]).then(() => {
+    check(
+      loggedOut.shared.box.value === null,
+      "a sign-out during a keyboard refresh stays signed out",
+    );
+  });
+
+  const signedIn = racing({ status: 200, body: tokens("c", "d") });
+  void Promise.all([
+    signedIn.keyboardBridge.handle('{"operation":"profile"}'),
+    signedIn.settingsBridge.handle(
+      '{"operation":"login","challenge_id":"challenge","credential":"123456"}',
+    ),
+  ]).then(() => {
+    check(
+      signedIn.shared.box.value !== null &&
+        JSON.parse(signedIn.shared.box.value).refresh_token === "8".repeat(64),
+      "a sign-in during a keyboard refresh is not overwritten by the old session's rotation",
+    );
+  });
+
+  const refusedAfterLogin = racing({ status: 401, body: "" }, "other-user");
+  void Promise.all([
+    refusedAfterLogin.keyboardBridge.handle('{"operation":"profile"}'),
+    refusedAfterLogin.settingsBridge.handle(
+      '{"operation":"login","challenge_id":"challenge","credential":"123456"}',
+    ),
+  ]).then(() => {
+    check(
+      refusedAfterLogin.shared.box.value !== null &&
+        JSON.parse(refusedAfterLogin.shared.box.value).user.id === "other-user",
+      "a refused refresh does not clear a sign-in saved after it",
+    );
+  });
+
+  // A writer that could not take the lock still lands mid-refresh; the refresh re-reads the store before writing.
+  const unlockedWriter = (refreshReply: AccountTransportResponse, landed: string | null) => {
+    const shared = disk(session("a", "b", Date.now() - 1), undefined);
+    const bridge = new AccountCloudBridge(
+      {
+        request: async (_method, path) => {
+          if (path === "/v1/auth/refresh") shared.box.value = landed;
+          return path === "/v1/auth/refresh" ? refreshReply : { status: 200, body: profile };
+        },
+      },
+      shared.store(),
+    );
+    return { shared, reply: bridge.handle('{"operation":"profile"}') };
+  };
+  const emptied = unlockedWriter({ status: 200, body: tokens("c", "d") }, null);
+  void emptied.reply.then((reply) => {
+    check(
+      JSON.parse(reply).error === "account_unauthorized",
+      "a rotation for an ended session is dropped",
+    );
+    check(emptied.shared.box.value === null, "and never written into an emptied store");
+  });
+  const resigned = session("7", "8", Date.now() + 600_000);
+  const replacedRefused = unlockedWriter({ status: 401, body: "" }, resigned);
+  void replacedRefused.reply.then(() => {
+    check(
+      replacedRefused.shared.box.value === resigned,
+      "a refusal clears only the session it refused",
+    );
+  });
+});
+
+group("cloud clipboard text follows the shared clipboard bounds", () => {
+  check(
+    CloudClipboardPolicy.validText("第一行\n第二行\r\n\t缩进"),
+    "line breaks and tabs are content",
+  );
+  check(!CloudClipboardPolicy.validText("   \n\t "), "blank text is refused");
+  check(!CloudClipboardPolicy.validText("a\u0000b"), "NUL is refused");
+  check(!CloudClipboardPolicy.validText("a\u0001b"), "other C0 controls are refused");
+  check(!CloudClipboardPolicy.validText("a\u007fb"), "DEL is refused");
+  check(
+    !CloudClipboardPolicy.validText("a\u0085b"),
+    "C1 controls are refused as Rust's is_control does",
+  );
+  check(CloudClipboardPolicy.validText("x".repeat(4000)), "4,000 UTF-16 units fit");
+  check(!CloudClipboardPolicy.validText("x".repeat(4001)), "4,001 do not");
+  check(
+    CloudClipboardPolicy.validText("😀".repeat(2000)),
+    "an astral character counts as two units",
+  );
+  check(
+    !CloudClipboardPolicy.validText("😀".repeat(2000) + "x"),
+    "so 2,000 of them fill the bound",
+  );
+  check(!CloudClipboardPolicy.validText(42), "only strings are text");
+});
+
+group("cloud clipboard listings are read whole", () => {
+  const id = (digit: string) => digit.repeat(64);
+  const page = (items: unknown[], enabled = true) =>
+    JSON.stringify({ ok: true, value: { enabled, items } });
+  const item = (digit: string, text: string) => ({
+    id: id(digit),
+    text,
+    updated_at: "2026-10-01T08:00:00Z",
+  });
+
+  const ready = CloudClipboardPolicy.parseList(
+    page([item("a", "来自手机"), item("b", "两行\n文本")]),
+  );
+  check(ready.state === CloudClipboardState.READY, "a valid page is ready");
+  check(
+    ready.items.length === 2 &&
+      ready.items[0].id === id("a") &&
+      ready.items[1].text === "两行\n文本" &&
+      ready.items[0].updatedAt === "2026-10-01T08:00:00Z",
+    "items keep their order, id, text and time",
+  );
+  check(
+    CloudClipboardPolicy.parseList(page([])).state === CloudClipboardState.READY &&
+      CloudClipboardPolicy.parseList(page([])).items.length === 0,
+    "an empty clipboard is ready with no items",
+  );
+
+  const disabled = CloudClipboardPolicy.parseList(page([item("a", "hidden")], false));
+  check(
+    disabled.state === CloudClipboardState.DISABLED && disabled.items.length === 0,
+    "a disabled clipboard shows nothing it carries",
+  );
+  check(
+    CloudClipboardPolicy.parseList('{"ok":false,"error":"account_unauthorized"}').state ===
+      CloudClipboardState.SIGNED_OUT,
+    "an unauthorized reply reads as signed out",
+  );
+  for (const failure of [
+    '{"ok":false,"error":"account_unavailable"}',
+    '{"ok":false,"error":"account_rate_limited"}',
+    "not json",
+    "[]",
+    '{"ok":true,"value":null}',
+    '{"ok":true,"value":{"items":[]}}',
+    '{"ok":true,"value":{"enabled":true}}',
+    page([{ id: "1", text: "short id", updated_at: "2026" }]),
+    page([{ id: "A".repeat(64), text: "upper-case id", updated_at: "2026" }]),
+    page([item("a", "bell\u0007")]),
+    page([item("a", "   ")]),
+    page([{ id: id("a"), text: "no time" }]),
+    page([{ id: id("a"), text: "control in time", updated_at: "2026\n" }]),
+    page([{ id: id("a"), text: "long time", updated_at: "9".repeat(129) }]),
+    page([item("a", "fine"), null]),
+    page(Array.from({ length: 51 }, (_unused, index) => item("c", `item ${index}`))),
+  ]) {
+    const listing = CloudClipboardPolicy.parseList(failure);
+    check(
+      listing.state === CloudClipboardState.FAILED && listing.items.length === 0,
+      `a malformed or failed reply shows nothing: ${failure.slice(0, 60)}`,
+    );
+  }
+  check(
+    CloudClipboardPolicy.parseList(page(Array.from({ length: 50 }, () => item("d", "x")))).items
+      .length === 50,
+    "fifty items is the service's page",
+  );
+});
+
+group("cloud clipboard items stay out of password fields and stale editors", () => {
+  check(CloudClipboardPolicy.editorAllows(true, false), "an ordinary field may show cloud items");
+  check(!CloudClipboardPolicy.editorAllows(true, true), "a password field never does");
+  check(
+    !CloudClipboardPolicy.editorAllows(false, false),
+    "nor a field whose attributes have not arrived",
+  );
+  check(CloudClipboardPolicy.current(7, 7), "a listing for the focused editor is current");
+  check(!CloudClipboardPolicy.current(7, 8), "a listing for the previous editor is dropped");
+  check(!CloudClipboardPolicy.current(-1, -1), "a listing never fetched belongs to no editor");
+  check(
+    !CloudClipboardPolicy.current(Number.NaN, Number.NaN),
+    "a non-integer generation is refused",
+  );
+});
+
+group("sending to the cloud clipboard needs a signed-in account with the clipboard on", () => {
+  check(
+    CloudClipboardPolicy.sendBlock(null, "hello") === CLOUD_CLIPBOARD_LOADING,
+    "nothing is sent before the account's state is known",
+  );
+  check(
+    CloudClipboardPolicy.sendBlock(CloudClipboardState.SIGNED_OUT, "hello") ===
+      "登录水杉账号后可在设备间同步剪贴板",
+    "signed out says how to sign in",
+  );
+  check(
+    CloudClipboardPolicy.sendBlock(CloudClipboardState.DISABLED, "hello") === "云剪贴板未开启",
+    "a disabled clipboard says so",
+  );
+  check(
+    CloudClipboardPolicy.sendBlock(CloudClipboardState.FAILED, "hello") === CLOUD_CLIPBOARD_FAILED,
+    "an unreadable clipboard is not written to",
+  );
+  check(
+    CloudClipboardPolicy.sendBlock(CloudClipboardState.READY, "hello") === null,
+    "ready and valid may be sent",
+  );
+  check(
+    CloudClipboardPolicy.sendBlock(CloudClipboardState.READY, "x".repeat(4001)) ===
+      CLOUD_CLIPBOARD_TOO_LONG,
+    "a local entry beyond the shared bound is refused before the network",
+  );
+  check(CLOUD_CLIPBOARD_SEND === "发到云剪贴板" && CLOUD_CLIPBOARD_TAB === "云端", "shared labels");
+
+  check(
+    CloudClipboardPolicy.parseSend('{"ok":true,"value":{}}') === CloudClipboardSendOutcome.SENT,
+    "an accepted add is sent",
+  );
+  check(
+    CloudClipboardPolicy.parseSend('{"ok":false,"error":"account_unauthorized"}') ===
+      CloudClipboardSendOutcome.SIGNED_OUT,
+    "an expired session is named",
+  );
+  check(
+    CloudClipboardPolicy.parseSend('{"ok":false,"error":"account_invalid"}') ===
+      CloudClipboardSendOutcome.INVALID,
+    "refused text is named",
+  );
+  check(
+    CloudClipboardPolicy.parseSend('{"ok":false,"error":"account_unavailable"}') ===
+      CloudClipboardSendOutcome.FAILED &&
+      CloudClipboardPolicy.parseSend("") === CloudClipboardSendOutcome.FAILED,
+    "anything else is a failure",
+  );
+  check(
+    CloudClipboardPolicy.sendNotice(CloudClipboardSendOutcome.SENT) === CLOUD_CLIPBOARD_SENT &&
+      CloudClipboardPolicy.sendNotice(CloudClipboardSendOutcome.FAILED) ===
+        CLOUD_CLIPBOARD_SEND_FAILED,
+    "each outcome has its line",
+  );
+
+  check(CloudClipboardPolicy.notice(null, true, 0) === CLOUD_CLIPBOARD_LOADING, "loading says so");
+  check(CloudClipboardPolicy.notice(null, false, 0) === "", "nothing is claimed before a fetch");
+  check(
+    CloudClipboardPolicy.notice(CloudClipboardState.READY, false, 0) === CLOUD_CLIPBOARD_EMPTY,
+    "an empty clipboard says it is empty",
+  );
+  check(
+    CloudClipboardPolicy.notice(CloudClipboardState.READY, false, 3) === "",
+    "items speak for themselves",
+  );
+  check(
+    CloudClipboardPolicy.notice(CloudClipboardState.SIGNED_OUT, false, 0) ===
+      "登录水杉账号后可在设备间同步剪贴板" &&
+      CloudClipboardPolicy.notice(CloudClipboardState.DISABLED, false, 0) === "云剪贴板未开启",
+    "signed-out and disabled use the shared wording",
+  );
+});
+
+group("the account bridge sends multi-line clipboard text the shared client accepts", () => {
+  let stored: string | null = JSON.stringify({
+    access_token: "a".repeat(64),
+    refresh_token: "b".repeat(64),
+    token_type: "Bearer",
+    expires_at: Date.now() + 600_000,
+    user: { id: "synthetic-user", display_name: "Test", created_at: "2026-01-01" },
+  });
+  const bodies: (Record<string, unknown> | undefined)[] = [];
+  const bridge = new AccountCloudBridge(
+    {
+      request: async (_method, _path, _token, body) => {
+        bodies.push(body);
+        return {
+          status: 200,
+          body: JSON.stringify({ id: "e".repeat(64), text: body?.text, updated_at: "2026-10-01" }),
+        };
+      },
+    },
+    {
+      load: () => stored,
+      save: (value) => {
+        stored = value;
+      },
+      clear: () => {
+        stored = null;
+      },
+    },
+  );
+  void bridge
+    .handle(
+      JSON.stringify({
+        operation: "clipboard",
+        clipboard_operation: "add",
+        text: "第一行\n第二行",
+      }),
+    )
+    .then((reply) => {
+      check(JSON.parse(reply).ok === true, "a copied paragraph is accepted");
+      check(bodies[0]?.text === "第一行\n第二行", "and sent with its line break");
+    });
+  void bridge
+    .handle(
+      JSON.stringify({ operation: "clipboard", clipboard_operation: "add", text: "a\u0085b" }),
+    )
+    .then((reply) => {
+      check(JSON.parse(reply).error === "account_invalid", "a C1 control is refused locally");
+    });
 });
 
 group("profile updates preserve the session and cannot outlive logout", () => {

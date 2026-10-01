@@ -85,6 +85,17 @@ macOS 26 及以上在没有选择任何服务时（候选翻译开启，小牛�
 
 `https://api.msime.app`，定义在 `crates/client-core/src/account.rs` 的 `ACCOUNT_ORIGIN`。普通账号不登录不发生。Linux 安装包会在 Debian `postinst` 为可联系的登录用户注册匿名账号；手工安装或当时网络不可用时，`msime-linux-setup` 会在首次配置时重试。候选翻译只有在选择了「水杉账号」后才发送，见[候选翻译](#候选翻译默认不联网需要你选择服务)；Android 浏览社区皮肤与词库目录时，也会先取匿名账号的令牌（`platforms/android/java/app/msime/android/community/CommunityCatalog.java`），取不到照常列出目录。macOS 输入法激活时不创建账号。Linux 的匿名身份和令牌由 `msime-linux-online-provider` 保存在用户配置目录的 `anonymous-account.json` 与 `anonymous-session.json`，两个文件均为当前用户专用权限，不进入设置页或输入法进程。凭据存放在系统密钥库：macOS/iOS 用 Keychain（`crates/host-macos/native/account.mm`、`crates/tauri-mobile-platform/ios/Sources/MobilePlatformPlugin.swift`），Android 用 Keystore 加密后落盘。
 
+### 云剪贴板（需要登录）
+
+用来在手机和电脑之间传文字：一台设备上把文字放进云剪贴板，另一台设备上从云剪贴板里点选。条目存在 `https://api.msime.app` 你的账号下，最多 50 条，单条不超过 4000 个 UTF-16 单元。
+
+- **只上传你明确选择的文字**：在云剪贴板面板里输入或粘贴后点上传，或者在本地剪贴板历史的某一条上点「发到云剪贴板」。任何平台都不会自动读取系统剪贴板，复制时也不会自动上传。
+- **只在打开面板时读取**：设置页、键盘里的「云端」栏和 macOS 输入法菜单里的「云剪贴板…」在打开和点刷新时各拉取一次列表，没有轮询或推送。
+- **密码框里不出现**：Android、iOS、HarmonyOS 键盘和 Linux Fcitx5 在密码类输入框里不显示云端条目，也不发请求；macOS 在安全输入期间不打开云剪贴板面板。
+- **关闭即删除**：把云剪贴板关掉会删除云端全部条目，共享设置页在关闭前会先请你确认。
+- **键盘怎么拿到账号**：键盘和设置应用是不同的进程，账号令牌不会被复制成明文文件。Android 键盘向主进程里一个不导出的 ContentProvider 取令牌，只有主进程会刷新令牌；iOS 的会话存放在 App 与键盘扩展共有的 App Group 钥匙串访问组里，键盘需要「允许完全访问」才会联网；HarmonyOS 键盘读取设置应用在应用私有目录里保存的同一份会话。iOS 与 HarmonyOS 刷新令牌时持有跨进程文件锁，防止两个进程用同一个刷新令牌而让会话被服务端吊销。
+- **从电脑上屏**：Windows 与 Linux 的设置窗口里，云剪贴板面板只有在这次打开时记下了另一个应用的输入窗口才能直接上屏，否则只能复制；它不会沿用以前记下的窗口。
+
 ### 资源与更新下载
 
 首次准备词库时从 GitHub Releases 拉取固定版本的资源，地址、长度和 SHA-256 全部写死在 `resources/desktop-dictionary.lock.json` 里，逐一校验，全部成功才发布到内容标识目录。下载的是公开发布物，不上传任何东西。检查更新只在点击「检查更新」时进行，向 `https://api.github.com/repos/metasequoiaime/msime/releases` 发起 GET 请求并在本地按平台标签前缀筛选（识别不出宿主平台时改为读取 `https://msime.app/update.json`）；请求除 IP 地址和防缓存时间戳外不携带标识，适用 GitHub 隐私条款。

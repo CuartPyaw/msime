@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { runAsyncAction } from "../core/async-action";
 import * as settings from "./settings-style";
 import { GroupList, Row, Segmented, Select, Slider, Switch } from "../core/platform-controls";
 import type { ConfirmRequest } from "../core/confirm";
@@ -214,11 +215,14 @@ export function PluginsSection({
   const [mentions, setMentions] = useState<MentionEntry[]>([]);
   const [savedMentions, setSavedMentions] = useState<MentionEntry[]>([]);
   const mentionsEditable = triggers && Boolean(client);
+  const actionRunning = useRef(false);
+  const clientGeneration = useRef(0);
   // The page stays mounted while hidden, so a reload on the next visit must not overwrite edits that were never saved.
   const mentionsDirtyRef = useRef(false);
 
   useEffect(() => {
     if (!active || !client) return;
+    const generation = ++clientGeneration.current;
     let current = true;
     void client
       .catalog()
@@ -244,6 +248,7 @@ export function PluginsSection({
     }
     return () => {
       current = false;
+      if (generation === clientGeneration.current) clientGeneration.current++;
     };
     // `onError` is the page's setter and stable; the effect reloads on a visit, not on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -262,33 +267,54 @@ export function PluginsSection({
   // After an import or removal that already succeeded: a failed reread is reported as such, not as a failed import or removal.
   const refresh = async () => {
     if (!client) return;
+    const generation = clientGeneration.current;
     try {
-      setCatalog(await client.catalog());
+      const next = await client.catalog();
+      if (generation !== clientGeneration.current) return;
+      setCatalog(next);
       setCatalogLoaded(true);
     } catch (error) {
-      onError(pluginErrorMessage(error, "无法读取扩展包列表，请重试。"));
+      if (generation === clientGeneration.current)
+        onError(pluginErrorMessage(error, "无法读取扩展包列表，请重试。"));
     }
   };
 
-  const importPack = async (source: "folder" | "archive") => {
-    if (!client) return;
-    setWorking(true);
-    setNotice("");
+  async function runPluginAction(
+    operation: (isCurrent: () => boolean) => Promise<void>,
+    fallback: string,
+  ) {
+    if (!client || actionRunning.current) return;
+    actionRunning.current = true;
+    const generation = clientGeneration.current;
     try {
-      const imported = await client.importPack(source);
+      await runAsyncAction(
+        {
+          busy: false,
+          isCurrent: () => generation === clientGeneration.current,
+          setBusy: setWorking,
+          setError: onError,
+          setNotice,
+        },
+        operation,
+        { formatError: (error) => pluginErrorMessage(error, fallback) },
+      );
+    } finally {
+      actionRunning.current = false;
+    }
+  }
+
+  const importPack = async (source: "folder" | "archive") => {
+    await runPluginAction(async (isCurrent) => {
+      const imported = await client!.importPack(source);
+      if (!isCurrent()) return;
       if (imported) {
         setNotice(`已导入${kindLabels[imported.kind]}「${imported.name}」${imported.version}。`);
         await refresh();
       }
-    } catch (error) {
-      onError(pluginErrorMessage(error, "导入失败，请重试。"));
-    } finally {
-      setWorking(false);
-    }
+    }, "导入失败，请重试。");
   };
 
   const removePack = async (pack: PluginPackage) => {
-    if (!client) return;
     const confirmed = await confirm({
       title: `删除${kindLabels[pack.kind]}`,
       message: `删除「${pack.name}」？包里的文件会从本机移除。`,
@@ -296,17 +322,12 @@ export function PluginsSection({
       danger: true,
     });
     if (!confirmed) return;
-    setWorking(true);
-    setNotice("");
-    try {
-      await client.remove(pack.kind, pack.id);
+    await runPluginAction(async (isCurrent) => {
+      await client!.remove(pack.kind, pack.id);
+      if (!isCurrent()) return;
       onChange(withoutRemovedPack(preferences, pack.kind, pack.id));
       await refresh();
-    } catch (error) {
-      onError(pluginErrorMessage(error, "删除失败，请重试。"));
-    } finally {
-      setWorking(false);
-    }
+    }, "删除失败，请重试。");
   };
 
   const setCommandTable = (id: string, enabled: boolean) =>
@@ -325,18 +346,14 @@ export function PluginsSection({
       current.map((entry, position) => (position === index ? { ...entry, ...patch } : entry)),
     );
   const saveMentions = async () => {
-    if (!client || mentionIssue) return;
-    setWorking(true);
-    try {
+    if (mentionIssue) return;
+    await runPluginAction(async (isCurrent) => {
       const trimmed = mentions.map((entry) => ({ text: entry.text.trim(), key: entry.key }));
-      await client.saveMentions(trimmed);
+      await client!.saveMentions(trimmed);
+      if (!isCurrent()) return;
       setMentions(trimmed);
       setSavedMentions(trimmed);
-    } catch (error) {
-      onError(pluginErrorMessage(error, "名单未能保存，请重试。"));
-    } finally {
-      setWorking(false);
-    }
+    }, "名单未能保存，请重试。");
   };
 
   // Enabled tables that are no longer installed, listed so they can be switched off.

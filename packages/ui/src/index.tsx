@@ -438,6 +438,7 @@ import { AboutSettingsPage } from "./settings/pages/about-page";
 import { HelpcodeSettingsPage } from "./settings/pages/helpcode-page";
 import type { CustomHelpcodeSchema, HelpcodePreferences } from "./settings/pages/helpcode-page";
 import type { ClipboardHistoryClient } from "./settings/clipboard-history-section";
+import type { CloudClipboardRequest } from "./settings/cloud-clipboard-send";
 import { defaultFuzzyPinyin, type FuzzyPinyinPreferences } from "./settings/fuzzy-pinyin-section";
 import {
   defaultWordCharacter,
@@ -584,7 +585,20 @@ export {
   type ClipboardHistoryClient,
   type ClipboardHistoryEntry,
 } from "./settings/clipboard-history-section";
-export { CloudPanelSessionNotice } from "./settings/cloud-panel-session-notice";
+export {
+  CloudPanelSessionNotice,
+  CLOUD_PANEL_SESSION_NOTE,
+} from "./settings/cloud-panel-session-notice";
+export {
+  CLOUD_CLIPBOARD_DISABLED,
+  CLOUD_CLIPBOARD_MAX_UTF16,
+  CLOUD_CLIPBOARD_SIGNED_OUT,
+  CLOUD_CLIPBOARD_UNAVAILABLE,
+  cloudClipboardAvailabilityNote,
+  cloudClipboardFailure,
+  type CloudClipboardAvailability,
+  type CloudClipboardRequest,
+} from "./settings/cloud-clipboard-send";
 export { FuzzyPinyinSection, type FuzzyPinyinPreferences } from "./settings/fuzzy-pinyin-section";
 export {
   WordCharacterSection,
@@ -1770,6 +1784,8 @@ export interface SettingsClient {
    * the review inline rather than offering a button that opens nothing. */
   openVocabulary?: () => Promise<void>;
   openCloudClipboard?: () => Promise<void>;
+  /** Sends cloud clipboard requests from the settings window itself, over the signed-in account; with it the local clipboard history can send an entry to the cloud. */
+  cloudClipboardRequest?: CloudClipboardRequest;
   openCloudDictionary?: () => Promise<void>;
   restartInputMethod?: () => Promise<void>;
   /** macOS installs/updates the separate InputMethodKit bundle before registering it. */
@@ -1983,9 +1999,9 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     setRemoveUserData: setRemoveUserDataOnUninstall,
   } = useInputSourceUninstall({ uninstallInputSource: client.uninstallInputSource });
   const {
+    dismissInputSourceStartup,
     inputSourceStartup,
     onDeviceDownloadable,
-    setInputSourceStartup,
     setSavedShuangpinKeymap,
     setSavedWubiAutoCommitUnique,
     setShuangpinKeymap,
@@ -2506,7 +2522,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     dataDirectoryBusy,
     dataDirectoryResult,
     inputSourceStartup,
-    setInputSourceStartup,
+    dismissInputSourceStartup,
     page,
     accountLoginReturnPage,
     settingsContentRef,
@@ -2744,7 +2760,7 @@ export function SettingsPage(props: SettingsPageProps) {
     notice,
     recoveredBackup,
     inputSourceStartup,
-    setInputSourceStartup,
+    dismissInputSourceStartup,
     page,
     accountLoginReturnPage,
     settingsContentRef,
@@ -2788,7 +2804,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const statusActions = createSettingsStatusActions({
     recoverPreferences,
     inputSourceStartup: client.inputSourceStartup,
-    setInputSourceStartup,
+    dismissInputSourceStartup,
   });
   const externalActions = createSettingsExternalActions({
     mobile: mobilePlatform,

@@ -179,6 +179,24 @@ pub async fn candidate_skin_community_add_preview(
     .map_err(|_| CommandError { code: "storage" })?
 }
 
+/// Write the asset license the user chose for an installed package that has none into its manifest, then rescan, so a public share is no longer refused for it and the user never edits skin.toml by hand.
+#[tauri::command]
+pub async fn candidate_skin_community_add_license(
+    directory: State<'_, SkinDirectoryState>,
+    runtime: State<'_, RuntimeOptionsState>,
+    skin_id: String,
+    assets: String,
+) -> Result<SkinCatalogResponse, CommandError> {
+    let root = directory.0.clone();
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        candidate_community::add_license(&root, &skin_id, &assets).map_err(package_error)?;
+        Ok(crate::rescan_skin_catalog(root, &runtime))
+    })
+    .await
+    .map_err(|_| CommandError { code: "storage" })?
+}
+
 #[tauri::command]
 pub async fn candidate_skin_community_publish(
     state: State<'_, CandidateSkinCommunityState>,

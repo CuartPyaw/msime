@@ -1,6 +1,9 @@
 package app.msime.android;
 
+import android.app.Application;
 import android.content.Context;
+import android.net.Uri;
+import android.os.Bundle;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -50,6 +53,11 @@ public final class BackendAccount {
         JSONObject request(String method, String path, JSONObject body, String token) throws Exception;
     }
 
+    /** Where a process that does not own the session gets its access token (see {@link AccountSessionRoutingPolicy}). */
+    interface TokenSource {
+        String accessToken() throws Exception;
+    }
+
     static final class RequestException extends IllegalStateException {
         private static final long serialVersionUID = 1L;
         final int status;
@@ -62,14 +70,46 @@ public final class BackendAccount {
 
     private final SessionStore sessions;
     private final Requester requester;
+    private final TokenSource ownerProcess;
 
+    /**
+     * The account as this process may use it.
+     *
+     * <p>In the main process this reads and refreshes the session itself. In any other process - the `:ime` keyboard - the access token comes from the main process through {@link AccountSessionProvider}, so only one process ever spends a refresh token. Sign-in and sign-out belong to the main process.
+     */
     public BackendAccount(Context context) {
-        this(new AndroidAccountSessionStorage(context, SESSION_STORE), BackendAccount::httpRequest);
+        this(new AndroidAccountSessionStorage(context, SESSION_STORE), BackendAccount::httpRequest,
+            AccountSessionRoutingPolicy.ownsSession(Application.getProcessName(), context.getPackageName())
+                ? null : sessionOwner(context));
+    }
+
+    /** The account read and refreshed in this process, whatever process it is; only {@link AccountSessionProvider} uses this, in the main process. */
+    static BackendAccount owningSession(Context context) {
+        return new BackendAccount(new AndroidAccountSessionStorage(context, SESSION_STORE),
+            BackendAccount::httpRequest, null);
     }
 
     BackendAccount(SessionStore sessions, Requester requester) {
+        this(sessions, requester, null);
+    }
+
+    BackendAccount(SessionStore sessions, Requester requester, TokenSource owner) {
         this.sessions = sessions;
         this.requester = requester;
+        this.ownerProcess = owner;
+    }
+
+    private static TokenSource sessionOwner(Context context) {
+        Context application = context.getApplicationContext();
+        Uri uri = Uri.parse("content://" + AccountSessionRoutingPolicy.authority(application.getPackageName()));
+        return () -> {
+            Bundle reply = application.getContentResolver().call(
+                uri, AccountSessionRoutingPolicy.METHOD_ACCESS_TOKEN, null, null);
+            if (reply == null) throw new IllegalStateException("account session unavailable");
+            return AccountSessionRoutingPolicy.tokenFromReply(
+                reply.getString(AccountSessionRoutingPolicy.KEY_STATE),
+                reply.getString(AccountSessionRoutingPolicy.KEY_ACCESS_TOKEN));
+        };
     }
 
     /**
@@ -121,47 +161,73 @@ public final class BackendAccount {
         }
     }
 
-    /** The saved access token, or an empty string when this device is not signed in. */
+    /** The saved access token, or an empty string when this device is not signed in or the token cannot be had right now. */
     public String accessToken() {
         try {
-            FutureTask<String> flight;
-            boolean owner = false;
-            synchronized (SESSION_LOCK) {
-                String saved = sessions.load();
-                if (saved == null) return "";
-                JSONObject session = new JSONObject(saved);
-                JSONObject tokens = session.getJSONObject("tokens");
-                if (!AccountTokenPolicy.validSession(tokens.optString("token_type", ""),
-                        tokens.optString("access_token", ""), tokens.optString("refresh_token", ""),
-                        tokens.optLong("expires_in", 0))) return "";
-                long now = System.currentTimeMillis();
-                long expiry = session.optLong("expires_at_unix_ms", 0);
-                if (expiry > now + MAX_SESSION_MILLISECONDS) return "";
-                if (expiry > now + 30_000L) {
-                    return tokens.optString("access_token", "");
-                }
-                if (refreshFlight != null) {
-                    flight = refreshFlight;
-                } else {
-                    long generation = sessionGeneration;
-                    String refresh = tokens.optString("refresh_token", "");
-                    flight = new FutureTask<>(() -> refresh(refresh, generation));
-                    refreshFlight = flight;
-                    owner = true;
-                }
-            }
-            if (owner) {
-                try {
-                    flight.run();
-                } finally {
-                    synchronized (SESSION_LOCK) {
-                        if (refreshFlight == flight) refreshFlight = null;
-                    }
-                }
-            }
-            return flight.get();
+            return currentAccessToken();
         } catch (Exception | LinkageError error) {
             return "";
+        }
+    }
+
+    /**
+     * The access token, an empty string when this device is not signed in, or an exception when that cannot be told right now (a refresh that failed on the network, a session owner that could not be reached).
+     *
+     * <p>For callers that word the two differently: signed out asks the user to sign in, the other asks them to retry.
+     */
+    String currentAccessToken() throws Exception {
+        if (ownerProcess != null) {
+            String token = ownerProcess.accessToken();
+            return AccountTokenPolicy.validToken(token) ? token : "";
+        }
+        FutureTask<String> flight;
+        boolean owner = false;
+        synchronized (SESSION_LOCK) {
+            String saved = sessions.load();
+            if (saved == null) return "";
+            JSONObject session = new JSONObject(saved);
+            JSONObject tokens = session.getJSONObject("tokens");
+            if (!AccountTokenPolicy.validSession(tokens.optString("token_type", ""),
+                    tokens.optString("access_token", ""), tokens.optString("refresh_token", ""),
+                    tokens.optLong("expires_in", 0))) return "";
+            long now = System.currentTimeMillis();
+            long expiry = session.optLong("expires_at_unix_ms", 0);
+            if (expiry > now + MAX_SESSION_MILLISECONDS) return "";
+            if (expiry > now + 30_000L) {
+                return tokens.optString("access_token", "");
+            }
+            if (refreshFlight != null) {
+                flight = refreshFlight;
+            } else {
+                long generation = sessionGeneration;
+                String refresh = tokens.optString("refresh_token", "");
+                flight = new FutureTask<>(() -> refresh(refresh, generation));
+                refreshFlight = flight;
+                owner = true;
+            }
+        }
+        if (owner) {
+            try {
+                flight.run();
+            } finally {
+                synchronized (SESSION_LOCK) {
+                    if (refreshFlight == flight) refreshFlight = null;
+                }
+            }
+        }
+        try {
+            return flight.get();
+        } catch (java.util.concurrent.ExecutionException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof Exception exception) throw exception;
+            throw error;
+        }
+    }
+
+    /** Whether this process's own store holds a session at all, expired or not. */
+    boolean hasSession() throws Exception {
+        synchronized (SESSION_LOCK) {
+            return sessions.load() != null;
         }
     }
 

@@ -935,6 +935,8 @@ static NSImage *MSIMECandidateLogoImage() {
     uint64_t _applySequence;
     // Bumped when a gloss arrival replaces the view, which can also happen inside an apply:'s marked-text write.
     uint64_t _glossViewSequence;
+    // Whether the client may still hold marked text this controller's compositions wrote; see MSIMEApplyTransitionTrackingMarkedText. Wrongly YES costs one redundant clear, wrongly NO leaves a composition stranded in the document, so anything that might mark text sets it.
+    BOOL _clientHasMarkedText;
     NSObject *_candidateMenuToken;
     NSPanel *_panel;
     NSRect _candidateAnchorCaret;
@@ -3012,6 +3014,10 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     NSMenuItem *emoji = [[NSMenuItem alloc] initWithTitle:@"水杉表情面板…" action:@selector(showEmoji:) keyEquivalent:@""];
     emoji.target = self;
     [menu addItem:emoji];
+    // The cloud clipboard panel pastes into the editor like the emoji panel's clipboard page, so it sits beside it; the account, sync switch and history management stay in the settings window.
+    NSMenuItem *cloudClipboard = [[NSMenuItem alloc] initWithTitle:@"云剪贴板…" action:@selector(showCloudClipboard:) keyEquivalent:@""];
+    cloudClipboard.target = self;
+    [menu addItem:cloudClipboard];
     NSMenuItem *keyboard = [[NSMenuItem alloc] initWithTitle:@"水杉屏幕键盘…" action:@selector(showScreenKeyboard:) keyEquivalent:@""];
     keyboard.target = self;
     [menu addItem:keyboard];
@@ -3046,6 +3052,8 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     });
 }
 - (void)showCloudClipboard:(id)sender {
+    // Cloud history is never listed, let alone pasted, while a password field or a terminal's secure keyboard entry holds the keyboard.
+    if ([self secureEventInputActive]) { NSBeep(); return; }
     NSRunningApplication *application = NSWorkspace.sharedWorkspace.frontmostApplication;
     if (_activeClient && application &&
         application.processIdentifier != NSProcessInfo.processInfo.processIdentifier &&
@@ -3540,6 +3548,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
             if (controller->_doubaoVoiceInline && text) {
                 [(id<MSIMETextClient>)controller->_doubaoVoiceClient setMarkedText:text selectionRange:NSMakeRange(text.length, 0) replacementRange:NSMakeRange(NSNotFound, NSNotFound)];
                 controller->_doubaoVoiceMarked = YES;
+                controller->_clientHasMarkedText = YES;
             }
             if (!controller->_doubaoVoiceInline && text.length <= 65536) [controller->_voiceOverlay setTranscript:text ?: @""];
             return; // Partial text must not consume the runtime's final-only token.
@@ -3784,6 +3793,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
         if (_liveVoiceInline && text.length <= 65536) {
             [(id<MSIMETextClient>)_liveVoiceClient setMarkedText:text ?: @"" selectionRange:NSMakeRange(text.length, 0) replacementRange:NSMakeRange(NSNotFound, NSNotFound)];
             _liveVoiceMarked = YES;
+            _clientHasMarkedText = YES;
         }
         if (!_liveVoiceInline && text.length <= 65536) [_voiceOverlay setTranscript:text ?: @""];
         return;
@@ -4439,8 +4449,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         [self refreshTypingEffectSettings];
         _view = [session viewWithError:nil] ?: result[@"view"];
         if (_view) {
-            MSIMEApplyTransitionWithPreeditStyle(@{@"view": _view}, (id<MSIMETextClient>)_activeClient,
-                                                 _appearance.inlinePreeditStyle);
+            MSIMEApplyTransitionTrackingMarkedText(@{@"view": _view}, (id<MSIMETextClient>)_activeClient,
+                                                   _appearance.inlinePreeditStyle, nil, &_clientHasMarkedText);
         }
         [self refreshFloatingToolbarState];
         if (MSIMEMusicOwner == self) [self claimBackgroundMusic];
@@ -5753,7 +5763,7 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     // The Korean syllable has no candidate window to show it in, so it is always drawn inline, whatever the preedit display preference says: hidden it would be text the user cannot see being written.
     const MSIMEInlinePreeditStyle preeditStyle = MSIMEKoreanComposition(displayTransition[@"view"])
         ? MSIMEInlinePreeditStylePinyin : _appearance.inlinePreeditStyle;
-    MSIMEApplyTransitionWithPendingClosing(displayTransition, (id<MSIMETextClient>)_activeClient, preeditStyle, pendingClosing);
+    MSIMEApplyTransitionTrackingMarkedText(displayTransition, (id<MSIMETextClient>)_activeClient, preeditStyle, pendingClosing, &_clientHasMarkedText);
     // What a commit leaves left of the caret is known for certain, even in a host that never reads it back (Windows sets the shadow after every commit it makes). A pending closing mark goes in behind the commit, so it is the character the caret follows.
     if ([displayTransition[@"commit"] isKindOfClass:NSString.class]) {
         NSString *landed = pendingClosing.length ? pendingClosing : displayTransition[@"commit"];
@@ -5767,6 +5777,7 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     }
     if (openedClosing) {
         _pendingPairedClosing = openedClosing;
+        _clientHasMarkedText = YES;
         [(id<MSIMETextClient>)_activeClient setMarkedText:openedClosing
                                           selectionRange:NSMakeRange(0, 0)
                                         replacementRange:NSMakeRange(NSNotFound, NSNotFound)];

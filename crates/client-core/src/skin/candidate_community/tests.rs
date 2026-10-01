@@ -328,6 +328,104 @@ fn add_preview_refuses_without_writing() {
     assert_eq!(snapshot(&bare), before);
 }
 
+#[test]
+fn add_license_appends_a_license_table_to_a_package_without_one() {
+    let root = tempfile::tempdir().unwrap();
+    let skin = write_skin(
+        root.path(),
+        "sakura",
+        TOP,
+        DECORATION_IMAGE,
+        BACKGROUND_TABLE,
+        "",
+    );
+    let original = fs::read_to_string(skin.join("skin.toml")).unwrap();
+    assert_eq!(pack(root.path(), "sakura"), Err(LICENSE_REQUIRED));
+
+    assert_eq!(add_license(root.path(), "sakura", " CC-BY-4.0 "), Ok(()));
+    let separator = if original.ends_with('\n') { "" } else { "\n" };
+    assert_eq!(
+        fs::read_to_string(skin.join("skin.toml")).unwrap(),
+        format!("{original}{separator}\n[license]\nassets = \"CC-BY-4.0\"\n")
+    );
+    assert!(!skin.join(".skin.toml.license").exists());
+    assert_eq!(
+        pack(root.path(), "sakura")
+            .unwrap()
+            .license
+            .assets
+            .as_deref(),
+        Some("CC-BY-4.0")
+    );
+    // A package that declares an asset license keeps it.
+    assert_eq!(add_license(root.path(), "sakura", "CC0-1.0"), Err(PACKAGE));
+}
+
+#[test]
+fn add_license_fills_in_an_existing_license_table() {
+    let root = tempfile::tempdir().unwrap();
+    let skin = write_skin(
+        root.path(),
+        "sakura",
+        TOP,
+        DECORATION_IMAGE,
+        "",
+        "[license] # 授权\ncode = 'MIT'\n",
+    );
+    let original = fs::read_to_string(skin.join("skin.toml")).unwrap();
+
+    assert_eq!(
+        add_license(root.path(), "sakura", "原创绘制，\"随意\"使用"),
+        Ok(())
+    );
+    assert_eq!(
+        fs::read_to_string(skin.join("skin.toml")).unwrap(),
+        original.replace(
+            "[license] # 授权\n",
+            "[license] # 授权\nassets = '原创绘制，\"随意\"使用'\n"
+        )
+    );
+    let license = pack(root.path(), "sakura").unwrap().license;
+    assert_eq!(license.code.as_deref(), Some("MIT"));
+    assert_eq!(license.assets.as_deref(), Some("原创绘制，\"随意\"使用"));
+}
+
+#[test]
+fn add_license_refuses_without_writing() {
+    let root = tempfile::tempdir().unwrap();
+    let skin = write_skin(root.path(), "sakura", TOP, DECORATION_IMAGE, "", "");
+    let before = snapshot(&skin);
+    assert_eq!(add_license(root.path(), "sakura", "  "), Err(PACKAGE));
+    assert_eq!(
+        add_license(root.path(), "sakura", &"x".repeat(121)),
+        Err(PACKAGE)
+    );
+    assert_eq!(add_license(root.path(), "sakura", "CC0\n1.0"), Err(PACKAGE));
+    assert_eq!(add_license(root.path(), "missing", "CC0-1.0"), Err(PACKAGE));
+    assert_eq!(snapshot(&skin), before);
+
+    // Declared as an inline table or with an empty assets, the license is not the editor's to rewrite.
+    for (id, top, tail) in [
+        (
+            "inline",
+            "preview = 'preview.png'\nlicense = { code = 'MIT' }\n",
+            "",
+        ),
+        ("empty", TOP, "[license]\nassets = ''\n"),
+    ] {
+        let skin = write_skin(root.path(), id, top, DECORATION_IMAGE, "", tail);
+        let before = snapshot(&skin);
+        assert_eq!(
+            add_license(root.path(), id, "CC0-1.0"),
+            Err(PACKAGE),
+            "{id}"
+        );
+        assert_eq!(snapshot(&skin), before, "{id}");
+    }
+    standard_skin(root.path(), "fluent");
+    assert_eq!(add_license(root.path(), "fluent", "CC0-1.0"), Err(PACKAGE));
+}
+
 #[cfg(unix)]
 #[test]
 fn pack_refuses_a_symlinked_image() {

@@ -108,10 +108,7 @@ impl PinyinDatabase {
         if !first.is_ascii_lowercase() || limit == 0 {
             return Vec::new();
         }
-        let sql = format!(
-            "SELECT \"key\", \"value\", \"weight\" FROM \"tbl_1_{}\" WHERE \"key\" >= ?1 AND \"key\" < ?2 ORDER BY \"weight\" DESC LIMIT ?3",
-            first as char
-        );
+        let sql = initial_sql(first);
         // The upper bound is written out here in the reference too (QQ:1083).
         let upper_bound = format!("{prefix}{{");
         self.rows(&sql, (prefix, upper_bound.as_str(), sql_limit(limit)))
@@ -326,9 +323,7 @@ impl PinyinDatabase {
             return rows;
         }
 
-        let jp_sql = format!(
-            "SELECT \"key\", \"value\", \"weight\" FROM \"{table}\" WHERE \"jp\" = ? ORDER BY \"weight\" DESC LIMIT ?"
-        );
+        let jp_sql = jianpin_sql(&table);
         if needs_mixed_jianpin_query(segments, source) {
             let scan_limit = sql_limit(build_mixed_jianpin_scan_limit(limit));
             let rows: Vec<DictRow> = self
@@ -353,10 +348,7 @@ impl PinyinDatabase {
         if table.is_empty() || keys.is_empty() || limit == 0 {
             return Vec::new();
         }
-        let placeholders = vec!["?"; keys.len()].join(",");
-        let sql = format!(
-            "SELECT \"key\", \"value\", \"weight\" FROM \"{table}\" WHERE \"key\" IN ({placeholders}) ORDER BY \"weight\" DESC LIMIT ?"
-        );
+        let sql = batch_sql(table, keys.len());
         let bound = sql_limit(limit);
         let mut params: Vec<&dyn ToSql> = keys.iter().map(|key| key as &dyn ToSql).collect();
         params.push(&bound);
@@ -403,15 +395,55 @@ fn open_connection(path: &Path) -> Option<Connection> {
 }
 
 fn exact_sql(table: &str) -> String {
-    format!(
-        "SELECT \"key\", \"value\", \"weight\" FROM \"{table}\" WHERE \"key\" = ? ORDER BY \"weight\" DESC LIMIT ?"
-    )
+    let mut sql = String::with_capacity(table.len() + 86);
+    sql.push_str("SELECT \"key\", \"value\", \"weight\" FROM \"");
+    sql.push_str(table);
+    sql.push_str("\" WHERE \"key\" = ? ORDER BY \"weight\" DESC LIMIT ?");
+    sql
 }
 
 fn range_sql(table: &str) -> String {
-    format!(
-        "SELECT \"key\", \"value\", \"weight\" FROM \"{table}\" WHERE \"key\" >= ? AND \"key\" < ? ORDER BY \"weight\" DESC LIMIT ?"
-    )
+    let mut sql = String::with_capacity(table.len() + 101);
+    sql.push_str("SELECT \"key\", \"value\", \"weight\" FROM \"");
+    sql.push_str(table);
+    sql.push_str("\" WHERE \"key\" >= ? AND \"key\" < ? ORDER BY \"weight\" DESC LIMIT ?");
+    sql
+}
+
+fn batch_sql(table: &str, key_count: usize) -> String {
+    let mut sql = String::with_capacity(
+        table
+            .len()
+            .saturating_add(key_count.saturating_mul(2))
+            .saturating_add(96),
+    );
+    sql.push_str("SELECT \"key\", \"value\", \"weight\" FROM \"");
+    sql.push_str(table);
+    sql.push_str("\" WHERE \"key\" IN (");
+    for index in 0..key_count {
+        if index > 0 {
+            sql.push(',');
+        }
+        sql.push('?');
+    }
+    sql.push_str(") ORDER BY \"weight\" DESC LIMIT ?");
+    sql
+}
+
+fn jianpin_sql(table: &str) -> String {
+    let mut sql = String::with_capacity(table.len() + 85);
+    sql.push_str("SELECT \"key\", \"value\", \"weight\" FROM \"");
+    sql.push_str(table);
+    sql.push_str("\" WHERE \"jp\" = ? ORDER BY \"weight\" DESC LIMIT ?");
+    sql
+}
+
+fn initial_sql(first: u8) -> String {
+    let mut sql = String::with_capacity(111);
+    sql.push_str("SELECT \"key\", \"value\", \"weight\" FROM \"tbl_1_");
+    sql.push(first as char);
+    sql.push_str("\" WHERE \"key\" >= ?1 AND \"key\" < ?2 ORDER BY \"weight\" DESC LIMIT ?3");
+    sql
 }
 
 fn contains_table_key(keys: &[String], key: &str) -> bool {
@@ -463,6 +495,54 @@ mod tests {
         let keys = vec!["ni'hao".to_owned()];
         assert!(contains_table_key(&keys, "ni'hao"));
         assert!(!contains_table_key(&keys, "ni'he"));
+    }
+
+    #[test]
+    fn batch_sql_writes_placeholders_without_intermediate_vectors() {
+        assert_eq!(
+            batch_sql("tbl_2_n", 3),
+            "SELECT \"key\", \"value\", \"weight\" FROM \"tbl_2_n\" WHERE \"key\" IN (?,?,?) ORDER BY \"weight\" DESC LIMIT ?"
+        );
+    }
+
+    #[test]
+    fn exact_sql_writes_the_lookup_statement_directly() {
+        let sql = exact_sql("tbl_2_n");
+        assert_eq!(
+            sql,
+            "SELECT \"key\", \"value\", \"weight\" FROM \"tbl_2_n\" WHERE \"key\" = ? ORDER BY \"weight\" DESC LIMIT ?"
+        );
+        assert_eq!(sql.capacity(), sql.len());
+    }
+
+    #[test]
+    fn range_sql_writes_the_lookup_statement_directly() {
+        let sql = range_sql("tbl_2_n");
+        assert_eq!(
+            sql,
+            "SELECT \"key\", \"value\", \"weight\" FROM \"tbl_2_n\" WHERE \"key\" >= ? AND \"key\" < ? ORDER BY \"weight\" DESC LIMIT ?"
+        );
+        assert_eq!(sql.capacity(), sql.len());
+    }
+
+    #[test]
+    fn jianpin_sql_writes_the_lookup_statement_directly() {
+        let sql = jianpin_sql("tbl_2_n");
+        assert_eq!(
+            sql,
+            "SELECT \"key\", \"value\", \"weight\" FROM \"tbl_2_n\" WHERE \"jp\" = ? ORDER BY \"weight\" DESC LIMIT ?"
+        );
+        assert_eq!(sql.capacity(), sql.len());
+    }
+
+    #[test]
+    fn initial_sql_writes_the_lookup_statement_directly() {
+        let sql = initial_sql(b'n');
+        assert_eq!(
+            sql,
+            "SELECT \"key\", \"value\", \"weight\" FROM \"tbl_1_n\" WHERE \"key\" >= ?1 AND \"key\" < ?2 ORDER BY \"weight\" DESC LIMIT ?3"
+        );
+        assert_eq!(sql.capacity(), sql.len());
     }
 
     fn cascade_fixture(directory: &Path) -> PinyinDatabase {

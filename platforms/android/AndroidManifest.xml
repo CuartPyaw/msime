@@ -25,6 +25,10 @@
             <meta-data android:name="android.view.im" android:resource="@xml/method" />
         </service>
         <provider
+            android:name="app.msime.android.AccountSessionProvider"
+            android:authorities="${applicationId}.account-session"
+            android:exported="false" />
+        <provider
             android:name="app.msime.android.MlKitImeInitProvider"
             android:authorities="${applicationId}.mlkit-ime-init"
             android:exported="false"

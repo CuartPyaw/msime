@@ -2,7 +2,7 @@
 import { settingsFormReady } from "../support/settings-form";
 import { useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
   AccountPage,
   SettingsPage,
@@ -110,6 +110,36 @@ test("a late profile mutation is ignored after the profile page unmounts", async
   view.unmount();
   finish({ user: { ...user, displayName: "晚到的昵称" }, providers: ["email"] });
   await Promise.resolve();
+});
+
+test("a desktop profile rename response from a replaced client is ignored", async () => {
+  let resolveOld!: (value: AccountProfile) => void;
+  const oldClient = account({
+    status: vi.fn().mockResolvedValue({ user }),
+    rename: vi.fn(
+      () =>
+        new Promise<AccountProfile>((resolve) => {
+          resolveOld = resolve;
+        }),
+    ),
+  });
+  const nextClient = account({
+    status: vi.fn().mockResolvedValue({ user }),
+  });
+  const view = render(<AccountPage client={oldClient} />);
+  const name = await screen.findByRole("textbox", { name: "社区昵称" });
+  fireEvent.change(name, { target: { value: "旧客户端昵称" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存昵称" }));
+  await waitFor(() => expect(oldClient.rename).toHaveBeenCalledWith("旧客户端昵称"));
+
+  view.rerender(<AccountPage client={nextClient} />);
+  await screen.findByRole("textbox", { name: "社区昵称" });
+  await act(async () => {
+    resolveOld({ user: { ...user, displayName: "响应旧昵称" }, providers: ["email"] });
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(screen.queryByDisplayValue("响应旧昵称")).toBeNull();
 });
 
 test("mobile accounts keep profile editing and session actions on the pushed profile page", async () => {
@@ -271,6 +301,36 @@ test("iOS Apple sign-in stays behind the native account client boundary", async 
   expect(screen.queryByText(/token|nonce/i)).toBeNull();
 });
 
+test("an Apple sign-in response from a replaced account client is ignored", async () => {
+  let resolveOld!: (value: { user?: AccountUser | null }) => void;
+  const oldClient = account({
+    providers: vi.fn().mockResolvedValue({ email: false, phone: false, apple: true }),
+    appleLogin: vi.fn(
+      () =>
+        new Promise<{ user?: AccountUser | null }>((resolve) => {
+          resolveOld = resolve;
+        }),
+    ),
+  });
+  const nextClient = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false }),
+    status: vi.fn().mockResolvedValue({ user: null }),
+  });
+  const view = render(<AccountPage client={oldClient} />);
+  fireEvent.click(await screen.findByRole("button", { name: "使用 Apple 登录" }));
+  await waitFor(() => expect(oldClient.appleLogin).toHaveBeenCalledTimes(1));
+
+  view.rerender(<AccountPage client={nextClient} />);
+  await screen.findByRole("button", { name: "邮箱登录" });
+  await act(async () => {
+    resolveOld({ user });
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(oldClient.profile).not.toHaveBeenCalled();
+  expect(screen.queryByText("水杉测试用户")).toBeNull();
+});
+
 test("an Apple-only backend without a native Apple client shows the empty login state", async () => {
   const client = account({
     providers: vi.fn().mockResolvedValue({ email: false, phone: false, apple: true }),
@@ -296,6 +356,36 @@ test("desktop Google sign-in runs through the native account client", async () =
   expect(await screen.findByText("Google")).not.toBeNull();
   expect(client.requestCode).not.toHaveBeenCalled();
   expect(screen.queryByText(/token|code|state/i)).toBeNull();
+});
+
+test("a Google sign-in response from a replaced account client is ignored", async () => {
+  let resolveOld!: (value: { user?: AccountUser | null }) => void;
+  const oldClient = account({
+    providers: vi.fn().mockResolvedValue({ email: false, phone: false, google: true }),
+    googleLogin: vi.fn(
+      () =>
+        new Promise<{ user?: AccountUser | null }>((resolve) => {
+          resolveOld = resolve;
+        }),
+    ),
+  });
+  const nextClient = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false }),
+    status: vi.fn().mockResolvedValue({ user: null }),
+  });
+  const view = render(<AccountPage client={oldClient} />);
+  fireEvent.click(await screen.findByRole("button", { name: "使用 Google 登录" }));
+  await waitFor(() => expect(oldClient.googleLogin).toHaveBeenCalledTimes(1));
+
+  view.rerender(<AccountPage client={nextClient} />);
+  await screen.findByRole("button", { name: "邮箱登录" });
+  await act(async () => {
+    resolveOld({ user });
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(oldClient.profile).not.toHaveBeenCalled();
+  expect(screen.queryByText("水杉测试用户")).toBeNull();
 });
 
 test("Google sign-in needs both the backend provider and a native Google client", async () => {
@@ -411,7 +501,7 @@ test("account cancellation does not show a stale error alert", async () => {
     status: vi.fn().mockRejectedValue({ code: "account_cancelled" }),
   });
   render(<AccountPage client={client} />);
-  expect(await screen.findByRole("heading", { name: "登录方式" })).not.toBeNull();
+  expect(await screen.findByRole("heading", { name: "欢迎来到水杉" })).not.toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
 });
 

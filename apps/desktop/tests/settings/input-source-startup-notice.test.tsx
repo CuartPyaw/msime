@@ -27,7 +27,7 @@ test("shows the installation result and can be dismissed", () => {
   );
 
   expect(screen.getByRole("status", { name: "水杉输入法安装状态" }).textContent).toContain(
-    "水杉输入法已安装：1.0.0。",
+    "水杉输入法 1.0.0 已安装",
   );
   fireEvent.click(screen.getByRole("button", { name: "知道了" }));
   expect(onDismiss).toHaveBeenCalledOnce();
@@ -47,7 +47,23 @@ test("reports a failure when opening keyboard settings fails", async () => {
   fireEvent.click(screen.getByRole("button", { name: "打开键盘设置" }));
   await vi.waitFor(() =>
     expect(onError).toHaveBeenCalledWith(
-      "无法打开系统设置，请手动前往 系统设置 > 键盘 > 文字输入 > 输入法。",
+      "无法打开系统设置，请手动前往「系统设置 › 键盘 › 文字输入 › 输入法」。",
     ),
   );
+});
+
+test("does not ask for adding the source after a failed install", () => {
+  render(
+    <InputSourceStartupNotice
+      status={{ ...installed, action: "failed", enabled: false }}
+      onOpenSettings={vi.fn()}
+      onDismiss={vi.fn()}
+      onError={vi.fn()}
+    />,
+  );
+
+  const banner = screen.getByRole("alert", { name: "水杉输入法安装状态" });
+  expect(banner.textContent).toContain("水杉输入法没能自动安装或更新");
+  expect(banner.textContent).not.toContain("简体中文");
+  expect(screen.queryByRole("button", { name: "打开键盘设置" })).toBeNull();
 });

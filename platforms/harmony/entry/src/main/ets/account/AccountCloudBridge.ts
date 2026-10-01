@@ -1,5 +1,6 @@
 import { utf8Length } from "../keyboard/Utf8";
 import { CustomKeyboardSkin, CustomSkinDocument } from "../keyboard/skin/CustomKeyboardSkin";
+import { CloudClipboardPolicy } from "../keyboard/clipboard/CloudClipboardPolicy";
 
 export type AccountTransportResponse = { status: number; body: string; contentLength?: number };
 export type AccountDownloadResponse = {
@@ -46,6 +47,12 @@ export interface AccountSessionStore {
   load(): string | null;
   save(value: string): void;
   clear(): void;
+  /**
+   * Runs `body` holding a lock that every process sharing this store takes before it refreshes.
+   *
+   * A store only one process ever reads may leave it out. One that the settings application and the keyboard extension both read must provide it, because the service revokes the whole session when a spent refresh token is presented.
+   */
+  exclusive?<T>(body: () => Promise<T>): Promise<T>;
 }
 
 type Session = {
@@ -78,7 +85,6 @@ const MAX_COMMUNITY_RESOURCE_PAGE_BYTES = 48 * 1024 * 1024;
 const MAX_COMMUNITY_RESOURCE_DETAIL_BYTES = 3 * 1024 * 1024;
 const MAX_SESSION_SECONDS = 86_400 * 30;
 const MAX_SESSION_MILLISECONDS = MAX_SESSION_SECONDS * 1000;
-const MAX_CLIPBOARD_TEXT = 4000;
 const MAX_SEARCH = 256;
 
 /**
@@ -245,16 +251,32 @@ function validSkinDesign(value: unknown): boolean {
   if (Object.keys(design).some((field) => !fields.includes(field))) return false;
   const color = (field: string, allowNull = false): boolean => {
     const current = design[field];
-    return current === undefined || (allowNull && current === null) ||
-      (typeof current === "number" && safeInteger(current) && current >= 0 && current <= 0xffffff);
+    return (
+      current === undefined ||
+      (allowNull && current === null) ||
+      (typeof current === "number" && safeInteger(current) && current >= 0 && current <= 0xffffff)
+    );
   };
-  const boundedNumber = (field: string, minimum: number, maximum: number, allowNull = false): boolean => {
+  const boundedNumber = (
+    field: string,
+    minimum: number,
+    maximum: number,
+    allowNull = false,
+  ): boolean => {
     const current = design[field];
-    return current === undefined || (allowNull && current === null) ||
-      (typeof current === "number" && Number.isFinite(current) && current >= minimum && current <= maximum);
+    return (
+      current === undefined ||
+      (allowNull && current === null) ||
+      (typeof current === "number" &&
+        Number.isFinite(current) &&
+        current >= minimum &&
+        current <= maximum)
+    );
   };
   if (
-    !["background", "keyBackground", "keyForeground", "accent", "actionBackground"].every((field) => color(field)) ||
+    !["background", "keyBackground", "keyForeground", "accent", "actionBackground"].every((field) =>
+      color(field),
+    ) ||
     !boundedNumber("cornerRadius", 0, 20) ||
     !boundedNumber("borderWidth", 0, 2) ||
     !boundedNumber("shadow", 0, 0.4) ||
@@ -268,11 +290,14 @@ function validSkinDesign(value: unknown): boolean {
   const pattern = design.pattern;
   if (pattern !== undefined && (!safeInteger(pattern) || pattern < 0 || pattern > 3)) return false;
   if (design.monospaced !== undefined && typeof design.monospaced !== "boolean") return false;
-  if (design.gradientHorizontal !== undefined && typeof design.gradientHorizontal !== "boolean") return false;
+  if (design.gradientHorizontal !== undefined && typeof design.gradientHorizontal !== "boolean")
+    return false;
   if (
-    (design.keyShape !== undefined && design.keyShape !== null &&
+    (design.keyShape !== undefined &&
+      design.keyShape !== null &&
       !["rounded", "capsule", "ticket", "pebble"].includes(design.keyShape as string)) ||
-    (design.keyMaterial !== undefined && design.keyMaterial !== null &&
+    (design.keyMaterial !== undefined &&
+      design.keyMaterial !== null &&
       !["flat", "raised", "glass", "paper"].includes(design.keyMaterial as string)) ||
     !color("gradientEnd", true) ||
     !color("customBorderColor", true)
@@ -323,7 +348,8 @@ function validateCommunitySkinResponse(path: string, value: unknown): boolean {
       page.skins.length > 20 ||
       typeof page.has_more !== "boolean" ||
       (page.has_more && page.skins.length === 0)
-    ) return false;
+    )
+      return false;
     const ids: string[] = [];
     for (const item of page.skins as unknown[]) {
       if (!validCommunitySkinResponse(item)) return false;
@@ -651,7 +677,7 @@ export class AccountCloudBridge {
         case "delete_account":
           return await this.deleteAccount();
         case "clear_expired":
-          this.clearExpired();
+          await this.signOut();
           return success({});
         case "clipboard":
           return await this.clipboard(action);
@@ -902,9 +928,17 @@ export class AccountCloudBridge {
     if (value === null) return error("account_unavailable");
     const session: Session | null = sessionFromTokens(value);
     if (session === null) return error("account_unavailable");
-    this.session = session;
-    this.store.save(JSON.stringify(session));
-    return success({ user: session.user });
+    try {
+      // Under the lock, so a refresh the keyboard is in the middle of cannot write the previous session over this one.
+      return await this.locked(async (): Promise<string> => {
+        if (generation !== this.generation) return error("account_cancelled");
+        this.session = session;
+        this.store.save(JSON.stringify(session));
+        return success({ user: session.user });
+      });
+    } catch {
+      return error("account_unavailable");
+    }
   }
 
   private async rename(action: Action): Promise<string> {
@@ -958,22 +992,33 @@ export class AccountCloudBridge {
     ) {
       return error("account_cancelled");
     }
-    const updated: Session = { ...current, user: value.user };
-    this.store.save(JSON.stringify(updated));
-    this.session = updated;
-    return success(value);
+    const user: Session["user"] = value.user;
+    try {
+      // Only the user record is written back, onto whatever session the store holds now: the other process may have rotated the tokens, or the user signed in again, since this request was sent, and writing the tokens held here would put a spent or superseded refresh token back on disk.
+      const saved: boolean = await this.locked(async (): Promise<boolean> => {
+        if (expectedGeneration !== this.generation || this.session === null) return false;
+        const stored: Session | null = this.storedSession();
+        if (stored === null || stored.user.id !== expectedUserId) return false;
+        this.store.save(JSON.stringify({ ...stored, user }));
+        this.session = { ...this.session, user };
+        return true;
+      });
+      return saved ? success(value) : error("account_cancelled");
+    } catch {
+      return error("account_unavailable");
+    }
   }
 
   private async logout(action: Action): Promise<string> {
     if (typeof action.all !== "boolean") return error("account_invalid");
     const result = await this.authenticated("POST", "/v1/auth/logout", { all: action.all });
-    if (JSON.parse(result).ok) this.clearExpired();
+    if (JSON.parse(result).ok) await this.signOut();
     return result;
   }
 
   private async deleteAccount(): Promise<string> {
     const result = await this.authenticated("DELETE", "/v1/users/me");
-    if (JSON.parse(result).ok) this.clearExpired();
+    if (JSON.parse(result).ok) await this.signOut();
     return result;
   }
 
@@ -987,8 +1032,8 @@ export class AccountCloudBridge {
       );
     }
     if (operation === "add") {
-      if (!validString(action.text, MAX_CLIPBOARD_TEXT) || action.text.trim().length === 0)
-        return error("account_invalid");
+      // Clipboard text keeps its line breaks and tabs, as the shared client allows; the generic string check here would refuse every multi-line copy.
+      if (!CloudClipboardPolicy.validText(action.text)) return error("account_invalid");
       return this.authenticated("POST", "/v1/users/me/clipboard", { text: action.text });
     }
     if (operation === "delete") {
@@ -1240,12 +1285,18 @@ export class AccountCloudBridge {
     }
     const value = parseJson(response.body, communityResponseLimit(path));
     if (value === null && response.body.length > 0) return error("community_unavailable");
-    if (method === "GET" && path.startsWith("/v1/community/resources") &&
-        !validateCommunityResourceResponse(path, value)) {
+    if (
+      method === "GET" &&
+      path.startsWith("/v1/community/resources") &&
+      !validateCommunityResourceResponse(path, value)
+    ) {
       return error("community_unavailable");
     }
-    if (method === "GET" && path.startsWith("/v1/community/skins") &&
-        !validateCommunitySkinResponse(path, value)) {
+    if (
+      method === "GET" &&
+      path.startsWith("/v1/community/skins") &&
+      !validateCommunitySkinResponse(path, value)
+    ) {
       return error("community_unavailable");
     }
     if (responseValidator !== undefined && (value === null || !responseValidator(value))) {
@@ -1660,16 +1711,85 @@ export class AccountCloudBridge {
   private async credential(rejectedToken?: string): Promise<CredentialReply> {
     const usable: string | null = this.usableToken(rejectedToken);
     if (usable !== null) return { token: usable };
-    const current = this.session;
-    if (current === null) return { error: "account_unauthorized" };
+    if (this.session === null) return { error: "account_unauthorized" };
     if (this.refreshing !== null) return await this.refreshing;
     const generation = this.generation;
-    const flight: Promise<CredentialReply> = this.refresh(current.refresh_token, generation);
+    const flight: Promise<CredentialReply> = this.exclusiveRefresh(generation, rejectedToken);
     this.refreshing = flight;
     try {
       return await flight;
     } finally {
       if (this.refreshing === flight) this.refreshing = null;
+    }
+  }
+
+  /**
+   * Refresh while holding the store's cross-process lock, deciding from the session on disk rather than the one in memory.
+   *
+   * The settings application and the keyboard extension run in different processes over the one session file. The service rotates the refresh token on every refresh and revokes the whole session when a spent one is presented, so two processes refreshing the same token, or one refreshing a token the other has already rotated, signs the user out everywhere. Inside the lock this re-reads the store and takes up a rotation the other process saved; only when the stored access token is no better than this one's does it refresh, and the rotation is saved before the lock is released.
+   */
+  private async exclusiveRefresh(
+    generation: number,
+    rejectedToken?: string,
+  ): Promise<CredentialReply> {
+    try {
+      return await this.locked(
+        async (): Promise<CredentialReply> => await this.refreshLatest(generation, rejectedToken),
+      );
+    } catch {
+      // Without the lock there is no knowing the other process is not refreshing this token right now, and guessing wrong revokes the session; leaving it unrefreshed is the safe failure.
+      return { error: "account_unavailable" };
+    }
+  }
+
+  private async refreshLatest(
+    generation: number,
+    rejectedToken?: string,
+  ): Promise<CredentialReply> {
+    if (generation !== this.generation) return { error: "account_cancelled" };
+    // The settings page signed in as someone else since this bridge read the file. Refreshing the old account's token would be refused and the refusal would clear the new account's session.
+    if (this.storedUserChanged()) return { error: "account_cancelled" };
+    this.adoptStored();
+    const usable: string | null = this.usableToken(rejectedToken);
+    if (usable !== null) return { token: usable };
+    const current: Session | null = this.session;
+    if (current === null) return { error: "account_unauthorized" };
+    return await this.refresh(current, generation);
+  }
+
+  /**
+   * Take up a rotation another process saved for this account since this one last read the store.
+   *
+   * Only a valid session for the same user that expires later than the one in memory is newer: each rotation moves the expiry forward, so an older document left behind by a failed write is never mistaken for one. A sign-out or a different account is not picked up here; those are the settings page's own operations and arrive through them.
+   */
+  private adoptStored(): void {
+    const current: Session | null = this.session;
+    const stored: Session | null = this.storedSession();
+    if (
+      current !== null &&
+      stored !== null &&
+      stored.user.id === current.user.id &&
+      stored.refresh_token !== current.refresh_token &&
+      stored.expires_at > current.expires_at
+    )
+      this.session = stored;
+  }
+
+  /** Whether the store now holds a valid session for a different account from the one in memory. */
+  private storedUserChanged(): boolean {
+    const current: Session | null = this.session;
+    const stored: Session | null = this.storedSession();
+    return current !== null && stored !== null && stored.user.id !== current.user.id;
+  }
+
+  private storedSession(): Session | null {
+    const saved: string | null = this.store.load();
+    if (saved === null) return null;
+    try {
+      const value: unknown = JSON.parse(saved);
+      return validateSession(value) ? value : null;
+    } catch {
+      return null;
     }
   }
 
@@ -1684,7 +1804,13 @@ export class AccountCloudBridge {
     return current.access_token;
   }
 
-  private async refresh(refreshToken: string, generation: number): Promise<CredentialReply> {
+  /**
+   * Spend `from`'s refresh token. Callers hold the store's lock.
+   *
+   * The store is read again right before anything is written. Unlocked writers remain — a sign-out that could not take the lock, a document refused as corrupt — and either can land while the request is out; the rotation is then not written over whatever they left.
+   */
+  private async refresh(from: Session, generation: number): Promise<CredentialReply> {
+    const refreshToken: string = from.refresh_token;
     let response: AccountTransportResponse;
     try {
       response = await this.transport.request("POST", "/v1/auth/refresh", undefined, {
@@ -1695,7 +1821,7 @@ export class AccountCloudBridge {
     }
     if (generation !== this.generation) return { error: "account_cancelled" };
     if (response.status === 401 || response.status === 403) {
-      this.clearExpired();
+      this.expireSession((session: Session): boolean => session.refresh_token === refreshToken);
       return { error: "account_unauthorized" };
     }
     if (response.status < 200 || response.status >= 300) {
@@ -1706,8 +1832,24 @@ export class AccountCloudBridge {
     const next: Session | null = sessionFromTokens(value);
     if (next === null) return { error: "account_unavailable" };
     if (generation !== this.generation) return { error: "account_cancelled" };
-    this.store.save(JSON.stringify(next));
+    const stored: Session | null = this.storedSession();
+    if (stored === null) {
+      // Signed out while the request was out: the rotation belongs to a session the user ended.
+      this.forgetSession();
+      return { error: "account_unauthorized" };
+    }
+    if (stored.user.id !== next.user.id) {
+      this.forgetSession();
+      return { error: "account_cancelled" };
+    }
+    if (stored.refresh_token !== refreshToken && stored.expires_at > from.expires_at) {
+      // A newer session for this account was saved meanwhile, a fresh sign-in; it stays, and this process uses it.
+      this.session = stored;
+      return { token: stored.access_token };
+    }
+    // The service has already spent the old token, so memory takes the rotation even if the write below fails; refreshing the spent one again would revoke the session.
     this.session = next;
+    this.store.save(JSON.stringify(next));
     return { token: next.access_token };
   }
 
@@ -1744,7 +1886,7 @@ export class AccountCloudBridge {
     response = await this.transport.request(method, path, token, body, timeoutMs, requestTag);
     if (generation !== this.generation) return { error: "account_cancelled" };
     if (response.status === 401 || response.status === 403) {
-      this.clearExpired();
+      await this.expireAccessToken(token);
       return { error: "account_unauthorized" };
     }
     return { response, token };
@@ -1791,7 +1933,7 @@ export class AccountCloudBridge {
     );
     if (generation !== this.generation) return { error: "account_cancelled" };
     if (response.status === 401 || response.status === 403) {
-      this.clearExpired();
+      await this.expireAccessToken(token);
       return { error: "account_unauthorized" };
     }
     return { response };
@@ -1823,7 +1965,7 @@ export class AccountCloudBridge {
     response = await upload.call(this.transport, source, revision, expectedSha256, token);
     if (generation !== this.generation) return { error: "account_cancelled" };
     if (response.status === 401 || response.status === 403) {
-      this.clearExpired();
+      await this.expireAccessToken(token);
       return { error: "account_unauthorized" };
     }
     return { response };
@@ -1873,11 +2015,56 @@ export class AccountCloudBridge {
       : success(value ?? {});
   }
 
-  private clearExpired(): void {
+  /** Runs `body` under the store's cross-process lock when it has one; rejects when the lock cannot be taken. */
+  private async locked<T>(body: () => Promise<T>): Promise<T> {
+    const store: AccountSessionStore = this.store;
+    return store.exclusive === undefined ? await body() : await store.exclusive<T>(body);
+  }
+
+  /**
+   * The user signed out or deleted the account: forget the session and clear the store, under the lock so a refresh in the other process cannot write it back.
+   *
+   * The user asked for this, so a lock that cannot be taken does not keep them signed in; the refresh path re-reads the store before writing and leaves an emptied one alone.
+   */
+  private async signOut(): Promise<void> {
+    try {
+      await this.locked(async (): Promise<void> => this.clearExpired());
+    } catch {
+      this.clearExpired();
+    }
+  }
+
+  /** The service refused this access token even after a refresh; forget its session, and clear the store only if the store still holds it. */
+  private async expireAccessToken(token: string): Promise<void> {
+    const matches = (session: Session): boolean => session.access_token === token;
+    try {
+      await this.locked(async (): Promise<void> => this.expireSession(matches));
+    } catch {
+      // Without the lock the store is left as it is; this process still stops using the refused session.
+      if (this.session !== null && matches(this.session)) this.forgetSession();
+    }
+  }
+
+  /**
+   * Forget a session the service refused. Callers hold the lock.
+   *
+   * The store is cleared only if it still holds that session: a sign-in saved since the refused request went out belongs to a session the refusal says nothing about.
+   */
+  private expireSession(matches: (session: Session) => boolean): void {
+    if (this.session !== null && matches(this.session)) this.forgetSession();
+    const stored: Session | null = this.storedSession();
+    if (stored !== null && matches(stored)) this.store.clear();
+  }
+
+  private forgetSession(): void {
     this.session = null;
     this.generation++;
     this.refreshing = null;
     this.transport.cancelDownloads?.();
+  }
+
+  private clearExpired(): void {
+    this.forgetSession();
     this.store.clear();
   }
 }

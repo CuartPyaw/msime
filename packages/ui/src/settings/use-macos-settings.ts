@@ -1,5 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { InputSourceStartupStatus, SettingsClient } from "../index";
+import { inputSourceNeedsAdding } from "./input-source-startup-notice";
+
+/** How often the settings page reads the input source list again while the notice waits for the user to act in System Settings or Finder; a focus change reads it at once. */
+export const INPUT_SOURCE_RECHECK_MS = 3000;
 
 export interface UseMacosSettingsOptions {
   client: Pick<
@@ -24,27 +28,56 @@ export function useMacosSettings({ client, macos, setError }: UseMacosSettingsOp
   const [wubiAutoCommitUnique, setWubiAutoCommitUnique] = useState<boolean>();
   const [savedWubiAutoCommitUnique, setSavedWubiAutoCommitUnique] = useState<boolean>();
 
-  // The Windows installer registers the input method on every install and upgrade; on macOS the
-  // settings app does it when it starts, and this tells the user what happened and whether the
-  // source still has to be enabled in System Settings.
-  useEffect(() => {
-    if (!macos || !client.inputSourceStartup) {
+  // Set once the user dismisses the notice, so a later focus refresh does not bring it back in this window.
+  const inputSourceDismissed = useRef(false);
+  const inputSourceRequest = useRef(0);
+  const refreshInputSourceStartup = useCallback(async () => {
+    const startup = macos ? client.inputSourceStartup : undefined;
+    const request = ++inputSourceRequest.current;
+    if (!startup || inputSourceDismissed.current) {
       setInputSourceStartup(null);
       return;
     }
-    let active = true;
-    void client.inputSourceStartup
-      .status()
-      .then((value) => {
-        if (active) setInputSourceStartup(value);
-      })
-      .catch(() => {
-        if (active) setInputSourceStartup(null);
-      });
-    return () => {
-      active = false;
-    };
+    const value = await startup.status().catch(() => null);
+    // Only the newest request answers: a slow start-time read must not overwrite a later one taken after the user enabled the source.
+    if (request === inputSourceRequest.current && !inputSourceDismissed.current) {
+      setInputSourceStartup(value);
+    }
   }, [client, macos]);
+  const dismissInputSourceStartup = useCallback(() => {
+    inputSourceDismissed.current = true;
+    inputSourceRequest.current++;
+    setInputSourceStartup(null);
+  }, []);
+
+  // The Windows installer registers the input method on every install and upgrade; on macOS the settings app does it when it starts, and this tells the user what happened and whether the source still has to be enabled. Reading again whenever the window comes back, typically from System Settings, lets the notice go away once the user has added the source there.
+  useEffect(() => {
+    if (!macos || !client.inputSourceStartup || typeof window === "undefined") {
+      inputSourceRequest.current++;
+      setInputSourceStartup(null);
+      return;
+    }
+    const refresh = () => void refreshInputSourceStartup();
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      inputSourceRequest.current++;
+      window.removeEventListener("focus", refresh);
+    };
+  }, [client, macos, refreshInputSourceStartup]);
+
+  // System Settings may sit beside the window rather than in front of it, so focus alone can miss the moment the source is added; while the notice is waiting on the user, read again on a short interval as well.
+  const waitingOnUser =
+    inputSourceNeedsAdding(inputSourceStartup) ||
+    Boolean(inputSourceStartup?.system_bundles?.length);
+  useEffect(() => {
+    if (!waitingOnUser || typeof window === "undefined") return;
+    const timer = window.setInterval(
+      () => void refreshInputSourceStartup(),
+      INPUT_SOURCE_RECHECK_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [waitingOnUser, refreshInputSourceStartup]);
 
   // The input method records missing pairs when it next translates, so read again whenever the
   // window comes back, typically from System Settings after a download.
@@ -117,11 +150,12 @@ export function useMacosSettings({ client, macos, setError }: UseMacosSettingsOp
   }, [client, macos]);
 
   return {
+    dismissInputSourceStartup,
     inputSourceStartup,
     onDeviceDownloadable,
+    refreshInputSourceStartup,
     savedShuangpinKeymap,
     savedWubiAutoCommitUnique,
-    setInputSourceStartup,
     setSavedShuangpinKeymap,
     setSavedWubiAutoCommitUnique,
     setShuangpinKeymap,

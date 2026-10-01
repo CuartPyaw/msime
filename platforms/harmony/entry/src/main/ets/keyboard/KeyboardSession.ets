@@ -84,6 +84,10 @@ import {
   ClipboardHistoryStore, ClipboardHistoryItem, ClipboardHistoryError, ClipboardFailure
 } from './clipboard/ClipboardHistoryStore';
 import { ClipboardHistoryPreferencePolicy } from './clipboard/ClipboardHistoryPreferencePolicy';
+import { CloudClipboardClient } from './clipboard/CloudClipboardClient';
+import {
+  CloudClipboardListing, CloudClipboardPolicy, CloudClipboardSendOutcome
+} from './clipboard/CloudClipboardPolicy';
 import {
   DEFAULT_VOICE_INPUT_CONFIGURATION, VoiceInputConfiguration, VoiceInputConfigurationPolicy
 } from './input/VoiceInputConfiguration';
@@ -1017,6 +1021,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   private modeBadge: boolean = true;
   private resourceDirectory: string = '';
   private stateDirectory: string = '';
+  private cloudClipboardClient: CloudClipboardClient | undefined = undefined;
   private systemDark: boolean = false;
   // What the editor wants its return key to do. Sending this rather than a newline is what makes the
   // key search in a search field and send in a message field, which is the whole point of having it.
@@ -4350,6 +4355,59 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   clearClipboardHistory(): ClipboardHistoryMutation {
     return this.mutateClipboard({ operation: 'clear' }, 'cleared');
+  }
+
+  /**
+   * Which editor a cloud clipboard listing was fetched for.
+   *
+   * The attribute generation rather than the editor one: only attach and detach move it, so an idle Engine restart does not throw away a listing that still belongs to the focused field.
+   */
+  cloudClipboardEditor(): number {
+    return this.attributeGeneration;
+  }
+
+  /** Whether the focused editor may see cloud clipboard items: never a password field, nor one whose attributes are still unknown. */
+  cloudClipboardVisible(): boolean {
+    return this.inputClient !== undefined
+      && CloudClipboardPolicy.editorAllows(this.editorAttributesKnown, this.traits.password);
+  }
+
+  /**
+   * The account's cloud clipboard, fetched now.
+   *
+   * Null when the listing no longer belongs to the focused editor: the field changed while the request was out, or it is one that may not see cloud items. A late answer for another field is dropped rather than shown, since tapping one of its items would paste into a field it was never fetched for.
+   */
+  async cloudClipboardItems(): Promise<CloudClipboardListing | null> {
+    const editor: number = this.attributeGeneration;
+    if (!this.cloudClipboardVisible()) return null;
+    const listing: CloudClipboardListing = await this.cloudClipboard().list();
+    if (!CloudClipboardPolicy.current(editor, this.attributeGeneration) || !this.cloudClipboardVisible()) {
+      return null;
+    }
+    return listing;
+  }
+
+  /** Inserts a cloud item the way a local history entry is inserted, but only into the editor its listing was fetched for. */
+  insertCloudClipboard(text: string, editor: number): boolean {
+    if (!CloudClipboardPolicy.current(editor, this.attributeGeneration) || !this.cloudClipboardVisible()) {
+      return false;
+    }
+    this.insert(text);
+    return true;
+  }
+
+  /** Uploads one local history entry the user chose; nothing reaches the cloud clipboard any other way. */
+  async sendToCloudClipboard(text: string): Promise<CloudClipboardSendOutcome> {
+    return await this.cloudClipboard().add(text);
+  }
+
+  private cloudClipboard(): CloudClipboardClient {
+    // Kept only once start() has named the state directory; a client made before that has no session file to read.
+    const cached: CloudClipboardClient | undefined = this.cloudClipboardClient;
+    if (cached !== undefined) return cached;
+    const made: CloudClipboardClient = new CloudClipboardClient(this.stateDirectory);
+    if (this.stateDirectory.length > 0) this.cloudClipboardClient = made;
+    return made;
   }
 
   private mutateClipboard(action: MobileClipboardAction,

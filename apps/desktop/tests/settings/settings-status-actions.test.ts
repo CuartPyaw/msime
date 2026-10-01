@@ -4,11 +4,11 @@ import { createSettingsStatusActions } from "@msime/ui";
 test("creates recovery and startup notice actions", async () => {
   const recoverPreferences = vi.fn().mockResolvedValue(undefined);
   const openSettings = vi.fn().mockResolvedValue(undefined);
-  const setInputSourceStartup = vi.fn();
+  const dismissInputSourceStartup = vi.fn();
   const actions = createSettingsStatusActions({
     recoverPreferences,
     inputSourceStartup: { openSettings },
-    setInputSourceStartup,
+    dismissInputSourceStartup,
   });
 
   actions.onRecover();
@@ -17,13 +17,13 @@ test("creates recovery and startup notice actions", async () => {
 
   expect(recoverPreferences).toHaveBeenCalledOnce();
   expect(openSettings).toHaveBeenCalledOnce();
-  expect(setInputSourceStartup).toHaveBeenCalledWith(null);
+  expect(dismissInputSourceStartup).toHaveBeenCalledOnce();
 });
 
-test("keeps the startup settings action safe when unavailable", async () => {
+test("keeps the startup settings actions safe when unavailable", async () => {
   const actions = createSettingsStatusActions({
     recoverPreferences: vi.fn().mockResolvedValue(undefined),
-    setInputSourceStartup: vi.fn(),
+    dismissInputSourceStartup: vi.fn(),
   });
 
   expect(actions.onOpenSettings()).toBeUndefined();

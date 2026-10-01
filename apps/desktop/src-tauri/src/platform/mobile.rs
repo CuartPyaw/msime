@@ -2,7 +2,6 @@
 
 pub(crate) mod mobile_account_helpers;
 pub(crate) mod mobile_account_preferences;
-pub(crate) mod mobile_cloud_clipboard;
 pub(crate) mod mobile_community;
 
 use msime_client_core::account::{BackendAccountClient, BackendAccountSession};

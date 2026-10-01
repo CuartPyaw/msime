@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { saveSettingsNow, settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
   LocalModesSection,
   PluginsSection,
@@ -25,6 +25,83 @@ import {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+test("ignores a duplicate plugin import while the first import is pending", async () => {
+  let resolveImport!: (value: null) => void;
+  const importPack = vi.fn(() => new Promise<null>((resolve) => (resolveImport = resolve)));
+  const client = fakeClient({ importPack });
+  render(
+    <SettingsPage
+      client={{
+        load: async () => snapshot,
+        save: vi.fn(),
+        host: { platform: "linux", plugin_triggers: true } as never,
+        plugins: client,
+      }}
+    />,
+  );
+  await settingsFormReady();
+  fireEvent.click(screen.getByRole("button", { name: "扩展" }));
+  const importButton = await screen.findByRole("button", { name: "导入文件夹" });
+  await act(async () => {
+    fireEvent.click(importButton);
+    fireEvent.click(importButton);
+  });
+  expect(importPack).toHaveBeenCalledOnce();
+  resolveImport(null);
+  await waitFor(() => expect(importPack).toHaveBeenCalledOnce());
+});
+
+test("a plugin removal response from a replaced client cannot update preferences", async () => {
+  let resolveRemove!: () => void;
+  const oldClient = fakeClient({
+    remove: vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRemove = resolve;
+        }),
+    ),
+  });
+  const nextClient = fakeClient();
+  const onChange = vi.fn();
+  const view = render(
+    <PluginsSection
+      client={oldClient}
+      preferences={defaultPluginPreferences}
+      keySound
+      music
+      triggers
+      active
+      onChange={onChange}
+      onError={vi.fn()}
+      confirm={vi.fn(async () => true)}
+    />,
+  );
+  const list = await screen.findByLabelText("已安装的扩展包");
+  fireEvent.click(within(list).getByRole("button", { name: "删除打字机" }));
+  await waitFor(() => expect(oldClient.remove).toHaveBeenCalledWith("sound", "typewriter"));
+
+  view.rerender(
+    <PluginsSection
+      client={nextClient}
+      preferences={defaultPluginPreferences}
+      keySound
+      music
+      triggers
+      active
+      onChange={onChange}
+      onError={vi.fn()}
+      confirm={vi.fn(async () => true)}
+    />,
+  );
+  await screen.findByLabelText("已安装的扩展包");
+  await act(async () => {
+    resolveRemove();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(onChange).not.toHaveBeenCalled();
 });
 
 const pack = (overrides: Partial<PluginPackage> & Pick<PluginPackage, "id" | "kind">) =>

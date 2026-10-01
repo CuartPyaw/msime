@@ -6,10 +6,12 @@
 
 #[cfg(target_os = "linux")]
 use crate::panel_input::panel_position;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-use crate::panel_input::remember_panel_input_target;
 #[cfg(target_os = "windows")]
 use crate::panel_input::windows_panel_position;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+use crate::panel_input::{
+    forget_cloud_clipboard_input_target, remember_opening_panel_target, CLOUD_CLIPBOARD_PANEL,
+};
 #[cfg(any(target_os = "macos", test))]
 use crate::platform::macos::macos_keyboard;
 #[cfg(target_os = "macos")]
@@ -242,14 +244,14 @@ pub(crate) fn open_surface_panel(
     let _ = state;
     #[cfg(target_os = "linux")]
     let position = {
-        let _ = remember_panel_input_target(state, surface.label, true);
+        remember_opening_panel_target(app, state, surface.label);
         panel_position(state, surface.label, width, height)
     };
     #[cfg(target_os = "windows")]
     let height = windows_panel_height(app, surface.label, height);
     #[cfg(target_os = "windows")]
     let position = {
-        let _ = remember_panel_input_target(state);
+        remember_opening_panel_target(app, state, surface.label);
         windows_panel_position(width, height, surface.placement)
     };
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
@@ -389,6 +391,10 @@ pub(crate) fn close_panel(
             code: "unavailable",
         });
     if result.is_ok() {
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        if label == CLOUD_CLIPBOARD_PANEL {
+            forget_cloud_clipboard_input_target(&app);
+        }
         if let Ok(mut target) = state.0.lock() {
             #[cfg(target_os = "linux")]
             {

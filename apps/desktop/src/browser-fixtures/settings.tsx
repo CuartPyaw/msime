@@ -44,6 +44,7 @@ export function mount() {
       size: 2048,
     }),
     addPreview: unavailable,
+    addLicense: unavailable,
     publish: unavailable,
     rate: unavailable,
     unpublish: unavailable,

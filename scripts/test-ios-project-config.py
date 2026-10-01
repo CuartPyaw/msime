@@ -343,15 +343,15 @@ class IOSProjectConfigTests(unittest.TestCase):
         swift = (plugin / "ios/Sources/MobilePlatformPlugin.swift").read_text()
         rust_entry = (TAURI_ROOT / "src/lib.rs").read_text()
         account = (TAURI_ROOT / "src/platform/ios/ios_account.rs").read_text()
-        clipboard = (TAURI_ROOT / "src/platform/mobile/mobile_cloud_clipboard.rs").read_text()
+        clipboard = (TAURI_ROOT / "src/platform/cloud_clipboard.rs").read_text()
         desktop_entry = (TAURI_ROOT.parent / "src/main.tsx").read_text()
 
         self.assertIn(
-            "mobile_cloud_clipboard::cloud_clipboard_request(state.session(), action).await",
+            "platform::cloud_clipboard::cloud_clipboard_request(state.session(), action).await",
             rust_entry,
         )
         self.assertIn("pub(crate) fn session(&self) -> &Arc<Session>", account)
-        self.assertIn("pub(crate) async fn cloud_clipboard_request", clipboard)
+        self.assertIn("pub(crate) async fn cloud_clipboard_request<", clipboard)
         self.assertIn("session.clipboard(&search)", clipboard)
         self.assertIn(".set_clipboard_enabled(enabled)", clipboard)
         self.assertIn("session.add_clipboard(&text)", clipboard)
