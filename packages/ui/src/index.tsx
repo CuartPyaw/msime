@@ -8,7 +8,6 @@ import { useSettingsContentScrollReset } from "./settings/use-settings-content-s
 import { MobileSettingsTabs } from "./settings/mobile-settings-tabs";
 import { SettingsPageHeader } from "./settings/settings-page-header";
 import {
-  mobilePrimaryPageIds,
   mobileTabForPage,
   requestedPage,
   type MobilePrimaryPageId,
@@ -20,7 +19,11 @@ import {
   type SettingsPageId,
 } from "./settings/settings-page-registry";
 import { settingsPageProjections } from "./settings/settings-page-projections";
-import { canReloadSettingsPage, isSettingsFormPage } from "./settings/settings-page-visibility";
+import {
+  canReloadSettingsPage,
+  canRestoreDefaultsOnPage,
+  isSettingsFormPage,
+} from "./settings/settings-page-visibility";
 import { settingsInputPreferences } from "./settings/settings-input-preferences";
 import { aiSettingsPreferences } from "./settings/ai-settings-preferences";
 import { diagnosticLogPreferences } from "./settings/diagnostic-log-preferences";
@@ -197,8 +200,12 @@ export {
   settingsSidebarGroups,
   type SettingsSidebarGroupsOptions,
 } from "./settings/sidebar-groups";
-export { canReloadSettingsPage, isSettingsFormPage } from "./settings/settings-page-visibility";
-export type { SettingsPageId } from "./settings/mobile-navigation";
+export {
+  canReloadSettingsPage,
+  canRestoreDefaultsOnPage,
+  isSettingsFormPage,
+} from "./settings/settings-page-visibility";
+export type { ExportedSettingsPageId as SettingsPageId } from "./settings/settings-page-registry";
 export {
   useSettingsDictionaryState,
   type UseSettingsDictionaryStateOptions,
@@ -418,7 +425,6 @@ import { createSettingsReloadAction } from "./settings/settings-reload-action";
 import { deepEqual } from "./core/deep-equal";
 import { createSettingsPageSelection } from "./settings/settings-page-selection";
 import { createSettingsDraftActions } from "./settings/settings-draft-actions";
-import { createHelpcodeSettingsActions } from "./settings/helpcode-settings-actions";
 import { createSettingsStatusActions } from "./settings/settings-status-actions";
 import { createSettingsExternalActions } from "./settings/settings-external-actions";
 import { createSettingsNavigationActions } from "./settings/settings-navigation-actions";
@@ -427,7 +433,6 @@ import { AiSettingsPage } from "./settings/pages/ai-page";
 import { InputSettingsPage } from "./settings/pages/input-page";
 import { ExpressionSettingsPage } from "./settings/pages/expression-page";
 import { DeveloperSettingsPage } from "./settings/pages/developer-page";
-import { DownloadSettingsPage } from "./settings/pages/download-page";
 import { DictionarySettingsPage } from "./settings/pages/dictionary-page";
 import { AppearanceSettingsPage } from "./settings/pages/appearance-page";
 import { SkinSettingsPage } from "./settings/pages/skin-page";
@@ -439,7 +444,6 @@ import { PluginsSettingsPage } from "./settings/pages/plugins-page";
 import type { PluginClient } from "./settings/plugins-section";
 import type { PluginPreferences } from "./settings/plugin-preferences";
 import { AboutSettingsPage } from "./settings/pages/about-page";
-import { HelpcodeSettingsPage } from "./settings/pages/helpcode-page";
 import type { CustomHelpcodeSchema, HelpcodePreferences } from "./settings/pages/helpcode-page";
 import type { ClipboardHistoryClient } from "./settings/clipboard-history-section";
 import type { CloudClipboardRequest } from "./settings/cloud-clipboard-send";
@@ -555,7 +559,12 @@ export {
   type ChatModel,
   type ChatModels,
 } from "./chat/chat-page";
-export { HomePage, MoreSettingsPage, type HomePageActions } from "./keyboard/home-page";
+export {
+  HomePage,
+  MoreSettingsPage,
+  type HomePageActions,
+  type MoreSettingsGroup,
+} from "./keyboard/home-page";
 export {
   WelcomeFlowPage,
   type OnboardingActions,
@@ -581,6 +590,8 @@ export {
 export { SettingsStartupPage } from "./settings/settings-startup-page";
 export {
   HelpcodeSettingsPage,
+  HelpcodeSettingsGroup,
+  type HelpcodeSettingsGroupProps,
   type CustomHelpcodeSchema,
   type HelpcodePreferences,
   type HelpcodeSchema,
@@ -736,7 +747,11 @@ export {
   type CandidateSizingPreferences,
 } from "./settings/candidate-sizing-section";
 export {
+  CandidateFontPresetRow,
+  CandidateScaleRow,
   CandidateWindowStyleSection,
+  type CandidateFontPresetRowProps,
+  type CandidateScaleRowProps,
   type CandidateWindowStyleSectionPreferences,
   type CandidateWindowStyleSectionProps,
 } from "./settings/candidate-window-style-section";
@@ -746,6 +761,10 @@ export {
   CandidateFollowCursorSection,
   type CandidateFollowCursorSectionProps,
 } from "./settings/candidate-follow-cursor-section";
+export {
+  CandidatePageNumberSection,
+  type CandidatePageNumberSectionProps,
+} from "./settings/candidate-page-number-section";
 export {
   CandidatePanelLimitSection,
   type CandidatePanelLimit,
@@ -799,6 +818,7 @@ export {
   type CloudCandidatesSectionProps,
 } from "./settings/cloud-candidates-section";
 export {
+  TelemetryRow,
   TelemetrySection,
   usageReportingDescription,
   type TelemetrySectionProps,
@@ -857,10 +877,8 @@ export {
   type DataDirectoryInfo,
   type DataDirectorySectionProps,
 } from "./settings/data-directory-section";
-export {
-  LicenseUninstallSection,
-  type LicenseUninstallSectionProps,
-} from "./settings/license-uninstall-section";
+export { LicenseRows, type LicenseRowsProps } from "./settings/license-rows";
+export { UninstallSection, type UninstallSectionProps } from "./settings/uninstall-section";
 export {
   DiagnosticLogsSection,
   type DiagnosticLogPreferences,
@@ -1885,7 +1903,7 @@ export interface SettingsClient {
   save(revision: number, preferences: Preferences): Promise<Snapshot>;
   onPreferencesChanged?(listener: (snapshot: Snapshot) => void): Promise<() => void>;
   dictionary?: DictionaryClient;
-  /** macOS can atomically restore packaged dictionaries and clear all learning state. */
+  /** 原子地恢复内置词库并清除全部学习数据；宿主只在真正能清除的平台（三个桌面宿主）上提供它。 */
   resetLearnedData?: () => Promise<void>;
   /**
    * What a restore-to-defaults would write, without writing it. The host decides what survives --
@@ -2036,6 +2054,33 @@ type SettingsPageProps = {
   onReplayOnboarding?: () => void;
 };
 
+/** 宿主资源目录里找到的自定义辅助码表；宿主不支持扫描或读取失败时为空。 */
+function useCustomHelpcodeSchemas(
+  reader: SettingsClient["listHelpcodeSchemas"],
+): CustomHelpcodeSchema[] {
+  const [schemas, setSchemas] = useState<CustomHelpcodeSchema[]>([]);
+  useEffect(() => {
+    let active = true;
+    if (!reader) {
+      setSchemas([]);
+      return () => {
+        active = false;
+      };
+    }
+    void reader()
+      .then((next) => {
+        if (active) setSchemas(next);
+      })
+      .catch(() => {
+        if (active) setSchemas([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [reader]);
+  return schemas;
+}
+
 // The state, effects and handlers behind the settings window. The shell below and every page component read the same values - the pages through `SettingsFormContext` - so splitting the page into files changed where the markup lives, not what it closes over.
 function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps) {
   const { confirm, confirmation } = useConfirm();
@@ -2166,7 +2211,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
       initialPage ?? restoredMobilePage ?? (client.home ? "home" : undefined),
       pages,
       settingsPageAliases,
-      "appearance",
+      "input",
     ),
   );
   const [accountLoginReturnPage, setAccountLoginReturnPage] = useState<SettingsPageId | null>(null);
@@ -2188,6 +2233,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     readAppVersion: client.readAppVersion,
     fallbackVersion: fallbackAppVersion,
   });
+  const customHelpcodeSchemas = useCustomHelpcodeSchemas(client.listHelpcodeSchemas);
   const {
     value: mobileKeyboardFeedback,
     busy: mobileKeyboardFeedbackBusy,
@@ -2506,9 +2552,10 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
   // Helper codes are per-host rather than per-form-factor. The Android keyboard sends them: Shift during a quanpin or shuangpin composition passes the next letter to the Engine as a helper code, and the Engine reads the schema and the candidate-row hint from these very preferences. Hiding the group left that shipping feature with no way to pick a schema or turn it off. The iOS keyboard extension marks a helper code the same way, so the group also follows the host's `helpcode_shift_entry`; the platform names stay for hosts that predate the capability. HarmonyOS ships the same input: its ChineseHelpcodePolicy is the Android one, ported, and the session calls it on every shifted key.
   const showHelpcode =
     !mobilePlatform || showHelpcodeShiftEntry || androidPlatform || harmonyPlatform;
-  // The local MCP server, the diagnostic logs and the data directory are what 开发者选项 holds; a host with none of them has no such page.
+  // 维护与诊断页收纳输入法服务（重启、重新注册）、诊断日志、数据目录、本地 MCP 服务和 macOS 的卸载；这些一样都没有的宿主不显示这一页。
   const showDeveloperPage =
     Boolean(client.mcpServerStatus) ||
+    Boolean(showRestartInputMethod) ||
     !client.host ||
     linuxPlatform ||
     windowsPlatform ||
@@ -2566,7 +2613,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
       accountLoginReturnPage,
     });
   const untitledOnPhone: readonly SettingsPageId[] = ["home", "typing-statistics", "account"];
-  // The design's row that opens a page from inside another, e.g. AI 辅助 on 表达.
+  // 设计稿里从一个页面内部打开另一个页面的行，例如「标点与翻译」上的「AI 辅助」。
   const pageEntry = (id: SettingsPageId) => availablePages.find((item) => item.id === id);
   const { openCommunity, openLocalDesigns } = useSettingsDestinationActions({
     selectPage,
@@ -2607,6 +2654,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showEnglishSuggestions,
     showHelpcodeShiftEntry,
     showHelpcode,
+    customHelpcodeSchemas,
     showShuangpinPreedit,
     showCharacterWidth,
     showVoiceCommitMode,
@@ -2859,29 +2907,8 @@ export type SettingsPageModel = ReturnType<typeof useSettingsPageModel>;
 export function SettingsPage(props: SettingsPageProps) {
   const { onReplayOnboarding } = props;
   const model = useSettingsPageModel(props);
-  const [customHelpcodeSchemas, setCustomHelpcodeSchemas] = useState<CustomHelpcodeSchema[]>([]);
   // The 插件 page shows either the installed packs (a page of the settings form) or the community gallery, which has its own search form and so is drawn outside the settings one.
   const [pluginView, setPluginView] = useState<"mine" | "community">("mine");
-  useEffect(() => {
-    let active = true;
-    const reader = props.client.listHelpcodeSchemas;
-    if (!reader) {
-      setCustomHelpcodeSchemas([]);
-      return () => {
-        active = false;
-      };
-    }
-    void reader()
-      .then((schemas) => {
-        if (active) setCustomHelpcodeSchemas(schemas);
-      })
-      .catch(() => {
-        if (active) setCustomHelpcodeSchemas([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [props.client.listHelpcodeSchemas]);
   // Filters the sidebar by page name; the model does not need it, since it never leaves the shell.
   const [navQuery, setNavQuery] = useState("");
   // The phone page that has scrolled its large title away, which brings in the compact bar. Keyed by page so that arriving on another page, which opens at its top, never inherits the bar.
@@ -2939,9 +2966,6 @@ export function SettingsPage(props: SettingsPageProps) {
     initialCommunityScope,
     initialCommunityMine,
   } = model;
-  const { onChange: onHelpcodeChange } = createHelpcodeSettingsActions({
-    setDraft: model.setDraft,
-  });
   const reloadSettings = createSettingsReloadAction({ dirty, reload, confirm });
   const { onOpenPage } = createSettingsPageSelection({ selectPage });
   const statusActions = createSettingsStatusActions({
@@ -2981,8 +3005,8 @@ export function SettingsPage(props: SettingsPageProps) {
   // macOS keeps its native traffic lights over the page (an overlay title bar), and a phone's frame belongs to the OS, so only the platforms that draw their own caption get one. The host still exposes the window commands on mobile because the same Tauri app binary backs both, so the presence of a command is not the question -- the platform is.
   const titlebarShown =
     !mobilePlatform && !macShell && Boolean(client.windowControl || client.beginWindowDrag);
-  const pageTitle = availablePages.find((item) => item.id === page)?.title ?? "候选窗口";
-  // A sub-page (AI 辅助 under 表达, 背单词 under 词库, 帮助 under 反馈) names its parent on the way back.
+  const pageTitle = availablePages.find((item) => item.id === page)?.title ?? "输入";
+  // 子页面（「标点与翻译」下的「AI 辅助」、「词库」下的「背单词」、「帮助与反馈」下的「帮助」）在返回时写出父页面的名字。
   const parentPage =
     navigationPage !== page ? availablePages.find((item) => item.id === navigationPage) : undefined;
   // A phone collapses the large title into a compact bar on the 设置 tab's pages, the way the design does; the other tabs and the untitled pages have no large title to collapse.
@@ -2993,22 +3017,15 @@ export function SettingsPage(props: SettingsPageProps) {
   const searchInSidebar =
     macShell || settingsPlatform === "hm2" || ipadShell || (winShell && !titlebarShown);
   const navNeedle = navQuery.trim().toLocaleLowerCase();
-  // The iPad's tab bar carries 社区, 统计 and 我的, so its settings sidebar does not list them a second time.
-  const splitSidebarGroups = ipadShell
-    ? sidebarGroups
-        .map((group) =>
-          group.filter(
-            (item) =>
-              item.id === "home" || !mobilePrimaryPageIds.includes(item.id as MobilePrimaryPageId),
-          ),
-        )
-        .filter((group) => group.length > 0)
-    : sidebarGroups;
+  // iPad 的标签栏已有社区、统计和我的；`settingsPageProjections` 在手机和 iPad 上都不把这几个标签页列进侧栏，这里不必再过滤一次。
   const shownSidebarGroups = navNeedle
-    ? splitSidebarGroups
-        .map((group) => group.filter((item) => item.title.toLocaleLowerCase().includes(navNeedle)))
-        .filter((group) => group.length > 0)
-    : splitSidebarGroups;
+    ? sidebarGroups
+        .map((group) => ({
+          ...group,
+          pages: group.pages.filter((item) => item.title.toLocaleLowerCase().includes(navNeedle)),
+        }))
+        .filter((group) => group.pages.length > 0)
+    : sidebarGroups;
   const navSearchField = (
     <>
       <svg
@@ -3033,7 +3050,7 @@ export function SettingsPage(props: SettingsPageProps) {
         onKeyDown={(event) => {
           if (event.key === "Escape") setNavQuery("");
           if (event.key !== "Enter") return;
-          const first = shownSidebarGroups[0]?.[0];
+          const first = shownSidebarGroups[0]?.pages[0];
           if (first) selectPage(first.id);
         }}
       />
@@ -3089,11 +3106,18 @@ export function SettingsPage(props: SettingsPageProps) {
           {searchInSidebar && <label className={settings.sidebarSearch}>{navSearchField}</label>}
           {shownSidebarGroups.map((group, index) => (
             <div
-              key={group[0].id}
+              key={group.pages[0].id}
               className={settings.sidebarSection(index === 0)}
               data-sidebar-section=""
+              role={group.title ? "group" : undefined}
+              aria-label={group.title}
             >
-              {group.map((item) => (
+              {group.title && (
+                <div className={settings.sidebarGroupTitle} aria-hidden="true">
+                  {group.title}
+                </div>
+              )}
+              {group.pages.map((item) => (
                 <NavItem
                   key={item.id}
                   label={item.title}
@@ -3186,9 +3210,14 @@ export function SettingsPage(props: SettingsPageProps) {
             )}
             {page === "more" && (
               <MoreSettingsPage
-                groups={mobileSecondaryGroups.map((group) =>
-                  group.map((item) => ({ id: item.id, title: item.title, icon: item.icon })),
-                )}
+                groups={mobileSecondaryGroups.map((group) => ({
+                  title: group.title,
+                  pages: group.pages.map((item) => ({
+                    id: item.id,
+                    title: item.title,
+                    icon: item.icon,
+                  })),
+                }))}
                 onOpenPage={onOpenPage}
               />
             )}
@@ -3325,15 +3354,6 @@ export function SettingsPage(props: SettingsPageProps) {
                   <AppearanceSettingsPage />
                   <FloatingToolbarSettingsPage />
                   <InputSettingsPage />
-                  <HelpcodeSettingsPage
-                    value={draft}
-                    customSchemas={customHelpcodeSchemas}
-                    mobile={mobilePlatform}
-                    showShiftEntry={model.showHelpcodeShiftEntry}
-                    disabled={busy}
-                    hidden={page !== "input" || !model.showHelpcode}
-                    onChange={onHelpcodeChange}
-                  />
                   <ExpressionSettingsPage />
                   <AiSettingsPage />
                   <ShortcutSettingsPage />
@@ -3345,7 +3365,6 @@ export function SettingsPage(props: SettingsPageProps) {
                   <PluginsSettingsPage
                     hidden={Boolean(client.communityPlugins) && pluginView === "community"}
                   />
-                  <DownloadSettingsPage />
                   <DeveloperSettingsPage />
                   <FeedbackSettingsPage />
                   <HelpSettingsPage
@@ -3368,7 +3387,9 @@ export function SettingsPage(props: SettingsPageProps) {
                   busy={busy}
                   saveState={saveState}
                   saveError={saveError}
-                  showRestoreDefaults={Boolean(client.loadDefaultPreferences)}
+                  showRestoreDefaults={
+                    Boolean(client.loadDefaultPreferences) && canRestoreDefaultsOnPage(page)
+                  }
                   onRestoreDefaults={onRestoreDefaults}
                   onRetry={() => void retrySave()}
                   // Settings save themselves, so reading them again is only a way out of a failure: a save or load that failed, or an error the page is showing.
