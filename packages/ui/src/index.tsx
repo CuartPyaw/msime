@@ -1076,6 +1076,17 @@ export {
   type CommunityGalleryPage,
 } from "./community/community-gallery";
 export {
+  CommunityRemovedBadge,
+  CommunityReportSection,
+  communityReportDetailLimit,
+  communityReportReasons,
+  communityReportedNotice,
+  type CommunityModeration,
+  type CommunityReportKind,
+  type CommunityReportReason,
+  type CommunityReportSectionProps,
+} from "./community/community-report";
+export {
   CommunityErrorAlert,
   type CommunityErrorAlertProps,
 } from "./community/community-error-alert";

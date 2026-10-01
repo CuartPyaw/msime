@@ -14,6 +14,13 @@ import { CommunitySearchForm } from "./community-search-form";
 import { runAsyncAction } from "../core/async-action";
 import { CommunityDialogHeader } from "./community-dialog";
 import {
+  CommunityRemovedBadge,
+  CommunityReportSection,
+  communityReportedNotice,
+  type CommunityModeration,
+  type CommunityReportReason,
+} from "./community-report";
+import {
   CommunityResourceScopeButtons,
   type CommunityResourceScope,
 } from "./community-resource-scope-buttons";
@@ -41,6 +48,8 @@ export type CommunityResource = {
   rating_count: number;
   rating_average: number;
   my_rating: number;
+  /** Sent only on the user's own items; `removed` shows 已下架. */
+  moderation?: CommunityModeration | null;
 };
 export type CommunityResourcePage = { items: CommunityResource[]; has_more: boolean };
 export type CommunityResourceApplication = {
@@ -79,6 +88,13 @@ export interface CommunityResourceClient {
   unpublish(id: string): Promise<void>;
   storeReply(item: CommunityResource): Promise<void>;
   removeReply(id: string): Promise<void>;
+  /** Reports another user's dictionary or reply template to the moderators. */
+  report?(
+    kind: CommunityResourceKind,
+    id: string,
+    reason: CommunityReportReason,
+    detail: string,
+  ): Promise<void>;
 }
 
 function ResourceCard({ item, open }: { item: CommunityResource; open: () => void }) {
@@ -93,7 +109,10 @@ function ResourceCard({ item, open }: { item: CommunityResource; open: () => voi
         {item.kind === "dictionary" ? "字" : "话"}
       </span>
       <strong className={style.cardTitle}>{item.name}</strong>
-      <span className={style.cardAuthor}>{item.owned ? "我的作品" : item.author}</span>
+      <span className={style.cardAuthor}>
+        {item.owned ? "我的作品" : item.author}
+        {item.owned && item.moderation === "removed" && " · 已下架"}
+      </span>
       <span className={style.resourceDescription}>
         {item.description || (item.kind === "dictionary" ? "共享词条" : "回复语气模板")}
       </span>
@@ -492,6 +511,17 @@ function ResourceDetail({
       setConfirmDelete(false);
       close();
     });
+  const report = async (reason: CommunityReportReason, detail: string) => {
+    if (!client.report) return false;
+    let reported = false;
+    await run(async (generation) => {
+      await client.report!(item.kind, item.id, reason, detail);
+      if (!mounted.current || generation !== clientGeneration.current) return;
+      reported = true;
+      setNotice(communityReportedNotice);
+    });
+    return reported;
+  };
   return (
     <div className={style.page}>
       <button type="button" className={style.back} disabled={busy} onClick={close}>
@@ -511,6 +541,7 @@ function ResourceDetail({
             </p>
           </div>
           {item.owned && <span className={style.detailBadge}>我的作品</span>}
+          <CommunityRemovedBadge owned={item.owned} moderation={item.moderation} />
         </div>
         {item.description && <p className={style.description}>{item.description}</p>}
         <p className={style.metrics}>
@@ -627,6 +658,9 @@ function ResourceDetail({
               下架作品
             </button>
           </>
+        )}
+        {!item.owned && client.report && (
+          <CommunityReportSection actionBusy={busy} onReport={report} />
         )}
         {confirmDelete && (
           <div className={style.confirmation} role="alertdialog" aria-label="确认下架作品">

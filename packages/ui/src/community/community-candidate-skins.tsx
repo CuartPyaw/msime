@@ -11,6 +11,12 @@ import * as style from "./community-style";
 import { CommunitySearchForm } from "./community-search-form";
 import { CommunityScopeButtons } from "./community-scope-buttons";
 import { CommunitySkinModerationSection } from "./community-skin-moderation-section";
+import {
+  CommunityRemovedBadge,
+  CommunityReportSection,
+  type CommunityModeration,
+  type CommunityReportReason,
+} from "./community-report";
 import { CommunitySkinCardMetrics } from "./community-skin-card-metrics";
 
 /** The server's license columns; each is `""` when the manifest leaves it out. */
@@ -38,6 +44,8 @@ export type CommunityCandidateSkin = {
   created_at: string;
   visibility: CandidateSkinVisibility;
   updated_at: string;
+  /** Sent only on the user's own packages; `removed` shows 已下架. */
+  moderation?: CommunityModeration | null;
 };
 
 export type CommunityCandidateSkinPage = {
@@ -96,6 +104,8 @@ export interface CandidateSkinCommunityClient {
   sync(): Promise<CandidateSkinSyncReport>;
   rate(id: string, stars: number): Promise<{ stars: number }>;
   unpublish(id: string): Promise<{ deleted: boolean }>;
+  /** Reports another user's package to the moderators. */
+  report?(id: string, reason: CommunityReportReason, detail: string): Promise<void>;
 }
 
 type PreviewLoader = (id: string) => Promise<string>;
@@ -178,6 +188,7 @@ function CommunityCandidateSkinCard({
       <span className={style.cardAuthor}>
         {skin.owned ? "我的作品" : skin.author}
         {skin.visibility === "private" && " · 私有"}
+        {skin.owned && skin.moderation === "removed" && " · 已下架"}
       </span>
       <CommunitySkinCardMetrics
         downloads={skin.downloads}
@@ -225,6 +236,10 @@ export function CommunityCandidateSkinsPage({
       unpublish: async (id) => {
         await client.unpublish(id);
       },
+      ...(client.report && {
+        report: (id: string, reason: CommunityReportReason, detail: string) =>
+          client.report!(id, reason, detail),
+      }),
     }),
     [client],
   );
@@ -254,6 +269,7 @@ export function CommunityCandidateSkinsPage({
     closeDetail: closeGalleryDetail,
     rateSelected,
     unpublishSelected,
+    reportSelected,
     runAction,
   } = gallery;
   const [search, setSearch] = useState("");
@@ -387,6 +403,7 @@ export function CommunityCandidateSkinsPage({
                 {selected.visibility === "private" ? "私有" : "我的作品"}
               </span>
             )}
+            <CommunityRemovedBadge owned={selected.owned} moderation={selected.moderation} />
           </div>
           {selected.description && <p className={style.description}>{selected.description}</p>}
           {license && <p className={style.metrics}>{license}</p>}
@@ -472,6 +489,9 @@ export function CommunityCandidateSkinsPage({
             onCancelUnpublish={() => setConfirmUnpublish(false)}
             confirmationActionsClassName={style.confirmationActions}
           />
+          {!selected.owned && client.report && (
+            <CommunityReportSection actionBusy={actionBusy} onReport={reportSelected} />
+          )}
         </section>
       </div>
     );

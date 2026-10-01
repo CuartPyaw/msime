@@ -20,6 +20,13 @@ import { CommunityDetailStatus } from "./community-detail-status";
 import * as style from "./community-style";
 import { CommunitySearchForm } from "./community-search-form";
 import { CommunitySkinModerationSection } from "./community-skin-moderation-section";
+import { CommunityScopeButtons } from "./community-scope-buttons";
+import {
+  CommunityRemovedBadge,
+  CommunityReportSection,
+  type CommunityModeration,
+  type CommunityReportReason,
+} from "./community-report";
 import { CommunitySkinCardMetrics } from "./community-skin-card-metrics";
 
 /** The kinds a pack can be shared as; effect packs stay local for now. Mirrors `client-core::plugins::community::PUBLISHABLE_KINDS`. */
@@ -50,6 +57,8 @@ export type CommunityPlugin = {
   owned: boolean;
   my_rating: number;
   created_at: string;
+  /** Sent only on the user's own packs; `removed` shows 已下架. */
+  moderation?: CommunityModeration | null;
 };
 
 export type CommunityPluginPage = {
@@ -75,6 +84,8 @@ export interface CommunityPluginClient {
     offset: number,
     search: string,
     kind: CommunityPluginKind | null,
+    /** Only the signed-in user's own packs, removed ones included. */
+    mine?: boolean,
   ): Promise<CommunityPluginPage>;
   detail(id: string): Promise<CommunityPlugin>;
   packPreview(kind: CommunityPluginKind, pluginId: string): Promise<CommunityPluginPackPreview>;
@@ -90,6 +101,8 @@ export interface CommunityPluginClient {
   install(id: string, kind: CommunityPluginKind, pluginId: string): Promise<PluginPackage>;
   rate(id: string, stars: number): Promise<{ stars: number }>;
   delete(id: string): Promise<{ deleted: boolean }>;
+  /** Reports another user's pack to the moderators. */
+  report?(id: string, reason: CommunityReportReason, detail: string): Promise<void>;
 }
 
 /** The server's archive limit, stated next to the packed size so the author sees the headroom. */
@@ -113,6 +126,7 @@ function CommunityPluginCard({ plugin, open }: { plugin: CommunityPlugin; open: 
       <strong className={style.cardTitle}>{plugin.name}</strong>
       <span className={style.cardAuthor}>
         {kindLabels[plugin.kind]} · {plugin.owned ? "我的作品" : plugin.author}
+        {plugin.owned && plugin.moderation === "removed" && " · 已下架"}
       </span>
       {plugin.description && (
         <span className={style.resourceDescription}>{plugin.description}</span>
@@ -144,8 +158,8 @@ export function CommunityPluginsPage({
   const kindFilter = useRef<CommunityPluginKind | null>(null);
   const galleryClient = useMemo<CommunityGalleryClient<CommunityPlugin>>(
     () => ({
-      list: async (offset, search) => {
-        const page = await client.list(offset, search, kindFilter.current);
+      list: async (offset, search, mine) => {
+        const page = await client.list(offset, search, kindFilter.current, mine ?? false);
         return { items: page.plugins, has_more: page.has_more, skipped: page.skipped };
       },
       detail: client.detail,
@@ -155,6 +169,10 @@ export function CommunityPluginsPage({
       unpublish: async (id) => {
         await client.delete(id);
       },
+      ...(client.report && {
+        report: (id: string, reason: CommunityReportReason, detail: string) =>
+          client.report!(id, reason, detail),
+      }),
     }),
     [client],
   );
@@ -172,16 +190,19 @@ export function CommunityPluginsPage({
     selected,
     actionBusy,
     actionNotice,
+    mineOnly,
     signInRequired,
     confirmUnpublish,
     activeSearch,
     setActionNotice,
+    setMineOnly,
     setConfirmUnpublish,
     requestList,
     open,
     closeDetail: closeGalleryDetail,
     rateSelected,
     unpublishSelected,
+    reportSelected,
     runAction,
   } = gallery;
   const [search, setSearch] = useState("");
@@ -277,6 +298,7 @@ export function CommunityPluginsPage({
               </p>
             </div>
             {selected.owned && <span className={style.detailBadge}>我的作品</span>}
+            <CommunityRemovedBadge owned={selected.owned} moderation={selected.moderation} />
           </div>
           {selected.description && <p className={style.description}>{selected.description}</p>}
           <p className={style.metrics}>
@@ -352,6 +374,9 @@ export function CommunityPluginsPage({
             unpublishLabel="下架这个插件"
             unpublishConfirmLabel="确认下架插件"
           />
+          {!selected.owned && client.report && (
+            <CommunityReportSection actionBusy={actionBusy} onReport={reportSelected} />
+          )}
         </section>
       </div>
     );
@@ -371,6 +396,16 @@ export function CommunityPluginsPage({
           <p className={style.headingNote}>音效、音乐与指令表，安装后在「我的插件」中选用</p>
         </div>
         <div className={style.headingActions}>
+          <CommunityScopeButtons
+            ariaLabel="插件范围"
+            mineOnly={mineOnly}
+            allLabel="全部插件"
+            mineLabel="我的作品"
+            onMineOnlyChange={(nextMineOnly) => {
+              setMineOnly(nextMineOnly);
+              void requestList(activeSearch, false, nextMineOnly);
+            }}
+          />
           {localPlugins && (
             <button type="button" className="primary" onClick={() => setPublishOpen(true)}>
               发布我的插件
@@ -414,11 +449,13 @@ export function CommunityPluginsPage({
       )}
       {!listBusy && !error && plugins.length === 0 && !hasMore && (
         <p className={style.notice}>
-          {activeSearch || kind
-            ? "没有匹配的插件。"
-            : localPlugins
-              ? "社区里还没有插件，安装或制作插件后可以点「发布我的插件」分享出来。"
-              : "社区里还没有插件。"}
+          {mineOnly
+            ? "你还没有发布过插件。"
+            : activeSearch || kind
+              ? "没有匹配的插件。"
+              : localPlugins
+                ? "社区里还没有插件，安装或制作插件后可以点「发布我的插件」分享出来。"
+                : "社区里还没有插件。"}
         </p>
       )}
       <div className={style.grid}>
