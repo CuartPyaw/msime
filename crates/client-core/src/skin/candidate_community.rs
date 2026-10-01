@@ -9,8 +9,8 @@ use crate::account::{
 };
 use crate::cloud::dictionary::percent_encode;
 use crate::community::{
-    valid_author, valid_description, valid_name, valid_query, valid_rating,
-    MAXIMUM_JAVASCRIPT_INTEGER, MAXIMUM_PAGE_ITEMS,
+    valid_author, valid_description, valid_name, valid_query, valid_rating, CommunityModeration,
+    MAXIMUM_JAVASCRIPT_INTEGER, MAXIMUM_PAGE_ITEMS, MODERATION_FIELDS,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use reqwest::Method;
@@ -117,6 +117,9 @@ pub struct CandidateSkinItem {
     /// [`request_digest`] of the request that last set the content. The server sends it only for the signed-in user's own packages; `""` otherwise.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub request_sha256: String,
+    /// The moderation state, sent only for the signed-in user's own package and only to a request that asked for it with `fields=moderation`; other users' packages and older servers leave it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moderation: Option<CommunityModeration>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -270,9 +273,14 @@ impl CandidateSkinCommunityApi for BackendAccountClient {
         if mine && token.is_none() {
             return Err(AccountError::Unauthorized);
         }
-        let scope = if mine { "&scope=mine" } else { "" };
+        // `fields` is repeated rather than comma-joined: a server that reads only the first value still gets the `sync` it requires.
+        let scope = if mine {
+            format!("&scope=mine&{SYNC_FIELDS}&{MODERATION_FIELDS}")
+        } else {
+            format!("&{SYNC_FIELDS}")
+        };
         let path = format!(
-            "/v1/community/candidate-skins?offset={offset}&q={}{scope}&{SYNC_FIELDS}",
+            "/v1/community/candidate-skins?offset={offset}&q={}{scope}",
             percent_encode(search)
         );
         let page = self.json::<CandidateSkinPage, ()>(Method::GET, &path, token, None)?;
@@ -289,7 +297,7 @@ impl CandidateSkinCommunityApi for BackendAccountClient {
             return Err(AccountError::Invalid);
         }
         let path = format!(
-            "/v1/community/candidate-skins/{}?{SYNC_FIELDS}",
+            "/v1/community/candidate-skins/{}?{SYNC_FIELDS}&{MODERATION_FIELDS}",
             id.hyphenated()
         );
         let item = self.json::<CandidateSkinItem, ()>(Method::GET, &path, token, None)?;

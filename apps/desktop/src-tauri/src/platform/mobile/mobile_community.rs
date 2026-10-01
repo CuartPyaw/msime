@@ -82,6 +82,9 @@ fn community_error(error: AccountError) -> crate::CommandError {
             AccountError::Storage => "community_storage",
             AccountError::Conflict => "community_conflict",
             AccountError::Unavailable => "community_unavailable",
+            AccountError::BlockedContent => "community_blocked_content",
+            AccountError::ScreeningUnavailable => "community_screening_unavailable",
+            AccountError::Banned => "community_account_banned",
         },
     }
 }
@@ -268,9 +271,10 @@ pub async fn community_skin_list(
     state: State<'_, MobileCommunityState>,
     offset: usize,
     search: String,
+    mine: Option<bool>,
 ) -> Result<CommunitySkinPage, crate::CommandError> {
     service_call(Arc::clone(&state.community), move |service| {
-        service.list(offset, &search)
+        service.list(offset, &search, mine.unwrap_or(false))
     })
     .await
 }

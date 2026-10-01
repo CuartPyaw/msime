@@ -8,8 +8,8 @@ use crate::account::{
 };
 use crate::cloud::dictionary::percent_encode;
 use crate::community::{
-    valid_author, valid_description, valid_name, valid_query, valid_rating,
-    MAXIMUM_JAVASCRIPT_INTEGER, MAXIMUM_PAGE_ITEMS,
+    valid_author, valid_description, valid_name, valid_query, valid_rating, CommunityModeration,
+    MAXIMUM_JAVASCRIPT_INTEGER, MAXIMUM_PAGE_ITEMS, MODERATION_FIELDS,
 };
 use crate::preferences::TouchKeyboardSkinDesign;
 use reqwest::Method;
@@ -30,6 +30,9 @@ pub struct CommunitySkin {
     pub rating_average: f64,
     pub owned: bool,
     pub my_rating: u8,
+    /// The moderation state, sent only for the signed-in user's own item and only to a request that asked for it with `fields=moderation`; other users' items and older servers leave it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moderation: Option<CommunityModeration>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -72,10 +75,12 @@ struct CommunitySkinUnpublishResponse {
 }
 
 pub trait CommunitySkinApi: Send + Sync + 'static {
+    /// One page of published skins; `mine` lists only the signed-in user's own, removed ones included, with their moderation state.
     fn community_skins(
         &self,
         offset: usize,
         search: &str,
+        mine: bool,
         token: Option<&str>,
     ) -> Result<CommunitySkinPage, AccountError>;
     fn community_skin(&self, id: Uuid, token: Option<&str>) -> Result<CommunitySkin, AccountError>;
@@ -101,11 +106,20 @@ impl CommunitySkinApi for BackendAccountClient {
         &self,
         offset: usize,
         search: &str,
+        mine: bool,
         token: Option<&str>,
     ) -> Result<CommunitySkinPage, AccountError> {
         validate_query(offset, search)?;
+        if mine && token.is_none() {
+            return Err(AccountError::Unauthorized);
+        }
+        let scope = if mine {
+            format!("&scope=mine&{MODERATION_FIELDS}")
+        } else {
+            String::new()
+        };
         let path = format!(
-            "/v1/community/skins?offset={offset}&q={}",
+            "/v1/community/skins?offset={offset}&q={}{scope}",
             percent_encode(search)
         );
         let page = self.json::<CommunitySkinPage, ()>(Method::GET, &path, token, None)?;
@@ -117,7 +131,10 @@ impl CommunitySkinApi for BackendAccountClient {
         if id.is_nil() {
             return Err(AccountError::Invalid);
         }
-        let path = format!("/v1/community/skins/{}", id.hyphenated());
+        let path = format!(
+            "/v1/community/skins/{}?{MODERATION_FIELDS}",
+            id.hyphenated()
+        );
         let skin = self.json::<CommunitySkin, ()>(Method::GET, &path, token, None)?;
         validate_skin(&skin)?;
         if skin.id != id {
@@ -225,10 +242,16 @@ where
     A: AccountApi + CommunitySkinApi,
     S: AccountSessionStorage,
 {
-    pub fn list(&self, offset: usize, search: &str) -> Result<CommunitySkinPage, AccountError> {
+    /// One page of published skins, newest first. `mine` lists only the signed-in user's own, removed ones included, and so requires a session.
+    pub fn list(
+        &self,
+        offset: usize,
+        search: &str,
+        mine: bool,
+    ) -> Result<CommunitySkinPage, AccountError> {
         validate_query(offset, search)?;
-        request_with_account_session(&self.api, &self.session, false, |api, token| {
-            api.community_skins(offset, search, token)
+        request_with_account_session(&self.api, &self.session, mine, |api, token| {
+            api.community_skins(offset, search, mine, token)
         })
     }
 
@@ -393,6 +416,7 @@ mod tests {
             rating_average: 4.0,
             owned: false,
             my_rating: 0,
+            moderation: None,
         }
     }
 
@@ -453,6 +477,7 @@ mod tests {
             &self,
             _: usize,
             _: &str,
+            _: bool,
             bearer: Option<&str>,
         ) -> Result<CommunitySkinPage, AccountError> {
             self.skin_calls.fetch_add(1, Ordering::SeqCst);
@@ -514,7 +539,7 @@ mod tests {
         let calls = Arc::clone(&api.skin_calls);
         let session = Arc::new(BackendAccountSession::new(api.clone(), storage));
         let service = BackendCommunitySkinService::new(api, session);
-        assert_eq!(service.list(0, "").unwrap().skins.len(), 1);
+        assert_eq!(service.list(0, "", false).unwrap().skins.len(), 1);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
@@ -526,6 +551,8 @@ mod tests {
         let service = BackendCommunitySkinService::new(api, session);
         assert_eq!(service.detail(skin().id).unwrap().name, "合成皮肤");
         assert!(storage.load().unwrap().is_none());
+        // The user's own list needs a session and never sends the request without one.
+        assert_eq!(service.list(0, "", true), Err(AccountError::Unauthorized));
     }
 
     #[test]
@@ -633,12 +660,16 @@ mod tests {
             stream.write_all(&response).unwrap();
         });
         let client = BackendAccountClient::loopback(&origin).unwrap();
-        let page = client.community_skins(7, "C++ 星", None).unwrap();
+        let page = client.community_skins(7, "C++ 星", false, None).unwrap();
         assert_eq!(page.skins.len(), 1);
         assert!(received
             .recv()
             .unwrap()
             .starts_with("GET /v1/community/skins?offset=7&q=C%2B%2B%20%E6%98%9F HTTP/1.1"));
+        assert_eq!(
+            client.community_skins(0, "", true, None),
+            Err(AccountError::Unauthorized)
+        );
     }
 
     #[test]
