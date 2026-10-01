@@ -40,7 +40,7 @@ Swift 后端客户端。鸿蒙不跑 Swift，这些的契约都在 client-core�
 | --- | --- |
 | `BackendAccountClient.swift` | `crates/client-core/src/account/client.rs`；ArkTS 侧 `AccountCloudBridge.ts` |
 | `BackendAccountSession.swift` | `crates/client-core/src/account/session.rs`；ArkTS 侧同上的会话与 generation |
-| `BackendAnonymousAccount.swift` | `crates/client-core/src/account`（匿名态）；鸿蒙默认离线，无需登录即可输入 |
+| `BackendAnonymousAccount.swift` | `crates/client-core/src/account/anonymous.rs`，经 N-API `ensureAnonymousAccount` 在应用或键盘首次启动时注册到 `files/state`；鸿蒙默认离线，无需登录即可输入 |
 | `BackendCandidateClient.swift` | `crates/client-core/src/cloud`；`OnlineCandidatePolicy.ts` |
 | `BackendChatClient.swift` | `AccountCloudBridge.chat`（#3327） |
 | `BackendClipboardClient.swift` | `AccountCloudBridge.clipboard` + `CloudClipboardPanel` |

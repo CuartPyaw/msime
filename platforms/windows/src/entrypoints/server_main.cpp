@@ -721,6 +721,15 @@ int wmain(int argc, wchar_t **argv) {
       telemetry_allowed.store(true, std::memory_order_release);
       std::thread([] { msime::telemetry::start("windows", MSIME_WINDOWS_VERSION); }).detach();
     }
+    // The device's anonymous MSIME account is registered on the first run after install, as on every other platform; once anonymous-session.json exists in the state root this is a file read. It runs off the main thread for the same reason as the telemetry event, and a failure (offline, rate limited) is simply retried on the next start.
+    if (production) {
+      std::thread([directory = config.state_root.u8string()] {
+        std::unique_ptr<char, decltype(&msime_client_string_free)> result(
+            msime_client_ensure_anonymous_account(
+                reinterpret_cast<const uint8_t *>(directory.data()), directory.size()),
+            msime_client_string_free);
+      }).detach();
+    }
     diagnostic_log.server(std::string(production ? "Production" : "Preview") +
                           " Server starting");
     auto traditional_output = std::make_shared<std::atomic<bool>>(

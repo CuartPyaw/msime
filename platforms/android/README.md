@@ -187,7 +187,7 @@ Tauri 合包的“键盘”页另有“个人词库”入口，打开共享设�
 
 Tauri 合包的 Android“我的”页“关于水杉”入口打开共享 `about` 页面；页面内的使用帮助和反馈继续通过 `help` / `feedback` 分类切换，复用公共版本、隐私、开源、帮助和反馈 UI。独立原生 APK 保留 Android fallback 页面；这样两种构建产物都不会启动不存在的 WebView Activity。
 
-“我的”页的“社区作品”入口打开共享账户页。Android Tauri 宿主现在注入账号命令客户端，复用公共登录、昵称、发布/收藏作品和账号管理流程；原生匿名身份仍只用于无需登录的社区目录浏览，账号会话由 Android 插件安全存储。
+“我的”页的“社区作品”入口打开共享账户页。Android Tauri 宿主现在注入账号命令客户端，复用公共登录、昵称、发布/收藏作品和账号管理流程；原生匿名身份在应用首次打开时向后端注册（`AccountIdentity.register`，后台线程，失败下次重试），用于无需登录的社区目录浏览与未登录时的候选翻译，账号会话由 Android 插件安全存储。
 
 共享设置的“屏幕键盘”页面在 Android 上通过 `android_open_keyboard_tryout` 打开原生 `KeyboardTryoutActivity`；Tauri 只提供公共配置和入口，实际输入仍走 Android 原生试用键盘与 `InputConnection`，不在 WebView 内伪造输入法。
 

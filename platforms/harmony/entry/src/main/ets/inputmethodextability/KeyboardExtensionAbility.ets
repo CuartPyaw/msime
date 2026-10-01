@@ -5,6 +5,7 @@ import { KeyboardSession, KeyboardPreferences } from '../keyboard/KeyboardSessio
 import { CandidateAnchor, CandidateAnchorPolicy } from './CandidateAnchorPolicy';
 import { KeyboardLog, describeError } from '../keyboard/KeyboardLog';
 import fs from '@ohos.file.fs';
+import client from 'libmsimeclient.so';
 import display from '@ohos.display';
 import window from '@ohos.window';
 import ConfigurationConstant from '@ohos.app.ability.ConfigurationConstant';
@@ -837,6 +838,10 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     if (!fs.accessSync(state)) {
       fs.mkdirSync(state, true);
     }
+    // Covers a keyboard enabled without the app ever being opened; the app's first launch does the same, and whichever runs first registers the account.
+    client.ensureAnonymousAccount(state).catch((error: Error): void => {
+      KeyboardLog.error(`anonymous account: ${describeError(error)}`);
+    });
     if (!StagedResources.stage(`${this.context.resourceDir}/engine`, resources,
         `${files}/engine.ready`)) {
       return;

@@ -52,6 +52,8 @@ uint32_t msime_client_abi_version(void);
 char *msime_client_prepare_host(const uint8_t *options, size_t length);
 /* path is an absolute UTF-8 runtime options file path of length bytes; maximum 4096. When its dictionaries directory is not the installed resource generation (after a package upgrade), prepares that generation, replays the user dictionary into it and atomically rewrites resources/dictionaries, keeping every other key. Value is true when the file was rewritten. Call before creating any session from the file. When the recorded resource directory does not match the compiled dictionary lock (downloaded dictionaries an upgrade did not replace) the error text begins with "dictionary_outdated:" and the file is left unchanged; the rest of that text may name private paths. */
 char *msime_client_refresh_host(const uint8_t *path, size_t length);
+/* directory is an absolute UTF-8 directory path of length bytes; maximum 4096. Registers the device's anonymous MSIME account at https://api.msime.app unless anonymous-session.json already exists there, keeping the identity in anonymous-account.json and the session in anonymous-session.json (both owner-only). Blocks on the network: call off the input thread. Value is true once a session exists. A failure leaves the identity for the next call, so call again on a later start. */
+char *msime_client_ensure_anonymous_account(const uint8_t *directory, size_t length);
 /* options is a readable UTF-8 buffer of length bytes; maximum 1 MiB.
  * Object: api_version=1, resources/user_data/cache/dictionaries (absolute paths),
  * preferences={scheme, candidate_page_size, learning, chinese_punctuation,

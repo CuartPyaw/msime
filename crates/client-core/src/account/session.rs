@@ -126,6 +126,16 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         self.sign_in_validated(challenge, credential)
     }
 
+    /// Signs in the device's anonymous account: the subject is presented as the challenge target and the secret answers it. Only `anonymous::ensure_anonymous_account` holds those values.
+    pub(super) fn sign_in_anonymous(
+        &self,
+        subject: &str,
+        secret: &str,
+    ) -> Result<AccountUser, AccountError> {
+        let challenge = self.request_code("anonymous", subject)?;
+        self.sign_in_validated(&challenge.challenge_id, secret)
+    }
+
     /// Completes an Apple challenge using the identity token returned by the
     /// native AuthenticationServices flow. The token never crosses the UI
     /// boundary; platform hosts pass it directly into the session.

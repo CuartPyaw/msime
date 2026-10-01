@@ -361,12 +361,17 @@ impl AccountError {
 // The shared data types and limits stay here; the behaviour is split by what it
 // does. Each part is re-exported, so `client_core::account::X` still resolves to
 // everything it did when this was one file.
+mod anonymous;
 mod api;
 mod client;
 mod google;
 mod session;
 mod validate;
 
+pub use anonymous::{
+    ensure_anonymous_account, AnonymousSessionStorage, ANONYMOUS_ACCOUNT_FILE,
+    ANONYMOUS_SESSION_FILE,
+};
 pub use api::*;
 pub use client::*;
 pub use google::*;

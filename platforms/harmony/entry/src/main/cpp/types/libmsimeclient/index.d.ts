@@ -85,6 +85,10 @@ export const plugins: (request: string) => string;
  */
 export const pluginsAsync: (request: string) => Promise<string>;
 /**
+ * Registers the device's anonymous MSIME account under `directory` (an absolute path; `anonymous-account.json` and `anonymous-session.json`) unless a session is already there, on a worker thread. Resolves with `{ok,value}` or `{ok:false,error}`; rejects only when the worker produced no answer.
+ */
+export const ensureAnonymousAccount: (directory: string) => Promise<string>;
+/**
  * Decodes the WAV sample at `sample` once per semitone and writes each note to `<directory>/note-<index>.wav` at 48 kHz, pitched as a playback rate. Resolves with the files in semitone order; rejects a sample that is not WAV, lasts longer than `maxMillis`, or decodes past its declared length.
  */
 export const keySoundRenderNotes: (
