@@ -131,7 +131,7 @@ impl InputSession {
         } else if wubi {
             request.raw_input.clone()
         } else if pinyin_fallback {
-            self.position_context(false, false)
+            self.position_context(false, false).into_owned()
         } else {
             request.normalized_segmentation.clone()
         };
