@@ -2564,7 +2564,6 @@ impl PreferencesStore {
     }
 }
 
-/// The candidate colour pickers #1187 moved from the top level into `custom_theme.candidate_colors`, old key and new.
 /// Keys of [`Preferences`] that were replaced and are dropped on read, so a document an older build saved still loads. `telemetry_enabled` was the opt-in reporting switch; its replacement `usage_reporting` is on by default and deliberately does not inherit the old value.
 const RETIRED_KEYS: [&str; 1] = ["telemetry_enabled"];
 
@@ -2575,6 +2574,7 @@ fn migrate_retired_fields(preferences: &mut serde_json::Map<String, serde_json::
     migrate_retired_skin_fields(preferences);
 }
 
+/// The candidate colour pickers #1187 moved from the top level into `custom_theme.candidate_colors`, old key and new.
 const RETIRED_CANDIDATE_COLORS: [(&str, &str); 7] = [
     ("candidate_text_color", "text"),
     ("candidate_number_color", "number"),
