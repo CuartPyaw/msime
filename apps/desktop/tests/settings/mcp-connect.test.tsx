@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
   McpConnectSection,
   type McpInstallOutcome,
@@ -234,6 +234,25 @@ test("a write response from a replaced host cannot update the new MCP section", 
       }) as HTMLButtonElement
     ).disabled,
   ).toBe(false);
+});
+
+test("a copy response from a replaced host cannot mark the new MCP section copied", async () => {
+  const pending = deferred<void>();
+  const oldCopy = vi.fn(() => pending.promise);
+  const nextCopy = vi.fn().mockResolvedValue(undefined);
+  const view = render(
+    <McpConnectSection status={() => Promise.resolve(status())} copyText={oldCopy} />,
+  );
+  const group = await screen.findByRole("group", { name: "连接 AI 助手" });
+  fireEvent.click(within(group).getByRole("radio", { name: "其他" }));
+  fireEvent.click(within(group).getByRole("button", { name: "复制配置" }));
+  expect(oldCopy).toHaveBeenCalledWith(config);
+  view.rerender(<McpConnectSection status={() => Promise.resolve(status())} copyText={nextCopy} />);
+  await act(async () => {
+    pending.resolve();
+    await Promise.resolve();
+  });
+  expect(screen.queryByRole("button", { name: "已复制" })).toBeNull();
 });
 
 test("a configuration file that is not JSON is reported and left alone", async () => {
