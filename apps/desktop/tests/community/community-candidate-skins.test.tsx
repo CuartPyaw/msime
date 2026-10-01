@@ -583,6 +583,29 @@ test("publish dialog: 公开发布 waits for the rights box and a valid name", a
   );
 });
 
+test("publish dialog ignores a same-tick duplicate submission", async () => {
+  const pending = deferred<CommunityCandidateSkin>();
+  const publish = vi.fn().mockReturnValue(pending.promise);
+  render(
+    <CandidateSkinPublishDialog
+      client={client({ publish })}
+      initialSkinId="ink-wash"
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  await screen.findByRole("textbox", { name: "发布皮肤名称" });
+  fireEvent.click(screen.getByRole("checkbox", { name: "确认拥有发布素材权利" }));
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "公开发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "公开发布" }));
+  });
+  expect(publish).toHaveBeenCalledOnce();
+  pending.resolve(first);
+  await settle();
+});
+
 test("replacing the publish client releases a pending dialog action", async () => {
   const pending = deferred<CommunityCandidateSkin>();
   const localSkins = vi.fn().mockResolvedValue(catalog(["ink-wash"]));
