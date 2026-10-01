@@ -643,7 +643,7 @@ pub(crate) fn is_packaged_resource_directory(resource_directory: &Path) -> bool 
             == Some("app".as_ref())
 }
 
-/// Whether the `AppleEnabledInputSources` list, as JSON, has any entry for this input method.
+/// Whether an enabled input source list, as JSON, has any entry for this input method.
 fn enabled_in_input_source_list(json: &[u8]) -> Option<bool> {
     let list: serde_json::Value = serde_json::from_slice(json).ok()?;
     Some(list.as_array()?.iter().any(|entry| {
@@ -651,23 +651,41 @@ fn enabled_in_input_source_list(json: &[u8]) -> Option<bool> {
     }))
 }
 
+/// The preference lists macOS records enabled input sources in. Current releases keep third-party input methods in `com.apple.inputsources` and leave them out of the HIToolbox list, which only still carries Apple's own sources; older releases kept everything in the HIToolbox list.
+const ENABLED_INPUT_SOURCE_LISTS: [(&str, &str); 2] = [
+    (
+        "com.apple.inputsources",
+        "AppleEnabledThirdPartyInputSources",
+    ),
+    ("com.apple.HIToolbox", "AppleEnabledInputSources"),
+];
+
+/// Enabled when any list has this input method; `None` only when no list could be read, since a release that does not use one of them simply has no such key.
+fn enabled_in_any_list(lists: impl IntoIterator<Item = Option<bool>>) -> Option<bool> {
+    lists
+        .into_iter()
+        .flatten()
+        .reduce(|any, enabled| any || enabled)
+}
+
 /// Whether the user has this input method in the System Settings input source list. `None` when the list cannot be read.
 ///
 /// Read through `defaults export`, which asks cfprefsd, rather than the plist file itself: the file lags behind a registration that has only just enabled the source.
 pub(crate) fn input_source_enabled() -> Option<bool> {
+    enabled_in_any_list(
+        ENABLED_INPUT_SOURCE_LISTS
+            .iter()
+            .map(|(domain, key)| enabled_in_preference_list(domain, key)),
+    )
+}
+
+fn enabled_in_preference_list(domain: &str, key: &str) -> Option<bool> {
     use std::io::Write;
     let mut command = Command::new("/usr/bin/defaults");
-    command.args(["export", "com.apple.HIToolbox", "-"]);
+    command.args(["export", domain, "-"]);
     let exported = bounded_command_output(&mut command, MAX_INPUT_SOURCE_PREFERENCES_BYTES)?;
     let mut plutil = Command::new("/usr/bin/plutil")
-        .args([
-            "-extract",
-            "AppleEnabledInputSources",
-            "json",
-            "-o",
-            "-",
-            "-",
-        ])
+        .args(["-extract", key, "json", "-o", "-", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -893,6 +911,15 @@ mod tests {
         let absent = br#"[{"Bundle ID":"com.apple.inputmethod.Kotoeri.RomajiTyping"}]"#;
         assert_eq!(enabled_in_input_source_list(absent), Some(false));
         assert_eq!(enabled_in_input_source_list(b"not json"), None);
+    }
+
+    #[test]
+    fn enabled_when_any_readable_list_has_this_bundle() {
+        // Current macOS lists third-party sources only in com.apple.inputsources, so the HIToolbox list alone reads as not enabled.
+        assert_eq!(enabled_in_any_list([Some(true), Some(false)]), Some(true));
+        assert_eq!(enabled_in_any_list([None, Some(true)]), Some(true));
+        assert_eq!(enabled_in_any_list([None, Some(false)]), Some(false));
+        assert_eq!(enabled_in_any_list([None, None]), None);
     }
 
     #[test]
