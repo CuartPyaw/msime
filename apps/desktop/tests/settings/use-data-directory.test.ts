@@ -46,3 +46,28 @@ test("a move response from a replaced data directory client is ignored", async (
   await act(async () => pending);
   expect(result.current.dataDirectory?.path).toBe("/new");
 });
+
+test("ignores a same-tick duplicate directory choice", async () => {
+  const pendingPick = deferred<string | null>();
+  const client: DataDirectoryClient = {
+    status: vi.fn().mockResolvedValue({ path: "/current", isDefault: true }),
+    pick: vi.fn().mockReturnValue(pendingPick.promise),
+    move: vi.fn(),
+  };
+  const confirm = vi.fn();
+  const { result } = renderHook(() => useDataDirectory({ client, enabled: true, confirm }));
+  await waitFor(() => expect(result.current.dataDirectory?.path).toBe("/current"));
+
+  let first!: Promise<void>;
+  let second!: Promise<void>;
+  act(() => {
+    first = result.current.choose();
+    second = result.current.choose();
+  });
+  expect(client.pick).toHaveBeenCalledOnce();
+  pendingPick.resolve(null);
+  await act(async () => {
+    await first;
+    await second;
+  });
+});
