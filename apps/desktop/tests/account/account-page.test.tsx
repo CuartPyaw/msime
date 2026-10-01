@@ -41,6 +41,14 @@ function account(overrides: Partial<AccountClient> = {}): AccountClient {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
 test("code login trims the target, requires six ASCII digits and loads the profile", async () => {
   const client = account();
   const onLoginComplete = vi.fn();
@@ -67,6 +75,28 @@ test("code login trims the target, requires six ASCII digits and loads the profi
   expect(onLoginComplete).toHaveBeenCalledOnce();
   expect(screen.getByText("邮箱")).not.toBeNull();
   expect(screen.queryByText("fixture-challenge")).toBeNull();
+});
+
+test("ignores a same-tick duplicate verification-code request", async () => {
+  const pending = deferred<{ challengeId: string; expiresIn: number }>();
+  const requestCode = vi.fn().mockReturnValue(pending.promise);
+  const client = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false }),
+    requestCode,
+  });
+  render(<AccountPage client={client} />);
+  fireEvent.click(await screen.findByRole("button", { name: "邮箱登录" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "邮箱地址" }), {
+    target: { value: "fixture@example.test" },
+  });
+  const request = screen.getByRole("button", { name: "获取验证码" });
+  act(() => {
+    fireEvent.click(request);
+    fireEvent.click(request);
+  });
+  expect(requestCode).toHaveBeenCalledOnce();
+  pending.resolve({ challengeId: "fixture-challenge", expiresIn: 300 });
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "6 位验证码" })).not.toBeNull());
 });
 
 test("profile rename, logout-all confirmation and account deletion use explicit actions", async () => {
