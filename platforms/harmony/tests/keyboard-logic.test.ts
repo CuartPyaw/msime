@@ -671,6 +671,17 @@ group("counts a held physical key once", () => {
 });
 
 group("bounds and deduplicates asynchronous online AI candidates", () => {
+  const signature = "7:ni'hao:fixture:true:";
+  check(
+    OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 7, 7),
+    "a failed current online request can be retried",
+  );
+  check(
+    !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, "new", 4, 4, 7, 7)
+      && !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, signature, 3, 4, 7, 7)
+      && !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 8, 7),
+    "a stale online failure cannot clear a newer request",
+  );
   const response = JSON.stringify({
     choices: [
       {
@@ -737,6 +748,26 @@ group("keeps translation provider policy bounded and credential-free in signatur
       target_language: "en",
     }).includes("niutrans:account"),
     "cache scope identifies the provider account",
+  );
+  const signature = TranslationPolicy.signature(query);
+  check(
+    TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 7, 7),
+    "a failed current translation request can be retried",
+  );
+  check(
+    !TranslationPolicy.shouldReleaseAfterFailure(signature, "new", 4, 4, 7, 7)
+      && !TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 3, 4, 7, 7)
+      && !TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 8, 7),
+    "a stale translation failure cannot clear a newer request",
+  );
+  check(
+    TranslationPolicy.shouldReleaseAfterProviderFailure("tencent", false, true),
+    "offline rows do not hide a failed online provider",
+  );
+  check(
+    !TranslationPolicy.shouldReleaseAfterProviderFailure("tencent", true, true)
+      && !TranslationPolicy.shouldReleaseAfterProviderFailure("", false, true),
+    "complete or disabled providers keep a usable translation signature",
   );
 });
 

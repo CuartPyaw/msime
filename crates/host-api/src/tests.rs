@@ -95,6 +95,36 @@ fn resource_verification_rejects_a_symlinked_state_root() {
     assert!(!outside.path().join("verified-resources.json").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn resource_verification_rejects_an_existing_state_root_below_a_symlink() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    std::fs::write(resources.join("fixture.db"), b"fixture").unwrap();
+    let specification = ResourceSet {
+        source_commit: "a".repeat(40),
+        artifacts: vec![msime_client_core::resources::Artifact {
+            name: "fixture.db".into(),
+            url: "https://example.invalid/fixture.db".into(),
+            sha256: hex::encode(Sha256::digest(b"fixture")),
+            size: 7,
+        }],
+    };
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir(outside.path().join("state")).unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let linked = parent.path().join("linked");
+    std::os::unix::fs::symlink(outside.path(), &linked).unwrap();
+    let state = linked.join("state");
+
+    assert!(verify_resources_once(&resources, &specification, &state).is_err());
+    assert!(!outside
+        .path()
+        .join("state/verified-resources.json")
+        .exists());
+}
+
 #[test]
 fn resource_verification_removes_the_retired_pinyin_dictionary_in_place() {
     let root = tempfile::tempdir().unwrap();
@@ -6378,9 +6408,9 @@ fn host_options_carry_vietnamese_settings_and_language_dictionaries_to_the_engin
     );
 }
 
-/// Cantonese and Zhuyin run on macOS once their dictionary is installed beside the resources, and fall back without it; Vietnamese needs no data and runs on macOS regardless. Every other build falls back from all three.
+/// Cantonese and Zhuyin run on macOS and desktop Linux once their dictionary is installed beside the resources, and fall back without it; Vietnamese needs no data and runs there regardless. Every other build falls back from all three.
 #[test]
-fn installed_language_dictionaries_enable_their_schemes_on_macos() {
+fn installed_language_dictionaries_enable_their_schemes_on_macos_and_linux() {
     let root = tempfile::tempdir().expect("tempdir");
     let resources = root.path().join("resources");
     std::fs::create_dir_all(&resources).expect("resources");
@@ -6396,14 +6426,17 @@ fn installed_language_dictionaries_enable_their_schemes_on_macos() {
             .into_engine_options()
             .scheme
     };
-    let macos = cfg!(target_os = "macos");
+    let runs = cfg!(any(
+        target_os = "macos",
+        all(target_os = "linux", not(target_env = "ohos"))
+    ));
     // Without the directory both fall back to the last Chinese scheme, 五笔.
     assert_eq!(super::installed_language_dictionaries(&resources), None);
     assert_eq!(engine_scheme(InputScheme::Cantonese), 2);
     assert_eq!(engine_scheme(InputScheme::Zhuyin), 2);
     assert_eq!(
         engine_scheme(InputScheme::Vietnamese),
-        if macos { 7 } else { 2 }
+        if runs { 7 } else { 2 }
     );
 
     let beside = root.path().join("language-dictionaries");
@@ -6416,15 +6449,12 @@ fn installed_language_dictionaries_enable_their_schemes_on_macos() {
     );
     assert_eq!(
         engine_scheme(InputScheme::Cantonese),
-        if macos { 5 } else { 2 }
+        if runs { 5 } else { 2 }
     );
-    assert_eq!(
-        engine_scheme(InputScheme::Zhuyin),
-        if macos { 6 } else { 2 }
-    );
+    assert_eq!(engine_scheme(InputScheme::Zhuyin), if runs { 6 } else { 2 });
     assert_eq!(
         engine_scheme(InputScheme::Vietnamese),
-        if macos { 7 } else { 2 }
+        if runs { 7 } else { 2 }
     );
 }
 
