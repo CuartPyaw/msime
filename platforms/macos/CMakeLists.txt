@@ -178,8 +178,14 @@ set(MSIME_VOICE_CUE_RESOURCES
 target_sources(MSIMEClientInputMethod PRIVATE ${MSIME_VOICE_CUE_RESOURCES})
 set_source_files_properties(${MSIME_VOICE_CUE_RESOURCES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/audios")
 # The built-in sound packs, synthesized by scripts/generate_sound_packs.py, one folder per pack under Resources/sound-packs: the directory the input method and the settings page name to client-core as the built-in pack root. Beside EngineResources rather than in it, because that directory has to hold exactly what the dictionary lock pins.
-foreach(MSIME_SOUND_PACK default twinkle)
-  file(GLOB MSIME_SOUND_PACK_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/sound-packs/${MSIME_SOUND_PACK}/*")
+# Every folder there is staged, so a pack the generator adds ships without being named here too.
+file(GLOB MSIME_SOUND_PACK_DIRECTORIES LIST_DIRECTORIES true CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/sound-packs/*")
+foreach(MSIME_SOUND_PACK_DIRECTORY ${MSIME_SOUND_PACK_DIRECTORIES})
+  if(NOT IS_DIRECTORY "${MSIME_SOUND_PACK_DIRECTORY}")
+    continue()
+  endif()
+  get_filename_component(MSIME_SOUND_PACK "${MSIME_SOUND_PACK_DIRECTORY}" NAME)
+  file(GLOB MSIME_SOUND_PACK_FILES CONFIGURE_DEPENDS "${MSIME_SOUND_PACK_DIRECTORY}/*")
   target_sources(MSIMEClientInputMethod PRIVATE ${MSIME_SOUND_PACK_FILES})
   set_source_files_properties(${MSIME_SOUND_PACK_FILES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/sound-packs/${MSIME_SOUND_PACK}")
 endforeach()
