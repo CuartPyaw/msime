@@ -2067,22 +2067,28 @@ public:
     char day[11]{};
     if (std::strftime(day, sizeof(day), "%Y-%m-%d", &local) == 0) return;
     const auto sourceId = std::string(msime::linux_host::typing_source_id(source));
-    std::thread([directory, text, sourceId, day = std::string(day),
-                 hour = local.tm_hour] {
-      try {
-        const auto request = Json{
-            {"directory", directory},
-            {"action", Json{{"operation", "record"}, {"text", text},
-                              {"source", sourceId}, {"day", day},
-                              {"hour", hour}}}}
-                                  .dump();
-        if (auto *raw = msime_client_typing_statistics(
-                reinterpret_cast<const uint8_t *>(request.data()), request.size()))
-          msime_client_string_free(raw);
-      } catch (...) {
-        // Statistics are best effort and must never affect text commitment.
-      }
-    }).detach();
+    fcitx_key_press_writes.begin();
+    try {
+      std::thread([directory, text, sourceId, day = std::string(day),
+                   hour = local.tm_hour] {
+        try {
+          const auto request = Json{
+              {"directory", directory},
+              {"action", Json{{"operation", "record"}, {"text", text},
+                                {"source", sourceId}, {"day", day},
+                                {"hour", hour}}}}
+                                    .dump();
+          if (auto *raw = msime_client_typing_statistics(
+                  reinterpret_cast<const uint8_t *>(request.data()), request.size()))
+            msime_client_string_free(raw);
+        } catch (...) {
+          // Statistics are best effort and must never affect text commitment.
+        }
+        fcitx_key_press_writes.end();
+      }).detach();
+    } catch (...) {
+      fcitx_key_press_writes.end();
+    }
   }
   // `typingStatistics` is false for text the Engine generated rather than the user typed out (the expression, command and mention modes), which the statistics leave out.
   void commitText(const std::string &text,
