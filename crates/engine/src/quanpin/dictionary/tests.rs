@@ -1,6 +1,7 @@
 //! Dictionary-level ports of the reference tests: the autocorrect switch matrix and marking probes (`test_pinyin.cpp:910-993`, `:1169-1225`), the segmentation contract, longer phrases (`test_longer_phrase_candidates.cpp`), fuzzy rules and the protected alternative slot (`test_fuzzy_pinyin.cpp:97-130`), typo sentences (`test_typo_correction_input_session.cpp:260-330`), online rows, initial expansion and the word writers.
 
 use rusqlite::params;
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use super::*;
@@ -62,6 +63,17 @@ fn series_slot_key_encodes_switches_and_context() {
         series_slot_key("T0:A:ni", options, true, "你好"),
         "T0:A:ni\u{1f}S101\u{1f}你好"
     );
+}
+
+#[test]
+fn fuzzy_segmentation_borrows_explicit_input() {
+    let borrowed = fuzzy_segmentation("ni'hao", &[]);
+    assert!(matches!(borrowed, Cow::Borrowed("ni'hao")));
+
+    let segments = vec!["ni".to_owned(), "hao".to_owned()];
+    let owned = fuzzy_segmentation("", &segments);
+    assert!(matches!(owned, Cow::Owned(_)));
+    assert_eq!(owned, "ni'hao");
 }
 
 fn contains(items: &[WordItem], word: &str) -> bool {

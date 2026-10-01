@@ -1,5 +1,6 @@
 //! `QuanpinDictionary` (`R/quanpin/quanpin_dictionary.cpp`, quanpin.md §4, §6, §7.5-§7.7, §9.9, §11, §13, §14): the query pipeline and its caches, plus the canonical-pinyin phrase writer learning uses (pins, removals and frequency learning go through `user_dictionary` directly, see `ime::registry`).
 
+use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -157,12 +158,13 @@ impl QuanpinDictionary {
         let mut result = self.query_exact(raw, segmentation, autocorrect_types);
         if fuzzy.rules != 0 && !raw.is_empty() {
             // Fuzzy rows are merged here, not in `query_exact`, so the ordinary cache slots stay free of preference-specific rows. The split is of the request's own segmentation, not the normalised one, so a typed `lue` expands under `lue` (quanpin.md §6).
-            let typed = if segmentation.is_empty() {
-                join_segments(&self.resolve_segments(raw, segmentation))
+            let normalized_segments = if segmentation.is_empty() {
+                self.resolve_segments(raw, segmentation)
             } else {
-                segmentation.to_string()
+                Vec::new()
             };
-            let rows = self.fuzzy_candidates(&typed, fuzzy);
+            let typed = fuzzy_segmentation(segmentation, &normalized_segments);
+            let rows = self.fuzzy_candidates(typed.as_ref(), fuzzy);
             append_unique_words(&mut result, rows);
             result.sort_by_key(|item| std::cmp::Reverse(matched_letters(&item.pinyin)));
         }
@@ -868,6 +870,14 @@ fn series_slot_key(
         slot.push_str(rescoring_context);
     }
     slot
+}
+
+fn fuzzy_segmentation<'a>(segmentation: &'a str, normalized_segments: &[String]) -> Cow<'a, str> {
+    if segmentation.is_empty() {
+        Cow::Owned(join_segments(normalized_segments))
+    } else {
+        Cow::Borrowed(segmentation)
+    }
 }
 
 fn lookup_cached_segments(
