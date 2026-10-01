@@ -312,6 +312,18 @@ impl SchemeType {
         }
     }
 
+    /// The first Cancel keeps the composition: it closes the open candidate list, or takes a Vietnamese word back to its raw keys. A second Cancel then discards it.
+    pub const fn cancel_keeps_composition(self) -> bool {
+        match self {
+            Self::Korean | Self::Zhuyin | Self::Vietnamese => true,
+            Self::Quanpin
+            | Self::Shuangpin
+            | Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Cantonese => false,
+        }
+    }
+
     /// Selecting any of the scheme's candidates finishes the composition. Native wubi rows also finish, which is decided per row because a mixed wubi list holds pinyin rows too.
     pub const fn selection_completes(self) -> bool {
         match self {
@@ -1037,7 +1049,7 @@ mod tests {
     // Each row lists Quanpin, Shuangpin, Wubi, Japanese and Korean; the values are the behaviour these schemes had before the checks became predicates.
     #[test]
     fn predicates_keep_the_behaviour_of_the_existing_schemes() {
-        let table: [Row; 25] = [
+        let table: [Row; 26] = [
             (
                 "is_chinese",
                 SchemeType::is_chinese,
@@ -1121,6 +1133,11 @@ mod tests {
             (
                 "has_openable_candidate_list",
                 SchemeType::has_openable_candidate_list,
+                [false, false, false, false, true],
+            ),
+            (
+                "cancel_keeps_composition",
+                SchemeType::cancel_keeps_composition,
                 [false, false, false, false, true],
             ),
             (
@@ -1208,8 +1225,12 @@ mod tests {
     #[test]
     fn zhuyin_predicates() {
         let scheme = SchemeType::Zhuyin;
-        let on: [Named; 8] = [
+        let on: [Named; 9] = [
             ("is_chinese", SchemeType::is_chinese),
+            (
+                "cancel_keeps_composition",
+                SchemeType::cancel_keeps_composition,
+            ),
             (
                 "outputs_traditional_natively",
                 SchemeType::outputs_traditional_natively,
@@ -1287,7 +1308,11 @@ mod tests {
             ("widens_full_width", SchemeType::widens_full_width),
             ("accepts_apostrophe", SchemeType::accepts_apostrophe),
         ];
-        let off: [Named; 19] = [
+        let off: [Named; 20] = [
+            (
+                "cancel_keeps_composition",
+                SchemeType::cancel_keeps_composition,
+            ),
             (
                 "script_conversion_applies",
                 SchemeType::script_conversion_applies,
@@ -1338,7 +1363,11 @@ mod tests {
     #[test]
     fn vietnamese_predicates() {
         let scheme = SchemeType::Vietnamese;
-        let on: [Named; 3] = [
+        let on: [Named; 4] = [
+            (
+                "cancel_keeps_composition",
+                SchemeType::cancel_keeps_composition,
+            ),
             ("commits_on_blur", SchemeType::commits_on_blur),
             ("locks_caret", SchemeType::locks_caret),
             ("selection_completes", SchemeType::selection_completes),

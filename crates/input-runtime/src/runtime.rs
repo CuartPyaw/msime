@@ -1705,9 +1705,8 @@ impl<E: InputEngine> Runtime<E> {
     /// Throw the composition away. Cancel is the user's Escape, and in some schemes the first one keeps the composition: with an openable candidate list open (the Korean Hanja list) it only closes the list, and a Vietnamese word goes back to its raw keys. A second Cancel then takes the composition too.
     fn discard_composition(&mut self) -> Result<EngineResult, RuntimeError> {
         let result = self.engine.command(Command::Cancel)?;
-        if scheme_type(self.cached.scheme).is_some_and(|scheme| {
-            scheme.has_openable_candidate_list() || scheme == SchemeType::Vietnamese
-        }) && !self.engine.snapshot()?.editing_text.is_empty()
+        if scheme_type(self.cached.scheme).is_some_and(SchemeType::cancel_keeps_composition)
+            && !self.engine.snapshot()?.editing_text.is_empty()
         {
             return self.engine.command(Command::Cancel);
         }
