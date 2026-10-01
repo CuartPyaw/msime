@@ -317,6 +317,12 @@ if ! rg -Uq 'android:name="app\.msime\.android\.MlKitImeInitProvider"[[:space:]]
   echo "Android native host must initialize ML Kit inside the isolated IME process" >&2
   exit 1
 fi
+# The rotating refresh token must be spent by one process only. The session provider stays in the main process (no android:process) and unexported; the :ime keyboard asks it for a token instead of refreshing its own copy.
+if ! rg -Uq 'android:name="app\.msime\.android\.AccountSessionProvider"[[:space:]]+android:authorities="\$\{applicationId\}\.account-session"[[:space:]]+android:exported="false"[[:space:]]*/>' \
+    "$repo_root/platforms/android/AndroidManifest.xml"; then
+  echo "Android account session provider must be declared unexported in the main process" >&2
+  exit 1
+fi
 # The host compiles against AndroidX and Material now, and those are AARs that only Gradle resolves,
 # so this script no longer compiles the whole source set -- `platforms/android/gradle-app` does, and
 # build-apk.sh drives it. What stays here is the part that is worth having without a Gradle daemon:
@@ -455,6 +461,7 @@ javac --release 17 -Xlint:all -Werror -cp "$android_jar" -d "$output_dir" \
   "$repo_root/platforms/android/tests/settings/AppIconStyleSmoke.java" \
   "$repo_root/platforms/android/tests/settings/CloudClipboardTextPolicySmoke.java" \
   "$repo_root/platforms/android/tests/keyboard/CloudClipboardPanelPolicySmoke.java" \
+  "$repo_root/platforms/android/tests/settings/AccountSessionRoutingSmoke.java" \
   "$repo_root/platforms/android/tests/settings/SmartPunctuationContextSmoke.java" \
   "$repo_root/platforms/android/tests/settings/HardwareKeyPolicySmoke.java" \
   "$repo_root/platforms/android/tests/settings/HardwareShortcutPolicySmoke.java" \
@@ -503,6 +510,7 @@ java -cp "$output_dir" ReplyKeyboardSmoke
 java -cp "$output_dir" app.msime.android.KeyboardSkinSmoke
 java -cp "$output_dir" CloudClipboardTextPolicySmoke
 java -cp "$output_dir:$android_jar" CloudClipboardPanelPolicySmoke
+java -cp "$output_dir:$android_jar" app.msime.android.AccountSessionRoutingSmoke
 java -cp "$output_dir" KeyboardFeedbackSmoke
 java -cp "$output_dir:$android_jar" app.msime.android.KeyboardFeedbackStoreSmoke
 java -cp "$output_dir" KeyboardShortcutIconPolicySmoke

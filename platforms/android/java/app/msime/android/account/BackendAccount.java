@@ -1,6 +1,9 @@
 package app.msime.android;
 
+import android.app.Application;
 import android.content.Context;
+import android.net.Uri;
+import android.os.Bundle;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -50,6 +53,11 @@ public final class BackendAccount {
         JSONObject request(String method, String path, JSONObject body, String token) throws Exception;
     }
 
+    /** Where a process that does not own the session gets its access token (see {@link AccountSessionRoutingPolicy}). */
+    interface TokenSource {
+        String accessToken() throws Exception;
+    }
+
     static final class RequestException extends IllegalStateException {
         private static final long serialVersionUID = 1L;
         final int status;
@@ -62,14 +70,43 @@ public final class BackendAccount {
 
     private final SessionStore sessions;
     private final Requester requester;
+    private final TokenSource owner;
 
+    /**
+     * The account as this process may use it.
+     *
+     * <p>In the main process this reads and refreshes the session itself. In any other process - the `:ime` keyboard - the access token comes from the main process through {@link AccountSessionProvider}, so only one process ever spends a refresh token. Sign-in and sign-out belong to the main process.
+     */
     public BackendAccount(Context context) {
-        this(new AndroidAccountSessionStorage(context, SESSION_STORE), BackendAccount::httpRequest);
+        this(new AndroidAccountSessionStorage(context, SESSION_STORE), BackendAccount::httpRequest,
+            AccountSessionRoutingPolicy.ownsSession(Application.getProcessName(), context.getPackageName())
+                ? null : sessionOwner(context));
+    }
+
+    /** The account read and refreshed in this process, whatever process it is; only {@link AccountSessionProvider} uses this, in the main process. */
+    static BackendAccount owningSession(Context context) {
+        return new BackendAccount(new AndroidAccountSessionStorage(context, SESSION_STORE),
+            BackendAccount::httpRequest, null);
     }
 
     BackendAccount(SessionStore sessions, Requester requester) {
+        this(sessions, requester, null);
+    }
+
+    BackendAccount(SessionStore sessions, Requester requester, TokenSource owner) {
         this.sessions = sessions;
         this.requester = requester;
+        this.owner = owner;
+    }
+
+    private static TokenSource sessionOwner(Context context) {
+        Context application = context.getApplicationContext();
+        Uri uri = Uri.parse("content://" + AccountSessionRoutingPolicy.authority(application.getPackageName()));
+        return () -> {
+            Bundle reply = application.getContentResolver().call(
+                uri, AccountSessionRoutingPolicy.METHOD_ACCESS_TOKEN, null, null);
+            return reply == null ? "" : reply.getString(AccountSessionRoutingPolicy.KEY_ACCESS_TOKEN, "");
+        };
     }
 
     /**
@@ -123,6 +160,14 @@ public final class BackendAccount {
 
     /** The saved access token, or an empty string when this device is not signed in. */
     public String accessToken() {
+        if (owner != null) {
+            try {
+                String token = owner.accessToken();
+                return AccountTokenPolicy.validToken(token) ? token : "";
+            } catch (Exception | LinkageError error) {
+                return "";
+            }
+        }
         try {
             FutureTask<String> flight;
             boolean owner = false;
