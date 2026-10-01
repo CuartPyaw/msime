@@ -3114,7 +3114,6 @@ export function SettingsPage(props: SettingsPageProps) {
                 localSkins={client.scanSkinCatalog}
                 openSkinDirectory={client.openSkinDirectory}
                 readSkinImage={client.readSkinImage}
-                importsSkin={client.host?.skin_directory_import === true}
                 onOpenSkinPage={() => selectPage("skin")}
                 theme={keyboardPreviewTheme}
                 initialMine={initialCommunityMine}
