@@ -4852,6 +4852,8 @@ void property_activate(IBusEngine *engine, const gchar *name, guint value) {
        std::string(name) != "Scheme/Korean" &&
        property_name != "Scheme/Quanpin" &&
        property_name != "Scheme/Shuangpin" && property_name != "Scheme/Wubi" &&
+       property_name != "Scheme/Cantonese" && property_name != "Scheme/Zhuyin" &&
+       property_name != "Scheme/Vietnamese" &&
        property_name.rfind("ShuangpinProfile/", 0) != 0) ||
       !s.focused || s.blocked ||
       (value != PROP_STATE_CHECKED && value != PROP_STATE_UNCHECKED))
