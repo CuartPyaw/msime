@@ -151,13 +151,16 @@ struct BackendKeychain: BackendSessionStorage {
   }
 }
 
-/// Serializes token refreshes across processes that share one stored session. The server rotates the refresh token on every refresh and revokes the whole session when a used one is presented again, so two processes refreshing from the same stored token sign the user out; whoever holds this lock re-reads the store before refreshing.
+/// Serializes every write to a stored session that several processes share: sign-in, refresh, profile updates and sign-out. The server rotates the refresh token on every refresh and revokes the whole session when a used one is presented again, so two processes refreshing from the same stored token sign the user out, and a refresh that finishes after another process signed out or switched accounts must not write its tokens back. Whoever holds this lock re-reads the store before writing.
 protocol BackendRefreshLock: Sendable {
+  /// Whether other processes read and write the same store. Such a store, not this process's memory, says who is signed in.
+  var sharedAcrossProcesses: Bool { get }
   func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T
 }
 
 /// For a session no other process shares.
 struct BackendProcessRefreshLock: BackendRefreshLock {
+  var sharedAcrossProcesses: Bool { false }
   func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T { try await body() }
 }
 
@@ -165,6 +168,7 @@ struct BackendProcessRefreshLock: BackendRefreshLock {
 struct BackendFileRefreshLock: BackendRefreshLock {
   let url: URL?
   var timeout: TimeInterval = 20
+  var sharedAcrossProcesses: Bool { true }
 
   /// iOS: the App Group container, opened by both the app and the keyboard extension.
   static var appGroup: BackendFileRefreshLock {
@@ -215,8 +219,10 @@ actor BackendAccountSession {
     try load()
     return saved?.tokens.user
   }
+  private var sharesStore: Bool { refreshLock.sharedAcrossProcesses }
+  /// A store other processes share is read every time: the other process may have signed out or switched accounts, and an empty store then means signed out here too rather than a cue to keep using the session held in memory.
   private func load() throws {
-    if !loaded {
+    if !loaded || sharesStore {
       saved = try storage.load().map { try BackendSavedSession.validated($0) }
       loaded = true
     }
@@ -227,8 +233,10 @@ actor BackendAccountSession {
     let version = generation
     let tokens = try await api.login(challenge: challenge, credential: credential, linkToken: nil)
     try Task.checkCancellation()
-    guard version == generation else { throw CancellationError() }
-    try install(tokens)
+    try await refreshLock.run {
+      guard await self.generation == version else { throw CancellationError() }
+      try await self.install(tokens)
+    }
   }
   private func install(_ tokens: BackendAccountClient.Tokens) throws {
     let value = try BackendSavedSession.forTokens(tokens)
@@ -263,8 +271,14 @@ actor BackendAccountSession {
   /// Runs with the refresh lock held, so no other process can rotate the stored session between the read below and the save after the refresh.
   private func refreshHoldingLock(_ expected: String, rejectedToken: String?, version: Int) async throws -> String {
     var refreshToken = expected
+    let before = try? storage.load().map({ try BackendSavedSession.validated($0) })
+    // Another process signed out while this one waited for the lock.
+    if sharesStore && before == nil {
+      saved = nil
+      throw BackendAccountClient.Failure(status: 401)
+    }
     // Another process may have rotated the session while this one waited for the lock; refreshing from the token it already used would revoke the session.
-    if let stored = try? storage.load().map({ try BackendSavedSession.validated($0) }), stored.tokens.refresh_token != expected {
+    if let stored = before, stored.tokens.refresh_token != expected {
       guard generation == version else { throw CancellationError() }
       saved = stored
       if stored.expiresAt.timeIntervalSinceNow > 30 && rejectedToken != stored.tokens.access_token { return stored.tokens.access_token }
@@ -273,6 +287,16 @@ actor BackendAccountSession {
     do {
       let tokens = try await api.refresh(refreshToken)
       guard generation == version else { throw CancellationError() }
+      // Writers that do not take the lock (another host's own keychain code) can still change the store; tokens for a session that is no longer the stored one are discarded instead of resurrecting it.
+      let current = try? storage.load().map({ try BackendSavedSession.validated($0) })
+      if let current, current.tokens.refresh_token != refreshToken || current.tokens.user.id != tokens.user.id {
+        saved = current
+        throw CancellationError()
+      }
+      if sharesStore && current == nil {
+        saved = nil
+        throw BackendAccountClient.Failure(status: 401)
+      }
       try install(tokens)
       return tokens.access_token
     } catch {
@@ -291,7 +315,10 @@ actor BackendAccountSession {
       throw error
     }
   }
-  func updateUser(_ user: BackendAccountClient.User, matching token: String) throws {
+  func updateUser(_ user: BackendAccountClient.User, matching token: String) async throws {
+    try await refreshLock.run { try await self.updateUserHoldingLock(user, matching: token) }
+  }
+  private func updateUserHoldingLock(_ user: BackendAccountClient.User, matching token: String) throws {
     try load()
     guard let current = saved, current.tokens.access_token == token, current.tokens.user.id == user.id else {
       throw CancellationError()
@@ -310,17 +337,23 @@ actor BackendAccountSession {
           expected == nil || saved.tokens.user.id == expected else { throw CancellationError() }
     return (saved.tokens.user.id, token)
   }
-  func forget() throws {
+  func forget() async throws {
     generation += 1
     refreshing?.cancel(); refreshing = nil
     saved = nil; loaded = true
-    try storage.clear()
+    // Under the lock, so a refresh another process has in flight cannot write its tokens back after this clear.
+    do { try await refreshLock.run { try await self.clearStorage() } }
+    catch let failure as BackendAccountClient.Failure where failure.status == 0 {
+      // The lock could not be taken. Clearing can only remove the session, so it still happens rather than leaving the user signed in.
+      try storage.clear()
+    }
   }
+  private func clearStorage() throws { try storage.clear() }
   func logout(all: Bool = false) async throws {
     let token: String
     do { token = try await accessToken() }
-    catch { try forget(); throw error }
-    try forget()
+    catch { try await forget(); throw error }
+    try await forget()
     try await api.logout(token: token, all: all)
   }
 }
