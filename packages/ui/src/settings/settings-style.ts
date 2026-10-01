@@ -102,6 +102,8 @@ export const skinPreviewSwitch =
 export const skinCardPreview =
   "skin-card-preview flex flex-col bg-[var(--skin-preview-stage-bg)] py-[9px] [&_.candidate]:max-w-full [&_.candidate]:min-w-0 [&_.candidate]:text-base [&_.wnd-v_.container]:w-fit [&_.wnd-v_.container]:max-w-full";
 export const skinPreviewStage = "flex min-w-0 items-start overflow-hidden px-6 py-[9px]";
+/** A theme card's horizontal and vertical candidate stages side by side. Neither shrinks, so a card too narrow for both wraps the vertical one under the horizontal one instead of clipping either. */
+export const skinCandidateStages = "flex flex-wrap items-start [&>*]:max-w-full [&>*]:shrink-0";
 
 // ---- the floating toolbar editor ----
 

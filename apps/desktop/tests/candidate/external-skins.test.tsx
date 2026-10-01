@@ -405,7 +405,14 @@ test("decorated previews preserve upstream geometry in both layouts without deco
     ).not.toBeNull();
   }
   expect(card.querySelectorAll(".containerParent")).toHaveLength(2);
-  expect(card.querySelector("[data-skin-stage]:last-child .containerParent")).toBeNull();
+  // The two candidate stages share a row; the card's last stage of its own is the toolbar, which draws no candidate.
+  expect(
+    card.querySelector("[data-skin-preview] > [data-skin-stage]:last-child .containerParent"),
+  ).toBeNull();
+  const candidateRow = card.querySelector("[data-skin-preview] > :first-child")!;
+  expect(candidateRow.querySelectorAll(":scope > [data-skin-stage] .containerParent")).toHaveLength(
+    2,
+  );
 });
 
 test.each([
