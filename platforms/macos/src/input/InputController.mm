@@ -684,6 +684,10 @@ static BOOL MSIMESchemeTrait(NSDictionary *view, bool (*trait)(int)) {
 static BOOL MSIMECandidateListOpen(NSDictionary *view) {
     return [view isKindOfClass:NSDictionary.class] && [view[@"candidate_list_open"] isEqual:@YES];
 }
+// The opened list is the Korean Hanja list, whose rows carry each Hanja's 훈음 as their annotation; a Zhuyin list carries none.
+static BOOL MSIMEKoreanHanjaListOpen(NSDictionary *view) {
+    return MSIMECandidateListOpen(view) && MSIMEViewScheme(view) == msime::mac::scheme::Korean;
+}
 // Candidates may carry translation glosses. Temporary Japanese keeps the Chinese scheme number in the view but writes Japanese, which has no glosses.
 static BOOL MSIMEViewShowsGlosses(NSDictionary *view) {
     return msime::mac::scheme::ShowsGlosses(MSIMEViewScheme(view)) && ![view[@"local_mode"] isEqual:@"temporary_japanese"];

@@ -227,7 +227,7 @@ int main(void)
         appearance.candidateEnglishGloss = NO;
         NSString *reading = @"나라 이름 한, 한나라 한";
         NSDictionary *hanjaBase = @{@"focused": @YES, @"scheme": @(msime::mac::KoreanScheme), @"local_mode": @"none", @"editing_text": @"한",
-                                    @"page": @0, @"page_count": @1};
+                                    @"candidate_list_open": @YES, @"page": @0, @"page_count": @1};
         NSMutableDictionary *hanjaView = [hanjaBase mutableCopy];
         hanjaView[@"candidates"] = @[@{@"text": @"韓", @"annotation": reading, @"highlighted": @YES}, @{@"text": @"漢", @"annotation": @"한수 한"}];
         [controller setValue:[hanjaView copy] forKey:@"view"];
