@@ -57,3 +57,39 @@ test("a stale model request cannot overwrite the status after the AI settings ch
   expect(result.current.modelsStatus).toBe("");
   expect(result.current.modelsBusy).toBe(false);
 });
+
+test("a model request from a replaced AI client is ignored", async () => {
+  const request = deferred<string[]>();
+  const oldClient: AiAssistantClient = {
+    fetchModels: vi.fn().mockReturnValue(request.promise),
+    test: vi.fn(),
+  };
+  const nextClient: AiAssistantClient = {
+    fetchModels: vi.fn(),
+    test: vi.fn(),
+  };
+  const { result, rerender } = renderHook(
+    ({ client }) =>
+      useAiAssistant({
+        client,
+        ai,
+        providerCredentialAvailable: true,
+        onChange: vi.fn(),
+      }),
+    { initialProps: { client: oldClient } },
+  );
+
+  let pending!: Promise<void>;
+  act(() => {
+    pending = result.current.fetchModels();
+  });
+  rerender({ client: nextClient });
+  await act(async () => {
+    request.resolve(["stale-model"]);
+    await pending;
+  });
+
+  expect(result.current.models).toBeNull();
+  expect(result.current.modelsStatus).toBe("");
+  expect(result.current.modelsBusy).toBe(false);
+});

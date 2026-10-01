@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { runAsyncAction } from "../core/async-action";
 import { aiCredentialOrigin } from "./credential-utils";
 import { aiPolishTestPrompt } from "./ai-assistant-defaults";
@@ -28,6 +28,19 @@ export function useAiAssistant({
   const requestGeneration = useRef(0);
   const origin = aiCredentialOrigin(ai.endpoint);
   const token = origin ? (ai.tokens?.[origin] ?? "") : "";
+
+  useEffect(() => {
+    requestGeneration.current += 1;
+    setModels(null);
+    setModelsStatus("");
+    setModelsBusy(false);
+    setTestOutput("");
+    setTestStatus("");
+    setTestBusy(false);
+    return () => {
+      requestGeneration.current += 1;
+    };
+  }, [client]);
 
   const updateAi = (patch: Partial<AiAssistantPreferences>) => {
     requestGeneration.current += 1;
