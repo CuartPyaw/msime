@@ -151,6 +151,44 @@ struct BackendKeychain: BackendSessionStorage {
   }
 }
 
+/// Serializes token refreshes across processes that share one stored session. The server rotates the refresh token on every refresh and revokes the whole session when a used one is presented again, so two processes refreshing from the same stored token sign the user out; whoever holds this lock re-reads the store before refreshing.
+protocol BackendRefreshLock: Sendable {
+  func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T
+}
+
+/// For a session no other process shares.
+struct BackendProcessRefreshLock: BackendRefreshLock {
+  func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T { try await body() }
+}
+
+/// An exclusive `flock` on a file in a directory every sharing process can open. It is waited for by polling, so a cooperative thread is never blocked, and it is held only for the one refresh request: iOS ends a suspended process that keeps a lock in an App Group container.
+struct BackendFileRefreshLock: BackendRefreshLock {
+  let url: URL?
+  var timeout: TimeInterval = 20
+
+  /// iOS: the App Group container, opened by both the app and the keyboard extension.
+  static var appGroup: BackendFileRefreshLock {
+    BackendFileRefreshLock(url: FileManager.default
+      .containerURL(forSecurityApplicationGroupIdentifier: "group.app.msime.ios")?
+      .appendingPathComponent("backend-account-refresh.lock", isDirectory: false))
+  }
+
+  func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+    // No shared directory means no way to keep another process out, and refreshing anyway risks the revocation this lock exists to prevent.
+    guard let url else { throw BackendAccountClient.Failure(status: 0) }
+    let descriptor = open(url.path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
+    guard descriptor >= 0 else { throw BackendAccountClient.Failure(status: 0) }
+    defer { close(descriptor) }
+    let deadline = Date().addingTimeInterval(timeout)
+    while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+      guard errno == EWOULDBLOCK || errno == EINTR, Date() < deadline else { throw BackendAccountClient.Failure(status: 0) }
+      try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    defer { flock(descriptor, LOCK_UN) }
+    return try await body()
+  }
+}
+
 /// Serializes rotating refresh tokens. A late login/refresh may never undo logout.
 actor BackendAccountSession {
   static let shared = BackendAccountSession()
@@ -160,9 +198,18 @@ actor BackendAccountSession {
   private var loaded = false
   private var generation = 0
   private var refreshing: Task<String, Error>?
+  private let refreshLock: any BackendRefreshLock
 
-  init(api: any BackendSessionAPI = BackendAccountClient(), storage: any BackendSessionStorage = BackendKeychain()) {
-    self.api = api; self.storage = storage
+  /// On iOS the app and the keyboard extension share the stored sessions, so refreshes take the App Group lock there.
+  #if os(iOS)
+  static var defaultRefreshLock: any BackendRefreshLock { BackendFileRefreshLock.appGroup }
+  #else
+  static var defaultRefreshLock: any BackendRefreshLock { BackendProcessRefreshLock() }
+  #endif
+
+  init(api: any BackendSessionAPI = BackendAccountClient(), storage: any BackendSessionStorage = BackendKeychain(),
+       refreshLock: any BackendRefreshLock = BackendAccountSession.defaultRefreshLock) {
+    self.api = api; self.storage = storage; self.refreshLock = refreshLock
   }
   func user() throws -> BackendAccountClient.User? {
     try load()
@@ -205,15 +252,30 @@ actor BackendAccountSession {
     let refreshToken = current.tokens.refresh_token
     let version = generation
     let task = Task<String, Error> {
-      let tokens = try await self.api.refresh(refreshToken)
-      guard self.generation == version else { throw CancellationError() }
-      try self.install(tokens)
-      return tokens.access_token
+      try await self.refreshLock.run {
+        try await self.refreshHoldingLock(refreshToken, rejectedToken: rejectedToken, version: version)
+      }
     }
     refreshing = task
     defer { if version == generation { refreshing = nil } }
-    do { return try await task.value }
-    catch {
+    return try await task.value
+  }
+  /// Runs with the refresh lock held, so no other process can rotate the stored session between the read below and the save after the refresh.
+  private func refreshHoldingLock(_ expected: String, rejectedToken: String?, version: Int) async throws -> String {
+    var refreshToken = expected
+    // Another process may have rotated the session while this one waited for the lock; refreshing from the token it already used would revoke the session.
+    if let stored = try? storage.load().map({ try BackendSavedSession.validated($0) }), stored.tokens.refresh_token != expected {
+      guard generation == version else { throw CancellationError() }
+      saved = stored
+      if stored.expiresAt.timeIntervalSinceNow > 30 && rejectedToken != stored.tokens.access_token { return stored.tokens.access_token }
+      refreshToken = stored.tokens.refresh_token
+    }
+    do {
+      let tokens = try await api.refresh(refreshToken)
+      guard generation == version else { throw CancellationError() }
+      try install(tokens)
+      return tokens.access_token
+    } catch {
       if version == generation, let failure = error as? BackendAccountClient.Failure, failure.status == 401 {
         // Clear only the session that was rejected; a rotation saved meanwhile elsewhere is adopted.
         // A nil read may be an unreadable keychain rather than an absent item, so it is not cleared.

@@ -193,6 +193,41 @@ final class BackendAccountSessionTests: XCTestCase {
     catch let failure as BackendAccountClient.Failure { XCTAssertEqual(failure.status, 401) }
     XCTAssertNil(try storage.load())
   }
+  /// The app and the keyboard extension each hold their own session over one stored item. The server revokes the session when a used refresh token comes back, so the second process must wait for the first and adopt its rotation.
+  func testProcessesSharingAStoreRefreshOneAtATimeUnderTheFileLock() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let lockURL = directory.appendingPathComponent("refresh.lock")
+    let storage = MemorySessions(.init(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: .distantPast))
+    let used = NSLock()
+    var presented: Set<String> = []
+    let api = SharedStoreAPI { token in
+      used.lock(); defer { used.unlock() }
+      // A refresh token works once; presenting it again revokes the session, as the server does.
+      guard presented.insert(token).inserted else { throw BackendAccountClient.Failure(status: 401) }
+      Thread.sleep(forTimeInterval: 0.1)
+      return SharedStoreAPI.tokens("b", "c")
+    }
+    let app = BackendAccountSession(api: api, storage: storage, refreshLock: BackendFileRefreshLock(url: lockURL))
+    let keyboard = BackendAccountSession(api: api, storage: storage, refreshLock: BackendFileRefreshLock(url: lockURL))
+    _ = try await app.user(); _ = try await keyboard.user()
+    async let first = app.accessToken()
+    async let second = keyboard.accessToken()
+    let tokens = try await [first, second]
+    XCTAssertEqual(tokens[0], tokens[1])
+    XCTAssertEqual(api.refreshCount, 1)
+    XCTAssertEqual(try storage.load()?.tokens.refresh_token, String(repeating: "c", count: 64))
+  }
+  func testRefreshWithoutASharedLockDirectoryIsRefused() async throws {
+    let storage = MemorySessions(.init(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: .distantPast))
+    let api = SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") }
+    let session = BackendAccountSession(api: api, storage: storage, refreshLock: BackendFileRefreshLock(url: nil))
+    do { _ = try await session.accessToken(); XCTFail("must not refresh unlocked") }
+    catch let failure as BackendAccountClient.Failure { XCTAssertEqual(failure.status, 0) }
+    XCTAssertEqual(api.refreshCount, 0)
+    XCTAssertEqual(try storage.load()?.tokens.refresh_token, String(repeating: "f", count: 64), "the stored session is kept")
+  }
   func testActorThatLoadedNothingSeesLaterSignIn() async throws {
     let storage = MemorySessions(nil)
     let api = SharedStoreAPI { _ in throw BackendAccountClient.Failure(status: 401) }
