@@ -109,8 +109,8 @@ impl CantoneseScheme {
         text
     }
 
-    /// The candidates for the composition, without duplicates of a text already listed:
-    /// 1. When the reading covers every letter, the entries of the whole reading, or when its last syllable is still a prefix, the entries that complete it.
+    /// The candidates for the composition, each text listed once per span length:
+    /// 1. When the reading covers every letter, the entries of the whole reading, or when its last syllable is still a prefix, the entries that complete it. A last syllable that is complete but also starts a longer one (`ho` of `hou`) lists its exact entries and then the entries that complete it, so a word does not drop out of the list while its last syllable is half typed.
     /// 2. Then each leading span of complete syllables, longest first, each span's entries heaviest first.
     pub fn candidates(&self, dictionary: &LanguageDictionary) -> Result<Vec<CantoneseCandidate>> {
         let input = self.input.as_str();
@@ -121,7 +121,7 @@ impl CantoneseScheme {
         let mut seen = HashSet::new();
         let mut candidates = Vec::new();
         let mut push = |key: String, text: String, weight: i64, syllables: usize| {
-            if seen.insert(text.clone()) {
+            if seen.insert((text.clone(), syllables)) {
                 candidates.push(CantoneseCandidate {
                     text,
                     weight,
@@ -141,6 +141,12 @@ impl CantoneseScheme {
             } else {
                 for entry in dictionary.lookup(&whole, SPAN_LIMIT)? {
                     push(whole.clone(), entry.text, entry.weight, count);
+                }
+                let last = reading.texts(input).last().unwrap_or_default();
+                if self.inventory.is_prefix(last) {
+                    for (key, entry) in dictionary.lookup_completions(&whole, COMPLETION_LIMIT)? {
+                        push(key, entry.text, entry.weight, count);
+                    }
                 }
             }
             spans = count - 1;
@@ -193,7 +199,7 @@ mod tests {
         ("ngo", "我", 6000),
         ("oi", "愛", 2500),
         ("ngoi", "外", 1000),
-        // The same text under a shorter span is listed once, at its longest span.
+        // The same text under a different span is listed again, so 光 stays selectable for `gwong` alone.
         ("gwong dung waa", "光", 1),
     ];
 
@@ -277,7 +283,7 @@ mod tests {
         assert_eq!(scheme.editing_text(), "gwong dung waa");
         assert_eq!(
             listed(&scheme, &fixture.dictionary),
-            ["廣東話/3", "光/3", "廣東/2", "廣/1"]
+            ["廣東話/3", "光/3", "廣東/2", "光/1", "廣/1"]
         );
     }
 
@@ -305,6 +311,23 @@ mod tests {
         assert_eq!(candidates[3].end, 3);
         // A prefix as the only syllable completes against single-syllable keys only.
         assert_eq!(listed(&typed("gw"), &fixture.dictionary), ["光/1", "廣/1"]);
+    }
+
+    #[test]
+    fn a_complete_trailing_syllable_that_starts_a_longer_one_is_completed_too() {
+        let fixture = fixture();
+        // `ho` is a syllable with no `nei ho` entry; 你好 must stay listed between `neih` and `neihou`.
+        let syllables = Inventory::new(SYLLABLES.iter().copied().chain(["ho"]));
+        let mut scheme = CantoneseScheme::new(Arc::new(syllables));
+        scheme.set_raw_input("neiho");
+        assert_eq!(scheme.editing_text(), "nei ho");
+        assert_eq!(
+            listed(&scheme, &fixture.dictionary),
+            ["你好/2", "妳好/2", "你向/2", "你/1", "妳/1"]
+        );
+        // Exact entries of the whole reading come before its completions: 我 for `ngo`, then 外 for `ngoi`.
+        let scheme = typed("ngo");
+        assert_eq!(listed(&scheme, &fixture.dictionary), ["我/1", "外/1"]);
     }
 
     #[test]
@@ -404,7 +427,7 @@ mod tests {
         scheme.set_raw_input("gwongdungwaa");
         assert_eq!(
             listed(&scheme, opened.dictionary()),
-            ["廣東話/3", "光/3", "廣東/2", "廣/1"]
+            ["廣東話/3", "光/3", "廣東/2", "光/1", "廣/1"]
         );
         assert!(
             crate::cantonese::CantoneseDictionary::open(&dir.path().join("missing.db")).is_err()
