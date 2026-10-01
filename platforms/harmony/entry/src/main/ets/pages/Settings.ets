@@ -19,6 +19,7 @@ import { HarmonyAccountCloudBridge } from '../account/HarmonyAccountCloudBridge'
 import { HarmonyAiSkins } from '../account/HarmonyAiSkins';
 import { utf8Length } from '../keyboard/Utf8';
 import { TextPolicy } from '../keyboard/TextPolicy';
+import { TypingStatisticsPolicy } from '../keyboard/TypingStatisticsPolicy';
 import { niutransAuth, tencentAuthorization } from '../keyboard/CredentialCrypto';
 import { HarmonyVoiceCaptureDevices } from '../keyboard/input/HarmonyVoiceCaptureDevices';
 import { KeyboardFeedbackBridge, MobileKeyboardFeedback } from '../keyboard/KeyboardFeedbackBridge';
@@ -216,6 +217,7 @@ interface TypingStatisticsAction {
   operation: string;
   enabled?: boolean;
   retention?: string;
+  day?: string;
 }
 
 /** One 扩展 page request; only the operation is read here, the rest travels to `msime_client_plugins` as the page wrote it. */
@@ -1434,6 +1436,10 @@ class SettingsBridge {
         || (action.operation === 'set_retention'
           && !['forever', '30d', '90d', '180d', '365d'].includes(action.retention ?? ''))) {
         return JSON.stringify({ ok: false, error: 'invalid typing statistics request' });
+      }
+      // The store counts the retention window back from the caller's local day and refuses a set_retention without one. This process is the one that knows the device's timezone, as for vocabularyReview above.
+      if (action.operation === 'set_retention') {
+        action.day = TypingStatisticsPolicy.day(new Date());
       }
       const raw: string = client.typingStatistics(JSON.stringify({
         directory: this.stateDirectory, action: action
