@@ -160,7 +160,7 @@ add_library(msime-tsf SHARED
   Global/Globals.cpp
   IME/ActiveLanguageProfileNotifySink.cpp IME/FunctionProviderSink.cpp
   IME/MetasequoiaIME.cpp IME/MetasequoiaIMEBaseStructure.cpp
-  IPC/Ipc.cpp IPC/PassthroughStatisticsQueue.cpp
+  IPC/Ipc.cpp IPC/PassthroughStatisticsQueue.cpp IPC/KeyPressStatisticsQueue.cpp
   Key/KeyEventSink.cpp Key/KeyHandler.cpp Key/KeyHandlerEditSession.cpp
   Key/KeyStateCategory.cpp
   LanguageBar/LanguageBar.cpp
@@ -218,3 +218,9 @@ target_include_directories(msime-tsf-passthrough-statistics-test PRIVATE IPC)
 target_compile_features(msime-tsf-passthrough-statistics-test PRIVATE cxx_std_17)
 add_test(NAME msime-tsf-passthrough-statistics
   COMMAND msime-tsf-passthrough-statistics-test)
+add_executable(msime-tsf-key-press-statistics-test
+  tests/key_press_statistics.cpp)
+target_include_directories(msime-tsf-key-press-statistics-test PRIVATE IPC)
+target_compile_features(msime-tsf-key-press-statistics-test PRIVATE cxx_std_17)
+add_test(NAME msime-tsf-key-press-statistics
+  COMMAND msime-tsf-key-press-statistics-test)

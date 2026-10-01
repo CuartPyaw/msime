@@ -1365,6 +1365,14 @@ int wmain(int argc, wchar_t **argv) {
     // listener the tray menu - and with it every shared-shell entry - is
     // unreachable. A failure here costs the menu, never the IME.
     TrayMenuMailbox tray_mailbox;
+    // Both statistics sinks below answer from this, never from the store: a key batch split over several Aux messages would otherwise have each message wait on the previous one's detached write for the store lock, past the DLL's 150 ms answer window. Declared before the listener so it outlives every sink call.
+    const TypingStatisticsSwitch statistics_switch(
+        [directory = config.state_root.u8string()] {
+          return msime_client_typing_statistics_enabled(
+              reinterpret_cast<const uint8_t *>(directory.data()),
+              directory.size());
+        },
+        std::chrono::seconds(5));
     DWORD aux_error = ERROR_SUCCESS;
     const std::wstring aux_name =
         production ? FANY_IME_AUX_NAMED_PIPE : config.aux_pipe_name();
@@ -1406,11 +1414,9 @@ int wmain(int argc, wchar_t **argv) {
                      : server.resume_dictionaries();
         },
         // Keys the TIP passed straight to the application - English mode, digits and punctuation the Engine declined - never reach a session, so the commit path cannot count them. The DLL batches them here instead. Refusing while statistics are off makes the DLL back off rather than keep sending characters nobody records.
-        [statistics_directory = config.state_root.u8string()](
-            const AuxTypingStatistics &batch) {
-          if (msime_client_typing_statistics_enabled(
-                  reinterpret_cast<const uint8_t *>(statistics_directory.data()),
-                  statistics_directory.size()) != 1)
+        [statistics_directory = config.state_root.u8string(),
+         &statistics_switch](const AuxTypingStatistics &batch) {
+          if (!statistics_switch.enabled())
             return false;
           const int wide_size = static_cast<int>(batch.characters.size());
           const int size = WideCharToMultiByte(
@@ -1428,6 +1434,21 @@ int wmain(int argc, wchar_t **argv) {
               statistics_directory, text,
               batch.english ? TypingSource::English : TypingSource::Unknown,
               foreground_is_fullscreen(GetForegroundWindow()));
+          return true;
+        },
+        // Per-key press counts for the key heatmap. The DLL counts them because only it sees the scan code, and it buffers nothing until a probe is answered here, so refusing while statistics are off is what keeps every host process from counting at all. The ids are ASCII by the time the parser accepted them; which ones are canonical is the shared store's rule.
+        [statistics_directory = config.state_root.u8string(),
+         &statistics_switch](const AuxTypingKeys &batch) {
+          if (!statistics_switch.enabled())
+            return false;
+          if (batch.counts.empty())
+            return true;
+          std::map<std::string, uint64_t> keys;
+          for (const auto &[key, count] : batch.counts)
+            keys.emplace(std::string(key.begin(), key.end()), count);
+          record_typing_keys_async(statistics_directory,
+                                   std::string(batch.day.begin(), batch.day.end()),
+                                   keys);
           return true;
         });
     // The fifth pipe: TIP diagnostics. The TIP has always produced batches on

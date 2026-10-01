@@ -25,19 +25,9 @@ FocusedSession::typing_statistics_directory(const std::string &options) {
     return {};
   }
 }
-void record_typing_statistics_async(const std::string &directory,
-                                    const std::string &text,
-                                    TypingSource source, bool quiet) {
-  if (directory.empty())
-    return;
-  const auto local = local_time_parts(std::time(nullptr));
-  if (!local)
-    return;
-  auto request = typing_statistics_record_request(
-      directory, text, source, local->day, local->hour, quiet);
-  if (request.empty())
-    return;
-  // Off the calling thread: the shared store takes a file lock, and neither a commit nor a pipe listener may wait on statistics. Detached like the other hosts do; the request is a self-contained copy, so nothing here outlives it.
+namespace {
+// Off the calling thread: the shared store takes a file lock, and neither a commit nor a pipe listener may wait on statistics. Detached like the other hosts do; the request is a self-contained copy, so nothing here outlives it.
+void submit_typing_statistics_request(std::string request) {
   try {
     std::thread([payload = std::move(request)] {
       try {
@@ -52,6 +42,29 @@ void record_typing_statistics_async(const std::string &directory,
   } catch (...) {
     // Thread exhaustion drops the record rather than the keystroke.
   }
+}
+} // namespace
+void record_typing_statistics_async(const std::string &directory,
+                                    const std::string &text,
+                                    TypingSource source, bool quiet) {
+  if (directory.empty())
+    return;
+  const auto local = local_time_parts(std::time(nullptr));
+  if (!local)
+    return;
+  auto request = typing_statistics_record_request(
+      directory, text, source, local->day, local->hour, quiet);
+  if (request.empty())
+    return;
+  submit_typing_statistics_request(std::move(request));
+}
+void record_typing_keys_async(const std::string &directory,
+                              const std::string &day,
+                              const std::map<std::string, uint64_t> &keys) {
+  auto request = typing_statistics_record_keys_request(directory, day, keys);
+  if (request.empty())
+    return;
+  submit_typing_statistics_request(std::move(request));
 }
 std::optional<FocusedSession::Commit> FocusedSession::pending_commit() const {
   if (!composer_ || !composer_->has_pending())

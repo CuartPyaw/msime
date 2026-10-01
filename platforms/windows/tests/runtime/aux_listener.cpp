@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -137,6 +138,8 @@ int main() {
       std::atomic<bool> statistics_ok{false};
       std::mutex statistics_mutex;
       std::vector<AuxTypingStatistics> statistics_batches;
+      std::atomic<bool> keys_ok{false};
+      std::vector<AuxTypingKeys> key_batches;
       auto listener = AuxListener::create(
           name, [&](const TrayMenuAnchor &a) { collected.add(a); }, error, {},
           [&](AuxActivation activation) {
@@ -162,6 +165,11 @@ int main() {
             std::lock_guard<std::mutex> lock(statistics_mutex);
             statistics_batches.push_back(batch);
             return statistics_ok.load();
+          },
+          [&](const AuxTypingKeys &batch) {
+            std::lock_guard<std::mutex> lock(statistics_mutex);
+            key_batches.push_back(batch);
+            return keys_ok.load();
           });
       require(listener != nullptr);
       const auto dispatched = [&] { return listener->stats().dispatched; };
@@ -262,6 +270,21 @@ int main() {
                 statistics_batches[0].characters == L"ab");
         require(!statistics_batches[1].english &&
                 statistics_batches[1].characters == L"12");
+      }
+      // Key heatmap counts: unanswered while statistics are off, which is what keeps the DLL from buffering; a probe and a batch are both routed to the keys sink, never to the character one.
+      require(send_and_read_reply(name, L"TypingKeys|2026-10-01|").empty());
+      keys_ok.store(true);
+      require(send_and_read_reply(name, L"TypingKeys|2026-10-01|") == L"OK");
+      require(send_and_read_reply(name, L"TypingKeys|2026-10-01|KeyA=3,Space=2") == L"OK");
+      require(send_and_read_reply(name, L"TypingKeys|2026-10-01|KeyA=0").empty());
+      {
+        std::lock_guard<std::mutex> lock(statistics_mutex);
+        require(statistics_batches.size() == 2);
+        require(key_batches.size() == 3);
+        require(key_batches[0].counts.empty() && key_batches[1].counts.empty());
+        require(key_batches[2].day == L"2026-10-01" &&
+                key_batches[2].counts ==
+                    std::map<std::wstring, uint64_t>{{L"KeyA", 3}, {L"Space", 2}});
       }
       // Progress is the click count, not `dispatched`: acknowledged verbs have already pushed that counter past any fixed target, which would turn deliver's retry into a single send that races the listener's next accept.
       const auto clicks = [&] { return uint64_t(collected.snapshot().size()); };

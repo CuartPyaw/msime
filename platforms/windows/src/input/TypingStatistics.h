@@ -1,9 +1,18 @@
 #pragma once
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <ctime>
+#include <functional>
+#include <map>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <thread>
+#include <utility>
 
 namespace msime::windows {
 // Private aggregate typing statistics for the Windows Server.
@@ -196,4 +205,69 @@ inline std::string typing_statistics_record_request(std::string_view directory,
     return {};
   return request;
 }
+
+// Build the shared host request for one day's per-key press counts. The day is the one the presses were counted on, never the flush time. Nothing to record, an empty directory or a malformed day yields an empty string; which ids are canonical is the shared store's rule (KEY_IDS), and it rejects the whole batch for one it does not know.
+inline std::string
+typing_statistics_record_keys_request(std::string_view directory,
+                                      const std::string &day,
+                                      const std::map<std::string, uint64_t> &keys) {
+  if (keys.empty() || directory.empty() || day.size() != 10)
+    return {};
+  return nlohmann::json{{"directory", std::string(directory)},
+                        {"action", nlohmann::json{{"operation", "record_keys"},
+                                                  {"day", day},
+                                                  {"keys", keys}}}}
+      .dump();
+}
+
+// The statistics switch as the Aux listener sees it. The listener must answer every statistics message within the DLL's 150 ms window, but the store keeps its enabled flag behind the same exclusive file lock a detached record holds for a whole read, validate, serialize and fsync, so asking the store from the listener thread makes the second message of a multi-part batch wait on the first one's write. The listener answers from this cached copy instead; a copy older than `lifetime` is refreshed on a detached thread while the stale answer is returned. A stale "on" records nothing, because the store checks the switch itself on every write; a stale "off" only delays counting until the DLL's next probe.
+class TypingStatisticsSwitch {
+public:
+  // `read` follows msime_client_typing_statistics_enabled: 1 is on, 0 is off and anything else is an unreadable store, which counts as off. It is called once here, on the constructing thread, so the first answer is a real one.
+  TypingStatisticsSwitch(std::function<int()> read,
+                         std::chrono::steady_clock::duration lifetime)
+      : state_(std::make_shared<State>(std::move(read), lifetime)) {
+    state_->refresh();
+  }
+
+  // Never touches the store on the calling thread.
+  bool enabled() const {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    const auto refreshed = std::chrono::steady_clock::duration(
+        state_->refreshed_at.load(std::memory_order_acquire));
+    if (now - refreshed >= state_->lifetime &&
+        !state_->refreshing.exchange(true, std::memory_order_acq_rel)) {
+      try {
+        // The thread owns a share of the state, so a refresh still running when the switch is destroyed writes into memory that is still alive.
+        std::thread([state = state_] {
+          state->refresh();
+          state->refreshing.store(false, std::memory_order_release);
+        }).detach();
+      } catch (const std::system_error &) {
+        // Thread exhaustion keeps the cached answer; the next call tries again.
+        state_->refreshing.store(false, std::memory_order_release);
+      }
+    }
+    return state_->enabled.load(std::memory_order_acquire);
+  }
+
+private:
+  struct State {
+    State(std::function<int()> reader,
+          std::chrono::steady_clock::duration age)
+        : read(std::move(reader)), lifetime(age) {}
+    void refresh() {
+      enabled.store(read() == 1, std::memory_order_release);
+      refreshed_at.store(
+          std::chrono::steady_clock::now().time_since_epoch().count(),
+          std::memory_order_release);
+    }
+    const std::function<int()> read;
+    const std::chrono::steady_clock::duration lifetime;
+    std::atomic<bool> enabled{false};
+    std::atomic<bool> refreshing{false};
+    std::atomic<std::chrono::steady_clock::rep> refreshed_at{0};
+  };
+  std::shared_ptr<State> state_;
+};
 } // namespace msime::windows

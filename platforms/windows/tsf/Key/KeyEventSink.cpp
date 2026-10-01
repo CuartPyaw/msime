@@ -13,6 +13,8 @@
 #include "Ipc.h"
 #include "PassthroughStatistics.h"
 #include "PassthroughStatisticsQueue.h"
+#include "KeyPressStatistics.h"
+#include "KeyPressStatisticsQueue.h"
 #include "FanyDefines.h"
 #include "AltGrKeyPolicy.h"
 #include "FanyUtils.h"
@@ -1692,6 +1694,36 @@ void CMetasequoiaIME::_NotePassthroughStatistics(UINT virtualKey, WCHAR wch, boo
 
 //+---------------------------------------------------------------------------
 //
+// _NoteKeyPressStatistics
+//
+// Counts one physical key press for the key heatmap: every key while this tip is active, eaten or passed through, Shift and hotkeys included. Only the key's id goes into the count. It runs ahead of every early return in OnTestKeyDown and again in OnKeyDown, for hosts that skip the test probe, so each press is seen at least once and the de-duplication keeps it to once. Observation only: nothing here changes how the key is handled.
+//----------------------------------------------------------------------------
+
+void CMetasequoiaIME::_NoteKeyPressStatistics(WPARAM wParam, LPARAM lParam)
+{
+    const wchar_t *keyId = KeyPressIdFromKeyDown(static_cast<std::uintptr_t>(wParam), static_cast<std::uintptr_t>(lParam));
+    if (keyId == nullptr)
+    {
+        return;
+    }
+    // The Test and Key probes of one press share its scan code and message time. Unlike the passthrough marker this one is not consumed, because a press can be probed more than twice; a genuine second press of the same key needs a key-up in between and so a later message.
+    const UINT physicalKey = KeyPressPhysicalKey(static_cast<std::uintptr_t>(lParam));
+    const LONG messageTime = GetMessageTime();
+    if (physicalKey == _keyPressStatsKey && messageTime == _keyPressStatsMessageTime)
+    {
+        return;
+    }
+    _keyPressStatsKey = physicalKey;
+    _keyPressStatsMessageTime = messageTime;
+    if (!ShouldCountKeyPress(keyId, _IsKeyboardDisabled() != FALSE, _IsSecureMode() != FALSE))
+    {
+        return;
+    }
+    QueueKeyPressStatistics(keyId);
+}
+
+//+---------------------------------------------------------------------------
+//
 // ITfKeyEventSink::OnTestKeyDown
 //
 // Called by the system to query this service wants a potential keystroke.
@@ -1708,6 +1740,8 @@ STDAPI CMetasequoiaIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARA
         *pIsEaten = FALSE;
         return S_OK;
     }
+    // Ahead of the backspace-hold, Shift and hotkey returns below, each of which would otherwise hide a real press.
+    _NoteKeyPressStatistics(wParam, lParam);
     // Only the first press toggles; auto-repeat would flip the prediction back.
     if (wParam == VK_CAPITAL && !IsAutoRepeat(lParam))
     {
@@ -2286,6 +2320,8 @@ STDAPI CMetasequoiaIME::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lP
         *pIsEaten = FALSE;
         return S_OK;
     }
+    // Usually a repeat of the OnTestKeyDown probe and dropped as one; it counts only for a host that calls OnKeyDown without testing first.
+    _NoteKeyPressStatistics(wParam, lParam);
     PerfTimer onKeyDownTimer;
     const uint64_t focusGeneration = _deferredKeyFocusGeneration;
     (void)_DispatchKeyDown(pContext, wParam, lParam, pIsEaten, nullptr, nullptr, nullptr, true, focusGeneration);
