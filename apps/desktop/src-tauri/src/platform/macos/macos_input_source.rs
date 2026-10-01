@@ -585,6 +585,14 @@ where
     F: FnOnce() -> Result<(), InstallError>,
 {
     validate_bundle(source)?;
+    match fs::symlink_metadata(target) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(InstallError::InvalidBundle)
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => return Err(InstallError::Io),
+    }
     let bundled = bundle_version(source);
     let installed = bundle_version(target);
     let refresh = refresh_decision(bundled.as_ref(), installed.as_ref(), target.exists());
@@ -862,6 +870,20 @@ mod tests {
             || panic!("nothing to install"),
         );
         assert!(matches!(result, Err(InstallError::SourceUnavailable)));
+    }
+
+    #[test]
+    fn ensure_current_rejects_a_symlinked_installed_bundle() {
+        let root = tempdir().unwrap();
+        let source = fixture(root.path(), INPUT_SOURCE_BUNDLE_ID, b"bundled");
+        let external = fixture(root.path(), INPUT_SOURCE_BUNDLE_ID, b"external");
+        let target = root.path().join(INPUT_SOURCE_BUNDLE_NAME);
+        std::os::unix::fs::symlink(&external, &target).unwrap();
+
+        let result = ensure_current_with(&source, &target, || {
+            panic!("a symlinked installed bundle must not be treated as current")
+        });
+        assert!(matches!(result, Err(InstallError::InvalidBundle)));
     }
 
     #[test]
