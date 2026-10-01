@@ -47,6 +47,23 @@ fn primary_segmentation_is_checked_without_owning_a_key_copy() {
     assert!(!is_duplicate_segmentation("ni'hao", &seen, "ni'he"));
 }
 
+#[test]
+fn series_slot_key_encodes_switches_and_context() {
+    let options = SentenceAssociationOptions {
+        word_lattice: true,
+        neural_keyboard: false,
+        show_next_on_duplicate: true,
+    };
+    assert_eq!(
+        series_slot_key("T0:A:ni", options, false, ""),
+        "T0:A:ni\u{1f}S101"
+    );
+    assert_eq!(
+        series_slot_key("T0:A:ni", options, true, "你好"),
+        "T0:A:ni\u{1f}S101\u{1f}你好"
+    );
+}
+
 fn contains(items: &[WordItem], word: &str) -> bool {
     items.iter().any(|item| item.word == word)
 }

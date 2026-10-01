@@ -389,23 +389,12 @@ impl QuanpinDictionary {
 
     /// The series cache slot of a resolution's key (overlays.md §1.6.2). The association switches decide which sentence rows a list carries, so they are always part of the slot. The reference bypassed the cache while a neural model ran, because its scores came from an asynchronous worker; scoring here is synchronous, so a reranked list is cached under the trimmed context it was scored with and a commit moves the next query to a fresh slot instead of clearing every list.
     fn series_slot(&self, cache_key: &str) -> String {
-        let options = self.sentence_association;
-        let switches: String = [
-            options.word_lattice,
-            options.neural_keyboard,
-            options.show_next_on_duplicate,
-        ]
-        .into_iter()
-        .map(|on| if on { '1' } else { '0' })
-        .collect();
-        if self.rerankers.is_empty() {
-            format!("{cache_key}\u{1f}S{switches}")
-        } else {
-            format!(
-                "{cache_key}\u{1f}S{switches}\u{1f}{}",
-                self.rescoring_context
-            )
-        }
+        series_slot_key(
+            cache_key,
+            self.sentence_association,
+            !self.rerankers.is_empty(),
+            &self.rescoring_context,
+        )
     }
 
     /// Clears everything except the resolution memo (QD:1400-1407).
@@ -850,6 +839,35 @@ impl QuanpinDictionary {
                 .retain(|key| series_cache.contains(key));
         }
     }
+}
+
+fn series_slot_key(
+    cache_key: &str,
+    options: SentenceAssociationOptions,
+    has_rerankers: bool,
+    rescoring_context: &str,
+) -> String {
+    let context_suffix = if has_rerankers {
+        rescoring_context.len() + 1
+    } else {
+        0
+    };
+    let mut slot = String::with_capacity(cache_key.len() + 5 + context_suffix);
+    slot.push_str(cache_key);
+    slot.push('\u{1f}');
+    slot.push('S');
+    slot.push(if options.word_lattice { '1' } else { '0' });
+    slot.push(if options.neural_keyboard { '1' } else { '0' });
+    slot.push(if options.show_next_on_duplicate {
+        '1'
+    } else {
+        '0'
+    });
+    if has_rerankers {
+        slot.push('\u{1f}');
+        slot.push_str(rescoring_context);
+    }
+    slot
 }
 
 fn lookup_cached_segments(
