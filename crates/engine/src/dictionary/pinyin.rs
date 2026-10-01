@@ -248,8 +248,7 @@ impl PinyinDatabase {
                 return false;
             };
             // A table that fails to prepare is skipped (QQ:1034-1038).
-            let Ok(mut statement) = connection
-                .prepare_cached(&format!("SELECT 1 FROM \"{table}\" WHERE value=?1 LIMIT 1"))
+            let Ok(mut statement) = connection.prepare_cached(&han_char_exists_sql(table.as_str()))
             else {
                 return false;
             };
@@ -451,6 +450,16 @@ fn jianpin_sql(table: &str) -> String {
     sql
 }
 
+fn han_char_exists_sql(table: &str) -> String {
+    const PREFIX: &str = "SELECT 1 FROM \"";
+    const SUFFIX: &str = "\" WHERE value=?1 LIMIT 1";
+    let mut sql = String::with_capacity(PREFIX.len() + table.len() + SUFFIX.len());
+    sql.push_str(PREFIX);
+    sql.push_str(table);
+    sql.push_str(SUFFIX);
+    sql
+}
+
 fn initial_sql(first: u8) -> String {
     let mut sql = String::with_capacity(111);
     sql.push_str("SELECT \"key\", \"value\", \"weight\" FROM \"tbl_1_");
@@ -552,6 +561,13 @@ mod tests {
             sql,
             "SELECT \"key\", \"value\", \"weight\" FROM \"tbl_2_n\" WHERE \"jp\" = ? ORDER BY \"weight\" DESC LIMIT ?"
         );
+        assert_eq!(sql.capacity(), sql.len());
+    }
+
+    #[test]
+    fn han_char_exists_sql_writes_the_lookup_statement_directly() {
+        let sql = han_char_exists_sql("tbl_1_n");
+        assert_eq!(sql, "SELECT 1 FROM \"tbl_1_n\" WHERE value=?1 LIMIT 1");
         assert_eq!(sql.capacity(), sql.len());
     }
 
