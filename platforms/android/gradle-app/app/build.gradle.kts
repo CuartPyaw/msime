@@ -64,6 +64,8 @@ dependencies {
     implementation("androidx.viewpager2:viewpager2:1.1.0")
     implementation("com.google.android.material:material:1.14.0")
     implementation("com.google.mlkit:digital-ink-recognition:19.0.0")
+    // Notice bodies on the 设置 tab are simple Markdown. Core only: no HTML plugin, so raw HTML in a notice is never interpreted, and no image loader.
+    implementation("io.noties.markwon:core:4.6.2")
     // Google 登录。Credential Manager 是 Google 现在的官方入口，旧的 GoogleSignInClient 已弃用；
     // googleid 提供那颗按钮要的 GetGoogleIdOption，play-services-auth 那件是它在设备上的实现。
     implementation("androidx.credentials:credentials:1.3.0")
