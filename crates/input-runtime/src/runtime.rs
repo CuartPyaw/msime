@@ -1963,6 +1963,15 @@ impl<E: InputEngine> Runtime<E> {
                     if !result.handled && value.is_ascii_punctuation() {
                         return self.punctuation(value);
                     }
+                    // Space the Engine let go over an open list, with nothing committed, is a pick of the highlighted row, as the Space command is (Zhuyin leaves it to the runtime; Korean commits its syllable first and so is not a pick).
+                    if !result.handled
+                        && !result.has_commit
+                        && value == b' '
+                        && self.cached.candidate_list_open
+                        && len > 0
+                    {
+                        return self.engine.select(self.engine_index(self.highlighted));
+                    }
                     // Let Engine consume numeric input (Unicode mode, nine-key, etc.) first. A result that already committed (a Korean syllable the digit ended) is final: selecting now would replace that commit and lose the text. A digit the scheme spells with (a Zhuyin tone or phonetic key) is never a pick, even one the Engine let go: Zhuyin leaves 1-9 to selection only while its list is open, when they are not spelling symbols, so `0` there stays ㄢ.
                     if result.handled
                         || result.has_commit
