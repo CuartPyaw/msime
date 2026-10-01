@@ -5028,6 +5028,8 @@ pub fn run() {
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             desktop_candidate_skin_community::candidate_skin_community_add_preview,
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_candidate_skin_community::candidate_skin_community_add_license,
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             desktop_candidate_skin_community::candidate_skin_community_publish,
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             desktop_candidate_skin_community::candidate_skin_community_rate,
