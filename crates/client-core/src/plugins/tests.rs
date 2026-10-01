@@ -660,6 +660,22 @@ fn symbolic_links_are_never_followed_into_or_out_of_a_pack() {
     assert!(reason(root.path(), PluginKind::Sound, "typewriter").contains("符号链接"));
 }
 
+#[cfg(unix)]
+#[test]
+fn a_linked_kind_directory_cannot_load_a_pack_outside_the_plugins_root() {
+    let root = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    let pack = sound_pack(outside.path(), SOUND);
+    std::os::unix::fs::symlink(
+        outside.path(),
+        kind_directory(root.path(), PluginKind::Sound),
+    )
+    .unwrap();
+
+    assert!(load_package(root.path(), None, PluginKind::Sound, "typewriter").is_err());
+    assert!(pack.join(MANIFEST_FILE).is_file());
+}
+
 #[test]
 fn built_in_ids_are_reserved_and_resolved_only_from_the_bundle() {
     let root = tempdir().unwrap();
