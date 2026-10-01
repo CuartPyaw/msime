@@ -40,8 +40,12 @@ pub fn reset_learned_data(paths: &RuntimePaths) -> Result<()> {
             diagnostics::PACKAGED_DICTIONARY_UNAVAILABLE,
         ));
     }
+    reject_redirected_directory(&paths.user_data)?;
+    reject_redirected_directory(&paths.dictionaries)?;
     fs::create_dir_all(&paths.user_data)?;
     fs::create_dir_all(&paths.dictionaries)?;
+    reject_redirected_directory(&paths.user_data)?;
+    reject_redirected_directory(&paths.dictionaries)?;
     // Every cached handle on the files about to be replaced goes first; on Windows an open handle blocks the rename.
     close_cached_journals();
 
@@ -169,6 +173,33 @@ fn is_real_file(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .map(|metadata| metadata.file_type().is_file())
         .unwrap_or(false)
+}
+
+fn reject_redirected_directory(path: &Path) -> std::io::Result<()> {
+    for ancestor in path.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                #[cfg(target_os = "macos")]
+                if ancestor == Path::new("/var") || ancestor == Path::new("/tmp") {
+                    continue;
+                }
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "reset directory has a symbolic-link ancestor",
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    "reset directory parent is not a directory",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -303,6 +334,24 @@ mod tests {
             diagnostics::PACKAGED_DICTIONARY_UNAVAILABLE
         );
         assert!(!paths.dictionary(assets::MAIN_DICTIONARY).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reset_rejects_a_symlinked_dictionary_directory() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let paths = paths(root.path());
+        for name in [assets::MAIN_DICTIONARY, assets::ENGLISH_DICTIONARY] {
+            sql(&paths.resource(name), "CREATE TABLE packaged(x);");
+        }
+        fs::remove_dir(&paths.dictionaries).unwrap();
+        symlink(outside.path(), &paths.dictionaries).unwrap();
+
+        assert!(reset_learned_data(&paths).is_err());
+        assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
     }
 
     #[test]
