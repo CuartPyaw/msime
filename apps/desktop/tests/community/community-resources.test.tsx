@@ -92,6 +92,23 @@ test("a failed fresh search hides pagination for the previous result set", async
   expect(screen.queryByRole("button", { name: "加载更多" })).toBeNull();
 });
 
+test("loading more keeps the last submitted search until a new search is run", async () => {
+  const first = base("dictionary");
+  const second = base("dictionary", "10000000-0000-0000-0000-000000000002");
+  const list = vi
+    .fn()
+    .mockResolvedValueOnce({ items: [first], has_more: true })
+    .mockResolvedValueOnce({ items: [second], has_more: false });
+  render(<CommunityResourcesPage client={client({ list })} kind="dictionary" />);
+  await waitFor(() => expect(list).toHaveBeenCalledWith("dictionary", "", "", 0));
+
+  fireEvent.change(screen.getByRole("textbox", { name: "搜索词库" }), {
+    target: { value: "尚未提交" },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "加载更多" }));
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith("dictionary", "", "", 1));
+});
+
 test("community home opens the requested resource collection", async () => {
   const resources = client();
   const skins = {
