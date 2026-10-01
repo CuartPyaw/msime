@@ -454,6 +454,7 @@ javac --release 17 -Xlint:all -Werror -cp "$android_jar" -d "$output_dir" \
   "$repo_root/platforms/android/tests/community/CommunityCatalogSmoke.java" \
   "$repo_root/platforms/android/tests/settings/AppIconStyleSmoke.java" \
   "$repo_root/platforms/android/tests/settings/CloudClipboardTextPolicySmoke.java" \
+  "$repo_root/platforms/android/tests/keyboard/CloudClipboardPanelPolicySmoke.java" \
   "$repo_root/platforms/android/tests/settings/SmartPunctuationContextSmoke.java" \
   "$repo_root/platforms/android/tests/settings/HardwareKeyPolicySmoke.java" \
   "$repo_root/platforms/android/tests/settings/HardwareShortcutPolicySmoke.java" \
@@ -501,6 +502,7 @@ java -cp "$output_dir" LocalAsrPolicySmoke
 java -cp "$output_dir" ReplyKeyboardSmoke
 java -cp "$output_dir" app.msime.android.KeyboardSkinSmoke
 java -cp "$output_dir" CloudClipboardTextPolicySmoke
+java -cp "$output_dir:$android_jar" CloudClipboardPanelPolicySmoke
 java -cp "$output_dir" KeyboardFeedbackSmoke
 java -cp "$output_dir:$android_jar" app.msime.android.KeyboardFeedbackStoreSmoke
 java -cp "$output_dir" KeyboardShortcutIconPolicySmoke
