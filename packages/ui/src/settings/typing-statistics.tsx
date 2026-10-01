@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "../core/confirm";
+import {
+  keyboardHeatmapModel,
+  keyHeatLevel,
+  scopedKeyCounts,
+  type DailyKeyCounts,
+  type KeyboardHeatmapKey,
+} from "./keyboard-heatmap";
 import { scopedBreakdown } from "./typing-breakdown";
 import { chartGradient } from "./typing-chart";
 import {
@@ -79,11 +86,14 @@ const heatWeek = "grid grid-rows-[repeat(7,14px)] gap-[3px]";
 const bar = "block w-full min-h-0.5 rounded-t-[3px] rounded-b-[1px]";
 const axis = "mt-[7px] flex justify-between text-xs text-muted";
 
-// The segmented control behind both the phone's content tabs and the desktop's range picker. The
-// column count is a parameter because the two differ, and because the tab row silently kept four
-// columns after a fifth tab was added -- the extra one wrapped onto a second row at a quarter width.
+// The segmented control behind both the phone's content tabs and the desktop's range picker. The column count is a parameter because the two differ, and because the tab row silently kept four columns after a fifth tab was added -- the extra one wrapped onto a second row at a quarter width. Each count is spelled out so Tailwind sees the class.
+const segmentedColumns: Record<number, string> = {
+  3: "grid-cols-3",
+  5: "grid-cols-5",
+  6: "grid-cols-6",
+};
 const segmented = (columns: number) =>
-  `grid gap-[3px] rounded-[9px] bg-subtle p-[3px] ${columns === 5 ? "grid-cols-5" : "grid-cols-3"} [&>button]:min-h-[34px] [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-secondary [&>button[aria-selected=true]]:bg-raised [&>button[aria-selected=true]]:text-body [&>button[aria-selected=true]]:shadow-card [&>button[aria-pressed=true]]:bg-raised [&>button[aria-pressed=true]]:text-body [&>button[aria-pressed=true]]:shadow-card`;
+  `grid gap-[3px] rounded-[9px] bg-subtle p-[3px] ${segmentedColumns[columns]} [&>button]:min-h-[34px] [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-secondary [&>button[aria-selected=true]]:bg-raised [&>button[aria-selected=true]]:text-body [&>button[aria-selected=true]]:shadow-card [&>button[aria-pressed=true]]:bg-raised [&>button[aria-pressed=true]]:text-body [&>button[aria-pressed=true]]:shadow-card`;
 
 export type SelectionCounts = {
   /** Commits from positions 1..9, index 0 being the first candidate. */
@@ -121,6 +131,8 @@ export type TypingStatistics = {
   dailyActiveMs?: Record<string, number>;
   /** Characters per local hour, 24 buckets per day. Absent for days the host sent no hour for. */
   dailyHours?: Record<string, number[]>;
+  /** Presses per key per local day, keyed by `KeyboardEvent.code` or soft-keyboard id. Absent in statistics written before keys were counted. */
+  dailyKeys?: DailyKeyCounts;
 };
 
 export type TypingStatisticsStatus = {
@@ -521,6 +533,161 @@ function StatisticsHeatmap({
   );
 }
 
+function KeyboardHeatmapRows({
+  rows,
+  maximum,
+  className,
+}: {
+  rows: KeyboardHeatmapKey[][];
+  maximum: number;
+  className: string;
+}) {
+  return (
+    <div className={className}>
+      {rows.map((row, rowIndex) => (
+        <div className="flex gap-1" key={rowIndex}>
+          {row.map((key, index) => {
+            const style = { flexGrow: key.weight, flexBasis: 0 };
+            // An unlabelled entry is spacing that lines a row up with the one above, not a key.
+            if (!key.code)
+              return <span className="min-w-0" style={style} key={index} aria-hidden="true" />;
+            const level = keyHeatLevel(key.count, maximum);
+            const name = `${key.name}，${key.count.toLocaleString("zh-CN")} 次`;
+            return (
+              <span
+                role="img"
+                className="relative grid h-9 min-w-0 place-items-center overflow-hidden rounded-[5px] border border-edge text-[11px] leading-none max-phone:h-8 max-phone:text-[10px]"
+                style={style}
+                key={index}
+                title={name}
+                aria-label={name}
+              >
+                <i className={`absolute inset-0 ${heatLevels[level]}`} aria-hidden="true" />
+                <span
+                  className={`relative overflow-hidden px-0.5 text-ellipsis whitespace-nowrap ${level >= 3 ? "[color:var(--p-on-accent,#fff)]" : "text-secondary"}`}
+                  aria-hidden="true"
+                >
+                  {key.label}
+                </span>
+              </span>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * How often each key was pressed in the page's scope, drawn on the keyboard the counts came from: the ANSI board for a physical keyboard, the phone's 26-key layout (plus the nine-key grid once one of its cells was pressed) for an on-screen one.
+ */
+function KeyboardHeatmap({
+  dailyKeys,
+  scopeKeys,
+  scopeLabel,
+  mobile,
+  platform,
+}: {
+  dailyKeys: DailyKeyCounts | undefined;
+  scopeKeys: string[] | null;
+  scopeLabel: string;
+  mobile: boolean;
+  platform?: string;
+}) {
+  const model = keyboardHeatmapModel(scopedKeyCounts(dailyKeys, scopeKeys), mobile, platform);
+  const count = (value: number) => value.toLocaleString("zh-CN");
+  return (
+    <section className="section m-0" aria-labelledby="statistics-keys-title">
+      <h2 className={heading} id="statistics-keys-title">
+        按键热力图 · {scopeLabel}
+      </h2>
+      {model.total === 0 ? (
+        <p className={`${empty} mt-3.5`}>这段时间还没有按键记录</p>
+      ) : (
+        <>
+          <p className="mt-[7px] mb-0 text-xs text-muted">
+            共 {count(model.total)} 次按键，颜色越深按得越多
+          </p>
+          <div role="group" aria-label="按键热力图">
+            <KeyboardHeatmapRows
+              rows={model.rows}
+              maximum={model.maximum}
+              className="mt-3 flex flex-col gap-1"
+            />
+            {model.nineRows && (
+              <div role="group" aria-label="九宫格按键">
+                <p className="mt-3.5 mb-0 text-xs text-muted">九宫格</p>
+                <KeyboardHeatmapRows
+                  rows={model.nineRows}
+                  maximum={model.maximum}
+                  className="mx-auto mt-2 flex max-w-[260px] flex-col gap-1"
+                />
+              </div>
+            )}
+            {model.others.length > 0 && (
+              <div className="mt-3.5">
+                <p className="m-0 text-xs text-muted" id="statistics-keys-others">
+                  其他键
+                </p>
+                <ul
+                  className="m-0 mt-2 flex list-none flex-wrap gap-1.5 p-0 text-xs"
+                  aria-labelledby="statistics-keys-others"
+                >
+                  {model.others.map((key) => (
+                    <li
+                      className="flex items-center gap-1.5 rounded-[5px] border border-edge px-2 py-1"
+                      key={key.code}
+                      aria-label={`${key.label}，${count(key.count)} 次`}
+                    >
+                      <i
+                        className={`block size-2.5 rounded-[2px] ${heatLevels[keyHeatLevel(key.count, model.maximum)]}`}
+                        aria-hidden="true"
+                      />
+                      <span aria-hidden="true">{key.label}</span>
+                      <strong
+                        className="font-medium tabular-nums text-secondary"
+                        aria-hidden="true"
+                      >
+                        {count(key.count)}
+                      </strong>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <div className="mt-2 flex items-center gap-1 text-[10px] text-muted" aria-hidden="true">
+            <span>少</span>
+            {heatLevels.map((shade, level) => (
+              <i className={`block size-3 rounded-[2px] ${shade}`} key={level} />
+            ))}
+            <span>多</span>
+          </div>
+          <ol
+            className="m-0 mt-3.5 flex list-none flex-col gap-1.5 p-0 text-xs"
+            aria-label="最常按的键"
+          >
+            {model.top.map((key, index) => (
+              <li className="flex items-center gap-2" key={key.code}>
+                <span className="w-4 text-right tabular-nums text-muted">{index + 1}</span>
+                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                  {key.label}
+                </span>
+                <strong className="font-medium tabular-nums text-secondary">
+                  {count(key.count)} 次
+                </strong>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+      <p className={footerNote}>
+        只保存每个键每天被按下的次数，不保存按键顺序和输入内容；按住不放只算一次，密码框中的按键不计入。
+      </p>
+    </section>
+  );
+}
+
 function StatisticsTrendLine({
   days,
   counts,
@@ -872,9 +1039,9 @@ export function TypingStatisticsPage({
   const [status, setStatus] = useState<TypingStatisticsStatus>();
   const [period, setPeriod] = useState<Period>(7);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
-  const [mobileTab, setMobileTab] = useState<"trend" | "kind" | "mode" | "scheme" | "ranks">(
-    "trend",
-  );
+  const [mobileTab, setMobileTab] = useState<
+    "trend" | "kind" | "mode" | "scheme" | "ranks" | "keys"
+  >("trend");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const requestRef = useRef<Promise<TypingStatisticsStatus> | null>(null);
@@ -1027,6 +1194,11 @@ export function TypingStatisticsPage({
     : mobile || period === 0
       ? "累计输入"
       : `近 ${period} 天输入`;
+  const keyScopeLabel = selectedDay
+    ? (trendDays.find((day) => day.key === selectedDay)?.label ?? dayLabel(selectedDay))
+    : mobile || period === 0
+      ? "累计"
+      : `近 ${period} 天`;
   const maximum = Math.max(1, ...trendDays.map((day) => statistics.days[day.key] ?? 0));
   const activity = activityMetrics(statistics, today.key);
   const characterSlices = characterKinds.map(([id, title], index) => ({
@@ -1121,7 +1293,7 @@ export function TypingStatisticsPage({
   const resetStatistics = async () => {
     const confirmed = await confirm({
       title: "清空打字统计",
-      message: "累计字数、分类和每日记录都会被删除，无法恢复。",
+      message: "累计字数、分类、每日记录和按键次数都会被删除，无法恢复。",
       confirmLabel: "清空",
       danger: true,
     });
@@ -1183,7 +1355,7 @@ export function TypingStatisticsPage({
             输入统计已关闭
           </h2>
           <p className="mt-2 mb-0 leading-relaxed text-secondary">
-            开启后这里会显示输入字数、速度与时段分布。统计只保存在本机，不记录输入内容，也不联网。
+            开启后这里会显示输入字数、速度、时段分布与按键热力图。统计只保存在本机，不记录输入内容，也不联网。
           </p>
           <button
             type="button"
@@ -1197,7 +1369,7 @@ export function TypingStatisticsPage({
       )}
       <section className="section m-0">
         {mobile ? (
-          <div className={segmented(5)} role="tablist" aria-label="统计内容">
+          <div className={segmented(6)} role="tablist" aria-label="统计内容">
             {(
               [
                 ["trend", "趋势"],
@@ -1205,6 +1377,7 @@ export function TypingStatisticsPage({
                 ["mode", "模式"],
                 ["scheme", "方案"],
                 ["ranks", "候选"],
+                ["keys", "按键"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -1418,6 +1591,15 @@ export function TypingStatisticsPage({
           />
         </section>
       )}
+      {(!mobile || mobileTab === "keys") && (
+        <KeyboardHeatmap
+          dailyKeys={statistics.dailyKeys}
+          scopeKeys={scopeKeys}
+          scopeLabel={keyScopeLabel}
+          mobile={mobile}
+          platform={platform}
+        />
+      )}
       {(!mobile || mobileTab === "kind") && (
         <Distribution title="字符类型" slices={characterSlices} variant={mobile ? "pie" : "bar"} />
       )}
@@ -1434,7 +1616,7 @@ export function TypingStatisticsPage({
           title="输入方案"
           slices={sourceSlices}
           variant={mobile ? "rank" : "bar"}
-          footer="输入方案统计其上屏字符数，不计未上屏的拼音按键。旧版本总数保留为历史未分类，新输入开始记录细分。"
+          footer="输入方案统计其上屏字符数；拼音等按键另由按键热力图计数，只记每个键每天的按下次数。旧版本总数保留为历史未分类，新输入开始记录细分。"
         />
       )}
       {!mobile && <DailyDetails rows={dailyDetailRows(statistics, today.key)} />}
@@ -1442,7 +1624,7 @@ export function TypingStatisticsPage({
       {mobile ? (
         <section className="section m-0 pt-0.5">
           <p className={`${privacy} mt-0`}>
-            仅统计水杉键盘成功提交的字符，含标点及表情，不含空格、换行和未上屏拼音。组合表情计为一个字符，删除文字不扣减。仅在本机保存日期、分类和数量，不保存输入内容。每日明细默认永久保留。
+            字数仅统计水杉键盘成功提交的字符，含标点及表情，不含空格和换行。组合表情计为一个字符，删除文字不扣减。按键热力图只保存每个键每天被按下的次数，不保存按键顺序和输入内容。仅在本机保存日期、分类和数量，不保存输入内容。每日明细默认永久保留。
           </p>
         </section>
       ) : (
@@ -1521,7 +1703,7 @@ export function TypingStatisticsPage({
             </button>
           </div>
           <p className={privacy}>
-            统计水杉键盘提交的字符，以及英文模式和放行给应用的字母、数字与符号（按按键时估计），含标点及表情，不含空格、换行和未上屏拼音。组合表情计为一个字符，删除文字不扣减。仅在本机保存日期、分类和数量，不保存输入内容。每日明细默认永久保留，可在「自动清理」中改为只保留最近一段时间；清理删除的日期同时从累计总数与分类中扣除。
+            字数统计水杉键盘提交的字符，以及英文模式和放行给应用的字母、数字与符号（按按键时估计），含标点及表情，不含空格和换行。组合表情计为一个字符，删除文字不扣减。按键热力图只保存每个键每天被按下的次数，不保存按键顺序和输入内容。仅在本机保存日期、分类和数量，不保存输入内容。每日明细默认永久保留，可在「自动清理」中改为只保留最近一段时间；清理删除的日期同时从累计总数与分类中扣除。
           </p>
         </section>
       )}

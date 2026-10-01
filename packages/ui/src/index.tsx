@@ -486,6 +486,18 @@ export {
   type TypingStatisticsStatus,
 } from "./settings/typing-statistics";
 export {
+  keyboardHeatmapLayout,
+  keyboardHeatmapModel,
+  keyHeatLevel,
+  keyLabel,
+  scopedKeyCounts,
+  type DailyKeyCounts,
+  type KeyboardHeatmapKey,
+  type KeyboardHeatmapLayout,
+  type KeyboardHeatmapModel,
+  type KeyCount,
+} from "./settings/keyboard-heatmap";
+export {
   VocabularyReviewPage,
   VocabularyReviewPanel,
   type VocabularyCard,
