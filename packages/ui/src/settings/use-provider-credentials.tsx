@@ -63,6 +63,7 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
     Partial<Record<ProviderCredentialBusy, ProviderCredentialMessage>>
   >({});
   const clientGeneration = useRef(0);
+  const credentialSaveRunning = useRef(false);
 
   const updateTencentCredentialInput = (patch: Partial<TencentCredentialInput>) =>
     setTencentCredentialInput((current) => ({ ...current, ...patch }));
@@ -70,6 +71,7 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
   useEffect(() => {
     const generation = ++clientGeneration.current;
     credentialTestGeneration.current = {};
+    credentialSaveRunning.current = false;
     setCredentialTests((current) => (Object.keys(current).length ? {} : current));
     setProviderCredentialBusy(undefined);
     setProviderCredentialMessages((current) => (Object.keys(current).length ? {} : current));
@@ -139,25 +141,30 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
     onSuccess: (result: T) => void,
   ) {
     const credentials = client.providerCredentials;
-    if (!credentials || providerCredentialBusy === kind) return;
+    if (!credentials || credentialSaveRunning.current) return;
     const clientVersion = clientGeneration.current;
-    await runAsyncAction(
-      {
-        busy: providerCredentialBusy === kind,
-        isCurrent: () => clientGeneration.current === clientVersion,
-        setBusy: (busy) => setProviderCredentialBusy(busy ? kind : undefined),
-        setError: (message) =>
-          setProviderCredentialMessages((current) => ({
-            ...current,
-            [kind]: message ? { ok: false, text: message } : undefined,
-          })),
-      },
-      async (isCurrent) => {
-        const result = await operation(credentials);
-        if (isCurrent()) onSuccess(result);
-      },
-      { formatError: providerCredentialErrorMessage },
-    );
+    credentialSaveRunning.current = true;
+    try {
+      await runAsyncAction(
+        {
+          busy: false,
+          isCurrent: () => clientGeneration.current === clientVersion,
+          setBusy: (busy) => setProviderCredentialBusy(busy ? kind : undefined),
+          setError: (message) =>
+            setProviderCredentialMessages((current) => ({
+              ...current,
+              [kind]: message ? { ok: false, text: message } : undefined,
+            })),
+        },
+        async (isCurrent) => {
+          const result = await operation(credentials);
+          if (isCurrent()) onSuccess(result);
+        },
+        { formatError: providerCredentialErrorMessage },
+      );
+    } finally {
+      if (clientVersion === clientGeneration.current) credentialSaveRunning.current = false;
+    }
   }
 
   const runProviderCredential = async (

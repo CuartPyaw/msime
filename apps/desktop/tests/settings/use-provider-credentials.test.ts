@@ -158,3 +158,32 @@ test("a voice credential save in progress ignores another save", async () => {
   expect(result.current.providerCredentialBusy).toBeUndefined();
   expect(result.current.providerCredentialMessages.asr).toMatchObject({ ok: false });
 });
+
+test("credential saves of different kinds cannot run concurrently", async () => {
+  let resolve!: (value: ProviderCredentialStatus) => void;
+  const pending = new Promise<ProviderCredentialStatus>((accept) => {
+    resolve = accept;
+  });
+  const saveAi = vi.fn().mockReturnValue(pending);
+  const saveTencent = vi.fn().mockResolvedValue(savedStatus);
+  const client = {
+    providerCredentials: { status: vi.fn().mockResolvedValue(savedStatus) } as never,
+  };
+  const { result } = renderHook(() => useProviderCredentials({ client }));
+
+  let first!: Promise<void>;
+  let second!: Promise<void>;
+  act(() => {
+    first = result.current.runProviderCredential("ai", saveAi, "AI 已保存");
+    second = result.current.runProviderCredential("tencent", saveTencent, "腾讯已保存");
+  });
+  expect(saveAi).toHaveBeenCalledOnce();
+  expect(saveTencent).not.toHaveBeenCalled();
+
+  resolve(savedStatus);
+  await act(async () => {
+    await first;
+    await second;
+  });
+  expect(result.current.providerCredentialBusy).toBeUndefined();
+});
