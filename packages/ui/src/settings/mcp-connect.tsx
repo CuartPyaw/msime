@@ -131,10 +131,12 @@ export function McpConnectSection({
   const mounted = useRef(true);
   const refreshGeneration = useRef(0);
   const clientGeneration = useRef(0);
+  const actionRunning = useRef(false);
 
   useEffect(() => {
     const generation = ++clientGeneration.current;
     mounted.current = true;
+    actionRunning.current = false;
     setBusy(undefined);
     return () => {
       mounted.current = false;
@@ -163,9 +165,10 @@ export function McpConnectSection({
   }, [refresh]);
 
   async function write(id: McpClientId) {
-    if (!install) return;
+    if (!install || busy !== undefined || actionRunning.current) return;
     const generation = clientGeneration.current;
     const name = clientNames[id];
+    actionRunning.current = true;
     setBusy(id);
     setResult(undefined);
     try {
@@ -196,7 +199,10 @@ export function McpConnectSection({
       if (mounted.current && generation === clientGeneration.current)
         setResult(mcpFailureMessage(error, name));
     } finally {
-      if (mounted.current && generation === clientGeneration.current) setBusy(undefined);
+      if (mounted.current && generation === clientGeneration.current) {
+        actionRunning.current = false;
+        setBusy(undefined);
+      }
     }
   }
 
