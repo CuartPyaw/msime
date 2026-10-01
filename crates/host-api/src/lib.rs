@@ -874,6 +874,15 @@ fn language_dictionaries_directory(resources: &std::path::Path) -> Option<std::p
     Some(resources.parent()?.join("language-dictionaries"))
 }
 
+/// The `language_dictionaries` value HostOptions records for `resources`: the directory beside them, only when it holds a dictionary, so a host without them writes the document it always did.
+fn installed_language_dictionaries(resources: &std::path::Path) -> Option<String> {
+    if language_dictionaries_beside(resources).is_empty() {
+        return None;
+    }
+    language_dictionaries_directory(resources)
+        .and_then(|directory| directory.to_str().map(str::to_owned))
+}
+
 /// The target languages an offline gloss dictionary can exist for; English is glossed from the packaged english.db instead.
 pub(crate) const OFFLINE_GLOSS_LANGUAGES: [&str; 6] = ["fr", "ja", "es", "ru", "de", "ko"];
 
@@ -1001,13 +1010,7 @@ pub fn prepare_host_configuration(
         sentence_model: None,
         settled_model: settled_model_beside(&resources),
         sound_packs: None,
-        // The directory is recorded only when it holds a dictionary, so a host without them writes the document it always did.
-        language_dictionaries: if language_dictionaries_beside(&resources).is_empty() {
-            None
-        } else {
-            language_dictionaries_directory(&resources)
-                .and_then(|directory| directory.to_str().map(str::to_owned))
-        },
+        language_dictionaries: installed_language_dictionaries(&resources),
     })?)
 }
 
@@ -1072,7 +1075,7 @@ fn reject_symlinked_options_parent(path: &Path) -> std::io::Result<()> {
 
 /// Bring a published HostOptions file up to the installed dictionary generation.
 ///
-/// A package upgrade replaces the resource bundle in place but leaves each user's options pointing at working dictionaries copied from the previous bundle, so the new dictionary never reaches the Engine and the user-dictionary replay the Windows installer runs after an upgrade never happens. When the recorded dictionaries directory is not the generation the installed lock describes, this prepares that generation (the Engine copies the new dictionaries and replays the user journal into them) and rewrites only `resources` and `dictionaries`, keeping every other key a setup or the settings app wrote. A current file is only read.
+/// A package upgrade replaces the resource bundle in place but leaves each user's options pointing at working dictionaries copied from the previous bundle, so the new dictionary never reaches the Engine and the user-dictionary replay the Windows installer runs after an upgrade never happens. When the recorded dictionaries directory is not the generation the installed lock describes, this prepares that generation (the Engine copies the new dictionaries and replays the user journal into them) and rewrites only `resources` and `dictionaries`, keeping every other key a setup or the settings app wrote. `language_dictionaries` is also brought up to the Cantonese and Zhuyin dictionaries installed beside the resources, whatever the generation. A current file is only read.
 ///
 /// Returns whether the file was rewritten. Run it before the caller's own sessions exist. The previous generation is never modified, so a host still using it keeps working until it restarts. A symlink, or a document whose paths do not follow the layout `prepare_host_configuration` produces, is left alone rather than guessed at. When the recorded resources do not match the compiled lock the error is [`DictionaryOutdated`] and the file is left as it was.
 pub fn refresh_host_options(path: &std::path::Path) -> Result<bool, Box<dyn std::error::Error>> {
@@ -1147,20 +1150,46 @@ fn refreshed_host_options(
     };
     if user_data != state.join("user")
         || dictionaries.parent() != Some(user_data.join("dictionaries").as_path())
-        || dictionaries.file_name().and_then(|name| name.to_str()) == Some(generation)
     {
         return Ok(None);
     }
-    let prepared = prepare(resources, state)?;
     let mut refreshed = document.clone();
-    for key in ["resources", "dictionaries"] {
-        refreshed[key] = prepared
-            .get(key)
-            .filter(|value| value.is_string())
-            .cloned()
-            .ok_or("prepared options are incomplete")?;
+    let mut changed = false;
+    if dictionaries.file_name().and_then(|name| name.to_str()) != Some(generation) {
+        let prepared = prepare(resources, state)?;
+        for key in ["resources", "dictionaries"] {
+            refreshed[key] = prepared
+                .get(key)
+                .filter(|value| value.is_string())
+                .cloned()
+                .ok_or("prepared options are incomplete")?;
+        }
+        changed = true;
     }
-    Ok(Some(refreshed))
+    // The Cantonese and Zhuyin dictionaries arrive with a package, not with a dictionary generation, so options published by an older package are brought up to what is installed beside the resources even when the generation is current. Only the directory `prepare_host_configuration` records is kept in step; a document naming another one keeps it.
+    let beside = language_dictionaries_directory(resources)
+        .and_then(|directory| directory.to_str().map(str::to_owned));
+    let recorded = document
+        .get("language_dictionaries")
+        .and_then(Value::as_str);
+    if recorded.is_none() || recorded == beside.as_deref() {
+        let installed = installed_language_dictionaries(resources);
+        if recorded != installed.as_deref() {
+            let object = refreshed
+                .as_object_mut()
+                .ok_or("runtime options are not an object")?;
+            match installed {
+                Some(directory) => {
+                    object.insert("language_dictionaries".to_owned(), Value::String(directory));
+                }
+                None => {
+                    object.remove("language_dictionaries");
+                }
+            }
+            changed = true;
+        }
+    }
+    Ok(changed.then_some(refreshed))
 }
 
 /// Import the mixed-input controls from the Windows installer's legacy TOML

@@ -6377,6 +6377,56 @@ fn host_options_carry_vietnamese_settings_and_language_dictionaries_to_the_engin
     );
 }
 
+/// Cantonese and Zhuyin run on macOS once their dictionary is installed beside the resources, and fall back without it; Vietnamese needs no data and runs on macOS regardless. Every other build falls back from all three.
+#[test]
+fn installed_language_dictionaries_enable_their_schemes_on_macos() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).expect("resources");
+    let engine_scheme = |scheme: InputScheme| {
+        let preferences = Preferences {
+            scheme,
+            last_chinese_scheme: Some(msime_client_core::preferences::ChineseScheme::Wubi),
+            ..Preferences::default()
+        };
+        let document = json!({ "api_version": 1, "resources": resources, "user_data": "/u", "cache": "/c", "dictionaries": "/d", "preferences": preferences, "language_dictionaries": super::installed_language_dictionaries(&resources) });
+        serde_json::from_value::<HostOptions>(document)
+            .expect("host options")
+            .into_engine_options()
+            .scheme
+    };
+    let macos = cfg!(target_os = "macos");
+    // Without the directory both fall back to the last Chinese scheme, 五笔.
+    assert_eq!(super::installed_language_dictionaries(&resources), None);
+    assert_eq!(engine_scheme(InputScheme::Cantonese), 2);
+    assert_eq!(engine_scheme(InputScheme::Zhuyin), 2);
+    assert_eq!(
+        engine_scheme(InputScheme::Vietnamese),
+        if macos { 7 } else { 2 }
+    );
+
+    let beside = root.path().join("language-dictionaries");
+    std::fs::create_dir_all(&beside).expect("beside");
+    std::fs::write(beside.join("cantonese.db"), b"sqlite").expect("cantonese");
+    std::fs::write(beside.join("zhuyin.db"), b"sqlite").expect("zhuyin");
+    assert_eq!(
+        super::installed_language_dictionaries(&resources).as_deref(),
+        beside.to_str()
+    );
+    assert_eq!(
+        engine_scheme(InputScheme::Cantonese),
+        if macos { 5 } else { 2 }
+    );
+    assert_eq!(
+        engine_scheme(InputScheme::Zhuyin),
+        if macos { 6 } else { 2 }
+    );
+    assert_eq!(
+        engine_scheme(InputScheme::Vietnamese),
+        if macos { 7 } else { 2 }
+    );
+}
+
 #[test]
 fn a_scheme_this_build_does_not_run_falls_back_and_says_why() {
     let dir = tempfile::tempdir().unwrap();
@@ -6997,6 +7047,55 @@ fn current_or_unfamiliar_options_are_not_prepared() {
         .unwrap();
         assert_eq!(refreshed, None);
     }
+}
+
+/// Options published before the Cantonese and Zhuyin dictionaries were installed learn about them at the next refresh, and forget them once they are gone, without a new dictionary generation. A directory the document names elsewhere is the host's own choice and is kept.
+#[test]
+fn refresh_keeps_the_language_dictionaries_in_step_with_the_installed_package() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).expect("resources");
+    let beside = root.path().join("language-dictionaries");
+    let current = json!({
+        "resources": resources,
+        "user_data": "/s/user",
+        "dictionaries": "/s/user/dictionaries/new",
+        "preferences_directory": "/s",
+    });
+    let refresh = |document: &Value| {
+        super::refreshed_host_options(document, "new", |_, _| {
+            panic!("a current generation is not prepared")
+        })
+        .unwrap()
+    };
+    assert_eq!(refresh(&current), None);
+
+    // An empty directory installs nothing.
+    std::fs::create_dir_all(&beside).expect("beside");
+    assert_eq!(refresh(&current), None);
+
+    std::fs::write(beside.join("zhuyin.db"), b"sqlite").expect("zhuyin");
+    let mut installed = current.clone();
+    installed["language_dictionaries"] = json!(beside);
+    assert_eq!(refresh(&current), Some(installed.clone()));
+    assert_eq!(refresh(&installed), None);
+
+    let mut elsewhere = current.clone();
+    elsewhere["language_dictionaries"] = json!("/opt/language-dictionaries");
+    assert_eq!(refresh(&elsewhere), None);
+
+    std::fs::remove_file(beside.join("zhuyin.db")).expect("uninstall");
+    assert_eq!(refresh(&installed), Some(current.clone()));
+
+    // A stale generation is prepared and picks up the dictionaries in the same rewrite.
+    std::fs::write(beside.join("cantonese.db"), b"sqlite").expect("cantonese");
+    let mut stale = current.clone();
+    stale["dictionaries"] = json!("/s/user/dictionaries/old");
+    let refreshed = super::refreshed_host_options(&stale, "new", |_, _| {
+        Ok(json!({ "resources": resources, "dictionaries": "/s/user/dictionaries/new" }))
+    })
+    .unwrap();
+    assert_eq!(refreshed, Some(installed));
 }
 
 #[test]

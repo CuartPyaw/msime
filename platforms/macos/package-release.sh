@@ -14,6 +14,8 @@
 #   MACOS_SIGNING_IDENTITY        a "Developer ID Application: ... (TEAMID)" identity in the keychain. Without it everything is signed ad-hoc: the package builds and the settings app runs, but macOS will not register the embedded input method as an input source (see scripts/install.sh)
 #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_SPECIFIC_PASSWORD
 #                                 when all three are set (and an identity is), the DMG is notarized and stapled
+#   MSIME_REQUIRE_LANGUAGE_DICTIONARIES
+#                                 1 fails the package unless the Cantonese and Zhuyin dictionaries are staged and embedded; otherwise a package without them still builds, with both schemes shown as unavailable
 #
 # The product is built for the host architecture only; the DMG name carries it.
 set -euo pipefail
@@ -72,6 +74,8 @@ handwriting_model="$repo_root/target/handwriting-model"
 python3 scripts/fetch_handwriting_model.py --out "$handwriting_model"
 # install_resources prints progress on stderr and the verified directory as its last stdout line. stage-resources.sh re-verifies it and stages target/macos/EngineResources, which tauri.macos.conf.json embeds.
 resources="$(cargo run --quiet --locked -p msime-client-core --example install_resources -- "$work/desktop-resources" | tail -n 1)"
+# The Cantonese and Zhuyin dictionaries pinned by resources/language-dictionaries.lock.json, into target/language-dictionaries where stage-resources.sh looks for them. Until a release is pinned the script prints a skipped line and fetches nothing.
+python3 scripts/fetch_language_dictionaries.py >/dev/null
 bash platforms/macos/stage-resources.sh "$resources"
 
 # ---- Input method bundle ----
@@ -134,6 +138,11 @@ glosses="$repo_root/target/macos/offline-glosses"
 if [ -d "$glosses" ]; then
   ditto "$glosses" "$app/Contents/Resources/offline-glosses"
 fi
+# The Cantonese and Zhuyin dictionaries, copied for the same reason as the glosses. The input method finds them beside EngineResources; without them both schemes fall back.
+languages="$repo_root/target/macos/language-dictionaries"
+if [ -d "$languages" ]; then
+  ditto "$languages" "$app/Contents/Resources/language-dictionaries"
+fi
 # Beside the Zinnia licence tauri.macos.conf.json already put in Contents/Resources/handwriting.
 mkdir -p "$app/Contents/Resources/handwriting"
 cp "$handwriting_model/handwriting-zh_CN.model" "$handwriting_model/HandwritingModel-LICENSE.txt" "$app/Contents/Resources/handwriting/"
@@ -158,6 +167,16 @@ check_app() {
   codesign --verify --strict "$root/Contents/MacOS/msime-mcp"
   if [ -d "$glosses" ]; then
     test -f "$resources_dir/offline-glosses/offline-glosses-NOTICE.txt"
+  fi
+  # A release build must carry both dictionaries; any other build carries whatever was staged, each dictionary with its licence.
+  if [ "${MSIME_REQUIRE_LANGUAGE_DICTIONARIES:-0}" = 1 ] || [ -d "$languages" ]; then
+    local pair
+    for pair in cantonese.db:rime_cantonese_LICENSE.txt zhuyin.db:libchewing_data_LICENSE.txt; do
+      if [ "${MSIME_REQUIRE_LANGUAGE_DICTIONARIES:-0}" = 1 ] || [ -f "$languages/${pair%%:*}" ]; then
+        test -s "$resources_dir/language-dictionaries/${pair%%:*}"
+        test -f "$resources_dir/language-dictionaries/${pair#*:}"
+      fi
+    done
   fi
   local nested
   nested="$(only "$resources_dir"/*.app)"

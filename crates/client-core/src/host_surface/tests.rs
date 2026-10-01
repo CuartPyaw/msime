@@ -392,10 +392,16 @@ fn capabilities_without_input_schemes_offer_the_base_five() {
 }
 
 #[test]
-fn every_build_compiles_the_base_five_schemes() {
+fn a_build_compiles_the_schemes_its_platform_offers() {
+    // macOS compiles all eight; every other target the base five, which is what Linux offers.
+    let platform = if cfg!(target_os = "macos") {
+        HostPlatform::Macos
+    } else {
+        HostPlatform::Linux
+    };
     assert_eq!(
         compiled_input_schemes(),
-        HostCapabilities::for_platform(HostPlatform::Linux)
+        HostCapabilities::for_platform(platform)
             .input_schemes
             .as_slice()
     );

@@ -347,9 +347,13 @@ fn base_input_schemes() -> Vec<InputScheme> {
     BASE_INPUT_SCHEMES.to_vec()
 }
 
-/// The schemes this build hands to its Engine. host-api falls back from any other scheme a preferences document names, so a host that never offers a scheme never runs it either. The base five on every target for now: Cantonese, Zhuyin and Vietnamese join on macOS once that host routes their keys and stages their dictionaries.
+/// The schemes this build hands to its Engine. host-api falls back from any other scheme a preferences document names, so a host that never offers a scheme never runs it either. All eight on macOS, the one host that routes the Cantonese, Zhuyin and Vietnamese keys and stages their dictionaries; the base five everywhere else. Cantonese and Zhuyin still fall back on macOS when their dictionary is not installed.
 pub fn compiled_input_schemes() -> &'static [InputScheme] {
-    &BASE_INPUT_SCHEMES
+    if cfg!(target_os = "macos") {
+        &ALL_INPUT_SCHEMES
+    } else {
+        &BASE_INPUT_SCHEMES
+    }
 }
 
 impl HostCapabilities {
