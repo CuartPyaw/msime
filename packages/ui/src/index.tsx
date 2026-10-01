@@ -1272,6 +1272,23 @@ export type KeybindingPreferences = {
   toggle_fullwidth_option_shift_h: boolean;
 };
 export type HostPlatform = "windows" | "macos" | "linux" | "android" | "ios" | "harmony";
+/** Mirrors `client-core::preferences::InputScheme`. */
+export type InputScheme =
+  | "quanpin"
+  | "shuangpin"
+  | "wubi"
+  | "japanese"
+  | "korean"
+  | "cantonese"
+  | "zhuyin"
+  | "vietnamese";
+/** Mirrors `client-core::preferences::ChineseScheme`: the schemes a Japanese, Korean or Vietnamese selection returns to. */
+export type ChineseScheme = "quanpin" | "shuangpin" | "wubi" | "cantonese" | "zhuyin";
+/** Mirrors `client-core::preferences::VietnamesePreferences`. Absent from a document left at its defaults: Telex with modern tone placement. */
+export type VietnamesePreferences = {
+  input_method?: "telex" | "vni";
+  tone_style?: "modern" | "classic";
+};
 /** Mirrors `client-core::host_surface::HostCapabilities`. */
 export interface HostCapabilities {
   platform: HostPlatform;
@@ -1349,6 +1366,8 @@ export interface HostCapabilities {
   music?: boolean;
   /** The host draws the typing effects and the combo count `msime_client_typing_effect` answers with. Absent on a host older than the field. */
   typing_effects?: boolean;
+  /** The input schemes this host offers; the others are shown disabled. Absent on a host older than the field, which offers 全拼, 双拼, 五笔, 日文 and 韩文. */
+  input_schemes?: InputScheme[];
 }
 
 export { useCandidatePreviewTheme } from "./candidate/candidate-preview-theme";
@@ -1397,6 +1416,7 @@ export type Preferences = {
   word_character?: { enabled: boolean; keys: "brackets" | "minus_equal" };
   navigation?: NavigationPreferences;
   keybindings?: KeybindingPreferences;
+  /** Narrower than `InputScheme` until the settings page handles Cantonese, Zhuyin and Vietnamese; a document naming one of those still loads. */
   scheme: "quanpin" | "shuangpin" | "wubi" | "japanese" | "korean";
   /** Width used when desktop hosts commit printable ASCII characters. */
   character_width?: "halfwidth" | "fullwidth";
@@ -1410,10 +1430,12 @@ export type Preferences = {
   touch_toolbar?: Partial<TouchToolbarPreferences>;
   default_ime_mode?: "chinese" | "english";
   ime_mode_scope?: "app" | "global";
+  /** Narrower than `ChineseScheme` for the same reason as `scheme`. */
   last_chinese_scheme?: "quanpin" | "shuangpin" | "wubi" | null;
   shuangpin_profile: "xiaohe" | "ziranma" | "shoudao" | "microsoft";
   /** macOS exposes the native shuangpin preedit presentation in the appearance page. */
   shuangpin_preedit_uses_raw?: boolean;
+  vietnamese?: VietnamesePreferences;
   wubi_mixed_pinyin?: boolean;
   candidate_page_size: number;
   number_row_selection?: boolean;

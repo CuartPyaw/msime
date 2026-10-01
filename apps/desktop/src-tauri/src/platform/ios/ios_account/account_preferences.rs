@@ -365,13 +365,15 @@ fn touch_scheme(value: &str) -> Result<TouchKeyboardScheme, AccountError> {
     }
 }
 
-/// Keep the Chinese scheme a Japanese or Korean selection returns to; switching between the two keeps the one already remembered.
+/// Keep the Chinese scheme a Japanese or Korean selection returns to; switching away from Japanese, Korean or Vietnamese keeps the one already remembered.
 fn remember_chinese_scheme(preferences: &mut Preferences) {
     let chinese = match preferences.scheme {
         InputScheme::Quanpin => ChineseScheme::Quanpin,
         InputScheme::Shuangpin => ChineseScheme::Shuangpin,
         InputScheme::Wubi => ChineseScheme::Wubi,
-        InputScheme::Japanese | InputScheme::Korean => return,
+        InputScheme::Cantonese => ChineseScheme::Cantonese,
+        InputScheme::Zhuyin => ChineseScheme::Zhuyin,
+        InputScheme::Japanese | InputScheme::Korean | InputScheme::Vietnamese => return,
     };
     preferences.last_chinese_scheme = Some(chinese);
 }
@@ -467,6 +469,24 @@ mod tests {
             dictionary_learning: false,
             global_theme: "custom".into(),
             custom_keyboard_skin: None,
+        }
+    }
+
+    #[test]
+    fn cantonese_and_zhuyin_are_remembered_and_vietnamese_keeps_the_last_chinese_scheme() {
+        use msime_client_core::preferences::ChineseScheme;
+        for (scheme, remembered) in [
+            (InputScheme::Cantonese, Some(ChineseScheme::Cantonese)),
+            (InputScheme::Zhuyin, Some(ChineseScheme::Zhuyin)),
+            (InputScheme::Vietnamese, Some(ChineseScheme::Wubi)),
+        ] {
+            let mut preferences = Preferences {
+                scheme,
+                last_chinese_scheme: Some(ChineseScheme::Wubi),
+                ..Preferences::default()
+            };
+            super::remember_chinese_scheme(&mut preferences);
+            assert_eq!(preferences.last_chinese_scheme, remembered, "{scheme:?}");
         }
     }
 

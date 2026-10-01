@@ -1088,23 +1088,27 @@ pub async fn app_icon_set(
     .map_err(|_| crate::CommandError { code: "app_icon" })?
 }
 
+/// The account value for a scheme, or none for a scheme the account schema does not name yet. Cantonese, Zhuyin and Vietnamese are left out rather than mapped to a neighbour, so the account keeps the scheme it last recorded instead of being overwritten with one the user did not choose.
+fn account_input_schema(scheme: InputScheme) -> Option<&'static str> {
+    match scheme {
+        InputScheme::Quanpin => Some("quanpin"),
+        InputScheme::Shuangpin => Some("shuangpin"),
+        InputScheme::Wubi => Some("wubi"),
+        InputScheme::Japanese => Some("japanese"),
+        InputScheme::Korean => Some("korean"),
+        InputScheme::Cantonese | InputScheme::Zhuyin | InputScheme::Vietnamese => None,
+    }
+}
+
 fn local_account_preferences(
     snapshot: &PreferencesSnapshot,
     feedback: &PluginHandle<Wry>,
 ) -> Result<BTreeMap<String, AccountPreferenceValue>, AccountError> {
     let preferences = &snapshot.preferences;
     let mut settings = BTreeMap::new();
-    insert_string(
-        &mut settings,
-        "input.schema",
-        match preferences.scheme {
-            InputScheme::Quanpin => "quanpin",
-            InputScheme::Shuangpin => "shuangpin",
-            InputScheme::Wubi => "wubi",
-            InputScheme::Japanese => "japanese",
-            InputScheme::Korean => "korean",
-        },
-    );
+    if let Some(schema) = account_input_schema(preferences.scheme) {
+        insert_string(&mut settings, "input.schema", schema);
+    }
     insert_string(
         &mut settings,
         "input.character_set",
@@ -1640,8 +1644,9 @@ pub async fn mobile_keyboard_feedback_preview(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_frequency_preferences, frequency_account_preferences, AccountPreferenceSchema,
-        AccountPreferenceValue, FrequencyMode, FrequencyPreferences, Preferences,
+        account_input_schema, apply_frequency_preferences, frequency_account_preferences,
+        AccountPreferenceSchema, AccountPreferenceValue, FrequencyMode, FrequencyPreferences,
+        InputScheme, Preferences,
     };
     use msime_client_core::account::AccountPreferenceField;
     use std::collections::BTreeMap;
@@ -1717,5 +1722,21 @@ mod tests {
         assert!(
             apply_frequency_preferences(&mut preferences, &invalid, &frequency_schema()).is_err()
         );
+    }
+
+    #[test]
+    fn the_account_names_only_the_schemes_its_schema_knows() {
+        for (scheme, schema) in [
+            (InputScheme::Quanpin, Some("quanpin")),
+            (InputScheme::Shuangpin, Some("shuangpin")),
+            (InputScheme::Wubi, Some("wubi")),
+            (InputScheme::Japanese, Some("japanese")),
+            (InputScheme::Korean, Some("korean")),
+            (InputScheme::Cantonese, None),
+            (InputScheme::Zhuyin, None),
+            (InputScheme::Vietnamese, None),
+        ] {
+            assert_eq!(account_input_schema(scheme), schema, "{scheme:?}");
+        }
     }
 }

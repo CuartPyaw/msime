@@ -343,6 +343,65 @@ fn capabilities_round_trip_and_reject_unknown_keys() {
 }
 
 #[test]
+fn only_macos_offers_cantonese_zhuyin_and_vietnamese() {
+    use crate::preferences::InputScheme;
+    let macos = HostCapabilities::for_platform(HostPlatform::Macos);
+    assert_eq!(macos.input_schemes.len(), 8);
+    for scheme in [
+        InputScheme::Cantonese,
+        InputScheme::Zhuyin,
+        InputScheme::Vietnamese,
+    ] {
+        assert!(macos.input_schemes.contains(&scheme));
+    }
+    for platform in [
+        HostPlatform::Windows,
+        HostPlatform::Linux,
+        HostPlatform::Android,
+        HostPlatform::Ios,
+        HostPlatform::Harmony,
+    ] {
+        let schemes = HostCapabilities::for_platform(platform).input_schemes;
+        assert_eq!(
+            schemes,
+            [
+                InputScheme::Quanpin,
+                InputScheme::Shuangpin,
+                InputScheme::Wubi,
+                InputScheme::Japanese,
+                InputScheme::Korean,
+            ],
+            "{platform:?}"
+        );
+    }
+}
+
+#[test]
+fn capabilities_without_input_schemes_offer_the_base_five() {
+    let capabilities = HostCapabilities::for_platform(HostPlatform::Macos);
+    let mut document = serde_json::to_value(&capabilities).expect("serializes");
+    document
+        .as_object_mut()
+        .expect("an object")
+        .remove("input_schemes");
+    let decoded: HostCapabilities = serde_json::from_value(document).expect("deserializes");
+    assert_eq!(
+        decoded.input_schemes,
+        HostCapabilities::for_platform(HostPlatform::Windows).input_schemes
+    );
+}
+
+#[test]
+fn every_build_compiles_the_base_five_schemes() {
+    assert_eq!(
+        compiled_input_schemes(),
+        HostCapabilities::for_platform(HostPlatform::Linux)
+            .input_schemes
+            .as_slice()
+    );
+}
+
+#[test]
 fn platform_names_round_trip() {
     for platform in [
         HostPlatform::Windows,

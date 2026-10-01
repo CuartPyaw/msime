@@ -70,6 +70,52 @@ fn korean_commits_count_under_their_own_source() {
 }
 
 #[test]
+fn cantonese_zhuyin_and_vietnamese_commits_count_under_their_own_sources() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = TypingStatisticsStore::new(directory.path());
+    store.set_enabled(true).unwrap();
+    for (id, source, text) in [
+        ("cantonese", TypingSource::Cantonese, "你好"),
+        ("zhuyin", TypingSource::Zhuyin, "臺灣"),
+        ("vietnamese", TypingSource::Vietnamese, "việt"),
+    ] {
+        assert_eq!(
+            serde_json::from_str::<TypingSource>(&format!("\"{id}\"")).unwrap(),
+            source
+        );
+        store.record(text, source, "2026-10-01", Some(9)).unwrap();
+    }
+    let value = store.load().unwrap();
+    assert_eq!(value.detail.sources["cantonese"], 2);
+    assert_eq!(value.detail.sources["zhuyin"], 2);
+    assert_eq!(value.detail.sources["vietnamese"], 4);
+}
+
+/// The document keeps sources as plain ids, so one written by a newer build with a scheme this build has no `TypingSource` for still loads, keeps that count, and goes on recording.
+#[test]
+fn a_document_naming_an_unknown_source_still_loads_and_records() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = TypingStatisticsStore::new(directory.path());
+    store.set_enabled(true).unwrap();
+    store
+        .record("你好", TypingSource::Cantonese, "2026-10-01", Some(9))
+        .unwrap();
+    let path = directory.path().join("typing-statistics.json");
+    let written = fs::read_to_string(&path).unwrap();
+    assert!(written.contains("\"cantonese\""));
+    fs::write(&path, written.replace("\"cantonese\"", "\"futureScheme\"")).unwrap();
+    let value = store.load().unwrap();
+    assert_eq!(value.detail.sources["futureScheme"], 2);
+    store
+        .record("好", TypingSource::Quanpin, "2026-10-01", Some(9))
+        .unwrap();
+    let value = store.load().unwrap();
+    assert_eq!(value.detail.sources["futureScheme"], 2);
+    assert_eq!(value.detail.sources["quanpin"], 1);
+    assert_eq!(value.total, 3);
+}
+
+#[test]
 fn migrates_legacy_totals_and_preserves_pause_on_reset() {
     let directory = tempfile::tempdir().unwrap();
     fs::write(

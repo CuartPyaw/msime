@@ -6019,6 +6019,256 @@ fn a_settled_model_beside_the_resources_is_discovered() {
 }
 
 #[test]
+fn language_dictionaries_beside_the_resources_are_discovered() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).expect("resources");
+    assert_eq!(
+        super::language_dictionaries_beside(&resources),
+        LanguageDictionaries::default()
+    );
+
+    let beside = root.path().join("language-dictionaries");
+    // A directory of the right name is not a dictionary.
+    std::fs::create_dir_all(beside.join("zhuyin.db")).expect("decoy");
+    std::fs::write(beside.join("cantonese.db"), b"sqlite").expect("cantonese");
+    assert_eq!(
+        super::language_dictionaries_beside(&resources),
+        LanguageDictionaries {
+            cantonese: Some(beside.join("cantonese.db")),
+            zhuyin: None,
+        }
+    );
+
+    std::fs::remove_dir(beside.join("zhuyin.db")).expect("decoy");
+    std::fs::write(beside.join("zhuyin.db"), b"sqlite").expect("zhuyin");
+    assert_eq!(
+        super::language_dictionaries_beside(&resources),
+        LanguageDictionaries {
+            cantonese: Some(beside.join("cantonese.db")),
+            zhuyin: Some(beside.join("zhuyin.db")),
+        }
+    );
+}
+
+#[test]
+fn effective_scheme_falls_back_to_the_last_chinese_scheme_then_quanpin() {
+    use msime_client_core::preferences::ChineseScheme;
+    use InputScheme::*;
+    let all = [
+        Quanpin, Shuangpin, Wubi, Japanese, Korean, Cantonese, Zhuyin, Vietnamese,
+    ];
+    let base = &all[..5];
+    let none = LanguageDictionaries::default();
+    let cantonese_only = LanguageDictionaries {
+        cantonese: Some("/dictionaries/cantonese.db".into()),
+        zhuyin: None,
+    };
+    let both = LanguageDictionaries {
+        cantonese: Some("/dictionaries/cantonese.db".into()),
+        zhuyin: Some("/dictionaries/zhuyin.db".into()),
+    };
+    const OFFERED: Option<&str> = None;
+    const NOT_OFFERED: Option<&str> = Some("this host does not offer it");
+    const NO_DICTIONARY: Option<&str> = Some("its dictionary is not installed");
+    for (scheme, last, supported, dictionaries, expected, reason) in [
+        // A scheme that can run is kept.
+        (Wubi, None, base, &none, Wubi, OFFERED),
+        (Vietnamese, None, &all[..], &none, Vietnamese, OFFERED),
+        (Cantonese, None, &all[..], &both, Cantonese, OFFERED),
+        (
+            Zhuyin,
+            Some(ChineseScheme::Wubi),
+            &all[..],
+            &both,
+            Zhuyin,
+            OFFERED,
+        ),
+        // An unsupported scheme returns to the last Chinese scheme, else 全拼.
+        (
+            Vietnamese,
+            Some(ChineseScheme::Wubi),
+            base,
+            &both,
+            Wubi,
+            NOT_OFFERED,
+        ),
+        (Vietnamese, None, base, &both, Quanpin, NOT_OFFERED),
+        (
+            Wubi,
+            Some(ChineseScheme::Wubi),
+            &[Quanpin][..],
+            &none,
+            Quanpin,
+            NOT_OFFERED,
+        ),
+        // The last Chinese scheme is itself checked: unsupported or without its dictionary, 全拼.
+        (
+            Vietnamese,
+            Some(ChineseScheme::Cantonese),
+            base,
+            &both,
+            Quanpin,
+            NOT_OFFERED,
+        ),
+        (
+            Japanese,
+            Some(ChineseScheme::Zhuyin),
+            &[Quanpin, Zhuyin][..],
+            &cantonese_only,
+            Quanpin,
+            NOT_OFFERED,
+        ),
+        // Cantonese and Zhuyin without their dictionary fall back even where they are supported.
+        (
+            Cantonese,
+            Some(ChineseScheme::Shuangpin),
+            &all[..],
+            &none,
+            Shuangpin,
+            NO_DICTIONARY,
+        ),
+        (Cantonese, None, &all[..], &none, Quanpin, NO_DICTIONARY),
+        (
+            Zhuyin,
+            Some(ChineseScheme::Cantonese),
+            &all[..],
+            &cantonese_only,
+            Cantonese,
+            NO_DICTIONARY,
+        ),
+        (
+            Cantonese,
+            Some(ChineseScheme::Zhuyin),
+            &all[..],
+            &cantonese_only,
+            Cantonese,
+            OFFERED,
+        ),
+        (
+            Zhuyin,
+            Some(ChineseScheme::Zhuyin),
+            &all[..],
+            &cantonese_only,
+            Quanpin,
+            NO_DICTIONARY,
+        ),
+    ] {
+        let preferences = Preferences {
+            scheme,
+            last_chinese_scheme: last,
+            ..Preferences::default()
+        };
+        let (effective, diagnostic) = effective_scheme(&preferences, supported, dictionaries);
+        assert_eq!(effective, expected, "{scheme:?} after {last:?}");
+        match (diagnostic, reason, effective == scheme) {
+            (None, _, true) => {}
+            (Some(diagnostic), Some(reason), false) => {
+                assert!(diagnostic.contains(reason), "{diagnostic}");
+                assert!(
+                    diagnostic.contains(&format!("{expected:?}")),
+                    "{diagnostic}"
+                );
+            }
+            (diagnostic, _, _) => panic!("{scheme:?} after {last:?}: {diagnostic:?}"),
+        }
+    }
+}
+
+#[test]
+fn host_options_carry_vietnamese_settings_and_language_dictionaries_to_the_engine() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let directory = root.path().join("language-dictionaries");
+    std::fs::create_dir_all(&directory).expect("directory");
+    std::fs::write(directory.join("cantonese.db"), b"sqlite").expect("cantonese");
+    let preferences = Preferences {
+        scheme: InputScheme::Vietnamese,
+        last_chinese_scheme: Some(msime_client_core::preferences::ChineseScheme::Wubi),
+        vietnamese: VietnamesePreferences {
+            input_method: VietnameseInputMethod::Vni,
+            tone_style: VietnameseToneStyle::Classic,
+        },
+        ..Preferences::default()
+    };
+    let document = json!({ "api_version": 1, "resources": "/r", "user_data": "/u", "cache": "/c", "dictionaries": "/d", "preferences": preferences, "language_dictionaries": directory });
+    let options = serde_json::from_value::<HostOptions>(document.clone())
+        .expect("host options")
+        .into_engine_options();
+    assert_eq!(options.vietnamese_input_method, 1);
+    assert_eq!(options.vietnamese_tone_style, 1);
+    assert_eq!(
+        options.cantonese_dictionary,
+        directory.join("cantonese.db").to_str().unwrap()
+    );
+    assert_eq!(options.zhuyin_dictionary, "");
+    // Production passes `compiled_input_schemes()`, which offers the scheme or returns to the last Chinese one.
+    let expected = if compiled_input_schemes().contains(&InputScheme::Vietnamese) {
+        7
+    } else {
+        2
+    };
+    assert_eq!(options.scheme, expected);
+
+    // A document from before the field still loads, with no dictionaries and default Vietnamese settings.
+    let mut legacy = document;
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("language_dictionaries");
+    legacy["preferences"] = serde_json::to_value(Preferences {
+        scheme: InputScheme::Cantonese,
+        ..Preferences::default()
+    })
+    .unwrap();
+    let options = serde_json::from_value::<HostOptions>(legacy)
+        .expect("legacy host options")
+        .into_engine_options();
+    assert_eq!(options.cantonese_dictionary, "");
+    assert_eq!(options.zhuyin_dictionary, "");
+    assert_eq!(options.vietnamese_input_method, 0);
+    assert_eq!(options.vietnamese_tone_style, 0);
+    // Cantonese with no dictionary never reaches the Engine; the 全拼 helpcode comes with the fallback.
+    assert_eq!(options.scheme, 0);
+    assert_eq!(
+        options.helpcode,
+        Preferences::default().quanpin_helpcode.enabled
+    );
+}
+
+#[test]
+fn a_scheme_this_build_does_not_run_falls_back_and_says_why() {
+    let dir = tempfile::tempdir().unwrap();
+    let handle = test_host_preferences(
+        dir.path(),
+        Preferences {
+            scheme: InputScheme::Cantonese,
+            ..chinese_preferences()
+        },
+    );
+    // No dictionary is installed beside these resources, so the session runs 全拼.
+    SESSIONS.with(|sessions| assert_eq!(sessions.borrow()[&handle].options.scheme, 0));
+
+    let zhuyin = Preferences {
+        scheme: InputScheme::Zhuyin,
+        last_chinese_scheme: Some(msime_client_core::preferences::ChineseScheme::Wubi),
+        ..chinese_preferences()
+    };
+    let updated = update(handle, 1, &zhuyin);
+    assert_eq!(updated["ok"], true);
+    assert_eq!(updated["value"]["deferred"], false);
+    let diagnostic = updated["value"]["diagnostic"].as_str().unwrap();
+    assert!(diagnostic.contains("Zhuyin"), "{diagnostic}");
+    assert!(diagnostic.contains("Wubi"), "{diagnostic}");
+    SESSIONS.with(|sessions| assert_eq!(sessions.borrow()[&handle].options.scheme, 2));
+
+    // A scheme that runs reports nothing.
+    let quanpin = chinese_preferences();
+    let updated = update(handle, 2, &quanpin);
+    assert!(updated["value"].get("diagnostic").is_none());
+    read(msime_client_destroy(handle));
+}
+
+#[test]
 fn translation_queries_only_clear_chinese_candidates_for_the_network() {
     // A gloss model has nothing to say about a Latin letter, a digit or an emoji, and asking spends the
     // account's bounded quota to put noise under candidates that should carry no gloss. The flag gates the
