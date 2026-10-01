@@ -35,4 +35,9 @@ inline void prefer_online_glosses(
   }
 }
 
+// Whether a translation query is the `/fy` command's rather than a candidate gloss request: the command mode's query is one sentence, the English after the trigger, and its answer becomes the command's first row instead of a gloss. It goes to the translation service the user chose whatever the gloss switches say, never to an offline dictionary and never to another service, and its target language is the one the query names.
+inline bool command_translation_query(std::string_view local_mode, bool sentence) {
+  return local_mode == "command" && sentence;
+}
+
 } // namespace msime::linux_host

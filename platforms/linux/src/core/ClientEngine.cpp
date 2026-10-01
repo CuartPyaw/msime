@@ -310,6 +310,9 @@ struct State {
   bool private_input = false;
   // What the process's sound player was last told about background music; see sync_music.
   msime::linux_host::MusicActivity music;
+  // The combo count the session last answered msime_client_typing_effect with, shown at the end of the candidate aux line, and the key held down, so an auto-repeat is drawn but not counted.
+  uint32_t typing_combo = 0;
+  msime::linux_host::KeyRepeat key_repeat;
   guint preferences_timer = 0;
   bool preferences_loading = false;
   // IBus hide notifications can trail the next confirmed candidate update;
@@ -615,6 +618,9 @@ struct State {
     if (voice_active && session)
       msime_client_string_free(msime_client_voice_cancel(session));
     music.release(session, msime_client_music_set_active);
+    // The combo lives in the session; the next one starts from none.
+    typing_combo = 0;
+    key_repeat.reset();
     voice_active = false;
     voice_generation = 0;
     voice_preedit.clear();
@@ -1879,8 +1885,9 @@ void translation_dispatch(IBusEngine *engine) {
   auto &s = state(engine);
   const bool online_translation =
       s.candidate_translations && !s.translation_provider_socket.empty();
-  // Either switch can reach an offline gloss: English, or an installed non-English dictionary, which only the query below can name.
-  if (!(s.candidate_english_gloss || s.candidate_translations) ||
+  const auto local_mode = s.view.value("local_mode", std::string("none"));
+  // Either switch can reach an offline gloss: English, or an installed non-English dictionary, which only the query below can name. The command mode may hold /fy, whose query is asked for whatever they say.
+  if (!(s.candidate_english_gloss || s.candidate_translations || local_mode == "command") ||
       s.translation_loading || !s.session ||
       !s.focused || s.blocked || !s.input_enabled || s.private_input ||
       !s.view.value("candidates", Json::array()).size())
@@ -1888,6 +1895,25 @@ void translation_dispatch(IBusEngine *engine) {
   try {
     auto query = response(msime_client_translation_query(s.session));
     if (query.is_null() || !query.is_object()) return;
+    // /fy asks the selected service alone, in the query's own target language, and answers with a row rather than a gloss (CandidateTranslationPolicy.h): no offline dictionary, no other service, no gloss cache.
+    if (msime::linux_host::command_translation_query(local_mode,
+                                                     query.value("sentence", false))) {
+      if (s.translation_provider_socket.empty()) return;
+      auto texts = Json::array();
+      for (const auto &candidate : query.at("candidates"))
+        texts.push_back(candidate.at("text"));
+      query["candidates"] = std::move(texts);
+      const auto encoded = query.dump();
+      if (encoded == s.translation_dispatched_query) return;
+      s.translation_dispatched_query = encoded;
+      start_translation_task(engine, TranslationTask{
+          s.session, s.provider_epoch, encoded, s.translation_provider_socket,
+          configured.value("resources", std::string{}),
+          Json{{"generation", query.at("generation")}, {"candidates", Json::array()}}.dump(),
+          false, Json::array(), false});
+      return;
+    }
+    if (!(s.candidate_english_gloss || s.candidate_translations)) return;
     const auto &target = s.translation_target_language;
     const auto installed = query.value("offline_gloss_languages", Json::array());
     const bool dictionary = target != "en" && installed.is_array() &&
@@ -2015,8 +2041,9 @@ void translation_schedule(IBusEngine *engine) {
     s.translation_delay_source = 0;
     g_source_remove(source);
   }
-  // The same switches reach every gloss, offline or online; translation_dispatch decides which applies once it has the query.
-  if (!(s.candidate_english_gloss || s.candidate_translations) ||
+  // The same switches reach every gloss, offline or online; translation_dispatch decides which applies once it has the query. The command mode may hold /fy, which does not depend on them.
+  if (!(s.candidate_english_gloss || s.candidate_translations ||
+        s.view.value("local_mode", std::string("none")) == "command") ||
       !s.session || !s.focused || s.blocked || !s.input_enabled || s.private_input ||
       s.view.value("candidates", Json::array()).empty())
     return;
@@ -3421,6 +3448,32 @@ void underline_preedit(IBusText *text, guint length) {
                              IBUS_ATTR_UNDERLINE_SINGLE, 0,
                              static_cast<gint>(length));
 }
+// The aux line above a candidate page: the page number, the reading when the candidate preedit shows it, the local mode, and the typing combo while there is one.
+std::string candidate_aux_text(IBusEngine *engine, const Json &view) {
+  auto paging = std::to_string(view.at("page").get<size_t>() + 1) + "/" +
+                std::to_string(view.at("page_count").get<size_t>());
+  if (state(engine).candidate_preedit_style == "pinyin") {
+    const auto candidate_preedit = view.value("preedit", std::string{});
+    if (!candidate_preedit.empty()) {
+      paging += "  · ";
+      const auto editing_text = view.value("editing_text", std::string{});
+      const auto caret = view.value("caret_position", editing_text.size());
+      paging += msime::linux_host::candidate_preedit_with_caret(
+          candidate_preedit, editing_text, caret);
+    }
+  }
+  const auto mode = view.at("local_mode").get<std::string>();
+  if (const char *label = msime::linux_host::candidate_local_mode_label(mode)) {
+    paging += "  · ";
+    paging += label;
+  }
+  const auto combo = msime::linux_host::typing_combo_label(state(engine).typing_combo);
+  if (!combo.empty()) {
+    paging += "  · ";
+    paging += combo;
+  }
+  return paging;
+}
 void render(IBusEngine *engine, const Json &view) {
   cancel_candidate_hide(engine);
   // Engine caret offsets refer to ASCII editing_text, never the display
@@ -3513,25 +3566,8 @@ void render(IBusEngine *engine, const Json &view) {
       ibus_engine_hide_lookup_table(engine);
     return;
   }
-  auto paging = std::to_string(view.at("page").get<size_t>() + 1) + "/" +
-                std::to_string(view.at("page_count").get<size_t>());
-  if (state(engine).candidate_preedit_style == "pinyin") {
-    const auto candidate_preedit = view.value("preedit", std::string{});
-    if (!candidate_preedit.empty()) {
-      paging += "  · ";
-      const auto editing_text = view.value("editing_text", std::string{});
-      const auto caret = view.value("caret_position", editing_text.size());
-      paging += msime::linux_host::candidate_preedit_with_caret(
-          candidate_preedit, editing_text, caret);
-    }
-  }
-  const auto mode = view.at("local_mode").get<std::string>();
-  if (const char *label = msime::linux_host::candidate_local_mode_label(mode)) {
-    paging += "  · ";
-    paging += label;
-  }
   ibus_engine_update_auxiliary_text(
-      engine, ibus_text_new_from_string(paging.c_str()), TRUE);
+      engine, ibus_text_new_from_string(candidate_aux_text(engine, view).c_str()), TRUE);
   auto table = ibus_lookup_table_new(static_cast<guint>(candidates.size()), 0,
                                      TRUE, FALSE);
   ibus_lookup_table_set_orientation(table, state(engine).candidate_orientation);
@@ -3730,8 +3766,12 @@ bool apply(IBusEngine *engine, char *raw, PunctuationPairMode pair_mode,
       commit_text(engine, text, std::nullopt,
                   !context.is_object() || context.value("typing_statistics", true));
       // The key sound played when the key went down; this is the commit's own sound, or the next note of a melody that advances on commits. A transition only commits for a key or click in this focused, non-secure field.
-      if (!s.private_input)
+      if (!s.private_input) {
         msime_client_commit_sound(s.session);
+        // The commit counts nothing; it reports the combo as it stands, which is how one that lapsed while the user paused leaves the aux line drawn just below.
+        s.typing_combo = msime::linux_host::typing_effect_combo(
+            msime_client_typing_effect(s.session, msime::linux_host::kTypingEffectCommit));
+      }
       if (space_convert_ascii != 0 && !inserted_pair) {
         // Preserve Engine's actual half (notably opening/closing quotes).
         s.space_convert_mark = space_convert_mark;
@@ -4442,6 +4482,7 @@ void focus_out(IBusEngine *engine) {
     s.native_compose.reset();
     s.reset_mode_modifiers();
     s.backspace_hold.reset();
+    s.key_repeat.reset();
     s.ai_context.clear();
     s.invalidate_providers();
     s.surrounding_text.clear();
@@ -7580,15 +7621,30 @@ void destroy(IBusObject *object) {
 void play_key_sound(IBusEngine *engine, guint key, guint flags) {
   auto &s = state(engine);
   sync_music(engine);
+  const bool release = (flags & IBUS_RELEASE_MASK) != 0;
+  if (release)
+    s.key_repeat.release(key);
   if (!s.session || !s.focused || s.blocked || s.private_input || !s.input_enabled ||
       s.voice_active)
     return;
   const bool shortcut =
       (flags & (IBUS_CONTROL_MASK | IBUS_MOD1_MASK | IBUS_MOD4_MASK | IBUS_SUPER_MASK |
                 IBUS_META_MASK | IBUS_HYPER_MASK)) != 0;
-  if (msime::linux_host::key_press_sounds((flags & IBUS_RELEASE_MASK) != 0, modifier(key),
-                                          shortcut))
-    msime_client_key_sound(s.session, msime::linux_host::key_sound_class(key));
+  if (!msime::linux_host::key_press_sounds(release, modifier(key), shortcut))
+    return;
+  const auto key_class = msime::linux_host::key_sound_class(key);
+  msime_client_key_sound(s.session, key_class);
+  // The typing effect of the same press, from the same session: Linux shows only the combo count, in the candidate aux line. The key was rendered before this point, so a count that moved redraws that line alone, from the page the panel holds.
+  const auto combo = msime::linux_host::typing_effect_combo(msime_client_typing_effect(
+      s.session, key_class | (s.key_repeat.press(key) ? msime::linux_host::kTypingEffectRepeat : 0)));
+  if (combo == s.typing_combo)
+    return;
+  s.typing_combo = combo;
+  if (s.rendered_session == s.session && s.rendered_view.is_object() &&
+      s.rendered_candidates.is_array() && !s.rendered_candidates.empty())
+    ibus_engine_update_auxiliary_text(
+        engine, ibus_text_new_from_string(candidate_aux_text(engine, s.rendered_view).c_str()),
+        TRUE);
 }
 // Characters the IME hands back to the application are still typed text: Windows counts them in the statistics (ShouldCountPassthroughChar), so English-mode letters and Chinese-mode keys the Engine declines show up in the daily totals. Keys the IME consumed already recorded their committed text.
 gboolean process_key_and_count(IBusEngine *engine, guint key, guint keycode,

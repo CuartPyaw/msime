@@ -111,6 +111,18 @@ assert 'unicode_digit' not in ibus_source
 assert source.index('music_.release(session_') < source.index('msime_client_destroy(session_)')
 assert 'state->playKeySound(event);' in source
 assert 'play_key_sound(engine, key, flags);' in ibus_source
+# The typing effect is asked for at the same two points as the sounds, and Linux shows only its combo count: IBus at the end of the candidate aux line, Fcitx5 in the aux line below the page, never in setAuxUp, which the voice, emoji search and configuration notices own.
+for host in (source, ibus_source):
+    assert host.count('msime_client_typing_effect(') == 2
+    assert 'kTypingEffectCommit' in host and 'kTypingEffectRepeat' in host
+    assert 'typing_combo_label(' in host
+assert ibus_source.index('msime_client_key_sound(s.session, key_class)') < ibus_source.index('kTypingEffectRepeat')
+assert source.index('msime_client_key_sound(session_, keyClass)') < source.index('kTypingEffectRepeat')
+assert 'setAuxDown(fcitx::Text(candidateAux()))' in source
+assert 'setAuxUp(fcitx::Text(candidateAux()))' not in source
+# /fy's translation goes to the selected service whatever the gloss switches say, and never to an offline gloss.
+for host in (source, ibus_source):
+    assert 'command_translation_query(' in host
 assert ibus_source.index('music.release(session') < ibus_source.index('msime_client_destroy(session)')
 # Both hosts name the installed built-in sound packs, which the parent project installs.
 assert 'MSIME_SOUND_PACKS="${CMAKE_INSTALL_FULL_DATADIR}/msime-client/sound-packs"' in cmake_fcitx5

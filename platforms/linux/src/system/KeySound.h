@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace msime::linux_host {
 
@@ -24,6 +25,35 @@ constexpr std::uint32_t key_sound_class(std::uint32_t keysym) {
 constexpr bool key_press_sounds(bool release, bool modifier_key, bool shortcut) {
   return !release && !modifier_key && !shortcut;
 }
+
+// msime_client_typing_effect's events beyond the key classes above, and its flag for an auto-repeated key, which is drawn but not counted (msime_client.h).
+constexpr std::uint32_t kTypingEffectCommit = 4;
+constexpr std::uint32_t kTypingEffectRepeat = 0x100;
+
+// The combo count in a msime_client_typing_effect answer: its low 16 bits, zero while the combo counter is off or the call was refused.
+constexpr std::uint32_t typing_effect_combo(std::uint32_t answer) { return answer & 0xffffu; }
+
+// The combo as the Linux hosts show it, as one more segment of the candidate aux line; empty while there is none. Linux draws no flash or sparks: neither IBus nor Fcitx5 gives an input method a reliable place on screen for an overlay under Wayland, so the count in the text the panel already shows is the whole effect.
+inline std::string typing_combo_label(std::uint32_t combo) {
+  return combo == 0 ? std::string{} : "连击 ×" + std::to_string(combo);
+}
+
+// Whether a press is an auto-repeat of the key still held. Neither IBus nor Fcitx5 tells an input method that a press repeats, but both pass it releases, and where a held key arrives as more presses of the same keysym with no release between them (Wayland, and X11 clients with detectable auto-repeat, which GDK turns on) that is the repeat; where X11 sends a fake release before each repeat, a repeat counts as a press. A release lost to a focus change misreads at most the next press of that key, and reset() at focus out avoids even that.
+class KeyRepeat {
+public:
+  bool press(std::uint32_t keysym) {
+    const bool repeat = keysym == held_;
+    held_ = keysym;
+    return repeat;
+  }
+  void release(std::uint32_t keysym) {
+    if (keysym == held_) held_ = 0;
+  }
+  void reset() { held_ = 0; }
+
+private:
+  std::uint32_t held_ = 0;
+};
 
 // The host's half of msime_client_music_set_active. The player keeps the answer it was told last for the whole process, whichever session told it, so a host tells it only when the answer changes, and counts it told only once a call was accepted: a call made while no sound is switched on starts no player and is not remembered, so the next one repeats it once music is switched on.
 class MusicActivity {

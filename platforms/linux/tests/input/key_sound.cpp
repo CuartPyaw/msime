@@ -26,6 +26,31 @@ int main() {
   assert(!key_press_sounds(false, true, false));
   assert(!key_press_sounds(false, false, true));
 
+  // The typing effect: the combo is the answer's low 16 bits, shown only while there is one.
+  using msime::linux_host::KeyRepeat;
+  using msime::linux_host::typing_combo_label;
+  using msime::linux_host::typing_effect_combo;
+  assert(msime::linux_host::kTypingEffectCommit == 4);
+  assert(msime::linux_host::kTypingEffectRepeat == 0x100);
+  assert(typing_effect_combo(0) == 0);
+  assert(typing_effect_combo(0x0010000c) == 12);
+  assert(typing_effect_combo(0x0005ffff) == 65535);
+  assert(typing_combo_label(0).empty());
+  assert(typing_combo_label(12) == "连击 ×12");
+
+  // A press of the key still held is its auto-repeat; a release, another key or a reset ends that.
+  KeyRepeat repeat;
+  assert(!repeat.press('a'));
+  assert(repeat.press('a'));
+  assert(repeat.press('a'));
+  repeat.release('a');
+  assert(!repeat.press('a'));
+  assert(!repeat.press('b'));
+  repeat.release('a');
+  assert(repeat.press('b'));
+  repeat.reset();
+  assert(!repeat.press('b'));
+
   // Music: the player hears only changes, and only through a live session.
   std::vector<std::pair<std::uint64_t, bool>> calls;
   bool accept = true;
