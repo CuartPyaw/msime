@@ -20,7 +20,8 @@ public final class AndroidAccountSessionStorage implements BackendAccount.Sessio
     private static final String KEY_CIPHERTEXT = "ciphertext";
     private static final int IV_BYTES = 12;
     private static final int GCM_TAG_BITS = 128;
-    private final SharedPreferences preferences;
+    private final Context application;
+    private final String preferencesName;
     private final String keyAlias;
 
     public AndroidAccountSessionStorage(Context context) {
@@ -32,13 +33,15 @@ public final class AndroidAccountSessionStorage implements BackendAccount.Sessio
         if (preferencesName == null || !preferencesName.matches("[a-zA-Z0-9_.-]{1,80}")) {
             throw new IllegalArgumentException("secure_storage");
         }
-        preferences = application.getSharedPreferences(preferencesName, Context.MODE_PRIVATE);
+        this.application = application;
+        this.preferencesName = preferencesName;
         keyAlias = preferencesName.equals(PREFERENCES_NAME)
             ? application.getPackageName() + ".account.session.v1"
             : application.getPackageName() + "." + preferencesName + ".key";
     }
 
     public synchronized String load() throws Exception {
+        SharedPreferences preferences = preferences();
         String encodedIv = preferences.getString(KEY_IV, null);
         String encodedCiphertext = preferences.getString(KEY_CIPHERTEXT, null);
         if (encodedIv == null && encodedCiphertext == null) return null;
@@ -66,7 +69,7 @@ public final class AndroidAccountSessionStorage implements BackendAccount.Sessio
         byte[] iv = cipher.getIV();
         if (iv == null || iv.length != IV_BYTES) throw new IllegalStateException("secure_storage");
         byte[] ciphertext = cipher.doFinal(plaintext);
-        boolean committed = preferences.edit()
+        boolean committed = preferences().edit()
             .putString(KEY_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
             .putString(KEY_CIPHERTEXT, Base64.encodeToString(ciphertext, Base64.NO_WRAP))
             .commit();
@@ -74,7 +77,17 @@ public final class AndroidAccountSessionStorage implements BackendAccount.Sessio
     }
 
     public synchronized void clear() throws Exception {
-        if (!preferences.edit().clear().commit()) throw new IllegalStateException("secure_storage");
+        if (!preferences().edit().clear().commit()) throw new IllegalStateException("secure_storage");
+    }
+
+    /**
+     * The session document, re-read from disk when another process has replaced it.
+     *
+     * <p>The settings app and the isolated `:ime` keyboard process both hold this session. A plain `MODE_PRIVATE` handle is loaded once per process and never re-read, so a keyboard that first looked while signed out stayed signed out after the user signed in in the app, and after one process refreshed the session the other kept presenting the refresh token that refresh had replaced. `MODE_MULTI_PROCESS` makes each lookup compare the file with what this process loaded and reload it when it changed; every write here is a synchronous `commit`, so the file is current when the other process looks.
+     */
+    @SuppressWarnings("deprecation")
+    private SharedPreferences preferences() {
+        return application.getSharedPreferences(preferencesName, Context.MODE_MULTI_PROCESS);
     }
 
     private SecretKey loadKey() throws Exception {
