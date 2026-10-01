@@ -119,6 +119,15 @@ export function withoutRemovedPack(
       phrase_tables: preferences.phrase_tables.filter((table) => table !== id),
     };
   }
+  if (kind === "helpcode") {
+    return {
+      ...preferences,
+      helpcode_pack_quanpin:
+        preferences.helpcode_pack_quanpin === id ? "" : preferences.helpcode_pack_quanpin,
+      helpcode_pack_shuangpin:
+        preferences.helpcode_pack_shuangpin === id ? "" : preferences.helpcode_pack_shuangpin,
+    };
+  }
   if (kind === "effect") {
     return preferences.effect_pack === id ? { ...preferences, effect_pack: "" } : preferences;
   }
@@ -169,5 +178,12 @@ export function withPackSelected(
       return preferences.phrase_tables.includes(pack.id)
         ? preferences
         : { ...preferences, phrase_tables: [...preferences.phrase_tables, pack.id] };
+    // 辅助码表包可以分别用于全拼和双拼；整体选中时两个方案都用它。
+    case "helpcode":
+      return {
+        ...preferences,
+        helpcode_pack_quanpin: pack.id,
+        helpcode_pack_shuangpin: pack.id,
+      };
   }
 }

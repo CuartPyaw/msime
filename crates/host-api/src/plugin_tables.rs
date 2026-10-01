@@ -1,12 +1,15 @@
-//! 从插件目录读进 Engine 选项的表：`/` 模式的指令表、K 模式的短语表和 `@` 模式的名单。
+//! 从插件目录读进 Engine 选项的表：`/` 模式的指令表、K 模式的短语表、当前方案选中的辅助码表和 `@` 模式的名单。
 //!
-//! 它们都是设置页在输入进程运行期间写的文件：导入的指令表包、短语表包和 `mentions.json`。 A session remembers the modification time and length of every file it read, checks them again when a field gains focus and when preferences are applied, and reads the files only when something moved. Nothing is read for a mode that is switched off.
+//! 它们都是设置页在输入进程运行期间写的文件：导入的指令表包、短语表包、辅助码表包和 `mentions.json`。 A session remembers the modification time and length of every file it read, checks them again when a field gains focus and when preferences are applied, and reads the files only when something moved. Nothing is read for a mode that is switched off.
 
 use msime_client_core::plugins::{
-    command_table, kind_directory, mentions, phrase_table, PluginKind, MANIFEST_FILE,
+    command_table, helpcode_pack, kind_directory, mentions, phrase_table, PluginKind, MANIFEST_FILE,
 };
 use msime_client_core::preferences::PluginPreferences;
-use msime_engine::host::{CommandTableEntry, EngineOptions, MentionEntry, QuickPhraseEntry};
+use msime_engine::host::{
+    CommandTableEntry, EngineOptions, HelpcodeKeymap, MentionEntry, QuickPhraseEntry, SharedKeymap,
+};
+use msime_engine::SchemeType;
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -18,6 +21,24 @@ fn stamp(path: &Path) -> FileStamp {
     Some((metadata.modified().ok(), metadata.len()))
 }
 
+/// 包目录里每个文件的名字和戳，按名字排序：数据文件的名字写在清单里，盖整个目录的戳就不必先读清单。目录不在时为空。
+fn directory_stamp(directory: &Path) -> Vec<(String, FileStamp)> {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let mut stamps: Vec<_> = entries
+        .flatten()
+        .map(|entry| {
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                stamp(&entry.path()),
+            )
+        })
+        .collect();
+    stamps.sort();
+    stamps
+}
+
 /// The files a session's Engine options were filled from.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PluginTables {
@@ -27,6 +48,8 @@ pub(crate) struct PluginTables {
     mentions: Option<FileStamp>,
     /// K 模式打开时，启用的短语表 id 与各自清单的戳。
     phrases: Option<Vec<(String, FileStamp)>>,
+    /// 辅助码打开、当前方案是全拼或双拼并选了辅助码表包时，包 id 与包目录的戳。
+    helpcode: Option<(String, Vec<(String, FileStamp)>)>,
 }
 
 impl PluginTables {
@@ -56,7 +79,27 @@ impl PluginTables {
             phrases: options
                 .local_quick_phrase
                 .then(|| manifests(PluginKind::PhraseTable, &plugins.phrase_tables)),
+            helpcode: Self::helpcode_pack(options, plugins).map(|id| {
+                let directory = kind_directory(root, PluginKind::Helpcode).join(id);
+                (id.to_owned(), directory_stamp(&directory))
+            }),
         }
+    }
+
+    /// 当前方案选中的辅助码表包：只有全拼和双拼有辅助码，辅助码关闭时不读包。
+    fn helpcode_pack<'a>(
+        options: &EngineOptions,
+        plugins: &'a PluginPreferences,
+    ) -> Option<&'a str> {
+        if !options.helpcode {
+            return None;
+        }
+        let pack = match SchemeType::from_u8(options.scheme)? {
+            SchemeType::Quanpin => &plugins.helpcode_pack_quanpin,
+            SchemeType::Shuangpin => &plugins.helpcode_pack_shuangpin,
+            _ => return None,
+        };
+        (!pack.is_empty()).then_some(pack.as_str())
     }
 
     pub(crate) fn commands_differ(&self, previous: &Self) -> bool {
@@ -69,6 +112,19 @@ impl PluginTables {
 
     pub(crate) fn phrases_differ(&self, previous: &Self) -> bool {
         self.phrases != previous.phrases
+    }
+
+    pub(crate) fn helpcode_differs(&self, previous: &Self) -> bool {
+        self.helpcode != previous.helpcode
+    }
+
+    /// 选中的辅助码表包的码表；没选包，或包载入失败时为 `None`，Engine 于是退回方案原来的 `schema`，设置页把这个包报告为未找到。
+    pub(crate) fn helpcode_table(&self, root: Option<&Path>) -> Option<SharedKeymap> {
+        let (Some(root), Some((id, _))) = (root, &self.helpcode) else {
+            return None;
+        };
+        let codes = helpcode_pack::load_codes(root, id).ok()?;
+        Some(std::sync::Arc::new(HelpcodeKeymap::from_codes(codes)))
     }
 
     /// 启用的短语表合并后的行；K 模式关闭时为空。
@@ -138,6 +194,9 @@ impl PluginTables {
         }
         if self.phrases_differ(previous) {
             options.quick_phrase_table = self.quick_phrase_table(root);
+        }
+        if self.helpcode_differs(previous) {
+            options.helpcode_table = self.helpcode_table(root);
         }
     }
 }

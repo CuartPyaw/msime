@@ -1340,3 +1340,57 @@ test("an enabled phrase table that is gone is listed as missing and can be dropp
     ).phrase_tables,
   ).toEqual(["b"]);
 });
+
+test("a helpcode pack shows its preview and is used per scheme", async () => {
+  const client = fakeClient({
+    catalog: vi.fn(async () => ({
+      packages: [
+        ...catalog.packages,
+        pack({
+          id: "radicals",
+          kind: "helpcode",
+          name: "部首码",
+          table: "table.txt",
+          entries: 3000,
+          preview: [
+            { character: "一", code: "yi" },
+            { character: "丁", code: "di" },
+          ],
+        }),
+      ],
+      issues: [],
+    })),
+  });
+  const onOpenPage = vi.fn();
+  const { onChange } = renderSection(
+    { client, helpcode: true, onOpenPage },
+    { ...defaultPluginPreferences, helpcode_pack_shuangpin: "radicals" },
+  );
+  const list = await screen.findByLabelText("已安装的插件");
+  expect(within(list).getByRole("button", { name: "部首码" }).textContent).toContain("用于双拼");
+  await openPack("部首码");
+  expect(screen.getByText("辅助码表")).toBeTruthy();
+  expect(screen.getByText("辅助码（3000 个字）")).toBeTruthy();
+  expect(screen.getByText("只显示前 2 个字。")).toBeTruthy();
+  fireEvent.click(screen.getByRole("switch", { name: "用于全拼" }));
+  expect(onChange).toHaveBeenLastCalledWith({
+    ...defaultPluginPreferences,
+    helpcode_pack_quanpin: "radicals",
+    helpcode_pack_shuangpin: "radicals",
+  });
+  fireEvent.click(screen.getByRole("switch", { name: "用于双拼" }));
+  expect(onChange).toHaveBeenLastCalledWith(defaultPluginPreferences);
+  fireEvent.click(screen.getByRole("button", { name: "前往辅助码设置" }));
+  expect(onOpenPage).toHaveBeenCalledWith("input");
+  expect(
+    withoutRemovedPack(
+      {
+        ...defaultPluginPreferences,
+        helpcode_pack_quanpin: "radicals",
+        helpcode_pack_shuangpin: "b",
+      },
+      "helpcode",
+      "radicals",
+    ),
+  ).toEqual({ ...defaultPluginPreferences, helpcode_pack_shuangpin: "b" });
+});

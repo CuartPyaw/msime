@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use crate::helpcode::SharedKeymap;
 use crate::paths::RuntimePaths;
 use crate::types::{
     CandidateSource, CommandTableEntry, EnglishInputOptions, FrequencyAdjustmentOptions,
@@ -28,6 +29,8 @@ pub struct SessionOptions {
     /// Where `zhuyin.db` is; empty when the host has none. Read only when Zhuyin is activated, which fails without it.
     pub zhuyin_dictionary: PathBuf,
     pub helpcode_schema: String,
+    /// 宿主给的辅助码表；有它时直接装上它，不再按 `helpcode_schema` 读表（名字仍然要合法）。`Session::set_helpcode_table` 可以实时替换。
+    pub helpcode_table: Option<SharedKeymap>,
     /// `autocorrect_type` bits; 0 keeps the user's spelling. Either of transposition and neighbor also enables missing and extra letters, and on inputs of three or more complete syllables offers a sentence that reads one syllable as a typo. Committing the raw letters while a correction is offered turns correction off for that exact input.
     pub autocorrect_types: u32,
     pub helpcode: bool,
@@ -70,6 +73,7 @@ impl SessionOptions {
             cantonese_dictionary: PathBuf::new(),
             zhuyin_dictionary: PathBuf::new(),
             helpcode_schema: "lantian".to_owned(),
+            helpcode_table: None,
             autocorrect_types: 0,
             helpcode: true,
             chinese_punctuation: true,

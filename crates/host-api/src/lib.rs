@@ -383,6 +383,11 @@ impl HostSession {
         options.local_expression = snapshot.preferences.local_modes.expression;
         options.local_command = snapshot.preferences.local_modes.command;
         options.local_mention = snapshot.preferences.local_modes.mention;
+        // 先定下辅助码设置：插件表的戳要看当前方案的辅助码是否打开、选了哪个辅助码表包。
+        let helpcode = helpcode_for_scheme(&snapshot.preferences, scheme);
+        options.helpcode = helpcode.enabled;
+        options.show_helpcode = helpcode.show_in_candidate_window;
+        options.helpcode_schema = helpcode.schema.as_str().into();
         let plugin_root = self.plugin_roots.installed.as_deref();
         let plugin_tables = plugin_tables::PluginTables::stamp(
             plugin_root,
@@ -398,10 +403,6 @@ impl HostSession {
         // better than the one it makes when it searches without alternatives.
         options.sentence_alternatives = true;
         apply_local_mode_resource_gates(&mut options);
-        let helpcode = helpcode_for_scheme(&snapshot.preferences, scheme);
-        options.helpcode = helpcode.enabled;
-        options.show_helpcode = helpcode.show_in_candidate_window;
-        options.helpcode_schema = helpcode.schema.as_str().into();
         options.paired_punctuation = snapshot.preferences.paired_punctuation;
         options.punctuation_lock = punctuation_lock_code(snapshot.preferences.punctuation_lock);
         options.chinese_punctuation = engine_chinese_punctuation(
@@ -473,7 +474,7 @@ impl HostSession {
         Ok(fallback)
     }
 
-    /// 输入框获得焦点时，让 `/` 指令表、K 模式短语表和 `@` 名单跟上插件目录：设置页可能刚导入了表或改了名单。没有文件变动时什么都不读。
+    /// 输入框获得焦点时，让 `/` 指令表、K 模式短语表、辅助码表和 `@` 名单跟上插件目录：设置页可能刚导入了表或改了名单。没有文件变动时什么都不读。
     fn refresh_plugin_tables(&mut self) -> Result<(), String> {
         let root = self.plugin_roots.installed.as_deref();
         let tables = plugin_tables::PluginTables::stamp(root, &self.options, &self.applied.plugins);
@@ -497,6 +498,13 @@ impl HostSession {
                 .set_quick_phrase_table(&table)
                 .map_err(|e| e.to_string())?;
             self.options.quick_phrase_table = table;
+        }
+        if tables.helpcode_differs(&self.plugin_tables) {
+            let table = tables.helpcode_table(root);
+            self.runtime
+                .set_helpcode_table(table.clone())
+                .map_err(|e| e.to_string())?;
+            self.options.helpcode_table = table;
         }
         self.plugin_tables = tables;
         Ok(())
@@ -807,6 +815,7 @@ impl HostOptions {
             command_table: Vec::new(),
             mention_entries: Vec::new(),
             quick_phrase_table: Vec::new(),
+            helpcode_table: None,
             sentence_association: engine_sentence_association(
                 &self.preferences.sentence_association,
             ),

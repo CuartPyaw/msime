@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::assets;
 use crate::diagnostics;
 use crate::error::{EngineError, Result};
+use crate::helpcode::SharedKeymap;
 use crate::paths::RuntimePaths;
 use crate::session::SessionOptions;
 use crate::types::{
@@ -42,6 +43,8 @@ pub struct EngineOptions {
     /// Display only: filtering stays on while annotations are hidden.
     pub show_helpcode: bool,
     pub helpcode_schema: String,
+    /// 宿主给的辅助码表（已安装的辅助码表插件）；有它时 Engine 直接用它，`helpcode_schema` 只用来校验和作为回退。
+    pub helpcode_table: Option<SharedKeymap>,
     pub chinese_punctuation: bool,
     pub paired_punctuation: bool,
     pub punctuation_lock: u8,
@@ -117,6 +120,7 @@ pub fn prepare_options(
         helpcode: true,
         show_helpcode: true,
         helpcode_schema: "ziranma".to_owned(),
+        helpcode_table: None,
         chinese_punctuation: true,
         paired_punctuation: true,
         punctuation_lock: 0,
@@ -195,6 +199,7 @@ pub fn session_options(options: &EngineOptions) -> Result<SessionOptions> {
     session.punctuation_lock = i32::from(options.punctuation_lock);
     session.helpcode = options.helpcode;
     session.helpcode_schema = options.helpcode_schema.clone();
+    session.helpcode_table = options.helpcode_table.clone();
     session.frequency = FrequencyAdjustmentOptions {
         mode,
         trigger_count: i32::from(options.frequency_trigger_count),

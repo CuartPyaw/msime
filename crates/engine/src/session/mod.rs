@@ -228,6 +228,11 @@ impl Session {
         self.input.set_helpcode_schema(schema)
     }
 
+    /// 换上宿主给的辅助码表，替换当前的表；全拼和双拼都用它。
+    pub fn set_helpcode_table(&mut self, table: crate::helpcode::SharedKeymap) {
+        self.input.set_helpcode_table(table);
+    }
+
     /// Quanpin and shuangpin together, as `SessionOptions::helpcode` does.
     pub fn set_helpcode_enabled(&mut self, enabled: bool) {
         self.input.set_helpcode_enabled(enabled);

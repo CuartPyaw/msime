@@ -439,7 +439,11 @@ import type { PluginClient } from "./settings/plugins-section";
 import type { PluginPreferences } from "./settings/plugin-preferences";
 import { AboutSettingsPage } from "./settings/pages/about-page";
 import { HelpcodeSettingsPage } from "./settings/pages/helpcode-page";
-import type { CustomHelpcodeSchema, HelpcodePreferences } from "./settings/pages/helpcode-page";
+import type {
+  CustomHelpcodeSchema,
+  HelpcodePackOption,
+  HelpcodePreferences,
+} from "./settings/pages/helpcode-page";
 import type { ClipboardHistoryClient } from "./settings/clipboard-history-section";
 import type { CloudClipboardRequest } from "./settings/cloud-clipboard-send";
 import { type FuzzyPinyinPreferences } from "./settings/fuzzy-pinyin-section";
@@ -581,6 +585,7 @@ export { SettingsStartupPage } from "./settings/settings-startup-page";
 export {
   HelpcodeSettingsPage,
   type CustomHelpcodeSchema,
+  type HelpcodePackOption,
   type HelpcodePreferences,
   type HelpcodeSchema,
   type HelpcodeSettings,
@@ -2850,6 +2855,29 @@ export function SettingsPage(props: SettingsPageProps) {
   const { onReplayOnboarding } = props;
   const model = useSettingsPageModel(props);
   const [customHelpcodeSchemas, setCustomHelpcodeSchemas] = useState<CustomHelpcodeSchema[]>([]);
+  // 已安装的辅助码表插件，每次进入「输入」页时重读，在别处导入或删除的包下次进来就能看到。
+  const [helpcodePacks, setHelpcodePacks] = useState<HelpcodePackOption[]>([]);
+  const pluginCatalog = props.client.plugins?.catalog;
+  const inputPageOpen = model.page === "input";
+  useEffect(() => {
+    if (!pluginCatalog || !inputPageOpen) return;
+    let active = true;
+    void pluginCatalog()
+      .then((catalog) => {
+        if (!active) return;
+        setHelpcodePacks(
+          catalog.packages
+            .filter((pack) => pack.kind === "helpcode")
+            .map((pack) => ({ id: pack.id, name: pack.name })),
+        );
+      })
+      .catch(() => {
+        if (active) setHelpcodePacks([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [pluginCatalog, inputPageOpen]);
   // The 插件 page shows either the installed packs (a page of the settings form) or the community gallery, which has its own search form and so is drawn outside the settings one.
   const [pluginView, setPluginView] = useState<"mine" | "community">("mine");
   useEffect(() => {
@@ -3318,6 +3346,7 @@ export function SettingsPage(props: SettingsPageProps) {
                   <HelpcodeSettingsPage
                     value={draft}
                     customSchemas={customHelpcodeSchemas}
+                    packs={helpcodePacks}
                     mobile={mobilePlatform}
                     showShiftEntry={model.showHelpcodeShiftEntry}
                     disabled={busy}

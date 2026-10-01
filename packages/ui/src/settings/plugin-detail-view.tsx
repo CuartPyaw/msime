@@ -51,6 +51,8 @@ export interface PluginDetailViewProps {
   effectPacks: boolean;
   /** 快捷短语（K 模式）是否打开：`local_modes.quick_phrase`。 */
   quickPhraseMode: boolean;
+  /** 宿主使用辅助码（设置里有辅助码这一组）。 */
+  helpcode: boolean;
   working: boolean;
   onChange: (preferences: PluginPreferences) => void;
   onCommandTable: (id: string, enabled: boolean) => void;
@@ -70,6 +72,7 @@ export function PluginDetailView({
   triggers,
   effectPacks,
   quickPhraseMode,
+  helpcode,
   working,
   onChange,
   onCommandTable,
@@ -100,6 +103,7 @@ export function PluginDetailView({
           triggers={triggers}
           effectPacks={effectPacks}
           quickPhraseMode={quickPhraseMode}
+          helpcode={helpcode}
           onSelect={select}
           onChange={onChange}
           onCommandTable={onCommandTable}
@@ -126,8 +130,21 @@ export function PluginDetailView({
   );
 }
 
-/** 各类型自己的内容：音乐包的曲目、指令表的指令、特效包的样式和参数、短语表的行数与前几行。 */
+/** 各类型自己的内容：音乐包的曲目、指令表的指令、特效包的样式和参数、短语表的行数与前几行、辅助码表的条数与前几条。 */
 function PackContent({ pack }: { pack: PluginPackage }) {
+  if (pack.kind === "helpcode") {
+    const preview = pack.preview ?? [];
+    return (
+      <GroupList title={`辅助码（${pack.entries ?? preview.length} 个字）`}>
+        {preview.map((entry) => (
+          <Row key={entry.character} title={entry.character} description={entry.code} />
+        ))}
+        {(pack.entries ?? 0) > preview.length && (
+          <p className={settings.groupNote}>只显示前 {preview.length} 个字。</p>
+        )}
+      </GroupList>
+    );
+  }
   if (pack.kind === "phrase_table") {
     const phrases = pack.phrases ?? [];
     const shown = phrases.slice(0, PHRASE_PREVIEW_ROWS);
@@ -205,6 +222,7 @@ function PackActions({
   triggers,
   effectPacks,
   quickPhraseMode,
+  helpcode,
   onSelect,
   onChange,
   onCommandTable,
@@ -218,6 +236,7 @@ function PackActions({
   triggers: boolean;
   effectPacks: boolean;
   quickPhraseMode: boolean;
+  helpcode: boolean;
   onSelect: () => void;
   onChange: (preferences: PluginPreferences) => void;
   onCommandTable: (id: string, enabled: boolean) => void;
@@ -324,6 +343,34 @@ function PackActions({
         </Row>
       );
     }
+    case "helpcode": {
+      if (!helpcode) return <ActionBlock note="这台设备不使用辅助码。" />;
+      const toggle = (key: "helpcode_pack_quanpin" | "helpcode_pack_shuangpin", on: boolean) =>
+        onChange({ ...preferences, [key]: on ? pack.id : "" });
+      return (
+        <>
+          <Row title="用于全拼" description="替换全拼的辅助码方案；关闭后回到原来的方案。">
+            <Switch
+              checked={preferences.helpcode_pack_quanpin === pack.id}
+              onChange={(on) => toggle("helpcode_pack_quanpin", on)}
+            />
+          </Row>
+          <Row title="用于双拼" description="替换双拼的辅助码方案；关闭后回到原来的方案。">
+            <Switch
+              checked={preferences.helpcode_pack_shuangpin === pack.id}
+              onChange={(on) => toggle("helpcode_pack_shuangpin", on)}
+            />
+          </Row>
+          {onOpenPage && (
+            <ActionBlock note="辅助码的开关和显示方式在「输入 → 辅助码」里。">
+              <button type="button" className="secondary" onClick={() => onOpenPage("input")}>
+                前往辅助码设置
+              </button>
+            </ActionBlock>
+          )}
+        </>
+      );
+    }
     case "phrase_table": {
       if (!triggers) return <ActionBlock note="这台设备不支持快捷短语插件。" />;
       const position = preferences.phrase_tables.indexOf(pack.id);
@@ -379,7 +426,9 @@ export function MissingPluginView({
       ? "改回默认"
       : entry.kind === "command_table" || entry.kind === "phrase_table"
         ? "移除"
-        : "不再使用";
+        : entry.kind === "helpcode"
+          ? "改回原来的方案"
+          : "不再使用";
   const note = entry.mismatched
     ? `设置里${entry.uses.join("、")}是「${entry.id}」，${missingReason(entry)}。可以${action}，或者在「我的插件」里打开另一个${label}。`
     : `设置里${entry.uses.join("、")}是「${entry.id}」，但这个${label}已不在本机，可能被删除或无法载入。可以重新导入它，或者${action}。`;

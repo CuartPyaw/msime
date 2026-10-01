@@ -1553,14 +1553,103 @@ fn fixture_packs() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/plugin-packs")
 }
 
-/// 每个 invalid fixture 被拒绝的原因。
+/// 每个 invalid fixture 被拒绝的原因（原因文本的一部分）。
 const FIXTURE_REFUSALS: &[(&str, &str)] = &[
+    (
+        "helpcode-ascii-char",
+        "table.txt 第 1 行的字不能是 ASCII、空白或控制字符",
+    ),
+    (
+        "helpcode-bad-file-name",
+        "helpcode.table 的文件名 ../table.txt 无效",
+    ),
+    (
+        "helpcode-blank-line-with-space",
+        "table.txt 第 2 行不是「字=码」",
+    ),
+    (
+        "helpcode-control-char",
+        "table.txt 第 1 行的字不能是 ASCII、空白或控制字符",
+    ),
+    (
+        "helpcode-digit-code",
+        "table.txt 第 1 行的码必须是 1 到 2 个小写字母",
+    ),
+    (
+        "helpcode-duplicate-char",
+        "table.txt 里「啊」出现了不止一次",
+    ),
+    (
+        "helpcode-empty-code",
+        "table.txt 第 1 行的码必须是 1 到 2 个小写字母",
+    ),
+    ("helpcode-empty-file", "table.txt 为空或太大"),
+    ("helpcode-invalid-utf8", "table.txt 不是 UTF-8 编码"),
+    (
+        "helpcode-leading-space",
+        "table.txt 第 1 行等号左边必须恰好是一个字",
+    ),
+    (
+        "helpcode-lone-cr",
+        "table.txt 第 1 行的码必须是 1 到 2 个小写字母",
+    ),
+    ("helpcode-missing-file", "缺少数据文件 table.txt"),
+    ("helpcode-missing-table-key", "helpcode.table 必须是字符串"),
+    (
+        "helpcode-no-char",
+        "table.txt 第 1 行等号左边必须恰好是一个字",
+    ),
+    ("helpcode-no-equals", "table.txt 第 1 行不是「字=码」"),
+    ("helpcode-only-comments", "table.txt 里没有任何辅助码"),
+    (
+        "helpcode-space-after-equals",
+        "table.txt 第 1 行的码必须是 1 到 2 个小写字母",
+    ),
+    (
+        "helpcode-space-before-equals",
+        "table.txt 第 1 行等号左边必须恰好是一个字",
+    ),
+    (
+        "helpcode-three-letter-code",
+        "table.txt 第 1 行的码必须是 1 到 2 个小写字母",
+    ),
+    (
+        "helpcode-trailing-space",
+        "table.txt 第 1 行的码必须是 1 到 2 个小写字母",
+    ),
+    (
+        "helpcode-two-chars",
+        "table.txt 第 1 行等号左边必须恰好是一个字",
+    ),
+    ("helpcode-unknown-key", "helpcode 里有未知的键 schema"),
+    (
+        "helpcode-uppercase-code",
+        "table.txt 第 1 行的码必须是 1 到 2 个小写字母",
+    ),
+    (
+        "helpcode-whitespace-char",
+        "table.txt 第 1 行的字不能是 ASCII、空白或控制字符",
+    ),
+    ("helpcode-wrong-extension", "table.tsv 的扩展名必须是 .txt"),
     ("phrase_table-blank-text", "短语 dh 的文本为空或太长"),
+    (
+        "phrase_table-digit-key",
+        "短语编码 d1 必须是 1 到 32 个小写字母",
+    ),
     ("phrase_table-duplicate", "短语 dh 的「电话」重复了"),
     ("phrase_table-empty", "短语表的条数不在允许范围内"),
-    ("phrase_table-long-key", "必须是 1 到 32 个小写字母"),
+    (
+        "phrase_table-empty-key",
+        "短语编码  必须是 1 到 32 个小写字母",
+    ),
+    ("phrase_table-empty-text", "短语 dh 的文本为空或太长"),
+    (
+        "phrase_table-long-key",
+        "短语编码 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 必须是 1 到 32 个小写字母",
+    ),
     ("phrase_table-long-text", "短语 dh 的文本为空或太长"),
     ("phrase_table-missing", "短语表缺少 phrases"),
+    ("phrase_table-missing-text", "每条短语都需要 text"),
     (
         "phrase_table-newline-in-text",
         "短语 dh 的文本含有换行、制表符等控制字符",
@@ -1592,12 +1681,18 @@ const FIXTURE_REFUSALS: &[(&str, &str)] = &[
     ),
 ];
 
+/// `group` 下的 fixture，按名字排序；类型前缀还不是已知插件类型的跳过（实现那种类型之前）。
 fn fixture_cases(group: &str) -> Vec<(String, PathBuf)> {
     let mut cases: Vec<_> = fs::read_dir(fixture_packs().join(group))
         .unwrap()
         .map(|entry| {
             let entry = entry.unwrap();
             (entry.file_name().into_string().unwrap(), entry.path())
+        })
+        .filter(|(case, _)| {
+            case.split_once('-')
+                .and_then(|(kind, _)| PluginKind::parse(kind))
+                .is_some()
         })
         .collect();
     cases.sort();
@@ -1612,13 +1707,34 @@ fn shared_fixture_packs_are_accepted_and_refused_as_listed() {
         assert_eq!(summary.kind().as_str(), kind, "{case}");
     }
     let invalid = fixture_cases("invalid");
+    let mut report = String::new();
+    for (case, path) in &invalid {
+        let actual = match validate(path) {
+            Err(PluginError::Invalid(actual)) => actual,
+            other => format!("NOT REFUSED AS INVALID: {other:?}"),
+        };
+        report.push_str(&format!("    (\"{case}\", \"{actual}\"),\n"));
+    }
     let names: Vec<&str> = invalid.iter().map(|(case, _)| case.as_str()).collect();
-    let listed: Vec<&str> = FIXTURE_REFUSALS.iter().map(|(case, _)| *case).collect();
+    let listed: Vec<&str> = FIXTURE_REFUSALS
+        .iter()
+        .map(|(case, _)| *case)
+        .filter(|case| {
+            case.split_once('-')
+                .and_then(|(kind, _)| PluginKind::parse(kind))
+                .is_some()
+        })
+        .collect();
     assert_eq!(
         names, listed,
-        "每个 invalid fixture 都要在 FIXTURE_REFUSALS 里写明原因"
+        "每个 invalid fixture 都要在 FIXTURE_REFUSALS 里写明原因：\n{report}"
     );
-    for ((case, path), (_, reason)) in invalid.iter().zip(FIXTURE_REFUSALS) {
+    for (case, path) in &invalid {
+        let reason = FIXTURE_REFUSALS
+            .iter()
+            .find(|(listed, _)| listed == case)
+            .unwrap()
+            .1;
         match validate(path) {
             Err(PluginError::Invalid(actual)) => {
                 assert!(actual.contains(reason), "{case}: {actual}")
@@ -1677,4 +1793,73 @@ fn phrase_tables_hold_bounded_rows_and_merge_in_priority_order() {
     let json = serde_json::to_value(&summary).unwrap();
     assert_eq!(json["kind"], "phrase_table");
     assert_eq!(json["phrases"][1]["text"], "邮箱");
+}
+
+fn installed_helpcode(root: &Path, id: &str, table: &[u8]) -> PathBuf {
+    let pack = kind_directory(root, PluginKind::Helpcode).join(id);
+    fs::create_dir_all(&pack).unwrap();
+    fs::write(
+        pack.join(MANIFEST_FILE),
+        format!("schema_version = 1\nkind = 'helpcode'\nid = '{id}'\nname = '部首码'\nversion = '1'\nlicense = 'CC0-1.0'\n[helpcode]\ntable = 'table.txt'\n"),
+    )
+    .unwrap();
+    fs::write(pack.join("table.txt"), table).unwrap();
+    pack
+}
+
+/// 从 U+4E00 起连续 `count` 个汉字，每个一条 `字=码`。
+fn helpcode_lines(count: u32) -> Vec<u8> {
+    (0..count)
+        .map(|index| format!("{}=ab\n", char::from_u32(0x4E00 + index).unwrap()))
+        .collect::<String>()
+        .into_bytes()
+}
+
+#[test]
+fn helpcode_tables_are_bounded_and_load_as_codes() {
+    let root = tempdir().unwrap();
+    installed_helpcode(root.path(), "full", &helpcode_lines(30_000));
+    installed_helpcode(root.path(), "over", &helpcode_lines(30_001));
+    let full = load_package(root.path(), None, PluginKind::Helpcode, "full").unwrap();
+    let json = serde_json::to_value(&full).unwrap();
+    assert_eq!(json["kind"], "helpcode");
+    assert_eq!(json["table"], "table.txt");
+    assert_eq!(json["entries"], 30_000);
+    assert_eq!(
+        json["preview"].as_array().unwrap().len(),
+        helpcode_pack::PREVIEW_ENTRIES
+    );
+    assert_eq!(
+        json["preview"][0],
+        serde_json::json!({"character": "一", "code": "ab"})
+    );
+    assert_eq!(
+        reason(root.path(), PluginKind::Helpcode, "over"),
+        "table.txt 的条数超过 30000"
+    );
+
+    // 1 MiB 以内可以，多一个字节就不行。
+    let mut large = b"# ".to_vec();
+    large.resize(helpcode_pack::MAX_TABLE_BYTES as usize - 6, b'x');
+    large.extend_from_slice("\n啊=a".as_bytes());
+    assert_eq!(large.len() as u64, helpcode_pack::MAX_TABLE_BYTES);
+    installed_helpcode(root.path(), "large", &large);
+    assert!(load_package(root.path(), None, PluginKind::Helpcode, "large").is_ok());
+    large.push(b'\n');
+    installed_helpcode(root.path(), "larger", &large);
+    assert_eq!(
+        reason(root.path(), PluginKind::Helpcode, "larger"),
+        "table.txt 为空或太大"
+    );
+
+    installed_helpcode(
+        root.path(),
+        "small",
+        "\u{FEFF}# 注释\r\n你=ni\r\n好=h\r\n".as_bytes(),
+    );
+    let codes = helpcode_pack::load_codes(root.path(), "small").unwrap();
+    assert_eq!(codes.len(), 2);
+    assert_eq!(codes["你"], "ni");
+    assert_eq!(codes["好"], "h");
+    assert!(helpcode_pack::load_codes(root.path(), "missing").is_err());
 }

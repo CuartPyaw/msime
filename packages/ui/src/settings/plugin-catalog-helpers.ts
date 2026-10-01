@@ -8,6 +8,7 @@ export const kindLabels: Record<PluginKind, string> = {
   command_table: "指令表",
   effect: "特效包",
   phrase_table: "短语表",
+  helpcode: "辅助码表",
 };
 
 /** 按键旋律（`mode = "sequence"` 的音效包）的类型显示名。 */
@@ -27,6 +28,7 @@ export const kindOrder: readonly PluginKind[] = [
   "music",
   "command_table",
   "phrase_table",
+  "helpcode",
 ];
 
 export const effectStyleOptions: readonly { value: EffectStyle; label: string }[] = [
@@ -135,7 +137,18 @@ export function packMarker(
       const position = preferences.phrase_tables.indexOf(pack.id);
       return position >= 0 ? `已启用 · 第 ${position + 1} 位` : null;
     }
+    case "helpcode":
+      return helpcodePackUses(preferences, pack.id);
   }
+}
+
+/** 辅助码表包用在哪个方案上：「用于全拼」「用于双拼」「用于全拼和双拼」，都没用时为 null。 */
+export function helpcodePackUses(preferences: PluginPreferences, id: string): string | null {
+  const schemes = [
+    preferences.helpcode_pack_quanpin === id ? "全拼" : null,
+    preferences.helpcode_pack_shuangpin === id ? "双拼" : null,
+  ].filter(Boolean);
+  return schemes.length > 0 ? `用于${schemes.join("和")}` : null;
 }
 
 /** A selection naming a pack the catalog does not have, and what it is selected as. `mismatched` is set when a sound pack by that id is installed but in the other mode (a melody named as the key-sound pack, or the reverse), so it cannot be played the way it is selected. */
@@ -167,6 +180,8 @@ export function missingSelections(
   add("music", preferences.music.pack, "当前音乐包");
   for (const id of preferences.command_tables) add("command_table", id, "已启用的指令表");
   for (const id of preferences.phrase_tables) add("phrase_table", id, "已启用的短语表");
+  add("helpcode", preferences.helpcode_pack_quanpin, "全拼辅助码");
+  add("helpcode", preferences.helpcode_pack_shuangpin, "双拼辅助码");
   return missing;
 }
 

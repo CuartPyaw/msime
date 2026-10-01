@@ -10,6 +10,7 @@ pub mod command_table;
 pub mod community;
 pub mod effect_pack;
 mod failure;
+pub mod helpcode_pack;
 mod import;
 pub mod mentions;
 pub mod music_pack;
@@ -84,15 +85,18 @@ pub enum PluginKind {
     Effect,
     /// K 模式的短语：编码和文本，全部写在清单里。
     PhraseTable,
+    /// 辅助码表：一个 `.txt` 数据文件，替换全拼或双拼方案的辅助码。
+    Helpcode,
 }
 
 impl PluginKind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Sound,
         Self::Music,
         Self::CommandTable,
         Self::Effect,
         Self::PhraseTable,
+        Self::Helpcode,
     ];
 
     /// The manifest's `kind` and the directory under the plugins root.
@@ -103,6 +107,7 @@ impl PluginKind {
             Self::CommandTable => "command_table",
             Self::Effect => "effect",
             Self::PhraseTable => "phrase_table",
+            Self::Helpcode => "helpcode",
         }
     }
 
@@ -116,7 +121,10 @@ pub fn is_builtin(kind: PluginKind, id: &str) -> bool {
     match kind {
         PluginKind::Sound => BUILTIN_SOUND_PACKS.contains(&id),
         PluginKind::Music => BUILTIN_MUSIC_PACKS.contains(&id),
-        PluginKind::CommandTable | PluginKind::Effect | PluginKind::PhraseTable => false,
+        PluginKind::CommandTable
+        | PluginKind::Effect
+        | PluginKind::PhraseTable
+        | PluginKind::Helpcode => false,
     }
 }
 
@@ -179,6 +187,7 @@ impl PluginSummary {
             PluginContent::CommandTable(_) => PluginKind::CommandTable,
             PluginContent::Effect(_) => PluginKind::Effect,
             PluginContent::PhraseTable(_) => PluginKind::PhraseTable,
+            PluginContent::Helpcode(_) => PluginKind::Helpcode,
         }
     }
 }
@@ -191,6 +200,7 @@ pub enum PluginContent {
     CommandTable(command_table::CommandTable),
     Effect(effect_pack::EffectPack),
     PhraseTable(phrase_table::PhraseTable),
+    Helpcode(helpcode_pack::HelpcodePack),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -429,6 +439,7 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
         PluginKind::CommandTable => &command_table::MANIFEST_KEYS,
         PluginKind::Effect => &effect_pack::MANIFEST_KEYS,
         PluginKind::PhraseTable => &phrase_table::MANIFEST_KEYS,
+        PluginKind::Helpcode => &helpcode_pack::MANIFEST_KEYS,
     };
     if let Some(key) = table
         .keys()
@@ -436,6 +447,7 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
     {
         return Err(format!("plugin.toml 里有未知的键 {key}"));
     }
+    let mut data: Vec<DataFile> = Vec::new();
     let (content, audio, limits) = match kind {
         PluginKind::Sound => {
             let pack = sound_pack::parse(table)?;
@@ -462,9 +474,32 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
             Vec::new(),
             AudioLimits::NONE,
         ),
+        PluginKind::Helpcode => {
+            // 码表内容要等文件检查过之后再读，这里先占位，下面换成解析结果。
+            let name = helpcode_pack::parse(table)?;
+            data.push(DataFile {
+                name: name.clone(),
+                max_bytes: helpcode_pack::MAX_TABLE_BYTES,
+                extension: helpcode_pack::TABLE_EXTENSION,
+            });
+            (
+                PluginContent::Helpcode(helpcode_pack::HelpcodePack {
+                    table: name,
+                    entries: 0,
+                    preview: Vec::new(),
+                }),
+                Vec::new(),
+                AudioLimits::NONE,
+            )
+        }
     };
-    let data: Vec<DataFile> = Vec::new();
     check_files(directory, &files, &audio, limits, &data)?;
+    let content = match content {
+        PluginContent::Helpcode(pack) => {
+            PluginContent::Helpcode(helpcode_pack::read(directory, &pack.table)?)
+        }
+        other => other,
+    };
     Ok(PluginSummary {
         id,
         name,
@@ -548,6 +583,18 @@ pub(crate) fn valid_file_name(name: &str) -> bool {
             .is_some_and(u8::is_ascii_alphanumeric)
         && crate::skin::catalog::safe_resource(name, 64)
         && !name.contains('/')
+}
+
+/// 数据文件按行切开：整个文件必须是 UTF-8（开头可以有 BOM），按 `\n` 分行，每行去掉一个行尾的 `\r`；其余位置的 `\r` 和别的控制字符一样留给各类型的行规则拒绝。返回从 1 开始的行号和行内容。
+pub(crate) fn data_lines<'a>(bytes: &'a [u8], name: &str) -> Result<Vec<(usize, &'a str)>, String> {
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    let text = std::str::from_utf8(bytes).map_err(|_| format!("{name} 不是 UTF-8 编码"))?;
+    Ok(text
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .enumerate()
+        .map(|(index, line)| (index + 1, line))
+        .collect())
 }
 
 /// The lower-case extension of a file name.

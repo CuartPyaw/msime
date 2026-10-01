@@ -126,10 +126,13 @@ impl Session {
         let profile = shuangpin_profile(options)?;
         // The engine loads its own copy for filtering; this one only annotates, and exists only while helpcode is on (bridge.cpp:431-435).
         let helpcode_keymap = if options.helpcode {
-            Some(Arc::new(load_helpcode_keymap(
-                Path::new(&options.resources),
-                &options.helpcode_schema,
-            )?))
+            match &options.helpcode_table {
+                Some(table) => Some(table.clone()),
+                None => Some(Arc::new(load_helpcode_keymap(
+                    Path::new(&options.resources),
+                    &options.helpcode_schema,
+                )?)),
+            }
         } else {
             None
         };
@@ -280,6 +283,23 @@ impl Session {
             Some(diagnostic) => Err(EngineError::failed(&diagnostic)),
             None => Ok(()),
         }
+    }
+
+    /// 实时替换宿主给的辅助码表（辅助码表插件）；`None` 回到 `helpcode_schema` 对应的表。重建的会话从 `EngineOptions::helpcode_table` 开始。
+    pub fn set_helpcode_table(&mut self, table: Option<SharedKeymap>) -> Result<()> {
+        let keymap = match &table {
+            Some(table) => table.clone(),
+            None => Arc::new(load_helpcode_keymap(
+                Path::new(&self.options.resources),
+                &self.options.helpcode_schema,
+            )?),
+        };
+        self.inner.set_helpcode_table(keymap.clone());
+        if self.helpcode_enabled {
+            self.helpcode_keymap = Some(keymap);
+        }
+        self.options.helpcode_table = table;
+        Ok(())
     }
 
     /// 实时替换 K 模式的宿主短语表；重建的会话从 `EngineOptions::quick_phrase_table` 开始。

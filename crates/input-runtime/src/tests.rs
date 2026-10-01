@@ -2986,6 +2986,7 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine::host::EngineOpti
         command_table: Vec::new(),
         mention_entries: Vec::new(),
         quick_phrase_table: Vec::new(),
+        helpcode_table: None,
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,

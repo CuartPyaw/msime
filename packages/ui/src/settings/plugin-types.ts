@@ -1,9 +1,18 @@
 import type { EffectStyle } from "./plugin-preferences";
 
 /** Mirrors `client-core::plugins::PluginKind`. */
-export type PluginKind = "sound" | "music" | "command_table" | "effect" | "phrase_table";
+export type PluginKind =
+  | "sound"
+  | "music"
+  | "command_table"
+  | "effect"
+  | "phrase_table"
+  | "helpcode";
 
 export type PluginCommand = { trigger: string; title: string; template: string };
+
+/** 辅助码表的一条：`client-core::plugins::helpcode_pack::HelpcodeEntry`。 */
+export type PluginHelpcodeEntry = { character: string; code: string };
 
 /** 短语表的一行：`client-core::plugins::phrase_table::PhraseRow`。 */
 export type PluginPhrase = { key: string; text: string };
@@ -27,6 +36,10 @@ export type PluginPackage = {
   commands?: PluginCommand[];
   /** 短语表。 */
   phrases?: PluginPhrase[];
+  /** 辅助码表：码表文件名、条数和前几条。 */
+  table?: string;
+  entries?: number;
+  preview?: PluginHelpcodeEntry[];
   /** Effect packs: `client-core::plugins::effect_pack::EffectPack`, never `off`. */
   style?: EffectStyle;
   intensity?: number;

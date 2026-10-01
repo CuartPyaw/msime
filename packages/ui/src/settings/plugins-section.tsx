@@ -24,6 +24,7 @@ export type {
   PluginCommand,
   PluginIssue,
   PluginKind,
+  PluginHelpcodeEntry,
   PluginPackage,
   PluginPhrase,
   PluginSettingsPage,
@@ -49,6 +50,8 @@ export interface PluginsSectionProps {
   effectPacks?: boolean;
   /** 快捷短语（K 模式）是否打开：`local_modes.quick_phrase`；关闭时短语表详情提示去打开。 */
   quickPhraseMode?: boolean;
+  /** 宿主使用辅助码（设置里显示辅助码这一组）；辅助码表包只在这时标记和报告缺失。 */
+  helpcode?: boolean;
   /** 打开设置里的另一页（输入、背单词）；没有时详情里不显示这些链接。 */
   onOpenPage?: (page: PluginSettingsPage) => void;
   /** Loads the catalog and the name list each time this turns true, so a pack copied in by hand shows up on the next visit. Turning false also closes any open view, so the next visit starts at the list. */
@@ -84,6 +87,7 @@ export function PluginsSection({
   effectStyles = false,
   effectPacks = false,
   quickPhraseMode = true,
+  helpcode = false,
   onOpenPage,
   active,
   onChange,
@@ -190,6 +194,7 @@ export function PluginsSection({
     ...(music ? (["music"] as const) : []),
     ...(triggers ? (["command_table", "phrase_table"] as const) : []),
     ...(effectPacksDrawn ? (["effect"] as const) : []),
+    ...(helpcode ? (["helpcode"] as const) : []),
   ]);
   // Selections naming a pack that is gone, for each kind the host acts on, listed so they can be dropped.
   const missing = packsListed ? missingSelections(preferences, catalog.packages, actedKinds) : [];
@@ -318,6 +323,7 @@ export function PluginsSection({
             triggers={triggers}
             effectPacks={effectPacksDrawn}
             quickPhraseMode={quickPhraseMode}
+            helpcode={helpcode}
             working={working}
             onChange={onChange}
             onCommandTable={setCommandTable}

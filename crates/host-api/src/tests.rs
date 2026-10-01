@@ -243,6 +243,7 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         command_table: Vec::new(),
         mention_entries: Vec::new(),
         quick_phrase_table: Vec::new(),
+        helpcode_table: None,
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
@@ -7836,6 +7837,64 @@ fn phrase_tables_reach_the_quick_phrase_mode_from_the_plugins_directory() {
             .quick_phrase_table
             .is_empty());
     });
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+fn install_helpcode_pack(root: &std::path::Path, id: &str, table: &str) {
+    let pack = root.join("state/plugins/helpcode").join(id);
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        format!("schema_version = 1\nkind = \"helpcode\"\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n[helpcode]\ntable = \"table.txt\"\n"),
+    )
+    .unwrap();
+    std::fs::write(pack.join("table.txt"), table).unwrap();
+}
+
+/// 会话里 Engine 选项的辅助码表：没有时为 None，有时给出「你」的码。
+fn session_helpcode(handle: u64) -> Option<String> {
+    SESSIONS.with(|sessions| {
+        sessions.borrow()[&handle]
+            .options
+            .helpcode_table
+            .as_ref()
+            .map(|table| table.code("你").unwrap_or_default().to_owned())
+    })
+}
+
+/// 当前方案选中的辅助码表包替换方案原来的表；包被重新导入时获得焦点就跟上，包不见了就退回方案原来的表；换到另一个方案用那个方案自己的选择。
+#[test]
+fn the_selected_helpcode_pack_replaces_the_scheme_table() {
+    let dir = tempfile::tempdir().unwrap();
+    install_helpcode_pack(dir.path(), "radicals", "你=ab\n");
+    let mut preferences = chinese_preferences();
+    preferences.scheme = msime_client_core::preferences::InputScheme::Quanpin;
+    preferences.plugins.helpcode_pack_quanpin = "radicals".into();
+    let handle = plugin_host(dir.path(), preferences.clone());
+    assert_eq!(session_helpcode(handle).as_deref(), Some("ab"));
+
+    install_helpcode_pack(dir.path(), "radicals", "你=cd\n好=ef\n");
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    assert_eq!(session_helpcode(handle).as_deref(), Some("cd"));
+
+    // 包不见了：退回方案原来的表，会话照常可用。
+    std::fs::remove_dir_all(dir.path().join("state/plugins/helpcode/radicals")).unwrap();
+    assert_eq!(read(msime_client_focus(handle, false))["ok"], true);
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    assert_eq!(session_helpcode(handle), None);
+
+    // 双拼没有选包，用双拼方案自己的表；关掉全拼辅助码时不读包。
+    install_helpcode_pack(dir.path(), "radicals", "你=gh\n");
+    preferences.scheme = msime_client_core::preferences::InputScheme::Shuangpin;
+    assert_eq!(update(handle, 1, &preferences)["value"]["deferred"], false);
+    assert_eq!(session_helpcode(handle), None);
+    preferences.scheme = msime_client_core::preferences::InputScheme::Quanpin;
+    preferences.quanpin_helpcode.enabled = false;
+    assert_eq!(update(handle, 2, &preferences)["value"]["deferred"], false);
+    assert_eq!(session_helpcode(handle), None);
+    preferences.quanpin_helpcode.enabled = true;
+    assert_eq!(update(handle, 3, &preferences)["value"]["deferred"], false);
+    assert_eq!(session_helpcode(handle).as_deref(), Some("gh"));
     assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }
 

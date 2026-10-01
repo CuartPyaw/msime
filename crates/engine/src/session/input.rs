@@ -174,7 +174,11 @@ impl InputSession {
             return Err(EngineError::invalid(diagnostics::INVALID_SESSION_OPTIONS));
         }
         // A missing custom table passes the name check; its load error (`UNKNOWN_HELPCODE_SCHEMA`) is what the caller sees.
-        session.install_helpcode_keymap(&options.helpcode_schema)?;
+        match &options.helpcode_table {
+            // 宿主给了表（辅助码表插件）就直接用它，不读 schema 对应的文件。
+            Some(table) => session.install_helpcode_table(table.clone()),
+            None => session.install_helpcode_keymap(&options.helpcode_schema)?,
+        }
         session.frequency = options.frequency;
         session.english_options = options.english;
         session.set_local_mode_options(options.local_modes);
@@ -954,6 +958,11 @@ impl InputSession {
         self.install_helpcode_keymap(schema).is_ok()
     }
 
+    /// 换上宿主给的辅助码表（辅助码表插件），替换当前的表。
+    pub fn set_helpcode_table(&mut self, table: SharedKeymap) {
+        self.install_helpcode_table(table);
+    }
+
     pub fn set_helpcode_enabled(&mut self, enabled: bool) {
         self.set_quanpin_helpcode_enabled(enabled);
         self.set_shuangpin_helpcode_enabled(enabled);
@@ -1155,10 +1164,14 @@ impl InputSession {
 
     fn install_helpcode_keymap(&mut self, schema: &str) -> Result<()> {
         let keymap = Arc::new(load_helpcode_keymap(&self.paths.resources, schema)?);
+        self.install_helpcode_table(keymap);
+        Ok(())
+    }
+
+    fn install_helpcode_table(&mut self, keymap: SharedKeymap) {
         self.helpcode_keymap = Some(keymap.clone());
         self.engine.set_helpcode_keymap(Some(keymap));
         self.update_mixed_candidates();
-        Ok(())
     }
 
     fn set_autocorrect_types(&mut self, types: u32) {

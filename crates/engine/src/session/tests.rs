@@ -3425,3 +3425,32 @@ INSERT INTO quick_parases VALUES('dh','电话',10);",
     assert_eq!(session.set_quick_phrase_table(&[]), None);
     assert_eq!(words(&session), ["电话"]);
 }
+
+/// 宿主给的辅助码表替换 schema 对应的表，也可以在会话中途换掉。
+#[test]
+fn a_host_helpcode_table_replaces_the_schema_table() {
+    let fixture = isolation_root("你", "甲");
+    let table = |pairs: &[(&str, &str)]| {
+        std::sync::Arc::new(crate::helpcode::HelpcodeKeymap::from_codes(
+            pairs
+                .iter()
+                .map(|(character, code)| ((*character).to_owned(), (*code).to_owned()))
+                .collect(),
+        ))
+    };
+    // schema 的表里 你=aa、拟=cc，所以 niC 把「拟」排到前面。
+    let mut plain = fixture.session();
+    type_text(&mut plain, "niC");
+    assert_eq!(words(&plain), ["拟", "你"]);
+
+    let mut session = fixture.session_with(|options| {
+        options.helpcode_table = Some(table(&[("你", "cc"), ("拟", "aa")]));
+    });
+    type_text(&mut session, "niC");
+    assert_eq!(words(&session), ["你", "拟"]);
+    session.command(Command::Cancel);
+
+    session.set_helpcode_table(table(&[("你", "aa"), ("拟", "cc")]));
+    type_text(&mut session, "niC");
+    assert_eq!(words(&session), ["拟", "你"]);
+}

@@ -79,6 +79,10 @@ pub trait InputEngine {
     fn set_command_table(&mut self, _table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
         Ok(())
     }
+    /// 替换宿主给的辅助码表；`None` 回到方案自己的表。没有辅助码的引擎忽略它。
+    fn set_helpcode_table(&mut self, _table: Option<SharedKeymap>) -> Result<(), RuntimeError> {
+        Ok(())
+    }
     /// 替换 K 模式的宿主短语表。没有这个模式的引擎忽略它。
     fn set_quick_phrase_table(&mut self, _table: &[QuickPhraseEntry]) -> Result<(), RuntimeError> {
         Ok(())
@@ -248,6 +252,9 @@ impl InputEngine for Session {
     fn set_quick_phrase_table(&mut self, table: &[QuickPhraseEntry]) -> Result<(), RuntimeError> {
         Session::set_quick_phrase_table(self, table)
             .map_err(|e| RuntimeError::Engine(e.to_string()))
+    }
+    fn set_helpcode_table(&mut self, table: Option<SharedKeymap>) -> Result<(), RuntimeError> {
+        Session::set_helpcode_table(self, table).map_err(|e| RuntimeError::Engine(e.to_string()))
     }
     fn set_mention_entries(&mut self, entries: &[MentionEntry]) -> Result<(), RuntimeError> {
         Session::set_mention_entries(self, entries).map_err(|e| RuntimeError::Engine(e.to_string()))

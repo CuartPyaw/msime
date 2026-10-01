@@ -53,6 +53,7 @@ fn options(root: &Path) -> EngineOptions {
         command_table: Vec::new(),
         mention_entries: Vec::new(),
         quick_phrase_table: Vec::new(),
+        helpcode_table: None,
         sentence_association: SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
