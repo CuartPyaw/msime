@@ -145,6 +145,9 @@ impl DictionarySnapshotQueue {
     }
 
     fn existing_root(&self) -> Result<Option<PathBuf>, SnapshotQueueError> {
+        if let Some(parent) = self.directory.parent() {
+            crate::storage::reject_symlink(parent).map_err(|_| SnapshotQueueError::Unavailable)?;
+        }
         let metadata = match fs::symlink_metadata(&self.directory) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -613,6 +616,23 @@ mod tests {
             Err(SnapshotQueueError::Unavailable | SnapshotQueueError::Invalid)
         ));
         assert!(!target.path().join(STATE_NAME).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_symlinked_queue_ancestor_when_reading_existing_state() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let queue_root = target.path().join("queue");
+        fs::create_dir(&queue_root).unwrap();
+        fs::write(queue_root.join(STATE_NAME), br#"{"version":1}"#).unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let linked_parent = parent.path().join("state");
+        symlink(target.path(), &linked_parent).unwrap();
+
+        let queue = DictionarySnapshotQueue::new(linked_parent.join("queue")).unwrap();
+        assert!(matches!(queue.read(), Err(SnapshotQueueError::Unavailable)));
     }
 
     #[test]
