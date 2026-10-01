@@ -306,12 +306,17 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
   async function deliverDictionaryExport(
     name: string,
     body: string,
+    generation = clientGeneration.current,
   ): Promise<string | null | undefined> {
-    if (client.saveExport) {
+    const isCurrent = () => mounted.current && generation === clientGeneration.current;
+    if (!isCurrent()) return undefined;
+    const saveExport = client.saveExport;
+    if (saveExport) {
       let path: string | null;
       try {
-        path = await client.saveExport(name, body);
+        path = await saveExport(name, body);
       } catch (error) {
+        if (!isCurrent()) return undefined;
         // A host that knows why its own save failed (the Harmony save picker) says so in an Error; anything else is the macOS Downloads write.
         setPhraseNotice("");
         setPhraseError(
@@ -321,6 +326,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
         );
         return undefined;
       }
+      if (!isCurrent()) return undefined;
       // A host with a save picker resolves null when the user closes it, which is neither a failure nor an export.
       if (path === null) {
         setPhraseNotice("已取消导出。");
@@ -328,6 +334,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
       }
       return path;
     }
+    if (!isCurrent()) return undefined;
     const url = URL.createObjectURL(new Blob([body], { type: "text/plain;charset=utf-8" }));
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -340,12 +347,13 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
   async function exportPhrases() {
     const dictionary = client.dictionary;
     if (!dictionary) return;
+    const generation = clientGeneration.current;
     if (dictionaryFormat === "hans") {
       setPhraseError("汉字自动注音格式仅支持导入。");
       return;
     }
     await runPhraseAction(
-      async () => {
+      async (isCurrent) => {
         let text = "";
         if (dictionary.export) {
           let offset = 0;
@@ -371,6 +379,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
             )
             .join("\n");
         }
+        if (!isCurrent()) return;
         const payload = dictionaryExportPayload(dictionaryKind, dictionaryFormat, text);
         if (!payload.rows) {
           setPhraseError("当前没有可导出的用户新增词条。");
@@ -379,8 +388,9 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
         const path = await deliverDictionaryExport(
           dictionaryExportName(dictionaryKind),
           payload.body,
+          generation,
         );
-        if (path === undefined) return;
+        if (path === undefined || !isCurrent()) return;
         setPhraseNotice(
           path === null
             ? `已导出 ${payload.rows} 条用户词条。`
@@ -394,18 +404,24 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
   async function exportAllPhrases() {
     const dictionary = client.dictionary;
     if (!dictionary) return;
+    const generation = clientGeneration.current;
     await runPhraseAction(
-      async () => {
+      async (isCurrent) => {
         setPhraseNotice("正在读取全部用户词库…");
         const payload = personalDictionaryExportPayload(
           await loadAllPersonalDictionaryEntries(dictionary),
         );
+        if (!isCurrent()) return;
         if (!payload.rows) {
           setPhraseNotice("当前没有可导出的用户词条。");
           return;
         }
-        const path = await deliverDictionaryExport(personalDictionaryExportName(), payload.body);
-        if (path === undefined) return;
+        const path = await deliverDictionaryExport(
+          personalDictionaryExportName(),
+          payload.body,
+          generation,
+        );
+        if (path === undefined || !isCurrent()) return;
         setPhraseNotice(
           path === null
             ? `已导出全部 ${payload.rows} 条用户词条。`
