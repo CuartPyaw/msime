@@ -685,16 +685,18 @@ export function CommunityResourcesPage({
   const [selected, setSelected] = useState<CommunityResource | null>(null);
   const [editing, setEditing] = useState(false);
   const generation = useRef(0);
-  const load = async (append = false) => {
+  const activeSearch = useRef("");
+  const load = async (append = false, query = activeSearch.current) => {
     const current = ++generation.current;
     setBusy(true);
     setError("");
     const offset = append ? items.length : 0;
     try {
-      const page = await client.list(kind, scope, search, offset);
+      const page = await client.list(kind, scope, query, offset);
       if (current !== generation.current) return;
       setItems((value) => (append ? appendUniqueById(value, page.items) : page.items));
       setMore(page.has_more);
+      if (!append) activeSearch.current = query;
     } catch (loadError) {
       if (current === generation.current) {
         setError(resourceMessage(loadError));
@@ -753,7 +755,7 @@ export function CommunityResourcesPage({
         label={`搜索${resourceKindTitle(kind)}`}
         value={search}
         onChange={setSearch}
-        onSubmit={() => void load()}
+        onSubmit={() => void load(false, search)}
       />
       <div className={style.heading}>
         <div className={style.headingBody}>
