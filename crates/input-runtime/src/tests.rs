@@ -4594,3 +4594,295 @@ fn a_busy_provider_keeps_only_the_newest_completed_result() {
     assert!(worker.try_recv().is_none());
     worker.shutdown();
 }
+
+/// The scheme predicates the runtime reads give, for every existing scheme, exactly what the ordinal comparisons they replaced gave.
+#[test]
+fn scheme_predicates_reproduce_the_ordinal_rules_they_replace() {
+    use super::runtime::{runtime_reorders_candidates, script_conversion};
+    use msime_engine::SchemeType;
+    for ordinal in 0..=4u8 {
+        let scheme = SchemeType::from_u8(ordinal).unwrap();
+        // Smart punctuation: neither Japanese nor Korean.
+        assert_eq!(
+            scheme.host_smart_punctuation(),
+            ordinal != 3 && ordinal != KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        // Nine-key: quanpin only.
+        assert_eq!(scheme.nine_key(), ordinal == 0, "{ordinal}");
+        // Phrase holding, reranking and runner-up demotion: everything but Korean.
+        assert_eq!(
+            scheme.holds_phrase_progress(),
+            ordinal != KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        assert_eq!(
+            runtime_reorders_candidates(ordinal),
+            ordinal != KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        // Committing on blur and the double Cancel of an open list: Korean only.
+        assert_eq!(
+            scheme.commits_on_blur(),
+            ordinal == KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        assert_eq!(
+            scheme.has_openable_candidate_list(),
+            ordinal == KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        // The cloud gate refused Korean; Wubi never had a query the Engine called eligible.
+        assert_eq!(
+            scheme.cloud_eligible(),
+            ordinal != 2 && ordinal != KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        // Only the schemes that open local modes listed idle spelling symbols (`/`, `@`).
+        assert_eq!(scheme.opens_local_modes(), ordinal <= 1, "{ordinal}");
+        assert_eq!(
+            script_conversion(ordinal, "none"),
+            ordinal <= 2,
+            "{ordinal}"
+        );
+    }
+    // The placeholder snapshot of a failed refresh names no scheme and keeps the treatment the ordinal comparisons gave it.
+    assert!(runtime_reorders_candidates(255));
+    assert!(!script_conversion(255, "none"));
+
+    // The cloud gate reads the predicate: a Wubi query claiming eligibility is refused like a Korean one, and so is a query naming no scheme.
+    let query = |scheme: u8| OnlineQuery {
+        scheme,
+        generation: 1,
+        identity: "x".into(),
+        query_text: "ni".into(),
+        cache_key: "x".into(),
+        pinyin_segments: vec![],
+        cloud_eligible: true,
+        ai_eligible: false,
+        cloud_candidates: true,
+        session_id: 1,
+        ai_context: String::new(),
+        ai_assistant: None,
+        ai_cache_only: false,
+    };
+    for scheme in [0, 1, 3] {
+        assert!(cloud_request_url(&query(scheme)).is_some(), "{scheme}");
+    }
+    for scheme in [2, KOREAN_SCHEME, 255] {
+        assert!(cloud_request_url(&query(scheme)).is_none(), "{scheme}");
+    }
+}
+
+fn scheme_runtime(scheme: u8, local_mode: &str) -> Runtime<Fixture> {
+    let mut runtime = Runtime::new(
+        Fixture {
+            scheme,
+            local_mode: local_mode.into(),
+            words: vec!["甲".into(), "乙".into()],
+            ..Fixture::default()
+        },
+        5,
+    )
+    .unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+/// `chinese_text`, `script_conversion` and `candidate_list_open` for the existing schemes, and the host-facing checks that now read predicates.
+#[test]
+fn views_carry_the_scheme_traits_of_existing_schemes() {
+    for scheme in 0..=4u8 {
+        let mut runtime = scheme_runtime(scheme, "none");
+        let view = runtime.view();
+        assert_eq!(view.chinese_text, scheme <= 2, "{scheme}");
+        assert_eq!(view.script_conversion, scheme <= 2, "{scheme}");
+        assert!(!view.candidate_list_open, "{scheme}");
+        assert_eq!(
+            runtime.punctuation_host_context_available(false),
+            scheme <= 2,
+            "{scheme}"
+        );
+        assert!(!runtime.punctuation_host_context_available(true));
+        assert_eq!(
+            matches!(
+                runtime.set_nine_key_enabled(true),
+                Err(RuntimeError::InvalidNineKeyScheme)
+            ),
+            scheme != 0,
+            "{scheme}"
+        );
+        if scheme == 0 {
+            runtime.set_nine_key_enabled(false).unwrap();
+        }
+
+        type_key(&mut runtime);
+        let committed = runtime.dispatch(Action::SelectHighlighted).unwrap();
+        assert_eq!(committed.commit.as_deref(), Some("甲"));
+        let context = committed.commit_context.unwrap();
+        assert_eq!(context.scheme, scheme);
+        assert_eq!(context.script_conversion, scheme <= 2, "{scheme}");
+    }
+}
+
+/// A Chinese scheme's text is not converted inside the modes whose text is not Chinese, and a commit carries the mode it was made in even when committing leaves that mode.
+#[test]
+fn script_conversion_stays_off_in_unicode_and_temporary_japanese_modes() {
+    for local_mode in ["unicode", "temporary_japanese"] {
+        let mut runtime = scheme_runtime(0, local_mode);
+        let typed = type_key(&mut runtime);
+        assert!(typed.view.chinese_text);
+        assert!(!typed.view.script_conversion, "{local_mode}");
+        let committed = runtime.dispatch(Action::SelectHighlighted).unwrap();
+        assert!(
+            !committed.commit_context.unwrap().script_conversion,
+            "{local_mode}"
+        );
+        // Selecting returned the fixture to no local mode.
+        assert!(committed.view.script_conversion);
+    }
+    let typed = type_key(&mut scheme_runtime(0, "emoji"));
+    assert!(typed.view.script_conversion);
+}
+
+/// The view reports an open Hanja list from the Engine rather than leaving hosts to infer it, and discarding the composition with the list open still takes two Cancels: the first closes the list.
+#[test]
+fn an_open_korean_hanja_list_is_reported_and_discarded_with_two_cancels() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = korean_runtime(directory.path());
+    let typed = character(&mut runtime, b'g');
+    assert!(!typed.view.candidate_list_open);
+    assert!(!typed.view.chinese_text && !typed.view.script_conversion);
+    let opened = open_korean_hanja(&mut runtime, "ks");
+    assert!(opened.view.candidate_list_open);
+    assert!(!opened.view.candidates.is_empty());
+
+    // Escape only closes the list.
+    let closed = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(!closed.view.candidate_list_open);
+    assert_eq!(closed.view.preedit, "한");
+
+    // Leaving the client with the list open commits the Hangul (commits on blur), whatever is highlighted.
+    open_korean_hanja(&mut runtime, "");
+    runtime.dispatch(Action::NextCandidate).unwrap();
+    let left = runtime.focus(false).unwrap();
+    assert_eq!(left.commit.as_deref(), Some("한"));
+    assert!(!left.view.candidate_list_open);
+
+    // Attaching a client discards: the first Cancel closes the list and the second takes the syllable.
+    runtime.focus(true).unwrap();
+    open_korean_hanja(&mut runtime, "gks");
+    let attached = runtime.focus(true).unwrap();
+    assert!(attached.commit.is_none());
+    assert_eq!(attached.view.editing_text, "");
+    assert!(!attached.view.candidate_list_open);
+}
+
+/// An Engine that spells with punctuation marks it lists in `spelling_symbols`, as Zhuyin's bopomofo keys are, recording every mark it is handed as a character.
+struct SpellingMarksEngine {
+    scheme: u8,
+    symbols: String,
+    text: String,
+}
+
+impl InputEngine for SpellingMarksEngine {
+    fn snapshot(&self) -> Result<EngineSnapshot, RuntimeError> {
+        Ok(EngineSnapshot {
+            scheme: self.scheme,
+            nine_key: false,
+            nine_key_spellings: Vec::new(),
+            candidate_codes: Vec::new(),
+            candidate_annotations: Vec::new(),
+            candidate_sources: Vec::new(),
+            candidate_positions: Vec::new(),
+            candidate_corrected: Vec::new(),
+            candidate_answers_key: Vec::new(),
+            candidate_list_open: false,
+            microsoft_shuangpin: false,
+            shuangpin_profile: "xiaohe".into(),
+            answered_by_pinyin_fallback: false,
+            wubi_unique_four_code: false,
+            local_mode: "none".into(),
+            spelling_symbols: self.symbols.clone(),
+            dedicated_english: false,
+            preedit: self.text.clone(),
+            reading: String::new(),
+            editing_text: self.text.clone(),
+            caret_position: self.text.len(),
+            segment_raw_boundaries: Vec::new(),
+            candidates: Vec::new(),
+        })
+    }
+    fn character(&mut self, value: u8, _shift: bool) -> Result<EngineResult, RuntimeError> {
+        if !self.symbols.as_bytes().contains(&value) {
+            return Ok(empty_result(false));
+        }
+        self.text.push(char::from(value));
+        Ok(empty_result(true))
+    }
+    fn command(&mut self, _command: Command) -> Result<EngineResult, RuntimeError> {
+        self.text.clear();
+        Ok(empty_result(true))
+    }
+    fn select(&mut self, _index: usize) -> Result<EngineResult, RuntimeError> {
+        Ok(empty_result(false))
+    }
+    fn finish(&mut self, _index: usize) -> Result<EngineResult, RuntimeError> {
+        Ok(EngineResult {
+            handled: !self.text.is_empty(),
+            has_commit: !self.text.is_empty(),
+            commit: std::mem::take(&mut self.text),
+            diagnostic: String::new(),
+        })
+    }
+    fn punctuation(&mut self, _value: u8) -> Result<EngineResult, RuntimeError> {
+        Ok(empty_result(false))
+    }
+    fn select_edge(
+        &mut self,
+        index: usize,
+        _edge: CandidateEdge,
+    ) -> Result<EngineResult, RuntimeError> {
+        self.select(index)
+    }
+}
+
+/// The literal-mark route gives a scheme the marks it spells with, as the punctuation route does, while the keys that open a local mode with nothing composed stay literal.
+#[test]
+fn ascii_punctuation_reaches_a_scheme_that_spells_with_marks() {
+    // A scheme that opens no local mode: its listed marks are spelling, idle or composing.
+    let mut runtime = Runtime::new(
+        SpellingMarksEngine {
+            scheme: 3,
+            symbols: ",.".into(),
+            text: String::new(),
+        },
+        5,
+    )
+    .unwrap();
+    runtime.focus(true).unwrap();
+    let idle = runtime.dispatch(Action::PunctuationAscii(b',')).unwrap();
+    assert!(idle.handled && idle.commit.is_none());
+    assert_eq!(idle.view.editing_text, ",");
+    let composing = runtime.dispatch(Action::PunctuationAscii(b'.')).unwrap();
+    assert!(composing.handled && composing.commit.is_none());
+    assert_eq!(composing.view.editing_text, ",.");
+    // A mark the scheme does not list still ends the composition with the literal mark.
+    let ended = runtime.dispatch(Action::PunctuationAscii(b'!')).unwrap();
+    assert_eq!(ended.commit.as_deref(), Some(",.!"));
+
+    // A scheme whose idle symbols open modes: the literal route never opens one.
+    let mut runtime = Runtime::new(
+        SpellingMarksEngine {
+            scheme: 0,
+            symbols: "/".into(),
+            text: String::new(),
+        },
+        5,
+    )
+    .unwrap();
+    runtime.focus(true).unwrap();
+    let literal = runtime.dispatch(Action::PunctuationAscii(b'/')).unwrap();
+    assert!(literal.commit.is_none());
+    assert_eq!(literal.view.editing_text, "");
+}

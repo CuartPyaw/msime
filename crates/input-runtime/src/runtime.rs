@@ -2,6 +2,7 @@
 //! providers return asynchronously.
 
 use super::*;
+use msime_engine::SchemeType;
 
 pub enum Action {
     ResetCache,
@@ -119,7 +120,23 @@ pub struct Runtime<E: InputEngine = Session> {
 pub(crate) const LATTICE_SOURCE: u8 = 8;
 
 /// `SchemeType::Korean`: Hangul syllables that compose in the preedit, with no Chinese punctuation; the only candidates are the composing syllable's Hanja, in the Engine's table order, once the host asks for them.
-pub const KOREAN_SCHEME: u8 = 4;
+pub const KOREAN_SCHEME: u8 = SchemeType::Korean as u8;
+
+/// The traits of the scheme behind `scheme`, which the Engine reports as its `SchemeType` ordinal. Only the placeholder snapshot of a failed refresh carries an ordinal no scheme has; each caller decides what that placeholder means, the way the ordinal comparisons this replaces did.
+fn scheme_type(scheme: u8) -> Option<SchemeType> {
+    SchemeType::from_u8(scheme)
+}
+
+/// Whether the runtime may reorder the scheme's candidate list (the sentence model and the runner-up demotion). A scheme whose selection goes straight to the document instead of being held as phrase progress (the Korean Hanja list) lists its table in frequency order, not readings of one sentence the model can compare, and that order is the one to keep.
+pub(crate) fn runtime_reorders_candidates(scheme: u8) -> bool {
+    scheme_type(scheme).is_none_or(SchemeType::holds_phrase_progress)
+}
+
+/// [`View::script_conversion`] for a scheme ordinal and local mode name.
+pub(crate) fn script_conversion(scheme: u8, local_mode: &str) -> bool {
+    scheme_type(scheme).is_some_and(SchemeType::script_conversion_applies)
+        && !matches!(local_mode, "unicode" | "temporary_japanese")
+}
 
 /// Move the flagged elements to the end, keeping both groups in their existing order.
 #[cfg(test)]
@@ -649,7 +666,7 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     pub fn set_nine_key_enabled(&mut self, enabled: bool) -> Result<(), RuntimeError> {
-        if enabled && self.cached.scheme != 0 {
+        if enabled && !scheme_type(self.cached.scheme).is_some_and(SchemeType::nine_key) {
             return Err(RuntimeError::InvalidNineKeyScheme);
         }
         if !self.is_idle() {
@@ -684,6 +701,8 @@ impl<E: InputEngine> Runtime<E> {
         );
         View {
             scheme: self.cached.scheme,
+            chinese_text: scheme_type(self.cached.scheme).is_some_and(SchemeType::is_chinese),
+            script_conversion: script_conversion(self.cached.scheme, &self.cached.local_mode),
             nine_key: self.cached.nine_key,
             nine_key_spellings: self.cached.nine_key_spellings.clone(),
             touch_keyboard_layout: self.touch_keyboard_layout,
@@ -710,6 +729,7 @@ impl<E: InputEngine> Runtime<E> {
             page,
             page_size: self.page_size,
             page_count: self.cached.candidates.len().div_ceil(self.page_size),
+            candidate_list_open: self.cached.candidate_list_open,
             candidates,
         }
     }
@@ -737,8 +757,7 @@ impl<E: InputEngine> Runtime<E> {
         !english_mode
             && !self.cached.dedicated_english
             && self.cached.local_mode == "none"
-            && self.cached.scheme != 3
-            && self.cached.scheme != KOREAN_SCHEME
+            && scheme_type(self.cached.scheme).is_some_and(SchemeType::host_smart_punctuation)
     }
 
     /// Copy only the state and candidate fields needed to plan translation requests. This avoids
@@ -1181,8 +1200,10 @@ impl<E: InputEngine> Runtime<E> {
         consumed: &str,
         result: &mut EngineResult,
     ) {
-        // A Korean syllable that the next key finished is already final text, not a chosen piece of a phrase: it goes to the document even while the next syllable composes.
-        if !self.phrase_preedit || self.cached.scheme == KOREAN_SCHEME {
+        // A Korean syllable that the next key finished is already final text, not a chosen piece of a phrase: it goes to the document even while the next syllable composes. So does anything a scheme that never holds phrase progress commits.
+        if !self.phrase_preedit
+            || scheme_type(self.cached.scheme).is_some_and(|scheme| !scheme.holds_phrase_progress())
+        {
             return;
         }
         let composing = !self.cached.editing_text.is_empty();
@@ -1220,6 +1241,16 @@ impl<E: InputEngine> Runtime<E> {
         }
     }
 
+    /// The context of a commit made in the applied state.
+    fn output_context(&self) -> OutputContext {
+        OutputContext {
+            scheme: self.cached.scheme,
+            local_mode: self.cached.local_mode.clone(),
+            script_conversion: script_conversion(self.cached.scheme, &self.cached.local_mode),
+            typing_statistics: local_mode_counts_as_typing(&self.cached.local_mode),
+        }
+    }
+
     fn transition(&mut self, result: EngineResult) -> Transition {
         // Every commit passes through here, so this is the one place the AI
         // context has to be fed from.
@@ -1227,11 +1258,7 @@ impl<E: InputEngine> Runtime<E> {
             self.remember_commit(&result.commit);
         }
         Transition {
-            commit_context: result.has_commit.then(|| OutputContext {
-                scheme: self.cached.scheme,
-                local_mode: self.cached.local_mode.clone(),
-                typing_statistics: local_mode_counts_as_typing(&self.cached.local_mode),
-            }),
+            commit_context: result.has_commit.then(|| self.output_context()),
             handled: result.handled,
             commit: result.has_commit.then_some(result.commit),
             diagnostic: (!result.diagnostic.is_empty()).then_some(result.diagnostic),
@@ -1325,9 +1352,8 @@ impl<E: InputEngine> Runtime<E> {
             order.push(0);
         }
         // The hiragana/katakana pair of a single complete kana keeps seats 1 and 2 ahead of every online candidate, as the reference's `preserve_single_kana_pair` does (server/src/ipc/event_listener.cpp); the reading is the converted kana, so one character in U+3041..U+3096 is its `IsSingleKanaConversion`.
-        const JAPANESE_ROMAJI: u8 = 3;
         let mut reading = snapshot.reading.chars();
-        let single_kana = snapshot.scheme == JAPANESE_ROMAJI
+        let single_kana = scheme_type(snapshot.scheme) == Some(SchemeType::JapaneseRomaji)
             && matches!((reading.next(), reading.next()), (Some(kana), None) if ('\u{3041}'..='\u{3096}').contains(&kana));
         let local_prefix = if single_kana { 2 } else { 1 };
         let mut local_seen = 0;
@@ -1431,13 +1457,14 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     fn rerank(&mut self) -> bool {
-        const WUBI: u8 = 2;
         // A Korean Hanja list is a table in frequency order for one syllable, not Chinese text the language model can read.
-        if self.cached.scheme == KOREAN_SCHEME {
+        if !runtime_reorders_candidates(self.cached.scheme) {
             return false;
         }
         // A Wubi list the table answered is ranked by the table: the Engine seats the Wubi rows first (`merge_pinyin_fallback`) and appends the mixed-in pinyin rows after them. Those pinyin rows are corrections of the same letters (dyn read as dun), so the corrected-key rule below would strip the exact code hit (态 on dyn) of its dictionary exemption and let the model promote a longer code's row (太快 on dynn) over it. Only a list the pinyin fallback answered alone is pinyin, and that one is reranked like pinyin.
-        if self.cached.scheme == WUBI && !self.cached.answered_by_pinyin_fallback {
+        if scheme_type(self.cached.scheme) == Some(SchemeType::Wubi)
+            && !self.cached.answered_by_pinyin_fallback
+        {
             return false;
         }
         let Some(reranker) = self.reranker.as_mut() else {
@@ -1515,7 +1542,7 @@ impl<E: InputEngine> Runtime<E> {
         const SENTENCE_READINGS: usize = 3;
 
         // Korean Hanja rows are not lattice readings, and their table order is the one to keep.
-        if self.cached.scheme == KOREAN_SCHEME {
+        if !runtime_reorders_candidates(self.cached.scheme) {
             return false;
         }
         let snapshot = &self.cached;
@@ -1649,13 +1676,13 @@ impl<E: InputEngine> Runtime<E> {
         self.advance()?;
         // Invalidate the client before cancellation, including on engine failure.
         self.focused = false;
-        // A Korean syllable is text the user already wrote, not a reading still to be converted, so leaving the client commits it; every other composition is cancelled. Attaching a client (`focused`) stays a pure reset: a syllable typed in the previous client must never be written into the new one.
-        let korean_composition = !focused
-            && self.cached.scheme == KOREAN_SCHEME
+        // A Korean syllable is text the user already wrote, not a reading still to be converted, so leaving the client commits it, as it does for every scheme that commits on blur; every other composition is cancelled. Attaching a client (`focused`) stays a pure reset: a syllable typed in the previous client must never be written into the new one.
+        let commits_on_blur = !focused
+            && scheme_type(self.cached.scheme).is_some_and(SchemeType::commits_on_blur)
             && !self.cached.dedicated_english
             && self.cached.local_mode == "none"
             && !self.cached.editing_text.is_empty();
-        let result = if korean_composition {
+        let result = if commits_on_blur {
             self.engine.finish(0)
         } else {
             self.discard_composition()
@@ -1675,10 +1702,12 @@ impl<E: InputEngine> Runtime<E> {
         Ok(self.transition(result))
     }
 
-    /// Throw the composition away. With a Korean Hanja list open, Cancel is the user's Escape and only closes the list, leaving the syllable composing, so a second Cancel takes the syllable too.
+    /// Throw the composition away. With an openable candidate list open (the Korean Hanja list), Cancel is the user's Escape and only closes the list, leaving the composition, so a second Cancel takes the composition too.
     fn discard_composition(&mut self) -> Result<EngineResult, RuntimeError> {
         let result = self.engine.command(Command::Cancel)?;
-        if self.cached.scheme == KOREAN_SCHEME && !self.engine.snapshot()?.editing_text.is_empty() {
+        if scheme_type(self.cached.scheme).is_some_and(SchemeType::has_openable_candidate_list)
+            && !self.engine.snapshot()?.editing_text.is_empty()
+        {
             return self.engine.command(Command::Cancel);
         }
         Ok(result)
@@ -1745,10 +1774,12 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     fn punctuation_ascii(&mut self, value: u8) -> Result<EngineResult, RuntimeError> {
-        // A spelling symbol still extends the composition in progress. With nothing composed the host asked for the literal mark after weighing the surrounding text (a `/` after a digit), so it never opens a mode.
-        if self.cached.local_mode != "none"
-            && self.cached.spelling_symbols.as_bytes().contains(&value)
-        {
+        // A spelling symbol is input, as on the punctuation route: it extends the local mode in progress, and a scheme that spells with marks (Zhuyin's bopomofo keys) takes them whenever it lists them. The symbols that open a mode with nothing composed are the exception: there the host asked for the literal mark after weighing the surrounding text (a `/` after a digit), so it never opens a mode.
+        let spells = self.cached.local_mode != "none"
+            || (self.phrase_prefix.is_empty()
+                && scheme_type(self.cached.scheme)
+                    .is_some_and(|scheme| !scheme.opens_local_modes()));
+        if spells && self.cached.spelling_symbols.as_bytes().contains(&value) {
             return self.engine.character(value, false);
         }
         if value == b'\'' && self.engine.takes_local_separator() {
@@ -1991,11 +2022,7 @@ impl<E: InputEngine> Runtime<E> {
                 && self.snapshot_valid
                 && self.cached.wubi_unique_four_code
                 && self.phrase_prefix.is_empty());
-        let commit_context = needs_commit_context.then(|| OutputContext {
-            scheme: self.cached.scheme,
-            local_mode: self.cached.local_mode.clone(),
-            typing_statistics: local_mode_counts_as_typing(&self.cached.local_mode),
-        });
+        let commit_context = needs_commit_context.then(|| self.output_context());
         let refresh = self.refresh();
         let mut result = result?;
         if let Err(error) = refresh {
@@ -2071,7 +2098,7 @@ pub(crate) fn empty_result(handled: bool) -> EngineResult {
 /// by the table, and committing nothing would still drop the key.
 pub(crate) fn wubi_four_code_is_complete(snapshot: &EngineSnapshot) -> bool {
     const WUBI_COMPLETE_CODE_LENGTH: usize = 4;
-    snapshot.scheme == 2
+    scheme_type(snapshot.scheme) == Some(SchemeType::Wubi)
         && !snapshot.dedicated_english
         && snapshot.local_mode == "none"
         && !snapshot.nine_key
