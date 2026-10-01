@@ -185,6 +185,24 @@
       "url": "https://dumps.wikimedia.org/zhwiki/20260901/zhwiki-20260901-pages-articles1.xml-p1p187712.bz2",
       "sha256": "71f216ffbd5d6ba64d1a7c5570519c2e412e6f7163304287399d1f5e9c1af0df",
       "size": 254212741
+    },
+    {
+      "path": "places/provinces.csv",
+      "url": "https://raw.githubusercontent.com/modood/Administrative-divisions-of-China/c49d495b40ac73eb1a66f6eeae5f8fd10696f035/dist/provinces.csv",
+      "sha256": "b17e76dab634e24e0f56021f15737c0a526dc7f0c4e39d21abeba5a8668383cd",
+      "size": 532
+    },
+    {
+      "path": "places/cities.csv",
+      "url": "https://raw.githubusercontent.com/modood/Administrative-divisions-of-China/c49d495b40ac73eb1a66f6eeae5f8fd10696f035/dist/cities.csv",
+      "sha256": "a9c818e8a5120189173668b40882ce8bf59a7ec2b057c49d7a724a04bec727f2",
+      "size": 7580
+    },
+    {
+      "path": "places/areas.csv",
+      "url": "https://raw.githubusercontent.com/modood/Administrative-divisions-of-China/c49d495b40ac73eb1a66f6eeae5f8fd10696f035/dist/areas.csv",
+      "sha256": "169b8d99654c28cbd285e771e00688837f77af8d50c2b703592146388d2a99ab",
+      "size": 85403
     }
   ]
 }

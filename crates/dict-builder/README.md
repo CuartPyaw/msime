@@ -7,6 +7,7 @@ cargo build --release -p msime-dict-builder
 target/release/msime-dict-build --cache <sources-cache> --out <output>                # every stage, about a minute
 target/release/msime-dict-build --cache <sources-cache> --out <output> --skip ngram   # without the zhwiki pass
 target/release/msime-dict-build --list
+target/release/msime-dict-build places --cache <sources-cache>                        # the @ place table the engine embeds
 ```
 
 ## Inputs
@@ -23,6 +24,10 @@ Inputs without a redistribution grant (`src/licensing.rs`) are left out unless `
 - Base lexicons, custom words, translations and English words are changed in msime-dictionary. To take its new state, wait for msime-dictionary to publish a new `sources-vX.Y.Z` release, move every entry fetched from it in the lock to that release's assets (URL, size and SHA-256, which `SHA256SUMS.txt` in the release lists), set the `msime-dictionary` reference to the tagged commit, rebuild, and compare. Do not pin raw files at an untagged commit.
 - Emoji, kaomoji and symbol keywords get their pinyin from the `pinyin` crate one character at a time. When a new polyphone keyword needs its phrase reading, add `keyword<TAB>item<TAB>item...` to `pinyin-overrides.txt`.
 - To move a pinned input, change its URL, size and SHA-256 in the lock in the same commit, rebuild, and compare the result with the previous release before publishing.
+
+## The `@` place table
+
+`@` mode can offer Chinese administrative divisions after the user's own mention list. Unlike the dictionary artifacts, that table is small enough to ship inside the engine: `msime-dict-build places --cache <sources-cache>` reads `places/provinces.csv`, `places/cities.csv` and `places/areas.csv` from [modood/Administrative-divisions-of-China](https://github.com/modood/Administrative-divisions-of-China) (WTFPL, see `resources/licenses/Administrative-divisions-of-China-WTFPL.txt`) at the commit the lock pins, and rewrites `crates/engine/src/local/places.tsv`, which is committed. Place names whose per-character pinyin is wrong (重庆, 六安, 蚌埠, ...) are listed in `READINGS` in `src/places.rs`; the command fails when an entry there no longer matches any name. To take newer data, move the three `places/` entries in the lock to the new commit, rerun the command, and review the diff of `places.tsv`.
 
 Releases are cut by the manually dispatched `.github/workflows/release-dictionary.yml`: it builds every artifact from the pinned sources without `--include-unlicensed`, checks `SHA256SUMS.txt`, and uploads the result as a workflow artifact; only with `publish` set does it create the `dict-vX.Y.Z` release on metasequoiaime/msime with the artifacts, `dictionary-manifest.json` and `SHA256SUMS.txt` as the builder wrote them. After a release is published, bump `resources/desktop-dictionary.lock.json` to the new files.
 
