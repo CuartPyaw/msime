@@ -1721,27 +1721,31 @@ fn pack_and_add_preview_refuse_images_that_do_not_decode() {
 }
 
 #[test]
-fn a_jpeg_must_reach_its_end_marker_within_the_scan_limit() {
-    let whole = encoded(16, 16, image::ImageFormat::Jpeg);
-    assert!(jpeg_reaches_end(&whole));
+fn a_jpeg_that_ends_early_or_has_too_many_scans_does_not_decode() {
+    // 用有纹理的图：纯色图的扫描数据太短，宽松模式下也大多解码失败，区分不出严格模式的作用。这张图在宽松模式下几乎每个截断点都能“解码成功”。
+    let mut picture = image::RgbImage::new(64, 64);
+    for (x, y, pixel) in picture.enumerate_pixels_mut() {
+        *pixel = image::Rgb([(x * 37 + y * 11) as u8, (x * y) as u8, ((x ^ y) * 4) as u8]);
+    }
+    let mut whole = std::io::Cursor::new(Vec::new());
+    picture
+        .write_to(&mut whole, image::ImageFormat::Jpeg)
+        .unwrap();
+    let whole = whole.into_inner();
+    assert_eq!(check_image("image/jpeg", &whole), Ok(64 * 64));
     let mut trailing = whole.clone();
     trailing.extend([0, 1, 2]);
-    assert!(jpeg_reaches_end(&trailing));
-    for cut in 0..whole.len() - 1 {
-        assert!(!jpeg_reaches_end(&whole[..cut]), "cut at {cut}");
+    assert_eq!(check_image("image/jpeg", &trailing), Ok(64 * 64));
+    for cut in 0..whole.len() {
+        assert_eq!(
+            check_image("image/jpeg", &whole[..cut]),
+            Err(IMAGE_INVALID),
+            "cut at {cut}"
+        );
     }
-    // 熵编码数据里的 0xFF 00 和 RSTn 不是段边界。
-    let scans = |count: usize| {
-        let mut bytes = vec![0xFF, 0xD8];
-        for _ in 0..count {
-            bytes.extend([0xFF, 0xDA, 0, 2, 1, 0xFF, 0x00, 2, 0xFF, 0xD3, 3]);
-        }
-        bytes.extend([0xFF, 0xFF, 0xD9]);
-        bytes
-    };
-    assert!(jpeg_reaches_end(&scans(MAX_JPEG_SCANS)));
-    assert!(!jpeg_reaches_end(&scans(MAX_JPEG_SCANS + 1)));
-    assert!(!jpeg_reaches_end(&[
-        0xFF, 0xD8, 0xFF, 0xE0, 0, 1, 0xFF, 0xD9
-    ]));
+    // 两张 8×8 的灰度渐进式 JPEG，由 jpegtran 按扫描脚本生成：一张恰好 32 个扫描段，一张 33 个。
+    let at_limit = include_bytes!("progressive-32-scans.jpg");
+    let over_limit = include_bytes!("progressive-33-scans.jpg");
+    assert_eq!(check_image("image/jpeg", at_limit), Ok(64));
+    assert_eq!(check_image("image/jpeg", over_limit), Err(IMAGE_INVALID));
 }

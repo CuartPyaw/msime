@@ -2761,6 +2761,7 @@ dependencies = [
  "unicode-segmentation",
  "uuid",
  "zip",
+ "zune-jpeg",
 ]
 
 [[package]]

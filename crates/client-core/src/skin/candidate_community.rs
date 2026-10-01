@@ -58,9 +58,9 @@ const MAX_RESOURCE_PATH_BYTES: usize = 256;
 const MAX_IMAGE_SIDE: u32 = 2048;
 /// 一个包里所有图片解码后的像素合计上限，与服务端 `maxCandidatePixels` 一致。
 const MAX_PACKAGE_PIXELS: u64 = 8_000_000;
-/// 解码一张图时允许分配的内存上限。每边 2048 的图按 16 位 RGBA 展开是 32 MiB，这里留出一倍给解码器自己的缓冲。尺寸在完整解码前就从文件头读出并按 [`MAX_IMAGE_SIDE`] 拒绝，这道上限是第二道防线：1 MiB 以内的文件声明巨大尺寸（解压炸弹）时，解码器也无法因此分配超出它的内存。
+/// 解码一张图时允许分配的内存上限。每边 2048 的图按 16 位 RGBA 展开是 32 MiB，这里留出一倍给解码器自己的缓冲。尺寸在完整解码前就从文件头读出并按 [`MAX_IMAGE_SIDE`] 拒绝，这道上限是 PNG 解码的第二道防线：1 MiB 以内的文件声明巨大尺寸（解压炸弹）时，解码器也无法因此分配超出它的内存。JPEG 由 `zune-jpeg` 解码，它没有分配上限，由同样的每边上限兜底，最多展开成 2048×2048 的 RGB，即 12 MiB。
 const MAX_IMAGE_DECODE_ALLOC: u64 = 64 << 20;
-/// 一张 JPEG 最多的扫描段（SOS）数，与服务端 `maxCandidateJPEGScans` 一致。
+/// 一张渐进式 JPEG 最多的扫描段（SOS）数，与服务端 `maxCandidateJPEGScans` 一致。
 const MAX_JPEG_SCANS: usize = 32;
 const MANIFEST_FILE: &str = "skin.toml";
 /// Where [`install`] writes a package before swapping it in. It sits in the skin root, so the rename that publishes it never crosses a filesystem.
@@ -917,9 +917,6 @@ fn check_image(content_type: &str, bytes: &[u8]) -> Result<u64, &'static str> {
     if !magic_matches(content_type, bytes) {
         return Err(IMAGE_INVALID);
     }
-    if format == image::ImageFormat::Jpeg && !jpeg_reaches_end(bytes) {
-        return Err(IMAGE_INVALID);
-    }
     let reader = |bytes| {
         let mut limits = image::Limits::default();
         limits.max_image_width = Some(MAX_IMAGE_SIDE);
@@ -938,55 +935,34 @@ fn check_image(content_type: &str, bytes: &[u8]) -> Result<u64, &'static str> {
     if width == 0 || height == 0 || width > MAX_IMAGE_SIDE || height > MAX_IMAGE_SIDE {
         return Err(TOO_LARGE);
     }
-    reader(bytes).decode().map_err(|_| IMAGE_INVALID)?;
+    if format == image::ImageFormat::Jpeg {
+        decode_jpeg_strictly(bytes)?;
+    } else {
+        reader(bytes).decode().map_err(|_| IMAGE_INVALID)?;
+    }
     Ok(u64::from(width) * u64::from(height))
 }
 
-/// 从 SOI 按段走到 EOI，扫描段不超过 [`MAX_JPEG_SCANS`] 时返回 `true`；EOI 之后的多余字节不管，服务端的解码器也不读它们。
+/// 用严格模式的 `zune-jpeg` 完整解码一张 JPEG，失败时返回 `candidate_skin_image_invalid`。
 ///
-/// `image` 的 JPEG 解码器固定用宽松模式，数据提前结束时用灰色补齐剩下的像素并报告成功，截断在扫描数据中间的 JPEG 因此能“解码成功”。服务端的解码器遇到这种文件会报错，所以这里另外确认文件完整地走到了 EOI。
-fn jpeg_reaches_end(bytes: &[u8]) -> bool {
-    let mut scans = 0;
-    let mut i = JPEG_MAGIC.len() - 1;
-    while i + 1 < bytes.len() {
-        if bytes[i] != 0xFF {
-            return false;
-        }
-        let marker = bytes[i + 1];
-        match marker {
-            // 段之间允许任意多个填充用的 0xFF。
-            0xFF => i += 1,
-            0xD9 => return true,
-            0x01 | 0xD0..=0xD7 => i += 2,
-            0x00 => return false,
-            _ => {
-                let Some(length) = bytes.get(i + 2..i + 4) else {
-                    return false;
-                };
-                let length = usize::from(u16::from_be_bytes([length[0], length[1]]));
-                if length < 2 {
-                    return false;
-                }
-                i += 2 + length;
-                if marker != 0xDA {
-                    continue;
-                }
-                scans += 1;
-                if scans > MAX_JPEG_SCANS {
-                    return false;
-                }
-                // 跳过熵编码数据：其中的 0xFF 后面只会跟 0x00（字节填充）或 RSTn，其它组合就是下一个标记。
-                while i + 1 < bytes.len()
-                    && (bytes[i] != 0xFF
-                        || bytes[i + 1] == 0x00
-                        || (0xD0..=0xD7).contains(&bytes[i + 1]))
-                {
-                    i += 1;
-                }
-            }
-        }
+/// `image` 也用 `zune-jpeg` 解码 JPEG，但固定关掉了严格模式：数据提前结束时用灰色补齐剩下的像素并报告成功，截断在扫描数据中间的 JPEG 因此能“解码成功”，服务端的解码器却会报错。严格模式下这类文件直接解码失败，只缺结尾 EOI 的情况另外检查。每边上限与 [`MAX_IMAGE_SIDE`] 一致；渐进式 JPEG 的扫描段上限与服务端一致，基线 JPEG 每个颜色分量只有一个扫描段，最多 4 个，`zune-jpeg` 不对它计数。
+fn decode_jpeg_strictly(bytes: &[u8]) -> Result<(), &'static str> {
+    let side = MAX_IMAGE_SIDE as usize;
+    let options = zune_jpeg::zune_core::options::DecoderOptions::default()
+        .set_strict_mode(true)
+        .set_max_width(side)
+        .set_max_height(side)
+        .jpeg_set_max_scans(MAX_JPEG_SCANS);
+    let cursor = zune_jpeg::zune_core::bytestream::ZCursor::new(bytes);
+    zune_jpeg::JpegDecoder::new_with_options(cursor, options)
+        .decode()
+        .map_err(|_| IMAGE_INVALID)?;
+    // 严格模式不要求结尾的 EOI：像素数据完整、只缺最后的 `FF D9` 时它照样解码成功，服务端的解码器却会报“意外的文件结尾”。熵编码数据里不会出现 `FF D9` 和 `FF DA`（`0xFF` 后面只跟 `0x00` 或 RSTn），所以最后一个扫描段（`FF DA`）之后必须还有一个 EOI。
+    let marker = |code: u8| bytes.windows(2).rposition(|pair| pair == [0xFF, code]);
+    match (marker(0xDA), marker(0xD9)) {
+        (Some(scan), Some(end)) if end > scan => Ok(()),
+        _ => Err(IMAGE_INVALID),
     }
-    false
 }
 
 /// Length of the padded standard base64 encoding of `bytes` bytes.
