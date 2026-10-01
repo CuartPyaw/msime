@@ -16,7 +16,7 @@ pub mod sound_pack;
 pub use failure::{remove_named, PluginFailure};
 pub use import::import;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
@@ -34,8 +34,20 @@ pub const MAX_PACK_FILES: usize = 16;
 /// Bytes of one text notice (`*.txt`, `*.md`), which is all a pack may carry besides its manifest and audio.
 pub const MAX_NOTICE_BYTES: u64 = 64 * 1024;
 
-/// Sound pack ids the bundle ships. An installed pack may not take one, so a selected id always names the same pack on every machine.
-pub const BUILTIN_SOUND_PACKS: [&str; 2] = ["default", "twinkle"];
+/// Sound pack ids the bundle ships: key packs first, then melodies. An installed pack may not take one, so a selected id always names the same pack on every machine.
+pub const BUILTIN_SOUND_PACKS: [&str; 9] = [
+    "default",
+    "twinkle",
+    "msime-typewriter",
+    "msime-bubble",
+    "msime-8bit",
+    "msime-woodblock",
+    "msime-pentatonic",
+    "msime-canon",
+    "msime-ode-to-joy",
+];
+/// Music pack ids the bundle ships, in the same built-in directory as the sound packs, reserved the same way.
+pub const BUILTIN_MUSIC_PACKS: [&str; 2] = ["msime-music-lofi", "msime-music-ambient"];
 /// The sound pack a fresh profile selects.
 pub const DEFAULT_SOUND_PACK: &str = "default";
 /// The melody pack a fresh profile selects.
@@ -83,6 +95,46 @@ impl PluginKind {
         Self::ALL.into_iter().find(|kind| kind.as_str() == value)
     }
 }
+
+/// Whether `id` of `kind` names a pack the bundle ships. Only sound and music packs are built in.
+pub fn is_builtin(kind: PluginKind, id: &str) -> bool {
+    match kind {
+        PluginKind::Sound => BUILTIN_SOUND_PACKS.contains(&id),
+        PluginKind::Music => BUILTIN_MUSIC_PACKS.contains(&id),
+        PluginKind::CommandTable => false,
+    }
+}
+
+/// The typing effect a host draws on keys and commits. Closed, and deliberately not a `PluginKind`: every style is built into the hosts and tuned only through the preferences, so no pack can supply one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectStyle {
+    #[default]
+    Off,
+    /// A brief flash on the host's own candidate surface.
+    Flash,
+    /// Sparks where the host can draw them, a flash where it cannot.
+    Sparks,
+    /// Sparks, a shake and a combo that grows the effect as it climbs.
+    PowerMode,
+}
+
+impl EffectStyle {
+    /// The style's number in `msime_client_typing_effect`'s answer.
+    pub fn code(self) -> u32 {
+        match self {
+            Self::Off => 0,
+            Self::Flash => 1,
+            Self::Sparks => 2,
+            Self::PowerMode => 3,
+        }
+    }
+}
+
+/// A combo starts over after the keyboard has been quiet this long, as a melody does.
+pub const COMBO_IDLE_RESET_MILLIS: u64 = sound_pack::MELODY_IDLE_RESET_MILLIS;
+/// Combo counts that move it up a tier, lowest first.
+pub const COMBO_MILESTONES: [u32; 4] = [10, 25, 50, 100];
 
 /// One loadable pack.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -166,7 +218,7 @@ pub fn kind_directory(root: &Path, kind: PluginKind) -> PathBuf {
 pub fn scan(root: &Path, builtin_sounds: Option<&Path>) -> PluginCatalog {
     let mut catalog = PluginCatalog::default();
     if let Some(builtin) = builtin_sounds {
-        scan_kind(builtin, PluginKind::Sound, true, &mut catalog);
+        scan_builtin(builtin, &mut catalog);
     }
     for kind in PluginKind::ALL {
         let directory = kind_directory(root, kind);
@@ -187,6 +239,36 @@ pub fn scan(root: &Path, builtin_sounds: Option<&Path>) -> PluginCatalog {
         .issues
         .sort_by(|a, b| (a.kind, &a.folder).cmp(&(b.kind, &b.folder)));
     catalog
+}
+
+/// The bundle's built-in packs. They share one directory, so each folder's kind is the one its id is reserved for: a music id is loaded as music, and anything else as a sound pack.
+fn scan_builtin(directory: &Path, catalog: &mut PluginCatalog) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let folder = entry.file_name().to_string_lossy().into_owned();
+        if folder.starts_with('.') {
+            continue;
+        }
+        let kind = if is_builtin(PluginKind::Music, &folder) {
+            PluginKind::Music
+        } else {
+            PluginKind::Sound
+        };
+        let loaded = match entry.file_type() {
+            Ok(file_type) if file_type.is_dir() => load_installed(directory, &folder, kind, true),
+            _ => Err("不是扩展包文件夹".to_owned()),
+        };
+        match loaded {
+            Ok(package) => catalog.packages.push(package),
+            Err(reason) => catalog.issues.push(PluginIssue {
+                kind,
+                folder,
+                reason,
+            }),
+        }
+    }
 }
 
 fn scan_kind(directory: &Path, kind: PluginKind, builtin: bool, catalog: &mut PluginCatalog) {
@@ -215,7 +297,7 @@ fn scan_kind(directory: &Path, kind: PluginKind, builtin: bool, catalog: &mut Pl
     }
 }
 
-/// Validate one pack by the rules `scan` lists packs by, without reading the rest of the root. Hosts resolve the selected pack through this. A built-in sound pack id is read from `builtin_sounds`, never from `root`.
+/// Validate one pack by the rules `scan` lists packs by, without reading the rest of the root. Hosts resolve the selected pack through this. A built-in sound or music pack id is read from `builtin_sounds`, never from `root`.
 pub fn load_package(
     root: &Path,
     builtin_sounds: Option<&Path>,
@@ -225,7 +307,7 @@ pub fn load_package(
     if !safe_id(id) {
         return Err("扩展包 id 无效".into());
     }
-    if kind == PluginKind::Sound && BUILTIN_SOUND_PACKS.contains(&id) {
+    if is_builtin(kind, id) {
         let builtin = builtin_sounds.ok_or("内置音效包不可用")?;
         return load_installed(builtin, id, kind, true);
     }
@@ -242,8 +324,8 @@ fn load_installed(
     if !safe_id(folder) {
         return Err("扩展包 id 无效".into());
     }
-    if !builtin && kind == PluginKind::Sound && BUILTIN_SOUND_PACKS.contains(&folder) {
-        return Err("这个 id 属于内置音效包".into());
+    if !builtin && is_builtin(kind, folder) {
+        return Err("这个 id 属于内置扩展包".into());
     }
     let package = directory.join(folder);
     let metadata = fs::symlink_metadata(&package).map_err(|_| "扩展包文件夹不存在")?;
@@ -559,12 +641,16 @@ pub fn remove(root: &Path, kind: PluginKind, id: &str) -> Result<(), PluginError
     if !safe_id(id) {
         return Err(PluginError::Invalid("扩展包 id 无效".into()));
     }
-    if kind == PluginKind::Sound && BUILTIN_SOUND_PACKS.contains(&id) {
+    if is_builtin(kind, id) {
         return Err(PluginError::Reserved);
     }
     let directory = kind_directory(root, kind);
     crate::storage::reject_symlink(&directory).map_err(|_| PluginError::Storage)?;
-    let _writes = import::lock_plugin_root();
+    if fs::symlink_metadata(&directory).is_err() {
+        // No kind directory, so no pack of this kind is installed, and there is nothing to lock.
+        return Ok(());
+    }
+    let _writes = import::lock_plugin_root(root)?;
     let target = directory.join(id);
     let metadata = match fs::symlink_metadata(&target) {
         Ok(metadata) => metadata,

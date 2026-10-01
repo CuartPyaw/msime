@@ -60,13 +60,31 @@ fn the_built_in_packs_the_bundles_ship_are_valid() {
     let catalog = scan(root.path(), Some(&builtin_root()));
     assert!(catalog.issues.is_empty(), "{:?}", catalog.issues);
     let ids: Vec<_> = catalog.packages.iter().map(|p| p.id.as_str()).collect();
-    assert_eq!(ids.len(), BUILTIN_SOUND_PACKS.len());
-    for id in BUILTIN_SOUND_PACKS {
-        assert!(ids.contains(&id), "{id}");
-        let pack = load_package(root.path(), Some(&builtin_root()), PluginKind::Sound, id).unwrap();
-        assert!(pack.builtin);
-        assert_eq!(pack.license, "CC0-1.0");
+    assert_eq!(
+        ids.len(),
+        BUILTIN_SOUND_PACKS.len() + BUILTIN_MUSIC_PACKS.len()
+    );
+    for (kind, builtins) in [
+        (PluginKind::Sound, &BUILTIN_SOUND_PACKS[..]),
+        (PluginKind::Music, &BUILTIN_MUSIC_PACKS[..]),
+    ] {
+        for id in builtins {
+            assert!(ids.contains(id), "{id}");
+            assert!(is_builtin(kind, id), "{id}");
+            let pack = load_package(root.path(), Some(&builtin_root()), kind, id).unwrap();
+            assert!(pack.builtin);
+            assert_eq!(pack.kind(), kind, "{id}");
+            assert_eq!(pack.license, "CC0-1.0");
+            // A built-in id of one kind is not built in as the other.
+            let other = match kind {
+                PluginKind::Sound => PluginKind::Music,
+                _ => PluginKind::Sound,
+            };
+            assert!(!is_builtin(other, id), "{id}");
+            assert!(load_package(root.path(), Some(&builtin_root()), other, id).is_err());
+        }
     }
+    assert!(!is_builtin(PluginKind::CommandTable, DEFAULT_SOUND_PACK));
     let PluginContent::Sound(default) = load_package(
         root.path(),
         Some(&builtin_root()),
@@ -642,7 +660,7 @@ fn built_in_ids_are_reserved_and_resolved_only_from_the_bundle() {
     installed_sound(root.path(), &SOUND.replace("typewriter", "default"));
     assert!(reason(root.path(), PluginKind::Sound, "default").contains("内置音效包不可用"));
     let catalog = scan(root.path(), None);
-    assert!(catalog.issues[0].reason.contains("属于内置音效包"));
+    assert!(catalog.issues[0].reason.contains("属于内置扩展包"));
     let resolved = load_package(
         root.path(),
         Some(&builtin_root()),
@@ -694,11 +712,12 @@ fn import_installs_a_picked_folder_and_replaces_an_older_version_whole() {
     let installed = import(&folder, &root).unwrap();
     assert_eq!(installed.version, "2.0.0");
     assert!(!installed.directory.join("space.wav").exists());
-    let names: Vec<_> = fs::read_dir(&root)
+    let mut names: Vec<_> = fs::read_dir(&root)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
         .collect();
-    assert_eq!(names, ["sound"]);
+    names.sort();
+    assert_eq!(names, [import::LOCK_FILE, "sound"]);
     let names: Vec<_> = fs::read_dir(root.join("sound"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
@@ -749,6 +768,81 @@ fn a_refused_import_leaves_the_installed_pack_and_no_staging() {
         .filter(|name| name.starts_with('.'))
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+#[test]
+fn effect_styles_are_a_closed_set_with_stable_codes() {
+    assert_eq!(EffectStyle::default(), EffectStyle::Off);
+    for (style, name, code) in [
+        (EffectStyle::Off, "off", 0),
+        (EffectStyle::Flash, "flash", 1),
+        (EffectStyle::Sparks, "sparks", 2),
+        (EffectStyle::PowerMode, "power_mode", 3),
+    ] {
+        assert_eq!(serde_json::to_value(style).unwrap(), name);
+        assert_eq!(
+            serde_json::from_value::<EffectStyle>(name.into()).unwrap(),
+            style
+        );
+        assert_eq!(style.code(), code);
+    }
+    assert!(serde_json::from_value::<EffectStyle>("confetti".into()).is_err());
+    assert!(COMBO_MILESTONES.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
+fn leftovers_are_swept_only_once_they_are_old() {
+    let state = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    let sound = kind_directory(&root, PluginKind::Sound);
+    fs::create_dir_all(&sound).unwrap();
+    let leftovers = [
+        root.join(".staging-0123"),
+        sound.join(".replaced-typewriter-0123"),
+        sound.join(".old-typewriter-0123"),
+    ];
+    for leftover in &leftovers {
+        fs::create_dir(leftover).unwrap();
+        fs::write(leftover.join("a.wav"), b"RIFF").unwrap();
+    }
+    // Neither dot-named nor a directory: never touched, however old.
+    fs::write(sound.join(".staging-file"), b"x").unwrap();
+    installed_sound(&root, SOUND);
+
+    // Another process may be writing into a young one right now.
+    import::sweep_leftovers(&root, std::time::SystemTime::now());
+    assert!(leftovers.iter().all(|leftover| leftover.is_dir()));
+    let later = std::time::SystemTime::now() + import::LEFTOVER_AGE;
+    import::sweep_leftovers(&root, later);
+    assert!(leftovers.iter().all(|leftover| !leftover.exists()));
+    assert!(sound.join(".staging-file").is_file());
+    assert!(sound.join("typewriter").join(MANIFEST_FILE).is_file());
+}
+
+#[test]
+fn writers_of_the_plugins_root_wait_for_the_lock_every_process_shares() {
+    let state = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    installed_sound(&root, SOUND);
+    // Another process's import, as far as this one can tell: the shared file locked through a handle of its own.
+    let other = crate::file_lock::open_lock_file(root.join(import::LOCK_FILE)).unwrap();
+    crate::file_lock::exclusive(&other).unwrap();
+    let (done, finished) = std::sync::mpsc::channel();
+    let writer = {
+        let root = root.clone();
+        std::thread::spawn(move || {
+            let removed = remove(&root, PluginKind::Sound, "typewriter");
+            done.send(()).unwrap();
+            removed
+        })
+    };
+    assert!(finished
+        .recv_timeout(std::time::Duration::from_millis(300))
+        .is_err());
+    assert!(root.join("sound/typewriter").is_dir());
+    drop(other);
+    writer.join().unwrap().unwrap();
+    assert!(!root.join("sound/typewriter").exists());
 }
 
 #[test]
@@ -980,8 +1074,12 @@ fn hostile_archives_are_refused_before_anything_is_installed() {
     ));
 
     assert!(!root.join("sound").exists());
-    let leftovers: Vec<_> = fs::read_dir(&root).unwrap().collect();
-    assert!(leftovers.is_empty());
+    let leftovers: Vec<_> = fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .filter(|name| name != import::LOCK_FILE)
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
 }
 
 #[cfg(unix)]

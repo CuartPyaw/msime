@@ -1158,6 +1158,9 @@ pub struct LocalModePreferences {
     /// `@` on an empty composition: the local mention list. Off by default, because `@` used to type itself.
     #[serde(default, skip_serializing_if = "is_false")]
     pub mention: bool,
+    /// The `@` mode also offers China's provinces, cities and counties from the Engine's built-in table, after the user's own names. Off by default, and only meaningful while `mention` is on.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mention_places: bool,
 }
 
 impl Default for LocalModePreferences {
@@ -1174,12 +1177,13 @@ impl Default for LocalModePreferences {
             expression: false,
             command: false,
             mention: false,
+            mention_places: false,
         }
     }
 }
 
 /// What the plugin packs do: which pack sounds and how loud, and which command tables the `/` mode reads. Everything is off in a fresh profile. Pack ids name a built-in pack or one installed under the plugins directory; a host that cannot find the named pack stays silent rather than falling back to another.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct PluginPreferences {
     pub key_sound: KeySoundPreferences,
@@ -1189,6 +1193,31 @@ pub struct PluginPreferences {
     pub achievements: AchievementPreferences,
     /// Installed command-table packs the `/` mode reads, in priority order: the first pack that defines a trigger wins.
     pub command_tables: Vec<String>,
+    /// The typing effect a host draws on keys and commits; `Off` draws nothing.
+    pub effect_style: crate::plugins::EffectStyle,
+    /// 0-100: how large and how long the effect is drawn. Only the host reads it.
+    pub effect_intensity: u8,
+    /// Count consecutive keys and show the count; a pause of `plugins::COMBO_IDLE_RESET_MILLIS` or a backspace starts it again.
+    pub combo_counter: bool,
+    /// Play the key sound pack's commit sample, pitched up, when the count reaches one of `plugins::COMBO_MILESTONES`.
+    pub combo_tier_sound: bool,
+}
+
+impl Default for PluginPreferences {
+    fn default() -> Self {
+        Self {
+            key_sound: KeySoundPreferences::default(),
+            commit_sound: CommitSoundPreferences::default(),
+            melody: MelodyPreferences::default(),
+            music: MusicPreferences::default(),
+            achievements: AchievementPreferences::default(),
+            command_tables: Vec::new(),
+            effect_style: crate::plugins::EffectStyle::Off,
+            effect_intensity: 50,
+            combo_counter: false,
+            combo_tier_sound: false,
+        }
+    }
 }
 
 impl PluginPreferences {
@@ -1206,6 +1235,7 @@ impl PluginPreferences {
             && pack(&self.music.pack)
             && self.key_sound.volume <= 100
             && self.music.volume <= 100
+            && self.effect_intensity <= 100
             && self.command_tables.len() <= Self::MAX_COMMAND_TABLES
             && self.command_tables.iter().enumerate().all(|(index, id)| {
                 crate::skin::catalog::safe_id(id) && !self.command_tables[..index].contains(id)

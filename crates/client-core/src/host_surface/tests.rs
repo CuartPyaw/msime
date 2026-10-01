@@ -548,6 +548,12 @@ fn plugin_surfaces_are_claimed_only_by_the_hosts_that_wire_them() {
             capabilities.key_sound && capabilities.plugin_triggers && capabilities.music,
             "{platform:?}"
         );
+        // Only macOS draws typing effects so far; each other host claims them in the change that wires its overlay.
+        assert_eq!(
+            capabilities.typing_effects,
+            platform == HostPlatform::Macos,
+            "{platform:?}"
+        );
     }
     // HarmonyOS claims its 2in1 surfaces in its own form-factor projection; the phone hosts wire none.
     for platform in [
@@ -557,18 +563,21 @@ fn plugin_surfaces_are_claimed_only_by_the_hosts_that_wire_them() {
     ] {
         let capabilities = HostCapabilities::for_platform(platform);
         assert!(
-            !capabilities.key_sound && !capabilities.plugin_triggers && !capabilities.music,
+            !capabilities.key_sound
+                && !capabilities.plugin_triggers
+                && !capabilities.music
+                && !capabilities.typing_effects,
             "{platform:?}"
         );
     }
     let mut document =
         serde_json::to_value(HostCapabilities::for_platform(HostPlatform::Macos)).unwrap();
     let fields = document.as_object_mut().unwrap();
-    for key in ["key_sound", "plugin_triggers", "music"] {
+    for key in ["key_sound", "plugin_triggers", "music", "typing_effects"] {
         assert!(fields.remove(key).is_some(), "{key}");
     }
     let older: HostCapabilities = serde_json::from_value(document).unwrap();
-    assert!(!older.key_sound && !older.plugin_triggers && !older.music);
+    assert!(!older.key_sound && !older.plugin_triggers && !older.music && !older.typing_effects);
     let mut claimed = HostCapabilities::for_platform(HostPlatform::Windows);
     claimed.key_sound = true;
     let text = serde_json::to_string(&claimed).unwrap();

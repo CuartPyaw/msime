@@ -291,6 +291,9 @@ pub struct HostCapabilities {
     /// The host streams the selected music pack while it is the active input method.
     #[serde(default)]
     pub music: bool,
+    /// The host draws the typing effects and the combo count that `msime_client_typing_effect` answers with. Each host flips this only in the change that wires the call, as with the flags above.
+    #[serde(default)]
+    pub typing_effects: bool,
     /// The operating system release, as the machine reports it, for the feedback
     /// page to attach. Not a platform assumption like the flags above -- the host
     /// fills it in after `for_platform`, the way `system_fonts` is filled in --
@@ -537,6 +540,8 @@ impl HostCapabilities {
             key_sound: platform.is_desktop(),
             plugin_triggers: platform.is_desktop(),
             music: platform.is_desktop(),
+            // macOS draws the sparks, the card flash and the combo badge (TypingEffectPanel.mm); the other hosts flip this in the change that wires their overlay.
+            typing_effects: matches!(platform, HostPlatform::Macos),
             os_version: None,
             candidate_panel_limit: None,
         }

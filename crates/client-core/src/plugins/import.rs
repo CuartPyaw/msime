@@ -6,19 +6,38 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, SystemTime};
 
 use super::{
-    kind_directory, load_directory, PluginError, PluginSummary, BUILTIN_SOUND_PACKS, MAX_PACK_FILES,
+    is_builtin, kind_directory, load_directory, PluginError, PluginSummary, MAX_PACK_FILES,
 };
 
-/// Serializes every write to the plugins root in this process, so two imports cannot sweep each other's staging directories.
+/// Serializes every write to the plugins root in this process. The file lock below does the same across processes (the settings window and an input process both install and remove packs), but a lock on a file is not something every platform promises to hold between two threads of one process.
 static PLUGIN_ROOT_WRITES: Mutex<()> = Mutex::new(());
 
-/// Hold the plugins-root write lock. A write that panicked leaves nothing the next one relies on, since each import sweeps leftovers first, so a poisoned lock is taken over.
-pub(super) fn lock_plugin_root() -> MutexGuard<'static, ()> {
-    PLUGIN_ROOT_WRITES
+/// The file in the plugins root that writers of packs lock, the way `mentions.lock` guards the name list.
+pub(crate) const LOCK_FILE: &str = "packs.lock";
+
+/// A staging, set-aside or replaced directory younger than this is left for a later sweep. The shared lock already keeps two writers apart, but it is advisory, and on a file system that does not honour it (some network and FUSE mounts accept the call and lock nothing) a sweep that went by name alone would delete another process's import while it is being written. An import or removal finishes in seconds.
+pub(crate) const LEFTOVER_AGE: Duration = Duration::from_secs(60 * 60);
+
+/// Both plugins-root write locks, released together when dropped.
+pub(crate) struct RootWrites {
+    _file: File,
+    _process: MutexGuard<'static, ()>,
+}
+
+/// Hold the plugins-root write locks: this process's, then the one every process shares through `LOCK_FILE`. `root` must exist. A write that panicked leaves nothing the next one relies on, since each import sweeps leftovers first, so a poisoned lock is taken over.
+pub(super) fn lock_plugin_root(root: &Path) -> io::Result<RootWrites> {
+    let process = PLUGIN_ROOT_WRITES
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let file = crate::file_lock::open_lock_file(root.join(LOCK_FILE))?;
+    crate::file_lock::exclusive(&file)?;
+    Ok(RootWrites {
+        _file: file,
+        _process: process,
+    })
 }
 
 /// Bytes of an archive the picker may hand over: a music pack at its limits plus notices and zip overhead.
@@ -52,8 +71,8 @@ pub fn import(source: &Path, root: &Path) -> Result<PluginSummary, PluginError> 
     if !crate::storage::create_directory_and_check(root).map_err(|_| PluginError::Storage)? {
         return Err(PluginError::Storage);
     }
-    let _writes = lock_plugin_root();
-    sweep_leftovers(root);
+    let _writes = lock_plugin_root(root)?;
+    sweep_leftovers(root, SystemTime::now());
     let staging = Staging(root.join(format!(".staging-{}", uuid::Uuid::new_v4().simple())));
     fs::create_dir(&staging.0)?;
     if archive {
@@ -63,7 +82,7 @@ pub fn import(source: &Path, root: &Path) -> Result<PluginSummary, PluginError> 
     }
     let mut summary = load_directory(&staging.0).map_err(PluginError::Invalid)?;
     let kind = summary.kind();
-    if kind == super::PluginKind::Sound && BUILTIN_SOUND_PACKS.contains(&summary.id.as_str()) {
+    if is_builtin(kind, &summary.id) {
         return Err(PluginError::Reserved);
     }
     let directory = kind_directory(root, kind);
@@ -75,7 +94,12 @@ pub fn import(source: &Path, root: &Path) -> Result<PluginSummary, PluginError> 
     if fs::symlink_metadata(&target).is_ok_and(|metadata| !metadata.is_dir()) {
         fs::remove_file(&target)?;
     }
-    let backup = directory.join(format!(".replaced-{}", summary.id));
+    // Named uniquely, so a backup a crashed import left behind, too young yet for the sweep, cannot stand in the way of this one.
+    let backup = directory.join(format!(
+        ".replaced-{}-{}",
+        summary.id,
+        uuid::Uuid::new_v4().simple()
+    ));
     crate::skin::folder_import::replace_directory(&staging.0, &target, &backup)
         .map_err(|_| PluginError::Storage)?;
     summary.directory = target;
@@ -91,8 +115,8 @@ impl Drop for Staging {
     }
 }
 
-/// Staging, set-aside and replaced directories a crashed import or removal left behind.
-fn sweep_leftovers(root: &Path) {
+/// Staging, set-aside and replaced directories a crashed import or removal left behind, once they are `LEFTOVER_AGE` old by their modification time at `now`. One whose age cannot be read is left alone.
+pub(crate) fn sweep_leftovers(root: &Path, now: SystemTime) {
     let mut directories = vec![root.to_path_buf()];
     directories.extend(super::PluginKind::ALL.map(|kind| kind_directory(root, kind)));
     for directory in directories {
@@ -108,6 +132,13 @@ fn sweep_leftovers(root: &Path) {
                 .iter()
                 .any(|prefix| name.starts_with(prefix))
                 && entry.file_type().is_ok_and(|kind| kind.is_dir())
+                && entry
+                    .metadata()
+                    .and_then(|metadata| metadata.modified())
+                    .is_ok_and(|modified| {
+                        now.duration_since(modified)
+                            .is_ok_and(|age| age >= LEFTOVER_AGE)
+                    })
             {
                 let _ = fs::remove_dir_all(entry.path());
             }
