@@ -40,8 +40,8 @@ private final class FakeCloudClipboard: KeyboardCloudClipboardService, @unchecke
       return holds
     }
     if shouldHold { await withCheckedContinuation { continuation in lock.withLock { gate = continuation } } }
-    let (failure, enabled, rows) = lock.withLock {
-      (failure, enabledValue, stored.map { ["id": $0.id, "text": $0.text, "updated_at": $0.updated_at] })
+    let (failure, enabled, rows) = lock.withLock { () -> (Error?, Bool, [[String: Any]]) in
+      (self.failure, enabledValue, stored.map { ["id": $0.id, "text": $0.text, "updated_at": $0.updated_at] })
     }
     if let failure { throw failure }
     let data = try JSONSerialization.data(withJSONObject: ["enabled": enabled, "items": rows])
