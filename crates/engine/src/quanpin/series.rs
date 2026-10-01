@@ -51,7 +51,7 @@ pub fn resolve_series_query(
         let cuts = autocorrect_cut_kbest(raw, autocorrect_types, AUTOCORRECT_CUT_KBEST);
         if !cuts.is_empty() {
             result.corrected_input = true;
-            populate_from_cuts(&mut result, &cuts, "");
+            populate_from_cuts(&mut result, cuts, "");
         } else {
             // The k-best search only reaches the end when every segment is a complete syllable, so "hauzh" (hau typo + zh jianpin) fails outright. Retry on the head without a trailing incomplete syllable, shortest tail first so the correction explains as much of the input as possible. Neighbor corrections are left out of the head: they have the widest false-positive surface, and stacking them on a speculative jianpin boundary turns deletion-shaped input into noise (shng -> sun + g -> 笋干).
             let head_types = autocorrect_types & !autocorrect_type::NEIGHBOR;
@@ -67,7 +67,7 @@ pub fn resolve_series_query(
                     continue;
                 }
                 result.corrected_input = true;
-                populate_from_cuts(&mut result, &head_cuts, tail);
+                populate_from_cuts(&mut result, head_cuts, tail);
                 break;
             }
         }
@@ -90,23 +90,28 @@ pub fn resolve_series_query(
 }
 
 /// The primary cut defines the cost tier; same-cost readings compete with it on frequency, costlier ones stay behind it.
-fn populate_from_cuts(result: &mut SeriesResolution, cuts: &[AutocorrectCut], jianpin_tail: &str) {
-    let to_segments = |cut: &AutocorrectCut| {
-        let mut segments = cut.syllables();
+fn populate_from_cuts(
+    result: &mut SeriesResolution,
+    cuts: Vec<AutocorrectCut>,
+    jianpin_tail: &str,
+) {
+    let to_segments = |cut: AutocorrectCut| {
+        let mut segments = cut.into_syllables();
         if !jianpin_tail.is_empty() {
             segments.push(jianpin_tail.to_string());
         }
         segments
     };
-    let primary = &cuts[0];
-    result.corrected = to_segments(primary);
-    for cut in &cuts[1..] {
-        if cut.same_cost_as(primary) {
+    let mut cuts = cuts.into_iter();
+    let primary = cuts.next().expect("autocorrect cuts are non-empty");
+    for cut in cuts {
+        if cut.same_cost_as(&primary) {
             result.alternative_corrected_cuts.push(to_segments(cut));
         } else {
             result.costlier_corrected_cuts.push(to_segments(cut));
         }
     }
+    result.corrected = to_segments(primary);
 }
 
 /// `"T<types>:" + ("M:" | "A:") + (segmentation or raw)` (QD:63-67). The mask is part of the key because correction alternatives and typo sentences depend on it, and one input can be asked with different masks in a session (a suppressed input clears it for that input only).
