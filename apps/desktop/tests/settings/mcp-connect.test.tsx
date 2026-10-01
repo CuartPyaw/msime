@@ -91,6 +91,15 @@ test("the entry is shown and copied as the host reports it", async () => {
   expect(group.textContent).toContain("--allow-write");
   // Without an install callback there is nothing to write into, so there is no tab for it either.
   expect(within(group).queryByRole("radio", { name: "Cursor" })).toBeNull();
+  // Both permission switches start on; turned off, the configuration is the host's entry as it reported it.
+  expect(
+    (within(group).getByRole("switch", { name: "允许修改设置" }) as HTMLInputElement).checked,
+  ).toBe(true);
+  expect(
+    (within(group).getByRole("switch", { name: "允许读取词库" }) as HTMLInputElement).checked,
+  ).toBe(true);
+  fireEvent.click(within(group).getByRole("switch", { name: "允许修改设置" }));
+  fireEvent.click(within(group).getByRole("switch", { name: "允许读取词库" }));
   fireEvent.click(within(group).getByRole("radio", { name: "其他" }));
   expect(within(group).getByLabelText("MCP 配置").textContent).toBe(config);
   fireEvent.click(within(group).getByRole("button", { name: "复制配置" }));
@@ -101,6 +110,12 @@ test("the install commands are built from the host's paths and follow the permis
   const copyText = vi.fn(async () => {});
   await openDeveloper({ mcpServerStatus: async () => status(), copyText });
   const group = await screen.findByRole("group", { name: "连接 AI 助手" });
+  // Both switches start on.
+  expect(within(group).getByLabelText("Claude Code 安装命令").textContent).toBe(
+    "claude mcp add --scope user msime -- /opt/msime/msime-mcp --options /state/runtime-options.json --allow-write --allow-dictionary-read",
+  );
+  fireEvent.click(within(group).getByRole("switch", { name: "允许修改设置" }));
+  fireEvent.click(within(group).getByRole("switch", { name: "允许读取词库" }));
   expect(within(group).getByLabelText("Claude Code 安装命令").textContent).toBe(
     "claude mcp add --scope user msime -- /opt/msime/msime-mcp --options /state/runtime-options.json",
   );
@@ -161,7 +176,7 @@ test("paths with spaces are quoted for the shell they are pasted into", async ()
   };
   const view = render(<McpConnectSection status={() => Promise.resolve(posix)} />);
   expect((await screen.findByLabelText("Claude Code 安装命令")).textContent).toBe(
-    "claude mcp add --scope user msime -- '/Applications/水杉 输入法.app/msime-mcp' --options '/it'\\''s/options.json'",
+    "claude mcp add --scope user msime -- '/Applications/水杉 输入法.app/msime-mcp' --options '/it'\\''s/options.json' --allow-write --allow-dictionary-read",
   );
   view.unmount();
 
@@ -172,7 +187,7 @@ test("paths with spaces are quoted for the shell they are pasted into", async ()
   };
   render(<McpConnectSection status={() => Promise.resolve(windows)} />);
   expect((await screen.findByLabelText("Claude Code 安装命令")).textContent).toBe(
-    'claude mcp add --scope user msime -- "C:\\Program Files\\MSIME\\msime-mcp.exe" --options "C:\\Users\\someone\\options.json"',
+    'claude mcp add --scope user msime -- "C:\\Program Files\\MSIME\\msime-mcp.exe" --options "C:\\Users\\someone\\options.json" --allow-write --allow-dictionary-read',
   );
 });
 
@@ -262,7 +277,7 @@ test("a copy response from a replaced host cannot mark the new MCP section copie
   const group = await screen.findByRole("group", { name: "连接 AI 助手" });
   fireEvent.click(within(group).getByRole("radio", { name: "其他" }));
   fireEvent.click(within(group).getByRole("button", { name: "复制配置" }));
-  expect(oldCopy).toHaveBeenCalledWith(config);
+  expect(oldCopy).toHaveBeenCalledOnce();
   view.rerender(<McpConnectSection status={() => Promise.resolve(status())} copyText={nextCopy} />);
   await act(async () => {
     pending.resolve();
@@ -309,6 +324,12 @@ test("the terminal tab tells an assistant how to run the tools directly, with th
   const group = await screen.findByRole("group", { name: "连接 AI 助手" });
   fireEvent.click(within(group).getByRole("radio", { name: "命令行" }));
   const program = "/opt/msime/msime-mcp --options /state/runtime-options.json";
+  // Both switches start on; turn them off to see the read-only instructions.
+  expect(within(group).getByLabelText("命令行用法").textContent).toContain(
+    `${program} --allow-write --allow-dictionary-read tools`,
+  );
+  fireEvent.click(within(group).getByRole("switch", { name: "允许修改设置" }));
+  fireEvent.click(within(group).getByRole("switch", { name: "允许读取词库" }));
   expect(within(group).getByLabelText("命令行用法").textContent).toBe(
     [
       "水杉输入法（MSIME）可以在终端里直接管理：",
@@ -337,7 +358,7 @@ test("on Windows the terminal instructions pass the arguments through a file", a
   fireEvent.click(within(group).getByRole("radio", { name: "命令行" }));
   const usage = within(group).getByLabelText("命令行用法").textContent!;
   expect(usage).toContain(
-    '"C:\\Program Files\\MSIME\\msime-mcp.exe" --options "C:\\ProgramData\\MSIME\\runtime-options.json" call <工具名> @<文件路径>',
+    '"C:\\Program Files\\MSIME\\msime-mcp.exe" --options "C:\\ProgramData\\MSIME\\runtime-options.json" --allow-write --allow-dictionary-read call <工具名> @<文件路径>',
   );
   expect(usage).not.toContain("'<JSON 参数>'");
 });

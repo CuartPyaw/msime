@@ -75,7 +75,20 @@ impl Segmentation {
 
     /// The first `count` syllables joined by single spaces: the `entries.key` they are looked up by.
     pub fn key(&self, input: &str, count: usize) -> String {
-        self.texts(input).take(count).collect::<Vec<_>>().join(" ")
+        let syllables = self.syllables.iter().take(count);
+        let capacity = syllables
+            .clone()
+            .map(|syllable| syllable.end - syllable.start)
+            .sum::<usize>()
+            .saturating_add(self.syllables.len().min(count).saturating_sub(1));
+        let mut key = String::with_capacity(capacity);
+        for (index, syllable) in self.syllables.iter().take(count).enumerate() {
+            if index > 0 {
+                key.push(' ');
+            }
+            key.push_str(&input[syllable.start..syllable.end]);
+        }
+        key
     }
 
     /// Where the letters this segmentation reads end; zero when it reads none.
@@ -337,7 +350,9 @@ pub(crate) mod tests {
     fn segmentation_keys() {
         let input = "gwong'dungwa";
         let reading = &segment(input, &inventory())[0];
-        assert_eq!(reading.key(input, 3), "gwong dung wa");
+        let key = reading.key(input, 3);
+        assert_eq!(key, "gwong dung wa");
+        assert_eq!(key.capacity(), key.len());
         assert_eq!(reading.key(input, 2), "gwong dung");
         assert!(reading.ends_in_prefix());
         assert_eq!(reading.end(), input.len());
