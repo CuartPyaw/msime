@@ -95,8 +95,8 @@ export function createMobileHostServices(
       mutate: (action) => invoke("mutate_custom_skin_library", { action }),
     },
     communitySkins: {
-      list: (offset, search) =>
-        invoke<CommunitySkinPage>("community_skin_list", { offset, search }),
+      list: (offset, search, mine) =>
+        invoke<CommunitySkinPage>("community_skin_list", { offset, search, mine }),
       detail: (id) => invoke("community_skin_detail", { id }),
       download: (id, name) =>
         invoke<CommunitySkinDownload>("community_skin_download", { id, name }),
@@ -105,6 +105,8 @@ export function createMobileHostServices(
         invoke("community_skin_publish", { id, name, description, design }),
       unpublish: (id) => invoke("community_skin_unpublish", { id }),
       finishTrial: (id, keep) => invoke("community_skin_finish_trial", { id, keep }),
+      report: (id, reason, detail) =>
+        invoke("community_report", { kind: "skins", id, reason, detail }),
     },
     aiSkins: {
       generate: (requestId, prompt) =>
@@ -128,6 +130,13 @@ export function createMobileHostServices(
       unpublish: (id) => invoke("community_resource_unpublish", { id }),
       storeReply: (item) => invoke("community_resource_store_reply", { item }),
       removeReply: (id) => invoke("community_resource_remove_reply", { id }),
+      report: (kind, id, reason, detail) =>
+        invoke("community_report", {
+          kind: kind === "dictionary" ? "dictionaries" : "replies",
+          id,
+          reason,
+          detail,
+        }),
     },
     openSystemKeyboardSettings,
     ...(platform === "android"

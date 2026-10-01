@@ -18,6 +18,12 @@ import { CommunityDetailStatus } from "./community-detail-status";
 import * as style from "./community-style";
 import { CommunitySearchForm } from "./community-search-form";
 import { CommunityScopeButtons } from "./community-scope-buttons";
+import {
+  CommunityRemovedBadge,
+  CommunityReportSection,
+  type CommunityModeration,
+  type CommunityReportReason,
+} from "./community-report";
 import { CommunitySkinPublicationFields } from "./community-skin-publication-fields";
 import { CommunitySkinModerationSection } from "./community-skin-moderation-section";
 import { CommunitySkinCardMetrics } from "./community-skin-card-metrics";
@@ -38,6 +44,8 @@ export type CommunitySkin = {
   rating_average: number;
   owned: boolean;
   my_rating: number;
+  /** Sent only on the user's own skins; `removed` shows 已下架. */
+  moderation?: CommunityModeration | null;
 };
 
 export type CommunitySkinPage = {
@@ -52,7 +60,8 @@ export type CommunitySkinDownload = {
 };
 
 export interface CommunitySkinClient {
-  list(offset: number, search: string): Promise<CommunitySkinPage>;
+  /** `mine` lists only the signed-in user's own skins, removed ones included. */
+  list(offset: number, search: string, mine?: boolean): Promise<CommunitySkinPage>;
   detail(id: string): Promise<CommunitySkin>;
   download(id: string, name: string): Promise<CommunitySkinDownload>;
   rate(id: string, stars: number): Promise<void>;
@@ -64,6 +73,8 @@ export interface CommunitySkinClient {
   ): Promise<void>;
   unpublish(id: string): Promise<void>;
   finishTrial(id: string, keep: boolean): Promise<void>;
+  /** Reports another user's skin to the moderators. */
+  report?(id: string, reason: CommunityReportReason, detail: string): Promise<void>;
 }
 
 function CommunitySkinPublishDialog({
@@ -270,7 +281,10 @@ function CommunitySkinCard({
         <ScreenKeyboardPreview theme={theme} skin="custom" customDesign={skin.design} compact />
       </span>
       <strong>{skin.name}</strong>
-      <span className={style.cardAuthor}>{skin.owned ? "我的作品" : skin.author}</span>
+      <span className={style.cardAuthor}>
+        {skin.owned ? "我的作品" : skin.author}
+        {skin.owned && skin.moderation === "removed" && " · 已下架"}
+      </span>
       <CommunitySkinCardMetrics
         downloads={skin.downloads}
         ratingCount={skin.rating_count}
@@ -298,13 +312,17 @@ export function CommunitySkinsPage({
 }) {
   const galleryClient = useMemo<CommunityGalleryClient<CommunitySkin>>(
     () => ({
-      list: async (offset, search) => {
-        const page = await client.list(offset, search);
+      list: async (offset, search, mine) => {
+        const page = await client.list(offset, search, mine ?? false);
         return { items: page.skins, has_more: page.has_more };
       },
       detail: client.detail,
       rate: client.rate,
       unpublish: client.unpublish,
+      ...(client.report && {
+        report: (id: string, reason: CommunityReportReason, detail: string) =>
+          client.report!(id, reason, detail),
+      }),
     }),
     [client],
   );
@@ -336,6 +354,7 @@ export function CommunitySkinsPage({
     closeDetail: closeGalleryDetail,
     rateSelected,
     unpublishSelected,
+    reportSelected,
     runAction,
   } = gallery;
   const [search, setSearch] = useState("");
@@ -463,6 +482,7 @@ export function CommunitySkinsPage({
               <p className={style.headingNote}>{selected.author}</p>
             </div>
             {selected.owned && <span className={style.detailBadge}>我的作品</span>}
+            <CommunityRemovedBadge owned={selected.owned} moderation={selected.moderation} />
           </div>
           {selected.description && <p className={style.description}>{selected.description}</p>}
           <CommunityDetailStatus
@@ -520,6 +540,9 @@ export function CommunitySkinsPage({
             onUnpublish={() => void unpublish()}
             onCancelUnpublish={() => setConfirmUnpublish(false)}
           />
+          {!selected.owned && client.report && (
+            <CommunityReportSection actionBusy={actionBusy} onReport={reportSelected} />
+          )}
         </section>
       </div>
     );
@@ -549,7 +572,7 @@ export function CommunitySkinsPage({
             mineLabel="我的作品"
             onMineOnlyChange={(nextMineOnly) => {
               setMineOnly(nextMineOnly);
-              void requestList(activeSearch, false);
+              void requestList(activeSearch, false, nextMineOnly);
             }}
           />
           {localSkinLibrary && (
