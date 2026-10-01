@@ -2,10 +2,11 @@
 //! Committed text is classified in memory and is never serialized.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::SystemTime;
 use unicode_general_category::{get_general_category, GeneralCategory};
 use unicode_segmentation::UnicodeSegmentation;
@@ -232,6 +233,158 @@ impl SelectionCounts {
     }
 }
 
+/// Every key id `dailyKeys` may hold, and the only ones `record_keys` accepts.
+///
+/// W3C `KeyboardEvent.code` names for physical keys, so every desktop host and the settings page agree on one spelling without a translation table, plus the on-screen keys a soft keyboard has and a physical one does not. A soft 26-key letter is `KeyA`..`KeyZ`, its space, return, backspace and shift are `Space`, `Enter`, `Backspace` and `ShiftLeft`, and a symbol-layer key is the ANSI key that types that character. A key with no entry here is not counted at all: an id invented by one host would be a key no other host or page can draw, and a closed list is also what keeps a free-form string, and with it anything typed, out of the file.
+pub const KEY_IDS: &[&str] = &[
+    // Letters.
+    "KeyA",
+    "KeyB",
+    "KeyC",
+    "KeyD",
+    "KeyE",
+    "KeyF",
+    "KeyG",
+    "KeyH",
+    "KeyI",
+    "KeyJ",
+    "KeyK",
+    "KeyL",
+    "KeyM",
+    "KeyN",
+    "KeyO",
+    "KeyP",
+    "KeyQ",
+    "KeyR",
+    "KeyS",
+    "KeyT",
+    "KeyU",
+    "KeyV",
+    "KeyW",
+    "KeyX",
+    "KeyY",
+    "KeyZ",
+    // Digit row.
+    "Digit0",
+    "Digit1",
+    "Digit2",
+    "Digit3",
+    "Digit4",
+    "Digit5",
+    "Digit6",
+    "Digit7",
+    "Digit8",
+    "Digit9",
+    // ANSI punctuation.
+    "Backquote",
+    "Minus",
+    "Equal",
+    "BracketLeft",
+    "BracketRight",
+    "Backslash",
+    "Semicolon",
+    "Quote",
+    "Comma",
+    "Period",
+    "Slash",
+    // International layouts (ISO, JIS, Korean).
+    "IntlBackslash",
+    "IntlRo",
+    "IntlYen",
+    "Lang1",
+    "Lang2",
+    "Convert",
+    "NonConvert",
+    "KanaMode",
+    // Editing and whitespace.
+    "Space",
+    "Enter",
+    "Backspace",
+    "Tab",
+    "Escape",
+    "Delete",
+    "Insert",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    // Modifiers.
+    "CapsLock",
+    "ShiftLeft",
+    "ShiftRight",
+    "ControlLeft",
+    "ControlRight",
+    "AltLeft",
+    "AltRight",
+    "MetaLeft",
+    "MetaRight",
+    "Fn",
+    "ContextMenu",
+    // Function row.
+    "F1",
+    "F2",
+    "F3",
+    "F4",
+    "F5",
+    "F6",
+    "F7",
+    "F8",
+    "F9",
+    "F10",
+    "F11",
+    "F12",
+    // Numeric keypad.
+    "Numpad0",
+    "Numpad1",
+    "Numpad2",
+    "Numpad3",
+    "Numpad4",
+    "Numpad5",
+    "Numpad6",
+    "Numpad7",
+    "Numpad8",
+    "Numpad9",
+    "NumpadDecimal",
+    "NumpadEnter",
+    "NumpadAdd",
+    "NumpadSubtract",
+    "NumpadMultiply",
+    "NumpadDivide",
+    "NumLock",
+    // On-screen keyboards only: the nine-key grid cells named by the digit printed on them (`Nine1` is the punctuation and separator cell), the nine-key side-column punctuation keys, and the symbol, layer, language, globe, emoji and voice keys.
+    "Nine0",
+    "Nine1",
+    "Nine2",
+    "Nine3",
+    "Nine4",
+    "Nine5",
+    "Nine6",
+    "Nine7",
+    "Nine8",
+    "Nine9",
+    "SoftPunctuation",
+    "SoftSymbol",
+    "SoftLayer",
+    "SoftLanguage",
+    "SoftGlobe",
+    "SoftEmoji",
+    "SoftVoice",
+];
+
+/// Whether `id` is one of [`KEY_IDS`].
+///
+/// A set rather than a scan of the list, because `validate` runs this for every key of every retained day on every read, and `Forever` retains years of them.
+pub fn is_known_key_id(id: &str) -> bool {
+    static KNOWN: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    KNOWN
+        .get_or_init(|| KEY_IDS.iter().copied().collect())
+        .contains(id)
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TypingStatistics {
@@ -285,6 +438,13 @@ pub struct TypingStatistics {
     /// commit's instant, which is the only thing the gap can be measured against.
     #[serde(default)]
     pub last_commit_ms: u64,
+    /// Presses per key per local day: day, then a [`KEY_IDS`] entry, then how many times that key went down that day.
+    ///
+    /// Counts and nothing else. There is no hour, no order and no pairing of keys, because any of those would start to say what was typed rather than how hard each key works; a day of counts per key says only the latter. The day comes from the host for the same reason `record` takes one, and it is the day the presses happened on, not the day the host got round to flushing them.
+    ///
+    /// Not tied to `days`: keys are pressed on days that commit nothing (navigation, deleting, typing into an app with the input method in English), so a day may appear here and nowhere else. Absent from files written before this existed, which `default` reads as no key history.
+    #[serde(default)]
+    pub daily_keys: BTreeMap<String, BTreeMap<String, u64>>,
     /// How long recorded days are kept.
     #[serde(default, deserialize_with = "retention_or_forever")]
     pub retention: StatisticsRetention,
@@ -309,6 +469,7 @@ impl Default for TypingStatistics {
             selections: SelectionCounts::default(),
             daily_active_ms: BTreeMap::new(),
             daily_hours: BTreeMap::new(),
+            daily_keys: BTreeMap::new(),
             last_commit_ms: 0,
             retention: StatisticsRetention::Forever,
             last_pruned_day: String::new(),
@@ -401,6 +562,11 @@ impl TypingStatistics {
                 return Err(TypingStatisticsError::InvalidDocument);
             }
         }
+        // Checked against the calendar rather than against `days`, which a key-only day is legitimately missing from.
+        for (day, keys) in &self.daily_keys {
+            validate_day(day).map_err(|_| TypingStatisticsError::InvalidDocument)?;
+            validate_key_counts(keys)?;
+        }
         Ok(())
     }
 
@@ -437,6 +603,7 @@ impl TypingStatistics {
         self.daily_details.retain(|day, _| *day >= boundary);
         self.daily_active_ms.retain(|day, _| *day >= boundary);
         self.daily_hours.retain(|day, _| *day >= boundary);
+        self.daily_keys.retain(|day, _| *day >= boundary);
         // Subtraction keeps whatever `total` and `detail` hold beyond the per-day records, which a document written by an older build can have. Where that leaves the counters out of step with each other - `total` below the retained days, or a category sum above `total` - validate() would reject the document this write produces, so fall back to what the retained days themselves say.
         let retained = self
             .days
@@ -484,6 +651,8 @@ pub enum TypingStatisticsError {
     CountExhausted,
     #[error("candidate position is not one-based")]
     InvalidPosition,
+    #[error("typing statistics key id is unknown or its count is zero")]
+    InvalidKey,
 }
 
 #[derive(Clone, Debug)]
@@ -732,6 +901,48 @@ impl TypingStatisticsStore {
         Ok(())
     }
 
+    /// Count key presses for `day`, each entry adding `count` presses of one [`KEY_IDS`] key, under one lock, one read and at most one write. Returns how many presses were added.
+    ///
+    /// `day` is the local day the presses happened on. A host that batches across midnight flushes the old day's counts under the old day before it counts anything for the new one; stamping them with the day of the flush would move typing onto a day it did not happen on.
+    ///
+    /// The batch is applied whole or not at all. An unknown key id or a zero count rejects it before the document is opened, because either one means the host is sending something this contract does not describe, and keeping the valid part would hide that. An empty batch touches nothing on disk, and statistics being off drops the batch without writing, the same answers `record_selections` gives. Retention runs on the first write of a day, exactly as `record` does it.
+    pub fn record_keys(
+        &self,
+        day: &str,
+        keys: &BTreeMap<String, u64>,
+    ) -> Result<u64, TypingStatisticsError> {
+        validate_day(day)?;
+        if keys
+            .iter()
+            .any(|(key, count)| *count == 0 || !is_known_key_id(key))
+        {
+            return Err(TypingStatisticsError::InvalidKey);
+        }
+        let presses = keys
+            .values()
+            .try_fold(0_u64, |sum, count| sum.checked_add(*count))
+            .filter(|sum| *sum <= MAX_COUNT)
+            .ok_or(TypingStatisticsError::CountExhausted)?;
+        if presses == 0 {
+            return Ok(0);
+        }
+        let _lock = self.lock()?;
+        let mut value = self.read_locked()?;
+        if !value.enabled {
+            return Ok(0);
+        }
+        let day_keys = value.daily_keys.entry(day.to_owned()).or_default();
+        for (key, count) in keys {
+            checked_increment(day_keys, key, *count)?;
+        }
+        if value.last_pruned_day != day {
+            value.apply_retention(day);
+            value.last_pruned_day = day.to_owned();
+        }
+        self.write_locked(&value)?;
+        Ok(presses)
+    }
+
     pub fn set_enabled(&self, enabled: bool) -> Result<TypingStatistics, TypingStatisticsError> {
         let _lock = self.lock()?;
         let mut value = self.read_locked()?;
@@ -773,6 +984,7 @@ impl TypingStatisticsStore {
         value.selections = SelectionCounts::default();
         value.daily_active_ms.clear();
         value.daily_hours.clear();
+        value.daily_keys.clear();
         // Including when typing last happened: it is the only field that survives a reset by
         // saying anything about the user at all.
         value.last_commit_ms = 0;
@@ -835,6 +1047,20 @@ fn validate_counts(value: &TypingBreakdown, total: u64) -> Result<(), TypingStat
         {
             return Err(TypingStatisticsError::InvalidDocument);
         }
+    }
+    Ok(())
+}
+
+/// A day's key counts: whitelisted ids only, so never more entries than [`KEY_IDS`] has, each within `MAX_COUNT`.
+///
+/// Not compared with the day's character count. Presses and committed characters measure different things — a pinyin syllable is several presses for one character, a deletion is a press for none — so neither bounds the other.
+fn validate_key_counts(keys: &BTreeMap<String, u64>) -> Result<(), TypingStatisticsError> {
+    if keys.len() > KEY_IDS.len()
+        || keys
+            .iter()
+            .any(|(key, count)| *count > MAX_COUNT || !is_known_key_id(key))
+    {
+        return Err(TypingStatisticsError::InvalidDocument);
     }
     Ok(())
 }
@@ -907,6 +1133,9 @@ fn is_emoji(grapheme: &str) -> bool {
             || code == 0xfe0f
     })
 }
+
+#[cfg(test)]
+mod key_tests;
 
 #[cfg(test)]
 mod selection_tests;

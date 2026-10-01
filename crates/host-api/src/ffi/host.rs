@@ -468,6 +468,11 @@ pub unsafe extern "C" fn msime_client_typing_statistics(
             /// knows which day the window is counted back from.
             day: String,
         },
+        /// Key presses a host batched in memory, as `{"KeyA": 3, ...}` press counts for the local day they happened on. Ids outside `KEY_IDS` or zero counts reject the whole batch.
+        RecordKeys {
+            day: String,
+            keys: std::collections::BTreeMap<String, u64>,
+        },
         Reset,
     }
     response(|| {
@@ -513,6 +518,12 @@ pub unsafe extern "C" fn msime_client_typing_statistics(
                     key_sound::achievement();
                 }
                 Ok(json!({"recorded": recorded, "milestone": milestone}))
+            }
+            StatisticsAction::RecordKeys { day, keys } => {
+                let recorded = store
+                    .record_keys(&day, &keys)
+                    .map_err(|error| error.to_string())?;
+                Ok(json!({"recorded": recorded}))
             }
             StatisticsAction::SetEnabled { enabled } => serde_json::to_value(
                 store
