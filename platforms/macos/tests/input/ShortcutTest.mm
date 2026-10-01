@@ -2833,7 +2833,7 @@ static void TestPreferenceClientGeneration() {
 }
 @end
 
-// Every controller observes the shared appearance, so a change is saved by whichever one registered first, usually a controller whose client lost focus long ago. Reloading only that one after the save left the focused session on what it had: a mode switch from 한 to 中 reached its Engine with the next one-second poll, and the keys typed before it composed Hangul, a syllable that then held the new scheme back until it ended. The controller that has the focus loads the saved document as soon as the save is done.
+// 每个控制器都观察同一份外观设置，所以改动由最先注册的那个保存，而它往往是早已失去焦点的控制器。保存后只重新载入它，持有焦点的会话就停留在原来的设置上：从 한 切到 中 要等下一次每秒一次的轮询才到达 Engine，在此之前敲的键按韩文组字，音节又把新方案挡到它结束。保存完成后，持有焦点的控制器应立即载入保存的文档。
 static void TestSavedPreferencesReachTheFocusedController() {
     NSString *suite = [@"msime.preference-focus-save." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
@@ -2860,7 +2860,7 @@ static void TestSavedPreferencesReachTheFocusedController() {
     MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
 
-// A mode switch is a scheme change, and the scheme reaches the Engine only through the shared document. The key typed right after Ctrl+Space has to compose in the new scheme, before any background save or poll has had a turn of the run loop: the switch writes the document and applies it to the session there and then. Checked against a real session for each direction, from the input menu too, and the save that follows must leave the switch where it is.
+// 切换输入模式就是切换方案，而方案只能通过共享文档到达 Engine。Ctrl+Space 之后敲的第一个键必须按新方案组字，此时后台保存和轮询都还没轮到运行循环：切换当场写入文档并应用到会话。用真实会话逐个方向检查，也检查输入法菜单，并且随后的保存不能改动这次切换。
 static void TestModeSwitchReachesTheSessionBeforeTheNextKey() {
     NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
     NSMutableDictionary *options = [@{@"api_version": @1,
@@ -2897,30 +2897,30 @@ static void TestModeSwitchReachesTheSessionBeforeTheNextKey() {
         assert([controller handleEvent:KeypadKey(keyCode, letter, 0, NO) client:client]);
     };
 
-    // 中 to 한: the very next letter is a Hangul jamo.
+    // 中 切到 한：紧接着的字母就是韩文字母（자모）。
     [controller systemDidReportInputMode:MSIMEKoreanInputModeID client:client];
     type(15, @"r");
     assert(scheme() == msime::mac::KoreanScheme && [client.marked isEqual:@"\u3131"]);
-    // 한 to 中 with a syllable still open: the syllable is written out first, then the next letter is pinyin.
+    // 音节未完成时从 한 切到 中：先把音节上屏，下一个字母按拼音处理。
     [controller systemDidReportInputMode:MSIMEChineseInputModeID client:client];
     assert([client.insertions.lastObject isEqual:@"\u3131"]);
     type(45, @"n");
     assert(scheme() == 0 && [client.marked isEqual:@"n"]);
-    // 中 to 日 and back.
+    // 中 切到 日 再切回来。
     [controller systemDidReportInputMode:MSIMEJapaneseInputModeID client:client];
     type(40, @"k");
     assert(scheme() == 3);
     [controller systemDidReportInputMode:MSIMEChineseInputModeID client:client];
     type(45, @"n");
     assert(scheme() == 0 && [client.marked isEqual:@"n"]);
-    // The input menu's scheme items take the same path.
+    // 输入法菜单里的方案项走同一条路径。
     NSMenuItem *korean = [[NSMenuItem alloc] initWithTitle:@"韩语" action:@selector(selectInputScheme:) keyEquivalent:@""];
     korean.representedObject = @"korean";
     [controller selectInputScheme:korean];
     type(15, @"r");
     assert(scheme() == msime::mac::KoreanScheme && [client.marked isEqual:@"\u3131"]);
 
-    // The background save the appearance change starts writes the same preferences again, and the reload after it is no second switch and no revert.
+    // 外观改动触发的后台保存会再写一遍相同的偏好，之后的重新载入既不会再切换一次，也不会切回去。
     [controller persistAppearancePreferences];
     SettleWindowLayout();
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1.5];
