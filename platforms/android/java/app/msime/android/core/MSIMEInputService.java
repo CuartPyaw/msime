@@ -1,6 +1,7 @@
 package app.msime.android;
 
 import android.inputmethodservice.InputMethodService;
+import app.msime.android.core.Telemetry;
 import android.app.AlertDialog;
 import android.content.ClipDescription;
 import android.content.Intent;
@@ -909,8 +910,15 @@ public final class MSIMEInputService extends InputMethodService {
         synchronizeReplyKeyboard();
     }
 
+    // One reporting session per keyboard process: a crash here is recorded against it, and a session that ends through onDestroy counts as a normal one.
+    @Override public void onCreate() {
+        super.onCreate();
+        Telemetry.beginInputSession(this);
+    }
+
     @Override public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
+        Telemetry.inputViewShown(this);
         cancelInputViewRefresh();
         final long expectedGeneration = engineStartGeneration;
         final InputConnection expectedConnection = connection;
@@ -1028,6 +1036,7 @@ public final class MSIMEInputService extends InputMethodService {
         onlineCandidateWorker.shutdownNow();
         aiPolishClient.close();
         connection = null;
+        Telemetry.endInputSession(this);
         super.onDestroy();
     }
     @Override public boolean onEvaluateFullscreenMode() { return false; }

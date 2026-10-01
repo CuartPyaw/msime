@@ -20,7 +20,8 @@ import org.json.JSONObject;
  * <p>Read-only on purpose. Publishing, rating and deleting are the operations that need a real
  * signed-in account, and this host only has the keyboard's anonymous identity -- offering a publish
  * button that always answers "请先登录" would be worse than not offering one. Downloading a skin,
- * which is what someone opens this tab to do, needs nothing more than the anonymous token.
+ * which is what someone opens this tab to do, needs nothing more than the anonymous token. So does
+ * reporting an entry to the moderators, the one write this host offers.
  *
  * <p>Every call blocks on the network and must not run on the main thread.
  */
@@ -86,6 +87,58 @@ public final class CommunityCatalog {
             // 说出是哪一步断的。界面上仍然只有那一句，但把原因扔掉，下一次就还得从头猜。
             android.util.Log.w("MSIMECommunity", "Catalogue request failed", error);
             return new Page(List.of(), false, CommunityRequest.message(null, 0));
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    /**
+     * Report one entry to the moderators (POST /v1/community/reports).
+     *
+     * <p>Needs a signed-in session, and the device's anonymous account counts: the Google account when there is one, otherwise the keyboard's anonymous identity.
+     *
+     * @return the failure to show, or an empty string once the report was taken
+     */
+    public String report(Item item, String reason, String detail) {
+        String text = detail == null ? "" : detail.trim();
+        if (item == null || !CommunityRequest.validReport(reason, text)) {
+            return CommunityRequest.message("invalid_report_reason", 400);
+        }
+        String token = new BackendAccount(context).accessToken();
+        if (token.isEmpty()) {
+            try {
+                token = new BackendAnonymousAccount(context).accessToken();
+            } catch (Exception | LinkageError error) {
+                android.util.Log.i("MSIMECommunity", "No identity to report with", error);
+                return CommunityRequest.message(null, error instanceof BackendAnonymousAccount.RateLimited ? 429 : 0);
+            }
+        }
+        HttpsURLConnection connection = null;
+        try {
+            JSONObject body = new JSONObject()
+                .put("kind", CommunityRequest.reportKind(item.kind()))
+                .put("item_id", item.id())
+                .put("reason", reason);
+            if (!text.isEmpty()) body.put("detail", text);
+            connection = (HttpsURLConnection) new URL(ORIGIN + CommunityRequest.REPORT_PATH).openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(TIMEOUT_MILLIS);
+            connection.setReadTimeout(TIMEOUT_MILLIS);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("User-Agent", "MSIME/Android");
+            connection.setRequestProperty("Authorization", "Bearer " + token);
+            try (java.io.OutputStream output = connection.getOutputStream()) {
+                output.write(body.toString().getBytes(StandardCharsets.UTF_8));
+            }
+            int status = connection.getResponseCode();
+            if (status == 200 || status == 201) return "";
+            return CommunityRequest.message(errorCode(connection.getErrorStream()), status);
+        } catch (Exception | LinkageError error) {
+            android.util.Log.w("MSIMECommunity", "Report failed", error);
+            return CommunityRequest.message(null, 0);
         } finally {
             if (connection != null) connection.disconnect();
         }
