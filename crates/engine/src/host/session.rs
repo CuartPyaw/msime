@@ -39,7 +39,7 @@ pub enum Command {
     CommitReading = 10,
     /// Commit the letters as typed without learning them as an English word.
     CommitRawWithoutLearning = 11,
-    /// Open or close the active scheme's candidate list (the Korean Hanja list); unhandled in a scheme without one. Hosts may call it `MSIME_OPEN_CANDIDATE_LIST`.
+    /// Open or close the active scheme's candidate list (the Korean Hanja list, the Zhuyin conversion list); unhandled in a scheme without one. Hosts may call it `MSIME_OPEN_CANDIDATE_LIST`.
     ConvertHanja = 12,
 }
 
@@ -56,7 +56,7 @@ pub struct EngineSnapshot {
     pub microsoft_shuangpin: bool,
     pub shuangpin_profile: String,
     pub preedit: String,
-    /// The kana reading in Japanese, the composed Hangul in Korean, else empty.
+    /// The kana reading in Japanese, the composed Hangul in Korean, the converted text plus the pending bopomofo in Zhuyin, else empty.
     pub reading: String,
     pub editing_text: String,
     pub caret_position: usize,
@@ -71,7 +71,7 @@ pub struct EngineSnapshot {
     pub candidate_positions: Vec<u8>,
     pub candidate_corrected: Vec<bool>,
     pub candidate_answers_key: Vec<bool>,
-    /// The scheme's openable candidate list is showing (the Korean Hanja list); candidates are its rows while it is.
+    /// The scheme's openable candidate list is showing (the Korean Hanja list, the Zhuyin conversion list); candidates are its rows while it is.
     pub candidate_list_open: bool,
 }
 
