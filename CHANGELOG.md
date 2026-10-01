@@ -22,6 +22,7 @@
 - `packages/ui` 提供跨平台共享的 React 设置页，桌面、Android、iOS 与 HarmonyOS 宿主共用同一份实现，包含首页、账号、AI 对话、社区、打字统计、外观、输入、辅助码、快捷键、词库、皮肤、语音、屏幕键盘、手写、实用功能、AI 辅助、悬浮工具栏、帮助、关于与反馈等页面，并带移动端底部 tab 映射。
 - 桌面 shell（Tauri）提供跨平台命令层，并按 Windows / macOS / Linux / Android / iOS 分目录接入各自的账号、凭据、数据目录、输入源与音频能力。
 - HarmonyOS 宿主消费同一份设置页的单文件构建产物，由 `platforms/harmony/stage-settings.sh` 在每次打 HAP 前从 `packages/ui` 构建、不提交进仓库，`entry/hvigorfile.ts` 在它缺失时拒绝打包。
+- 外观页新增「候选窗」分组，集中设置候选主题、候选字体预设（默认 / 宋体 / 黑体 / 楷体 / 圆体）、整体大小、不透明度、背景 / 焦点高亮 / 文字 / 序号四种颜色和圆角大小。共享偏好新增 `candidate_scale_percent`（50–200%，字号与窗口几何一并缩放）、`candidate_opacity_percent`（50–100%，只作用于卡片底色、边框和皮肤背景图，文字保持不透明）和 `candidate_corner_radius`（0–32pt，优先于皮肤包的 `corner_radius_dip`）；宿主能力新增 `candidate_window_scale`、`candidate_window_opacity`、`candidate_corner_radius` 三个开关，Windows 与 macOS 全部支持，Linux（Fcitx5）只支持圆角，HarmonyOS 2in1 支持圆角与不透明度，iOS 与 Android 不提供。可见变化：设置了焦点高亮颜色后，选中候选的文字改为按该底色明暗自动取黑或白（序号随之取同色半透明），不再沿用强调色。兼容性：三项保持默认时不写入偏好文档，旧版本照常读取；一旦调整过其中任一项，尚未升级的旧版本宿主（例如更新后尚未重启的输入法进程，或经同步共用同一份文档的另一台设备）会因不认识这些键而整份加载失败，需要一并升级。
 
 #### macOS
 

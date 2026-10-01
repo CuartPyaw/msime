@@ -610,6 +610,10 @@ fn host_capability_boundary_describes_each_platform() {
     // Every host reads capabilities through this boundary, so the border colour reaches the Linux page here.
     assert_eq!(linux["value"]["candidate_border_color"], true);
     assert_eq!(linux["value"]["candidate_selection_appearance"], false);
+    // The Fcitx5 theme carries the card's radius but neither a scale nor a translucent fill.
+    assert_eq!(linux["value"]["candidate_corner_radius"], true);
+    assert_eq!(linux["value"]["candidate_window_scale"], false);
+    assert_eq!(linux["value"]["candidate_window_opacity"], false);
 
     let windows = capabilities("windows");
     assert_eq!(windows["value"]["restart_input_method"], true);

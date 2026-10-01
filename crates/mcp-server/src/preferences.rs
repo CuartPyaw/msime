@@ -176,6 +176,12 @@ pub struct PreferencesView {
     pub candidate_page_size: u8,
     /// Candidate font size in points, 12 to 32.
     pub candidate_font_size: u8,
+    /// Overall size of the floating candidate window in percent, 50 to 200; the font size and the window's geometry are both multiplied by it (Windows and macOS).
+    pub candidate_scale_percent: u16,
+    /// Opacity of the candidate window's background, border and skin image in percent, 50 to 100; the text stays opaque.
+    pub candidate_opacity_percent: u8,
+    /// Corner radius of the candidate window in points, 0 to 32. Null means the skin's or the platform's own radius.
+    pub candidate_corner_radius: Option<u8>,
     pub candidate_layout: Layout,
     pub candidate_follow_cursor: bool,
     /// Select candidates with the number row.
@@ -214,6 +220,9 @@ impl From<&PreferencesSnapshot> for PreferencesView {
             shuangpin_profile: preferences.shuangpin_profile.into(),
             candidate_page_size: preferences.candidate_page_size,
             candidate_font_size: preferences.candidate_font_size,
+            candidate_scale_percent: preferences.candidate_scale_percent,
+            candidate_opacity_percent: preferences.candidate_opacity_percent,
+            candidate_corner_radius: preferences.candidate_corner_radius,
             candidate_layout: preferences.candidate_layout.into(),
             candidate_follow_cursor: preferences.candidate_follow_cursor,
             number_row_selection: preferences.number_row_selection,
@@ -247,6 +256,13 @@ pub struct PreferencesChange {
     pub candidate_page_size: Option<u8>,
     /// 12 to 32.
     pub candidate_font_size: Option<u8>,
+    /// 50 to 200.
+    pub candidate_scale_percent: Option<u16>,
+    /// 50 to 100.
+    pub candidate_opacity_percent: Option<u8>,
+    /// 0 to 32, or null to return to the skin's or the platform's own radius.
+    #[serde(default, deserialize_with = "present")]
+    pub candidate_corner_radius: Option<Option<u8>>,
     pub candidate_layout: Option<Layout>,
     pub candidate_follow_cursor: Option<bool>,
     pub number_row_selection: Option<bool>,
@@ -272,6 +288,9 @@ impl PreferencesChange {
             && self.shuangpin_profile.is_none()
             && self.candidate_page_size.is_none()
             && self.candidate_font_size.is_none()
+            && self.candidate_scale_percent.is_none()
+            && self.candidate_opacity_percent.is_none()
+            && self.candidate_corner_radius.is_none()
             && self.candidate_layout.is_none()
             && self.candidate_follow_cursor.is_none()
             && self.number_row_selection.is_none()
@@ -303,6 +322,15 @@ impl PreferencesChange {
         }
         if let Some(size) = self.candidate_font_size {
             preferences.candidate_font_size = size;
+        }
+        if let Some(scale) = self.candidate_scale_percent {
+            preferences.candidate_scale_percent = scale;
+        }
+        if let Some(opacity) = self.candidate_opacity_percent {
+            preferences.candidate_opacity_percent = opacity;
+        }
+        if let Some(radius) = self.candidate_corner_radius {
+            preferences.candidate_corner_radius = radius;
         }
         if let Some(layout) = self.candidate_layout {
             preferences.candidate_layout = layout.into();
@@ -347,6 +375,13 @@ impl PreferencesChange {
             preferences.diagnostic_log.tsf = value;
         }
     }
+}
+
+/// A field that was given, even as null, is `Some`; only an absent field is `None`, so null can clear a value rather than leave it alone.
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
 }
 
 pub fn load(state_dir: &Path) -> Result<PreferencesView, String> {
@@ -574,6 +609,54 @@ mod tests {
             assert!(document.get("preferences").is_none());
         }
         assert_eq!(document["candidate_skin_catalog"][0]["id"], "kept");
+    }
+
+    #[test]
+    fn the_candidate_window_style_is_set_and_its_radius_returned_to_the_skin() {
+        let directory = tempfile::tempdir().unwrap();
+        let options = directory.path().join("runtime-options.json");
+        std::fs::write(&options, br#"{"api_version":1}"#).unwrap();
+        let before = load(directory.path()).unwrap();
+        assert_eq!(before.candidate_scale_percent, 100);
+        assert_eq!(before.candidate_opacity_percent, 100);
+        assert_eq!(before.candidate_corner_radius, None);
+
+        let styled: PreferencesChange = serde_json::from_value(json!({
+            "expected_revision": before.revision,
+            "candidate_scale_percent": 125,
+            "candidate_opacity_percent": 80,
+            "candidate_corner_radius": 12,
+        }))
+        .unwrap();
+        let updated = update(directory.path(), &options, &styled).unwrap();
+        assert_eq!(updated.candidate_scale_percent, 125);
+        assert_eq!(updated.candidate_opacity_percent, 80);
+        assert_eq!(updated.candidate_corner_radius, Some(12));
+
+        // An absent radius leaves it alone; null hands it back to the skin.
+        let untouched: PreferencesChange = serde_json::from_value(json!({
+            "expected_revision": updated.revision,
+            "candidate_scale_percent": 150,
+        }))
+        .unwrap();
+        assert_eq!(untouched.candidate_corner_radius, None);
+        let updated = update(directory.path(), &options, &untouched).unwrap();
+        assert_eq!(updated.candidate_corner_radius, Some(12));
+        let cleared: PreferencesChange = serde_json::from_value(json!({
+            "expected_revision": updated.revision,
+            "candidate_corner_radius": null,
+        }))
+        .unwrap();
+        assert!(!cleared.is_empty());
+        let updated = update(directory.path(), &options, &cleared).unwrap();
+        assert_eq!(updated.candidate_corner_radius, None);
+        assert_eq!(updated.candidate_scale_percent, 150);
+
+        let invalid = PreferencesChange {
+            candidate_opacity_percent: Some(30),
+            ..change(updated.revision)
+        };
+        assert!(update(directory.path(), &options, &invalid).is_err());
     }
 
     #[test]

@@ -3376,3 +3376,95 @@ fn mint_morning_is_the_community_design_and_a_valid_custom_theme() {
     );
     assert_eq!(Preferences::default().custom_theme, CustomTheme::default());
 }
+
+#[test]
+fn candidate_window_style_defaults_stay_out_of_the_document() {
+    let preferences = Preferences::default();
+    assert_eq!(preferences.candidate_scale_percent, 100);
+    assert_eq!(preferences.candidate_opacity_percent, 100);
+    assert_eq!(preferences.candidate_corner_radius, None);
+
+    // An untouched document must still load in a build that predates these keys, which refuses unknown fields.
+    let value = serde_json::to_value(&preferences).unwrap();
+    for key in [
+        "candidate_scale_percent",
+        "candidate_opacity_percent",
+        "candidate_corner_radius",
+    ] {
+        assert!(value.get(key).is_none(), "{key} is written at its default");
+    }
+    let decoded: Preferences = serde_json::from_value(value).unwrap();
+    assert_eq!(decoded, preferences);
+}
+
+#[test]
+fn candidate_window_style_round_trips_through_the_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let styled = Preferences {
+        candidate_scale_percent: 125,
+        candidate_opacity_percent: 80,
+        candidate_corner_radius: Some(0),
+        ..Preferences::default()
+    };
+    let value = serde_json::to_value(&styled).unwrap();
+    assert_eq!(value["candidate_scale_percent"], 125);
+    assert_eq!(value["candidate_opacity_percent"], 80);
+    // Zero is a real choice, square corners, and must not collapse into "follow the skin".
+    assert_eq!(value["candidate_corner_radius"], 0);
+
+    store.save(0, styled.clone()).unwrap();
+    let loaded = store.load().unwrap().preferences;
+    assert_eq!(loaded, styled);
+}
+
+#[test]
+fn candidate_window_style_rejects_out_of_range_values() {
+    for (scale, opacity, radius) in [
+        (49, 100, None),
+        (201, 100, None),
+        (100, 49, None),
+        (100, 101, None),
+        (100, 100, Some(33)),
+    ] {
+        let preferences = Preferences {
+            candidate_scale_percent: scale,
+            candidate_opacity_percent: opacity,
+            candidate_corner_radius: radius,
+            ..Preferences::default()
+        };
+        assert!(
+            matches!(
+                preferences.validate(),
+                Err(PreferencesError::InvalidCandidateWindowStyle)
+            ),
+            "{scale} {opacity} {radius:?} was accepted"
+        );
+    }
+    for (scale, opacity, radius) in [(50, 50, Some(0)), (200, 100, Some(32)), (75, 95, None)] {
+        let preferences = Preferences {
+            candidate_scale_percent: scale,
+            candidate_opacity_percent: opacity,
+            candidate_corner_radius: radius,
+            ..Preferences::default()
+        };
+        assert!(preferences.validate().is_ok());
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    assert!(matches!(
+        store.save(
+            0,
+            Preferences {
+                candidate_opacity_percent: 20,
+                ..Preferences::default()
+            }
+        ),
+        Err(PreferencesError::InvalidCandidateWindowStyle)
+    ));
+    assert_eq!(
+        PreferencesError::InvalidCandidateWindowStyle.to_string(),
+        "candidate window scale must be 50-200%, opacity 50-100% and corner radius 0-32"
+    );
+}
