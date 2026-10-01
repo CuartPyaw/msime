@@ -1,6 +1,19 @@
 import { Children, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import * as settings from "./settings-style";
 
+/** The most dots the nav shows. With more themes than this - every installed skin is a slide - the dots are a window that follows the current slide, so the nav row keeps its width however many skins there are. */
+export const MAX_CAROUSEL_DOTS = 9;
+
+/** The first slide of the window of dots around `index`, keeping the window inside the slides. */
+export function carouselDotWindowStart(
+  index: number,
+  count: number,
+  size = MAX_CAROUSEL_DOTS,
+): number {
+  if (count <= size) return 0;
+  return Math.min(Math.max(index - Math.floor(size / 2), 0), count - size);
+}
+
 export interface ThemeCarouselProps {
   /** One name per slide, in order; the dots are labelled with them. */
   labels: string[];
@@ -16,6 +29,7 @@ export function ThemeCarousel({ labels, selectedIndex, children }: ThemeCarousel
   // The resize handler re-snaps to this without re-subscribing on every slide change.
   const current = useRef(index);
   const count = Children.count(children);
+  const windowStart = carouselDotWindowStart(index, labels.length);
 
   const show = useCallback(
     (next: number, smooth: boolean) => {
@@ -81,16 +95,23 @@ export function ThemeCarousel({ labels, selectedIndex, children }: ThemeCarousel
           ‹
         </button>
         <div className={settings.themeCarouselDots}>
-          {labels.map((label, slide) => (
-            <button
-              type="button"
-              key={slide}
-              className={settings.themeCarouselDot(slide === index)}
-              aria-label={`查看${label}`}
-              aria-current={slide === index ? "true" : undefined}
-              onClick={() => show(slide, true)}
-            />
-          ))}
+          {labels.slice(windowStart, windowStart + MAX_CAROUSEL_DOTS).map((label, offset) => {
+            const slide = windowStart + offset;
+            // The end dots of a window that does not reach the first or last slide are drawn smaller, to say there are more themes past them.
+            const edge =
+              (offset === 0 && windowStart > 0) ||
+              (offset === MAX_CAROUSEL_DOTS - 1 && windowStart + MAX_CAROUSEL_DOTS < labels.length);
+            return (
+              <button
+                type="button"
+                key={slide}
+                className={settings.themeCarouselDot(slide === index, edge)}
+                aria-label={`查看${label}`}
+                aria-current={slide === index ? "true" : undefined}
+                onClick={() => show(slide, true)}
+              />
+            );
+          })}
         </div>
         <span className={settings.themeCarouselCount}>
           {index + 1} / {count}
