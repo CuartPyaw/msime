@@ -1,6 +1,7 @@
 //! Correction resolution, series keys, alternative-segmentation merging and autocorrect marking (quanpin.md §4.2-§4.3, §7.5, §7.7, §11.1-§11.2). Pure functions over rows; the dictionary drives them.
 
 use std::collections::HashSet;
+use std::fmt::Write;
 
 use crate::pinyin::autocorrect::{
     autocorrect_cut_kbest, looks_like_syllable_with_jianpin_tail, AutocorrectCut,
@@ -79,10 +80,11 @@ pub fn resolve_series_query(
     } else {
         join_segments(segments)
     };
-    let prefix = if result.corrected_input { "C:" } else { "" };
-    result.cache_key = format!(
-        "{prefix}{}",
-        series_cache_key(raw, &result.segmentation, autocorrect_types)
+    result.cache_key = series_cache_key_with_prefix(
+        raw,
+        &result.segmentation,
+        autocorrect_types,
+        result.corrected_input,
     );
     result
 }
@@ -109,13 +111,36 @@ fn populate_from_cuts(result: &mut SeriesResolution, cuts: &[AutocorrectCut], ji
 
 /// `"T<types>:" + ("M:" | "A:") + (segmentation or raw)` (QD:63-67). The mask is part of the key because correction alternatives and typo sentences depend on it, and one input can be asked with different masks in a session (a suppressed input clears it for that input only).
 pub fn series_cache_key(raw: &str, segmentation: &str, autocorrect_types: u32) -> String {
+    series_cache_key_with_prefix(raw, segmentation, autocorrect_types, false)
+}
+
+fn series_cache_key_with_prefix(
+    raw: &str,
+    segmentation: &str,
+    autocorrect_types: u32,
+    corrected: bool,
+) -> String {
     let mode = if raw.contains('\'') { "M:" } else { "A:" };
     let reading = if segmentation.is_empty() {
         raw
     } else {
         segmentation
     };
-    format!("T{autocorrect_types}:{mode}{reading}")
+    // Reserve the complete key once: `resolve_series_query` used to format around a second
+    // already-allocated key when adding the correction marker.
+    let type_digits = if autocorrect_types == 0 {
+        1
+    } else {
+        autocorrect_types.ilog10() as usize + 1
+    };
+    let mut key =
+        String::with_capacity(reading.len() + 4 + type_digits + usize::from(corrected) * 2);
+    if corrected {
+        key.push_str("C:");
+    }
+    write!(&mut key, "T{autocorrect_types}:{mode}{reading}")
+        .expect("writing a series cache key to String cannot fail");
+    key
 }
 
 /// Lowercase, drop `'`, keep `v` distinct from `u` (QD:75-88). The ü alias rewrite is a marking source by product decision: a typed `nue` whose primary segmentation is `nve` must compare as different.
@@ -243,6 +268,18 @@ mod tests {
         assert_eq!(series_cache_key("nihao", "ni'hao", 0), "T0:A:ni'hao");
         assert_eq!(series_cache_key("ni'hao", "ni'hao", 15), "T15:M:ni'hao");
         assert_eq!(series_cache_key("xyz", "", 3), "T3:A:xyz");
+    }
+
+    #[test]
+    fn series_cache_key_can_add_correction_prefix_in_one_build() {
+        assert_eq!(
+            series_cache_key_with_prefix("gau", "gua", 3, true),
+            "C:T3:A:gua"
+        );
+        assert_eq!(
+            series_cache_key_with_prefix("gau", "gua", 3, false),
+            "T3:A:gua"
+        );
     }
 
     fn owned(segments: &[&str]) -> Vec<String> {
