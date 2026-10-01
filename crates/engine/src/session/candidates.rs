@@ -21,6 +21,17 @@ use crate::user_dictionary::positions::{
 };
 use crate::user_dictionary::removal::delete_dictionary_candidate;
 
+fn english_position_context(input: &str) -> String {
+    let mut context = String::with_capacity("english:".len() + input.len());
+    context.push_str("english:");
+    context.extend(
+        input
+            .chars()
+            .map(|character| character.to_ascii_lowercase()),
+    );
+    context
+}
+
 impl InputSession {
     /// Prefix or engine rows, then personal context rerank, mixed English / emoji / kaomoji, fixed positions (input_session.cpp:1057-1078).
     pub(super) fn update_mixed_candidates(&mut self) {
@@ -206,7 +217,7 @@ impl InputSession {
             } else {
                 &request.raw_input_with_cases
             };
-            return Cow::Owned(format!("english:{}", input.to_ascii_lowercase()));
+            return Cow::Owned(english_position_context(input));
         }
         if self.local_mode == LocalInputMode::SuperJianpin {
             return Cow::Owned(jianpin_ranking_context(
@@ -400,5 +411,15 @@ impl InputSession {
         );
         self.apply_candidate_positions(&mut mixed);
         mixed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::english_position_context;
+
+    #[test]
+    fn english_position_context_preserves_non_ascii_while_lowercasing_ascii() {
+        assert_eq!(english_position_context("HeLLo 世界"), "english:hello 世界");
     }
 }
