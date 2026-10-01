@@ -1,5 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { boundedGraphemes } from "../core/text";
+import {
+  communityPublishFields,
+  handleCommunityPublishKeyDown,
+} from "./community-publish-validation";
 import { randomUuid } from "../core/random-id";
 import {
   kindLabels,
@@ -32,8 +36,11 @@ import {
   type CommunityReportReason,
 } from "./community-report";
 import { CommunitySkinCardMetrics } from "./community-skin-card-metrics";
+import { CommunityCardAuthor } from "./community-card-author";
+import { CommunityInstallButton } from "./community-install-button";
 import { CommunityReplaceConfirmation } from "./community-replace-confirmation";
-import { CommunityBackButton, CommunityLoadMoreButton } from "./community-gallery-controls";
+import { CommunityBackButton } from "./community-gallery-controls";
+import { CommunityGalleryLoadMore } from "./community-gallery-load-more";
 
 /** The kinds a pack can be shared as; effect packs stay local for now. Mirrors `client-core::plugins::community::PUBLISHABLE_KINDS`. */
 export type CommunityPluginKind = Exclude<PluginKind, "effect">;
@@ -130,10 +137,12 @@ function CommunityPluginCard({ plugin, open }: { plugin: CommunityPlugin; open: 
       onClick={open}
     >
       <strong className={style.cardTitle}>{plugin.name}</strong>
-      <span className={style.cardAuthor}>
-        {kindLabels[plugin.kind]} · {plugin.owned ? "我的作品" : plugin.author}
-        {plugin.owned && plugin.moderation === "removed" && " · 已下架"}
-      </span>
+      <CommunityCardAuthor
+        prefix={kindLabels[plugin.kind]}
+        author={plugin.author}
+        owned={plugin.owned}
+        removed={plugin.moderation === "removed"}
+      />
       {plugin.description && (
         <span className={style.resourceDescription}>{plugin.description}</span>
       )}
@@ -322,21 +331,20 @@ export function CommunityPluginsPage({
               已安装到插件目录，可在「我的插件」中选用。
             </p>
           ) : (
-            <button
-              type="button"
-              className={`primary ${style.action}`}
-              disabled={actionBusy || detailBusy || confirmReplace}
-              onClick={() => void install(false)}
-            >
-              {actionBusy ? "正在安装…" : "一键安装"}
-            </button>
+            <CommunityInstallButton
+              actionBusy={actionBusy}
+              detailBusy={detailBusy}
+              confirmReplace={confirmReplace}
+              onInstall={() => void install(false)}
+            />
           )}
           {confirmReplace && (
             <CommunityReplaceConfirmation
               ariaLabel="确认替换插件"
               message={
                 <>
-                  已安装同 id 的{kindLabels[selected.kind]}“{selected.plugin_id}”，安装会整体替换它。
+                  已安装同 id 的{kindLabels[selected.kind]}“{selected.plugin_id}
+                  ”，安装会整体替换它。
                 </>
               }
               actionBusy={actionBusy}
@@ -449,17 +457,12 @@ export function CommunityPluginsPage({
           <CommunityPluginCard key={plugin.id} plugin={plugin} open={() => open(plugin)} />
         ))}
       </div>
-      {hasMore && (
-        <CommunityLoadMoreButton
-          disabled={listBusy}
-          onClick={() => void requestList(activeSearch, true)}
-        />
-      )}
-      {listBusy && (
-        <p role="status" className={style.notice}>
-          正在读取插件…
-        </p>
-      )}
+      <CommunityGalleryLoadMore
+        hasMore={hasMore}
+        busy={listBusy}
+        loadingText="正在读取插件…"
+        onLoadMore={() => void requestList(activeSearch, true)}
+      />
       {publishOpen && localPlugins && (
         <CommunityPluginPublishDialog
           client={client}
@@ -592,13 +595,8 @@ export function CommunityPluginPublishDialog({
     };
   }, [client, chosen]);
 
-  const normalizedName = name.trim();
-  const normalizedDescription = description.trim();
-  const nameValid =
-    normalizedName.length > 0 &&
-    boundedGraphemes(normalizedName, 32) === normalizedName &&
-    [...normalizedName].length <= 32;
-  const descriptionValid = [...normalizedDescription].length <= 280;
+  const { normalizedName, normalizedDescription, nameValid, descriptionValid } =
+    communityPublishFields(name, description);
   const ready = Boolean(pack) && !packLoading && nameValid && descriptionValid && agreed;
 
   const submit = async () => {
@@ -627,14 +625,6 @@ export function CommunityPluginPublishDialog({
     });
   };
 
-  // Enter in a text field would otherwise submit whichever form this dialog sits in.
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Enter" && event.target instanceof HTMLInputElement) {
-      event.preventDefault();
-      if (event.target.type !== "checkbox") void submit();
-    }
-  };
-
   return (
     <div className={style.backdrop}>
       <div
@@ -642,7 +632,7 @@ export function CommunityPluginPublishDialog({
         role="dialog"
         aria-modal="true"
         aria-label="发布插件"
-        onKeyDown={onKeyDown}
+        onKeyDown={(event) => handleCommunityPublishKeyDown(event, () => void submit())}
       >
         <CommunityDialogHeader
           title="发布插件"

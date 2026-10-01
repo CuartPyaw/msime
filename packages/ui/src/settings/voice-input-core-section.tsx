@@ -1,7 +1,9 @@
-import { GroupList, Row, Switch } from "../core/platform-controls";
+import { GroupList, Row } from "../core/platform-controls";
 import { ASR_PROVIDER_OPTIONS } from "../voice/voice-provider-options";
 import { VoiceLanguageOptions } from "../voice/voice-language-options";
 import { VoiceProviderSelect } from "./voice-provider-select";
+import { SwitchRow } from "./switch-row";
+import { TextInputRow } from "./text-input-row";
 
 export interface VoiceInputCoreSectionProps {
   enabled: boolean;
@@ -39,9 +41,13 @@ export function VoiceInputCoreSection({
 }: VoiceInputCoreSectionProps) {
   return (
     <GroupList title="识别">
-      <Row title="语音输入" description="使用语音识别将录音转换为文字">
-        <Switch aria-label="启用语音输入" checked={enabled} onChange={onEnabledChange} />
-      </Row>
+      <SwitchRow
+        title="语音输入"
+        description="使用语音识别将录音转换为文字"
+        aria-label="启用语音输入"
+        checked={enabled}
+        onChange={onEnabledChange}
+      />
       {showProviderSettings && (
         <Row title="识别服务">
           <VoiceProviderSelect
@@ -72,23 +78,21 @@ export function VoiceInputCoreSection({
           </VoiceProviderSelect>
         </Row>
       )}
-      <Row
+      <TextInputRow
         title="识别语言"
         description={
           systemVoice ? "选择明确的语言代码，例如 zh-CN、en-US；可用语言由系统决定" : undefined
         }
+        label="识别语言"
+        maxLength={64}
+        list="settings-voice-language-options"
+        value={language}
+        onChange={onLanguageChange}
       >
-        <input
-          aria-label="识别语言"
-          maxLength={64}
-          list="settings-voice-language-options"
-          value={language}
-          onChange={(event) => onLanguageChange(event.target.value)}
-        />
         <datalist id="settings-voice-language-options">
           <VoiceLanguageOptions systemVoice={systemVoice} />
         </datalist>
-      </Row>
+      </TextInputRow>
     </GroupList>
   );
 }

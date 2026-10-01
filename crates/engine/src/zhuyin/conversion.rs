@@ -66,8 +66,9 @@ pub fn convert(
             continue;
         };
         let score = *score;
-        let mut arrivals = Vec::new();
-        if let Some(pin) = pins.iter().find(|pin| pin.start == start) {
+        let pin = pins.iter().find(|pin| pin.start == start);
+        let mut arrivals = Vec::with_capacity(arrival_capacity(count, start, pin.is_some()));
+        if let Some(pin) = pin {
             arrivals.push((score.add(pin.len(), 0), pin.clone()));
         } else {
             for end in start + 1..=count {
@@ -107,7 +108,7 @@ pub fn convert(
             }
         }
     }
-    let mut spans = Vec::new();
+    let mut spans = Vec::with_capacity(count);
     let mut end = count;
     while end > 0 {
         let span = paths[end]
@@ -119,6 +120,14 @@ pub fn convert(
     }
     spans.reverse();
     Ok(spans)
+}
+
+fn arrival_capacity(count: usize, start: usize, pinned: bool) -> usize {
+    if pinned {
+        1
+    } else {
+        count.saturating_sub(start)
+    }
 }
 
 fn build_dictionary_key(syllables: &[&str]) -> String {
@@ -174,6 +183,13 @@ mod tests {
         assert_eq!(build_dictionary_key(&["ㄋㄧˇ", "ㄏㄠˇ"]), "ㄋㄧˇ ㄏㄠˇ");
     }
 
+    #[test]
+    fn arrivals_capacity_matches_possible_dictionary_ends() {
+        assert_eq!(arrival_capacity(4, 0, false), 4);
+        assert_eq!(arrival_capacity(4, 2, false), 2);
+        assert_eq!(arrival_capacity(4, 2, true), 1);
+    }
+
     const ENTRIES: [(&str, &str, i64); 7] = [
         ("ㄋㄧˇ", "你", 1000),
         ("ㄏㄠˇ", "好", 2000),
@@ -206,10 +222,9 @@ mod tests {
 
     #[test]
     fn unknown_syllables_convert_to_themselves() {
-        assert_eq!(
-            texts(&run(&["ㄅㄧㄤ", "ㄋㄧˇ"], &[], &ENTRIES)),
-            ["ㄅㄧㄤ", "你"]
-        );
+        let spans = run(&["ㄅㄧㄤ", "ㄋㄧˇ"], &[], &ENTRIES);
+        assert_eq!(texts(&spans), ["ㄅㄧㄤ", "你"]);
+        assert_eq!(spans.capacity(), spans.len());
         assert!(run(&[], &[], &ENTRIES).is_empty());
     }
 

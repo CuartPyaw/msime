@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
-import { GroupList, Row, Switch } from "../core/platform-controls";
+import { GroupList, Row } from "../core/platform-controls";
 import { POLISH_PROVIDER_OPTIONS } from "../voice/voice-provider-options";
 import * as settings from "./settings-style";
 import { VoiceProviderSelect } from "./voice-provider-select";
+import { TextInputRow } from "./text-input-row";
+import { SwitchRow } from "./switch-row";
 
 export interface VoicePolishSectionProps {
   enabled: boolean;
@@ -29,9 +31,12 @@ export function VoicePolishSection({
   return (
     <GroupList title="文本润色 provider">
       <p className={settings.groupNote}>识别结果可交给用户管理的服务润色</p>
-      <Row title="启用润色">
-        <Switch aria-label="启用文本润色" checked={enabled} onChange={onEnabledChange} />
-      </Row>
+      <SwitchRow
+        title="启用润色"
+        aria-label="启用文本润色"
+        checked={enabled}
+        onChange={onEnabledChange}
+      />
       <Row title="服务提供商">
         <VoiceProviderSelect
           options={POLISH_PROVIDER_OPTIONS}
@@ -41,13 +46,7 @@ export function VoicePolishSection({
         />
       </Row>
       {providerPreset}
-      <Row title="模型">
-        <input
-          aria-label="文本润色模型"
-          value={model}
-          onChange={(event) => onModelChange(event.target.value)}
-        />
-      </Row>
+      <TextInputRow title="模型" label="文本润色模型" value={model} onChange={onModelChange} />
       {children}
     </GroupList>
   );

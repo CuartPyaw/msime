@@ -536,6 +536,10 @@ export {
   type AccountConfirmationAction,
   type AccountConfirmationProps,
 } from "./account/account-confirmation";
+export {
+  AccountIdentityDetails,
+  type AccountIdentityDetailsProps,
+} from "./account/account-identity-details";
 export { copyAccountId, type AccountIdCopyOptions } from "./account/account-id-copy";
 export { runAccountOperation, type AccountOperationState } from "./account/account-operation";
 export {
@@ -691,7 +695,10 @@ export { SurfaceThemeSelect, type SurfaceThemeSelectProps } from "./settings/sur
 export { EndpointInput, type EndpointInputProps } from "./settings/endpoint-input";
 export { FeedbackKindOptions } from "./settings/feedback-kind-options";
 export { OpenPanelButton, type OpenPanelButtonProps } from "./settings/open-panel-button";
-export { VoiceLanguageOptions, type VoiceLanguageOptionsProps } from "./voice/voice-language-options";
+export {
+  VoiceLanguageOptions,
+  type VoiceLanguageOptionsProps,
+} from "./voice/voice-language-options";
 export {
   CloudPinyinSchemeOptions,
   CloudShuangpinProfileOptions,
@@ -1051,14 +1058,16 @@ export {
   type TencentTranslationSectionProps,
 } from "./settings/tencent-translation-section";
 export { SecretSettingRow, type SecretSettingRowProps } from "./settings/secret-setting-row";
-export {
-  SecretSettingField,
-  type SecretSettingFieldProps,
-} from "./settings/secret-setting-field";
+export { TextInputRow, type TextInputRowProps } from "./settings/text-input-row";
+export { SelectRow, type SelectRowProps } from "./settings/select-row";
+export { SwitchRow, type SwitchRowProps } from "./settings/switch-row";
+export { SecretSettingField, type SecretSettingFieldProps } from "./settings/secret-setting-field";
 export {
   PasswordSettingField,
   type PasswordSettingFieldProps,
 } from "./settings/password-setting-field";
+export { TextSettingField, type TextSettingFieldProps } from "./settings/text-setting-field";
+export { SelectSettingField, type SelectSettingFieldProps } from "./settings/select-setting-field";
 export {
   LinuxTencentCredentialsSection,
   type LinuxTencentCredentialsSectionProps,
@@ -1176,9 +1185,22 @@ export {
   type CommunityScopeButtonsProps,
 } from "./community/community-scope-buttons";
 export {
+  communityPublishFields,
+  handleCommunityPublishKeyDown,
+  type CommunityPublishFields,
+} from "./community/community-publish-validation";
+export {
   CommunityResourceScopeButtons,
   type CommunityResourceScopeButtonsProps,
 } from "./community/community-resource-scope-buttons";
+export {
+  CommunityGalleryLoadMore,
+  type CommunityGalleryLoadMoreProps,
+} from "./community/community-gallery-load-more";
+export {
+  CommunityCardAuthor,
+  type CommunityCardAuthorProps,
+} from "./community/community-card-author";
 export {
   CommunitySkinPublicationFields,
   type CommunitySkinPublicationFieldsProps,
@@ -1304,6 +1326,10 @@ export {
 } from "./keyboard/cloud-dictionary-entry-form";
 export { CloudPanelHeader, type CloudPanelHeaderProps } from "./keyboard/cloud-panel-header";
 export {
+  CloudDictionaryPagination,
+  type CloudDictionaryPaginationProps,
+} from "./keyboard/cloud-dictionary-pagination";
+export {
   CloudDictionaryKindTabs,
   type CloudDictionaryKindTabsProps,
 } from "./keyboard/cloud-dictionary-kind-tabs";
@@ -1311,6 +1337,10 @@ export {
   CloudDictionaryKindSelect,
   type CloudDictionaryKindSelectProps,
 } from "./keyboard/cloud-dictionary-kind-select";
+export {
+  CloudDictionaryQueryToolbar,
+  type CloudDictionaryQueryToolbarProps,
+} from "./keyboard/cloud-dictionary-query-toolbar";
 export type { EmojiCatalogGroup } from "./emoji/emoji-catalog";
 export {
   customTranslationsExample,

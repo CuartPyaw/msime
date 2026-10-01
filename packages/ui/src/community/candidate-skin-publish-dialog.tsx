@@ -1,5 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { boundedGraphemes } from "../core/text";
+import {
+  communityPublishFields,
+  handleCommunityPublishKeyDown,
+} from "./community-publish-validation";
 import { randomUuid } from "../core/random-id";
 import { errorCode } from "../core/error-code";
 import type { ExternalSkin, SkinCatalog } from "../skin/external-skins";
@@ -271,13 +275,8 @@ export function CandidateSkinPublishDialog({
     }
   };
 
-  const normalizedName = name.trim();
-  const normalizedDescription = description.trim();
-  const nameValid =
-    normalizedName.length > 0 &&
-    boundedGraphemes(normalizedName, 32) === normalizedName &&
-    [...normalizedName].length <= 32;
-  const descriptionValid = [...normalizedDescription].length <= 280;
+  const { normalizedName, normalizedDescription, nameValid, descriptionValid } =
+    communityPublishFields(name, description);
   const ready = Boolean(pack) && !packLoading && nameValid && descriptionValid && agreed;
 
   const submit = async () => {
@@ -317,14 +316,6 @@ export function CandidateSkinPublishDialog({
     }
   };
 
-  // Enter in a text field would otherwise submit whichever form this dialog sits in.
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Enter" && event.target instanceof HTMLInputElement) {
-      event.preventDefault();
-      if (event.target.type !== "checkbox") void submit();
-    }
-  };
-
   return (
     <div className={style.backdrop}>
       <div
@@ -332,7 +323,7 @@ export function CandidateSkinPublishDialog({
         role="dialog"
         aria-modal="true"
         aria-label="发布候选窗皮肤"
-        onKeyDown={onKeyDown}
+        onKeyDown={(event) => handleCommunityPublishKeyDown(event, () => void submit())}
       >
         <CommunityDialogHeader
           title="发布候选窗皮肤"
