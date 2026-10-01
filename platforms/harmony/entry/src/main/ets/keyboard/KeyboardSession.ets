@@ -3751,19 +3751,22 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (this.onlineTimer >= 0) clearTimeout(this.onlineTimer);
     const epoch: number = ++this.onlineEpoch;
     const handle: number = this.handle;
+    const requestSignature: string = signature;
     this.onlineTimer = setTimeout((): void => {
       this.onlineTimer = -1;
-      void this.fetchOnline(handle, JSON.stringify(query), query, epoch);
+      void this.fetchOnline(handle, JSON.stringify(query), query, epoch, requestSignature);
     }, OnlineCandidatePolicy.QUIET_INTERVAL_MS);
   }
 
   private async fetchOnline(handle: number, queryDocument: string, query: OnlineQuery,
-    epoch: number): Promise<void> {
+    epoch: number, requestSignature: string): Promise<void> {
     if (epoch !== this.onlineEpoch || handle !== this.handle) return;
+    let complete: boolean = true;
     let aiQuery: OnlineQuery = query;
     let aiDocument: string = queryDocument;
     if (query.cloud_candidates && query.cloud_eligible) {
       const applied: boolean = await this.fetchCloud(handle, queryDocument, epoch);
+      complete = applied;
       // Applying a cloud result advances Engine's generation. Re-read the exact query before
       // sending AI so both optional providers can contribute without one becoming stale.
       if (applied && handle === this.handle && epoch === this.onlineEpoch) {
@@ -3773,16 +3776,30 @@ export class KeyboardSession implements HardwareKeyTarget {
           if (current.ok && current.value !== null) {
             aiQuery = current.value;
             aiDocument = JSON.stringify(current.value);
+          } else {
+            complete = false;
+            this.releaseOnlineSignatureIfCurrent(requestSignature, epoch, handle);
+            return;
           }
         } catch {
+          complete = false;
+          this.releaseOnlineSignatureIfCurrent(requestSignature, epoch, handle);
           return;
         }
       }
     }
+    if (epoch !== this.onlineEpoch || handle !== this.handle) return;
     const assistant = aiQuery.ai_assistant;
     if (assistant?.enabled === true && aiQuery.ai_eligible) {
-      await this.fetchAi(handle, aiDocument, assistant.candidate_limit, epoch);
+      complete = await this.fetchAi(handle, aiDocument, assistant.candidate_limit, epoch) && complete;
     }
+    if (!complete) this.releaseOnlineSignatureIfCurrent(requestSignature, epoch, handle);
+  }
+
+  private releaseOnlineSignatureIfCurrent(requestSignature: string, requestEpoch: number,
+    requestHandle: number): void {
+    if (OnlineCandidatePolicy.shouldReleaseAfterFailure(requestSignature, this.onlineSignature,
+      requestEpoch, this.onlineEpoch, requestHandle, this.handle)) this.onlineSignature = '';
   }
 
   private async fetchCloud(handle: number, queryDocument: string, epoch: number): Promise<boolean> {
@@ -3822,16 +3839,16 @@ export class KeyboardSession implements HardwareKeyTarget {
   }
 
   private async fetchAi(handle: number, queryDocument: string, limit: number,
-    epoch: number): Promise<void> {
+    epoch: number): Promise<boolean> {
     let descriptor: AiHttpDescriptor | null;
     try {
       const reply: NativeReply<AiHttpDescriptor | null> = JSON.parse(
         client.aiRequestForQuery(handle, queryDocument)) as NativeReply<AiHttpDescriptor | null>;
-      if (!reply.ok || reply.value === null) return;
+      if (!reply.ok || reply.value === null) return false;
       descriptor = reply.value;
     } catch (error) {
       KeyboardLog.error(`AI query unavailable: ${describeError(error)}`);
-      return;
+      return false;
     }
     const request = http.createHttp();
     this.onlineRequests.add(request);
@@ -3844,14 +3861,16 @@ export class KeyboardSession implements HardwareKeyTarget {
         extraData: JSON.stringify(descriptor.body)
       });
       if (epoch !== this.onlineEpoch || handle !== this.handle || response.responseCode < 200
-        || response.responseCode >= 300 || typeof response.result !== 'string') return;
+        || response.responseCode >= 300 || typeof response.result !== 'string') return false;
       const candidates: string[] | null = OnlineCandidatePolicy.aiCandidates(response.result, limit);
-      if (candidates === null || candidates.length === 0) return;
+      if (candidates === null || candidates.length === 0) return false;
       const applied: NativeReply<OnlineApplyValue> = JSON.parse(client.applyOnlineCandidates(
         handle, queryDocument, JSON.stringify(candidates), 1)) as NativeReply<OnlineApplyValue>;
       if (applied.ok && applied.value.applied) this.render(applied.value.view);
+      return applied.ok && applied.value.applied;
     } catch (error) {
       KeyboardLog.error(`AI candidate unavailable: ${describeError(error)}`);
+      return false;
     } finally {
       this.onlineRequests.delete(request);
       request.destroy();

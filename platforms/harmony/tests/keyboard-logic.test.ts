@@ -671,6 +671,17 @@ group("counts a held physical key once", () => {
 });
 
 group("bounds and deduplicates asynchronous online AI candidates", () => {
+  const signature = "7:ni'hao:fixture:true:";
+  check(
+    OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 7, 7),
+    "a failed current online request can be retried",
+  );
+  check(
+    !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, "new", 4, 4, 7, 7)
+      && !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, signature, 3, 4, 7, 7)
+      && !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 8, 7),
+    "a stale online failure cannot clear a newer request",
+  );
   const response = JSON.stringify({
     choices: [
       {
