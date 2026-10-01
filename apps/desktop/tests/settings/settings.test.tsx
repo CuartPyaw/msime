@@ -6700,12 +6700,51 @@ test("macOS routes input-session panels through the native input-method process"
   expect(screen.queryByRole("button", { name: "打开" })).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "云剪贴板" }));
-  expect(await screen.findByText(/云剪贴板和云词典需要当前输入法进程提供输入会话/)).toBeDefined();
+  expect(await screen.findByText(/请从输入法菜单中的「云剪贴板…」打开云剪贴板/)).toBeDefined();
   expect(screen.queryByRole("button", { name: "打开云剪贴板" })).toBeNull();
   expect(screen.queryByRole("button", { name: "打开云词典" })).toBeNull();
   expect(client.openHandwriting).not.toHaveBeenCalled();
   expect(client.openCloudClipboard).not.toHaveBeenCalled();
   expect(client.openCloudDictionary).not.toHaveBeenCalled();
+});
+
+test("the 云剪贴板 page sends a history entry through the host's cloud clipboard, macOS included", async () => {
+  const snapshot = { ...initial, preferences: { ...initial.preferences, clipboard_history: true } };
+  const cloudClipboardRequest = vi
+    .fn()
+    .mockResolvedValueOnce({ enabled: true, items: [] })
+    .mockResolvedValueOnce({ items: [] });
+  const client: SettingsClient = {
+    load: vi.fn().mockResolvedValue(snapshot),
+    save: vi.fn(),
+    host: { platform: "macos" } as HostCapabilities,
+    clipboard: {
+      clear: vi.fn(),
+      list: vi
+        .fn()
+        .mockResolvedValue([
+          { text: "synthetic cloud", timestampMs: 1_700_000_000_000, pinned: false },
+        ]),
+    },
+    cloudClipboardRequest,
+  };
+  render(<SettingsPage client={client} />);
+  await settingsReady();
+  expect(cloudClipboardRequest).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "云剪贴板" }));
+  expect(await screen.findByText("synthetic cloud")).toBeDefined();
+  const send = screen.getByRole("button", { name: "发到云剪贴板" });
+  await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(send);
+
+  await waitFor(() =>
+    expect(cloudClipboardRequest).toHaveBeenLastCalledWith({
+      operation: "add",
+      text: "synthetic cloud",
+    }),
+  );
+  expect(await screen.findByText("已发到云剪贴板")).toBeDefined();
 });
 
 test("native panel views support close, modifier, drawing and undo interactions", async () => {

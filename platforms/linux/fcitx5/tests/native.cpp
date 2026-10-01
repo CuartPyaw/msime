@@ -307,7 +307,7 @@ int main(int argc, char **argv) {
       if (client < 0) { close(cloudServer); return false; }
       char request[4096]{};
       const auto count = read(client, request, sizeof(request) - 1);
-      const auto reply = "{\"entries\":[{\"id\":\"synthetic-1\",\"text\":\"云剪贴板测试\"},{\"id\":\"synthetic-2\",\"text\":\"云剪贴板第二条\"}]}\n";
+      const auto reply = "{\"enabled\":true,\"items\":[{\"id\":\"synthetic-1\",\"text\":\"云剪贴板测试\",\"updated_at\":\"2026-01-01T00:00:00Z\"},{\"id\":\"synthetic-2\",\"text\":\"云剪贴板第二条\",\"updated_at\":\"2026-01-01T00:00:01Z\"}]}\n";
       const bool valid = count > 0 && std::string(request, count).find("cloud_clipboard") != std::string::npos;
       const bool sent = send(client, reply, std::strlen(reply), MSG_NOSIGNAL) == static_cast<ssize_t>(std::strlen(reply));
       close(client); close(cloudServer);
@@ -1753,6 +1753,13 @@ int main(int argc, char **argv) {
     require(key(FcitxKey_n), "restart composition");
     ic.setCapabilityFlags(fcitx::CapabilityFlag::Password);
     require(state->session_ == 0, "password capability immediately closes session");
+    state->cloud_clipboard_items_ = Json::array({Json{{"id", "synthetic-3"}, {"text", "云剪贴板受限"}}});
+    require(engine.cloud_clipboard_item1_.shortText(&ic) == "云剪贴板 1",
+            "password context does not preview cloud clipboard text");
+    const auto beforeRestrictedCloud = ic.committed;
+    engine.cloud_clipboard_item1_.activate(&ic);
+    require(ic.committed == beforeRestrictedCloud, "password context does not commit cloud clipboard text");
+    state->cloud_clipboard_items_ = Json::array();
     engine.english_action_.activate(&ic);
     require(state->session_ == 0, "status action cannot reopen password context");
     require(ic.inputPanel().clientPreedit().empty(), "password immediately clears preedit");

@@ -3406,10 +3406,19 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   /// Fields that hold a password or a one-time code, whose key presses are never counted.
   private static let credentialContentTypes: Set<UITextContentType> = [.password, .newPassword, .oneTimeCode]
 
+  /// A secure field, or one marked only by its content type as a password or one-time code. Key presses there are not counted and the cloud clipboard is neither shown nor inserted.
+  static func isCredentialField(secure: Bool?, contentType: UITextContentType?) -> Bool {
+    if secure == true { return true }
+    if let contentType, credentialContentTypes.contains(contentType) { return true }
+    return false
+  }
+  private var isCredentialField: Bool {
+    Self.isCredentialField(secure: textDocumentProxy.isSecureTextEntry, contentType: textDocumentProxy.textContentType ?? nil)
+  }
+
   /// One press of a soft key, by its id in `TypingKeyID`; `nil` is a key with no id, which is not counted. Secure and credential fields are skipped as well: iOS normally swaps in the system keyboard for secure ones, and a host that does not, or that marks a field only by its content type, still gets nothing recorded.
   private func countKeyPress(_ id: String?) {
-    guard let id, countsKeyPresses, hasFullAccess, textDocumentProxy.isSecureTextEntry != true else { return }
-    if let contentType = textDocumentProxy.textContentType ?? nil, Self.credentialContentTypes.contains(contentType) { return }
+    guard let id, countsKeyPresses, hasFullAccess, !isCredentialField else { return }
     for batch in keyPresses.record(id, day: TypingStatistics.dayKey(Date())) { writeKeyPresses(batch) }
   }
 
@@ -4288,7 +4297,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   private func showClipboardHistory() {
     closeKeyboardService()
     closeKeyboardPicker()
-    let panel = KeyboardClipboardView(hasFullAccess: hasFullAccess, onInsert: { [weak self] text in
+    // No 云端 tab at all in a password or one-time-code field, so nothing is fetched there either.
+    let cloud = isCredentialField ? nil : KeyboardCloudClipboard(hasFullAccess: hasFullAccess)
+    cloud?.fieldAllowsCloud = { [weak self] in self.map { !$0.isCredentialField } ?? false }
+    let panel = KeyboardClipboardView(hasFullAccess: hasFullAccess, cloud: cloud, onInsert: { [weak self] text in
       guard let self else { return }
       render(session.finishComposition())
       insertOwnText(text)

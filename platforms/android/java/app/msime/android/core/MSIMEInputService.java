@@ -158,6 +158,11 @@ public final class MSIMEInputService extends InputMethodService {
     private TextView keyboardHeightValue;
     private ClipboardHistoryStore clipboardHistory;
     private boolean clipboardHistoryEnabled;
+    private CloudClipboardPanelPolicy.Tab clipboardTab = CloudClipboardPanelPolicy.Tab.LOCAL;
+    private CloudClipboardPanelPolicy.Status cloudClipboardStatus = CloudClipboardPanelPolicy.Status.LOADING;
+    private java.util.List<BackendAccount.ClipboardItem> cloudClipboardItems = java.util.List.of();
+    // Bumped whenever the field or the open panel changes; a cloud answer started under an older value is dropped rather than drawn into a field it was not fetched for.
+    private long cloudClipboardGeneration;
     private boolean candidateEnglishGloss;
     private boolean candidateTranslationsEnabled;
     // Gates only the account network path (fetch, apply, reserved rows); candidateTranslationsEnabled stays the display gate for translations a candidate already carries.
@@ -406,6 +411,7 @@ public final class MSIMEInputService extends InputMethodService {
         1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(32),
         new ThreadPoolExecutor.AbortPolicy());
     private final ExecutorService emojiWorker = Executors.newSingleThreadExecutor();
+    private final ExecutorService cloudClipboardWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService candidateGlossWorker = new ThreadPoolExecutor(
         1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1),
         new ThreadPoolExecutor.DiscardOldestPolicy());
@@ -825,6 +831,7 @@ public final class MSIMEInputService extends InputMethodService {
         super.onStartInput(info, restarting);
         cancelInputViewRefresh();
         long startGeneration = ++engineStartGeneration;
+        cloudClipboardGeneration++;
         cancelPersonalDictionarySynchronization();
         boolean newDocument = !restarting || currentDocumentIdentifier == 0;
         if (newDocument) {
@@ -933,6 +940,7 @@ public final class MSIMEInputService extends InputMethodService {
         cancelBackspaceRepeat();
         cancelInputViewRefresh();
         engineStartGeneration++;
+        cloudClipboardGeneration++;
         resetSpaceCursor();
         stop(true);
         schedulePersonalDictionarySynchronization(false);
@@ -1011,6 +1019,7 @@ public final class MSIMEInputService extends InputMethodService {
         flushKeyPresses();
         typingStatisticsWorker.shutdown();
         emojiWorker.shutdown();
+        cloudClipboardWorker.shutdownNow();
         candidateGlossWorker.shutdownNow();
         candidateTranslationWorker.shutdownNow();
         englishSuggestionWorker.shutdownNow();
@@ -1557,7 +1566,9 @@ public final class MSIMEInputService extends InputMethodService {
         preferencesSnapshot = accepted;
         if (!clipboardHistoryEnabled && clipboardHistory != null) {
             clipboardHistory.clearQuietly();
-            closeClipboardHistory();
+            // The cloud half does not depend on this switch; only a panel left with nothing to show closes.
+            if (clipboardPanelOpen() && cloudClipboardAllowed()) renderClipboardHistory();
+            else closeClipboardHistory();
         }
         view = nextView;
         // After the view is in place, because this replaces it with the runtime's answer.
@@ -3702,6 +3713,10 @@ public final class MSIMEInputService extends InputMethodService {
 
     private void closeClipboardHistory() {
         if (clipboardScroll != null) clipboardScroll.setVisibility(View.GONE);
+        // Cloud entries live only as long as the panel that fetched them, so a later field - possibly a password one - never starts with them in memory.
+        cloudClipboardGeneration++;
+        cloudClipboardItems = java.util.List.of();
+        cloudClipboardStatus = CloudClipboardPanelPolicy.Status.LOADING;
     }
 
     private void closeSchemePicker() {
@@ -5475,7 +5490,16 @@ public final class MSIMEInputService extends InputMethodService {
         PopupMenu popup = new PopupMenu(this, anchor);
         MenuItem pin = popup.getMenu().add(item.pinned() ? "取消固定" : "固定");
         MenuItem remove = popup.getMenu().add("删除");
+        // Offered wherever the cloud half is, so the action is discoverable; it only runs once this panel's fetch said the account is signed in with the cloud clipboard on.
+        boolean cloudAllowed = cloudClipboardAllowed();
+        MenuItem upload = cloudAllowed ? popup.getMenu().add(CloudClipboardPanelPolicy.UPLOAD_ACTION) : null;
+        if (upload != null) upload.setEnabled(CloudClipboardPanelPolicy.canUpload(
+            cloudAllowed, cloudClipboardStatus, item.text()));
         popup.setOnMenuItemClickListener(selected -> {
+            if (upload != null && selected == upload) {
+                uploadClipboardText(item.text());
+                return true;
+            }
             if (clipboardHistory == null) return false;
             try {
                 if (selected == pin) clipboardHistory.setPinned(item.text(), !item.pinned());
@@ -5509,7 +5533,9 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private void showClipboardHistory() {
-        if (!clipboardHistoryEnabled || clipboardScroll == null) return;
+        boolean cloudAllowed = cloudClipboardAllowed();
+        if (!CloudClipboardPanelPolicy.panelAvailable(clipboardHistoryEnabled, cloudAllowed)
+                || clipboardScroll == null) return;
         // Clipboard entries are independent editor text. Finish the active composition when the
         // panel opens, matching the symbol and emoji panels instead of leaving stale preedit behind
         // while the user browses history.
@@ -5521,22 +5547,156 @@ public final class MSIMEInputService extends InputMethodService {
         closeLayoutSettings();
         closeVoiceResult();
         closeAiPolish();
+        clipboardTab = CloudClipboardPanelPolicy.initialTab(
+            clipboardTab, clipboardHistoryEnabled, cloudAllowed);
         renderClipboardHistory();
         clipboardScroll.setVisibility(View.VISIBLE);
+        // Fetched on every opening, whichever half is showing: the local half's 发到云剪贴板 needs to know the account is signed in with the cloud clipboard on.
+        if (cloudAllowed) refreshCloudClipboard();
+    }
+
+    private boolean clipboardPanelOpen() {
+        return clipboardScroll != null && clipboardScroll.getVisibility() == View.VISIBLE;
+    }
+
+    private boolean cloudClipboardAllowed() {
+        return CloudClipboardPanelPolicy.cloudAllowed(editorInputType, allowLearning);
+    }
+
+    private void selectClipboardTab(CloudClipboardPanelPolicy.Tab tab) {
+        if (tab == CloudClipboardPanelPolicy.Tab.CLOUD && !cloudClipboardAllowed()) return;
+        clipboardTab = tab;
+        renderClipboardHistory();
+    }
+
+    /**
+     * Ask the service for this account's cloud list, off the main thread.
+     *
+     * <p>The answer is drawn only if the field and the panel are still the ones it was asked for; otherwise it is dropped. Errors carry no response text, and nothing about the request is logged.
+     */
+    private void refreshCloudClipboard() {
+        if (!cloudClipboardAllowed()) return;
+        long generation = ++cloudClipboardGeneration;
+        cloudClipboardStatus = CloudClipboardPanelPolicy.Status.LOADING;
+        cloudClipboardItems = java.util.List.of();
+        if (clipboardTab == CloudClipboardPanelPolicy.Tab.CLOUD) renderClipboardHistory();
+        try {
+            cloudClipboardWorker.execute(() -> {
+                CloudClipboardPanelPolicy.Status status;
+                java.util.List<BackendAccount.ClipboardItem> items = java.util.List.of();
+                try {
+                    BackendAccount account = new BackendAccount(this);
+                    // Throws when the session owner cannot tell right now, which is a retry, not a sign-in.
+                    if (account.currentAccessToken().isEmpty()) {
+                        status = CloudClipboardPanelPolicy.Status.SIGNED_OUT;
+                    } else {
+                        BackendAccount.ClipboardPage page = account.clipboard("");
+                        status = CloudClipboardPanelPolicy.loaded(page.enabled(), page.items().size());
+                        if (CloudClipboardPanelPolicy.showsItems(status)) items = page.items();
+                    }
+                } catch (BackendAccount.RequestException error) {
+                    status = CloudClipboardPanelPolicy.failed(error.status);
+                } catch (Exception | LinkageError error) {
+                    status = CloudClipboardPanelPolicy.Status.FAILED;
+                }
+                CloudClipboardPanelPolicy.Status answer = status;
+                java.util.List<BackendAccount.ClipboardItem> answered = items;
+                main.post(() -> {
+                    if (!CloudClipboardPanelPolicy.accepts(generation, cloudClipboardGeneration)
+                            || !clipboardPanelOpen() || !cloudClipboardAllowed()) return;
+                    cloudClipboardStatus = answer;
+                    cloudClipboardItems = answered;
+                    if (clipboardTab == CloudClipboardPanelPolicy.Tab.CLOUD) renderClipboardHistory();
+                });
+            });
+        } catch (java.util.concurrent.RejectedExecutionException error) {
+            cloudClipboardStatus = CloudClipboardPanelPolicy.Status.FAILED;
+        }
+    }
+
+    /** Send one local entry to the account's cloud clipboard, because the user asked for exactly this one. */
+    private void uploadClipboardText(String text) {
+        boolean cloudAllowed = cloudClipboardAllowed();
+        if (!CloudClipboardPanelPolicy.canUpload(cloudAllowed, cloudClipboardStatus, text)) {
+            Toast.makeText(this, cloudClipboardStatus == CloudClipboardPanelPolicy.Status.SIGNED_OUT
+                    || cloudClipboardStatus == CloudClipboardPanelPolicy.Status.DISABLED
+                    ? CloudClipboardPanelPolicy.message(cloudClipboardStatus, 0)
+                    : "这条记录无法发到云剪贴板", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        long generation = cloudClipboardGeneration;
+        try {
+            cloudClipboardWorker.execute(() -> {
+                CloudClipboardPanelPolicy.Status failure = null;
+                try {
+                    new BackendAccount(this).addClipboard(text);
+                } catch (BackendAccount.RequestException error) {
+                    failure = CloudClipboardPanelPolicy.failed(error.status);
+                } catch (Exception | LinkageError error) {
+                    failure = CloudClipboardPanelPolicy.Status.FAILED;
+                }
+                CloudClipboardPanelPolicy.Status result = failure;
+                main.post(() -> {
+                    Toast.makeText(this, result == null ? "已发到云剪贴板"
+                        : result == CloudClipboardPanelPolicy.Status.SIGNED_OUT
+                            ? CloudClipboardPanelPolicy.SIGNED_OUT_MESSAGE
+                            : "未能发到云剪贴板，请稍后重试", Toast.LENGTH_SHORT).show();
+                    if (!CloudClipboardPanelPolicy.accepts(generation, cloudClipboardGeneration)
+                            || !clipboardPanelOpen()) return;
+                    // Re-read rather than splice the entry in: the service deduplicates and orders the list.
+                    refreshCloudClipboard();
+                });
+            });
+        } catch (java.util.concurrent.RejectedExecutionException error) {
+            Toast.makeText(this, "未能发到云剪贴板，请稍后重试", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void insertCloudClipboardText(String text) {
+        // Re-checked at the tap: the list was drawn for this field, but a field never gets cloud text once it has turned sensitive.
+        if (!cloudClipboardAllowed()) return;
+        insertClipboardText(text);
     }
 
     private void renderClipboardHistory() {
         if (clipboardPanel == null || clipboardHistory == null) return;
         clipboardPanel.removeAllViews();
+        boolean cloudAllowed = cloudClipboardAllowed();
+        if (!cloudAllowed) clipboardTab = CloudClipboardPanelPolicy.Tab.LOCAL;
+        boolean cloud = clipboardTab == CloudClipboardPanelPolicy.Tab.CLOUD;
         LinearLayout header = new LinearLayout(this);
         TextView title = new TextView(this);
         title.setText("剪贴板历史");
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         header.addView(title, new LinearLayout.LayoutParams(0,
             LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        button(header, "清空", this::confirmClearClipboardHistory);
+        if (cloud) {
+            Button refresh = button(header, "刷新", this::refreshCloudClipboard);
+            refresh.setEnabled(cloudClipboardStatus != CloudClipboardPanelPolicy.Status.LOADING);
+            refresh.setContentDescription("刷新云剪贴板");
+        } else if (clipboardHistoryEnabled) {
+            button(header, "清空", this::confirmClearClipboardHistory);
+        }
         button(header, "返回", this::closeClipboardHistory);
         clipboardPanel.addView(header);
+        if (cloudAllowed) {
+            LinearLayout tabs = new LinearLayout(this);
+            addClipboardTab(tabs, CloudClipboardPanelPolicy.TAB_LOCAL, CloudClipboardPanelPolicy.Tab.LOCAL);
+            addClipboardTab(tabs, CloudClipboardPanelPolicy.TAB_CLOUD, CloudClipboardPanelPolicy.Tab.CLOUD);
+            clipboardPanel.addView(tabs);
+        }
+        if (cloud) {
+            renderCloudClipboard();
+            applySkin();
+            return;
+        }
+        if (!clipboardHistoryEnabled) {
+            TextView status = new TextView(this);
+            status.setText("剪贴板历史未开启，可在设置中开启");
+            clipboardPanel.addView(status);
+            applySkin();
+            return;
+        }
         Button capture = button(clipboardPanel, "保存当前剪贴板", this::captureClipboardText);
         capture.setContentDescription("保存当前剪贴板文本");
         try {
@@ -5566,6 +5726,28 @@ public final class MSIMEInputService extends InputMethodService {
             clipboardPanel.addView(status);
         }
         applySkin();
+    }
+
+    private void addClipboardTab(LinearLayout tabs, String title, CloudClipboardPanelPolicy.Tab tab) {
+        Button button = button(tabs, title, () -> selectClipboardTab(tab));
+        button.setSelected(clipboardTab == tab);
+        button.setContentDescription("剪贴板分类 " + title);
+        if (Build.VERSION.SDK_INT >= 30)
+            button.setStateDescription(button.isSelected() ? "已选中" : "未选中");
+        styleButton(button, true);
+    }
+
+    private void renderCloudClipboard() {
+        TextView status = new TextView(this);
+        status.setText(CloudClipboardPanelPolicy.message(cloudClipboardStatus, cloudClipboardItems.size()));
+        clipboardPanel.addView(status);
+        if (!CloudClipboardPanelPolicy.showsItems(cloudClipboardStatus)) return;
+        for (BackendAccount.ClipboardItem item : cloudClipboardItems) {
+            LinearLayout row = new LinearLayout(this);
+            Button insert = button(row, item.text(), () -> insertCloudClipboardText(item.text()));
+            insert.setContentDescription("点按插入云剪贴板记录");
+            clipboardPanel.addView(row);
+        }
     }
 
     private void showFeedbackMenu() {
@@ -5828,7 +6010,8 @@ public final class MSIMEInputService extends InputMethodService {
                     showEmojiPicker();
                 }),
             moreToolsCard("剪贴板历史", MoreToolsLayout.Section.TOOLS, false,
-                clipboardHistoryEnabled, true, () -> {
+                CloudClipboardPanelPolicy.panelAvailable(clipboardHistoryEnabled,
+                    cloudClipboardAllowed()), true, () -> {
                     closeMoreTools();
                     showClipboardHistory();
                 }),

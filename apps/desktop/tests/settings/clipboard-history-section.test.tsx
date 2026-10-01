@@ -34,3 +34,102 @@ test("clipboard history loads entries and toggles a pin", async () => {
   await waitFor(() => expect(setPinned).toHaveBeenCalledWith("合成测试", true));
   expect(await screen.findByRole("button", { name: "取消固定剪贴板记录" })).toBeTruthy();
 });
+
+function renderWithCloud(
+  cloudRequest: Parameters<typeof ClipboardHistorySection>[0]["cloudRequest"],
+  entries = [{ text: "合成云端记录", timestampMs: 1_700_000_000_000, pinned: false }],
+) {
+  const list = vi.fn().mockResolvedValue(entries);
+  return render(
+    <ClipboardHistorySection
+      client={{ clear: vi.fn(), list }}
+      historyEnabled
+      persistedHistoryEnabled
+      revision={1}
+      ios={false}
+      onToggle={vi.fn()}
+      onError={vi.fn()}
+      cloudRequest={cloudRequest}
+    />,
+  );
+}
+
+test("clipboard history offers no cloud action when the host has no cloud clipboard", async () => {
+  renderWithCloud(undefined);
+
+  expect(await screen.findByText("合成云端记录")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "发到云剪贴板" })).toBeNull();
+});
+
+test("clipboard history sends only the chosen entry to the cloud clipboard", async () => {
+  const cloudRequest = vi
+    .fn()
+    .mockResolvedValueOnce({ enabled: true, items: [] })
+    .mockResolvedValueOnce({ items: [{ id: "c1", text: "合成云端记录" }] });
+  renderWithCloud(cloudRequest);
+
+  const send = await screen.findByRole("button", { name: "发到云剪贴板" });
+  await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+  expect(cloudRequest).toHaveBeenCalledTimes(1);
+  expect(cloudRequest).toHaveBeenCalledWith({ operation: "list", search: "" });
+
+  fireEvent.click(send);
+
+  await waitFor(() =>
+    expect(cloudRequest).toHaveBeenLastCalledWith({ operation: "add", text: "合成云端记录" }),
+  );
+  expect(await screen.findByText("已发到云剪贴板")).toBeTruthy();
+});
+
+test("clipboard history explains a signed-out account and keeps the cloud action disabled", async () => {
+  const cloudRequest = vi.fn().mockRejectedValue({ code: "account_unauthorized" });
+  renderWithCloud(cloudRequest);
+
+  expect(await screen.findByText("登录水杉账号后可在设备间同步剪贴板")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "发到云剪贴板" }).hasAttribute("disabled")).toBe(true);
+  expect(cloudRequest).toHaveBeenCalledTimes(1);
+});
+
+test("clipboard history explains a disabled cloud clipboard and does not upload", async () => {
+  const cloudRequest = vi.fn().mockResolvedValue({ enabled: false, items: [] });
+  renderWithCloud(cloudRequest);
+
+  expect(await screen.findByText("云剪贴板未开启")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "发到云剪贴板" }));
+  expect(cloudRequest).toHaveBeenCalledTimes(1);
+});
+
+test("clipboard history refuses an entry over the cloud limit instead of truncating it", async () => {
+  const cloudRequest = vi.fn().mockResolvedValue({ enabled: true, items: [] });
+  renderWithCloud(cloudRequest, [
+    { text: "合".repeat(4001), timestampMs: 1_700_000_000_000, pinned: false },
+  ]);
+
+  const send = await screen.findByRole("button", { name: "发到云剪贴板" });
+  await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(send);
+
+  expect(
+    await screen.findByText("这条记录超过 4000 个 UTF-16 单元，无法发到云剪贴板"),
+  ).toBeTruthy();
+  expect(cloudRequest).toHaveBeenCalledTimes(1);
+});
+
+test("clipboard history reports a failed upload and a lost session", async () => {
+  const cloudRequest = vi
+    .fn()
+    .mockResolvedValueOnce({ enabled: true, items: [] })
+    .mockRejectedValueOnce({ code: "account_unavailable" })
+    .mockRejectedValueOnce({ code: "account_unauthorized" });
+  renderWithCloud(cloudRequest);
+
+  const send = await screen.findByRole("button", { name: "发到云剪贴板" });
+  await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(send);
+  expect(await screen.findByText("发到云剪贴板失败，请稍后重试")).toBeTruthy();
+
+  await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(send);
+  expect(await screen.findByText("登录水杉账号后可在设备间同步剪贴板")).toBeTruthy();
+  expect(send.hasAttribute("disabled")).toBe(true);
+});

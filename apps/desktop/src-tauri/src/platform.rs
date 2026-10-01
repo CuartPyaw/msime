@@ -5,6 +5,7 @@
 pub(crate) mod account_helpers;
 #[cfg(any(target_os = "android", test))]
 pub(crate) mod android;
+pub(crate) mod cloud_clipboard;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos", test))]
 pub(crate) mod desktop;
 #[cfg(any(target_os = "ios", test))]

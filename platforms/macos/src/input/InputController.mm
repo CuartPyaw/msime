@@ -3014,6 +3014,10 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     NSMenuItem *emoji = [[NSMenuItem alloc] initWithTitle:@"水杉表情面板…" action:@selector(showEmoji:) keyEquivalent:@""];
     emoji.target = self;
     [menu addItem:emoji];
+    // The cloud clipboard panel pastes into the editor like the emoji panel's clipboard page, so it sits beside it; the account, sync switch and history management stay in the settings window.
+    NSMenuItem *cloudClipboard = [[NSMenuItem alloc] initWithTitle:@"云剪贴板…" action:@selector(showCloudClipboard:) keyEquivalent:@""];
+    cloudClipboard.target = self;
+    [menu addItem:cloudClipboard];
     NSMenuItem *keyboard = [[NSMenuItem alloc] initWithTitle:@"水杉屏幕键盘…" action:@selector(showScreenKeyboard:) keyEquivalent:@""];
     keyboard.target = self;
     [menu addItem:keyboard];
@@ -3048,6 +3052,8 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     });
 }
 - (void)showCloudClipboard:(id)sender {
+    // Cloud history is never listed, let alone pasted, while a password field or a terminal's secure keyboard entry holds the keyboard.
+    if ([self secureEventInputActive]) { NSBeep(); return; }
     NSRunningApplication *application = NSWorkspace.sharedWorkspace.frontmostApplication;
     if (_activeClient && application &&
         application.processIdentifier != NSProcessInfo.processInfo.processIdentifier &&

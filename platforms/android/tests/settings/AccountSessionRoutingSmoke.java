@@ -1,0 +1,97 @@
+package app.msime.android;
+
+import java.util.concurrent.atomic.AtomicInteger;
+
+public final class AccountSessionRoutingSmoke {
+    private static final String PACKAGE = "app.msime.android";
+    private static final String TOKEN = "e".repeat(64);
+
+    public static void main(String[] args) throws Exception {
+        check(AccountSessionRoutingPolicy.ownsSession(PACKAGE, PACKAGE), "the main process owns the session");
+        check(!AccountSessionRoutingPolicy.ownsSession(PACKAGE + ":ime", PACKAGE), "the keyboard process does not own the session");
+        check(!AccountSessionRoutingPolicy.ownsSession(null, PACKAGE), "an unknown process asks the owner");
+        check(!AccountSessionRoutingPolicy.ownsSession(PACKAGE, ""), "a missing package name asks the owner");
+        check(!AccountSessionRoutingPolicy.ownsSession(PACKAGE, null), "a null package name asks the owner");
+        check(AccountSessionRoutingPolicy.authority(PACKAGE).equals(PACKAGE + ".account-session"), "the authority matches the manifests");
+        boolean rejected = false;
+        try {
+            AccountSessionRoutingPolicy.authority("");
+        } catch (IllegalArgumentException expected) {
+            rejected = true;
+        }
+        check(rejected, "an empty package name has no authority");
+
+        check(AccountSessionRoutingPolicy.accepts("access_token", 10123, 10123), "our own uid gets the token");
+        check(!AccountSessionRoutingPolicy.accepts("access_token", 10124, 10123), "another uid is refused");
+        check(!AccountSessionRoutingPolicy.accepts("refresh_token", 10123, 10123), "no other method is answered");
+        check(!AccountSessionRoutingPolicy.accepts(null, 10123, 10123), "a missing method is refused");
+
+        check(AccountSessionRoutingPolicy.source(true, true) == AccountSessionRoutingPolicy.Source.OWN, "a native sign-in session wins");
+        check(AccountSessionRoutingPolicy.source(true, false) == AccountSessionRoutingPolicy.Source.OWN, "a native sign-in session answers alone");
+        check(AccountSessionRoutingPolicy.source(false, true) == AccountSessionRoutingPolicy.Source.LEGACY_READ_ONLY, "the combined package's Rust session is read only");
+        check(AccountSessionRoutingPolicy.source(false, false) == AccountSessionRoutingPolicy.Source.NONE, "no session means signed out");
+        long now = 1_700_000_000_000L;
+        check(AccountSessionRoutingPolicy.legacyToken(TOKEN, now + 60_000L, now).equals(TOKEN), "an unexpired Rust token is used as it is");
+        check(AccountSessionRoutingPolicy.legacyToken(TOKEN, now + 30_000L, now).isEmpty(), "a token inside the expiry margin is left to the Rust client");
+        check(AccountSessionRoutingPolicy.legacyToken(TOKEN, now - 1L, now).isEmpty(), "an expired Rust token is not used");
+        check(AccountSessionRoutingPolicy.legacyToken(TOKEN, 0L, now).isEmpty(), "a Rust session without an expiry is not used");
+        check(AccountSessionRoutingPolicy.legacyToken("E".repeat(64), now + 60_000L, now).isEmpty(), "a malformed Rust token is not used");
+        check(AccountSessionRoutingPolicy.legacyToken(null, now + 60_000L, now).isEmpty(), "a missing Rust token is not used");
+
+        check(AccountSessionRoutingPolicy.stateFor(TOKEN).equals(AccountSessionRoutingPolicy.STATE_SIGNED_IN), "a token is reported as signed in");
+        check(AccountSessionRoutingPolicy.stateFor("").equals(AccountSessionRoutingPolicy.STATE_SIGNED_OUT), "no token is reported as signed out");
+        check(AccountSessionRoutingPolicy.tokenFromReply(AccountSessionRoutingPolicy.STATE_SIGNED_IN, TOKEN).equals(TOKEN), "a signed-in reply yields its token");
+        check(AccountSessionRoutingPolicy.tokenFromReply(AccountSessionRoutingPolicy.STATE_SIGNED_OUT, "").isEmpty(), "a signed-out reply yields no token");
+        for (String[] reply : new String[][] {
+                {AccountSessionRoutingPolicy.STATE_UNAVAILABLE, ""},
+                {AccountSessionRoutingPolicy.STATE_SIGNED_IN, ""},
+                {AccountSessionRoutingPolicy.STATE_SIGNED_IN, "not-a-token"},
+                {null, TOKEN},
+                {"unknown", TOKEN}}) {
+            boolean unavailable = false;
+            try {
+                AccountSessionRoutingPolicy.tokenFromReply(reply[0], reply[1]);
+            } catch (IllegalStateException expected) {
+                unavailable = true;
+            }
+            check(unavailable, "reply " + reply[0] + " is a retry, not a sign-out");
+        }
+
+        // A process that does not own the session neither reads nor writes the store and never calls the service; the token comes from the owner alone.
+        AtomicInteger storeTouches = new AtomicInteger();
+        AtomicInteger requests = new AtomicInteger();
+        BackendAccount.SessionStore store = new BackendAccount.SessionStore() {
+            @Override public String load() { storeTouches.incrementAndGet(); return null; }
+            @Override public void save(String value) { storeTouches.incrementAndGet(); }
+            @Override public void clear() { storeTouches.incrementAndGet(); }
+        };
+        BackendAccount.Requester requester = (method, path, body, token) -> {
+            requests.incrementAndGet();
+            throw new IllegalStateException("no network in this smoke");
+        };
+        check(new BackendAccount(store, requester, () -> TOKEN).accessToken().equals(TOKEN), "the owner's token is used");
+        check(new BackendAccount(store, requester, () -> TOKEN).signedIn(), "an owner token means signed in");
+        check(new BackendAccount(store, requester, () -> "").accessToken().isEmpty(), "a signed-out owner means signed out");
+        check(new BackendAccount(store, requester, () -> null).accessToken().isEmpty(), "a missing reply means signed out");
+        check(new BackendAccount(store, requester, () -> "not-a-token").accessToken().isEmpty(), "a malformed reply is not used as a token");
+        check(new BackendAccount(store, requester, () -> {
+            throw new IllegalArgumentException("Unknown authority");
+        }).accessToken().isEmpty(), "an unreachable owner means signed out rather than a local refresh");
+        boolean retry = false;
+        try {
+            new BackendAccount(store, requester, () -> {
+                throw new IllegalStateException("account session unavailable");
+            }).currentAccessToken();
+        } catch (IllegalStateException expected) {
+            retry = true;
+        }
+        check(retry, "an owner that cannot tell is reported to callers that word a retry");
+        check(storeTouches.get() == 0, "a non-owning process never touches the session store");
+        check(requests.get() == 0, "a non-owning process never refreshes");
+        System.out.println("Android account session routing: single refreshing process passed");
+    }
+
+    private static void check(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}

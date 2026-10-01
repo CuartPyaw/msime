@@ -2,6 +2,8 @@
 
 The native IMK cloud clipboard route launches the Tauri cloud clipboard surface while the existing Swift account actor remains the sole owner of account credentials and refreshes. Signed-out and failed launches fall back to the native clipboard window. When the route belongs to an active IMK client, it also captures a one-shot input session before launching the panel. Standalone launches are copy-only.
 
+The route is reached from 「云剪贴板…」 in the input source menu, next to the emoji panel whose clipboard page it complements. It refuses to open while secure event input is on (a password field or a terminal's secure keyboard entry), so cloud history is never listed over such a field. In the native emoji panel's clipboard page, a history row's context menu offers 「发到云剪贴板」: it uploads only that row, through `BackendCloudClipboardProvider.send`, which reads the server's enabled flag first and reports signed-out, disabled or failed instead of uploading.
+
 ## Boundaries
 
 - `BackendCloudClipboardProvider` captures the native account ID when preparing the panel. Credentials are checked before and after each request; logout or a different account prevents delivery of a pending response. Tokens never cross the transport or enter host-core configuration.

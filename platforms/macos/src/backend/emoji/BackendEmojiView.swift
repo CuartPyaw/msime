@@ -55,6 +55,7 @@ struct MacEmojiView: View {
   @ObservedObject private var clipboardService = MacClipboardService.shared
   @State private var deletingHistory = false
   @State private var deletionNotice = ""
+  @State private var sendingToCloud = false
   @State private var loadedQuery: [String] = []
   private var queryID: [String] { [search, category, parent, group, String(category == "recent" ? recent.revision : 0), String(category == "clipboard" ? historyRevision : 0)] }
   @State private var items: [MacEmojiCatalogItem] = []
@@ -106,6 +107,15 @@ struct MacEmojiView: View {
         guard queryID == requestedID else { return }
         deletionNotice = "无法删除历史记录，请重试"
       }
+    }
+  }
+  // Only the entry the user picked is uploaded; the provider checks the account and the server's enabled flag first.
+  private func sendToCloud(_ text: String) {
+    guard !sendingToCloud else { return }
+    sendingToCloud = true
+    Task {
+      defer { sendingToCloud = false }
+      toast.show(await BackendCloudClipboardProvider.send(text).message)
     }
   }
   var body: some View {
@@ -188,7 +198,7 @@ struct MacEmojiView: View {
               ForEach(Array((loadedQuery == queryID ? items : []).enumerated()), id: \.offset) { index, item in
                   MacEmojiClipboardRow(text: item.text, palette: palette, selected: selectedIndex == index,
                     deleting: deletingHistory, copy: { selectedIndex = index; copyItem(item) },
-                    remove: { removeHistory(item.text) })
+                    remove: { removeHistory(item.text) }, sendToCloud: { sendToCloud(item.text) })
                     .id(index)
               }
             }

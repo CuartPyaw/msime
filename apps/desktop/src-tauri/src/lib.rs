@@ -24,16 +24,17 @@ mod voice;
 // shared name ambiguous.
 #[cfg(target_os = "linux")]
 use clipboard_history::{start_linux_clipboard_monitor, write_linux_clipboard};
-// Everything but these two is one host's own. Windows reaches its foreground
-// window through send_panel_key_windows and send_panel_text_windows, which the
-// call sites already name directly.
+// Everything but the group gated on both hosts is one host's own. Windows reaches its foreground window through send_panel_key_windows and send_panel_text_windows, which the call sites already name directly.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+use panel_input::{
+    cloud_clipboard_input_target, record_panel_typing_statistics, remember_opening_panel_target,
+    remember_panel_input_target, CLOUD_CLIPBOARD_PANEL,
+};
 #[cfg(target_os = "linux")]
 use panel_input::{
     panel_input_target, panel_position, send_panel_ctrl_v, send_panel_key, send_panel_text,
     send_panel_voice_text,
 };
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-use panel_input::{record_panel_typing_statistics, remember_panel_input_target};
 #[cfg(target_os = "windows")]
 use panel_input::{send_panel_key_windows, send_panel_text_windows, windows_panel_position};
 
@@ -58,8 +59,6 @@ use platform::macos::{
 };
 #[cfg(any(target_os = "ios", target_os = "android"))]
 use platform::mobile::mobile_account_helpers::parse_cloud_dictionary_request;
-#[cfg(any(target_os = "ios", target_os = "android"))]
-use platform::mobile::mobile_cloud_clipboard;
 #[cfg(any(target_os = "ios", target_os = "android"))]
 use platform::mobile::mobile_community;
 #[cfg(windows)]
@@ -1124,6 +1123,50 @@ struct PanelInputState(std::sync::Mutex<HashMap<String, PanelInputTarget>>);
 #[derive(Default)]
 struct PanelInputState(std::sync::Mutex<Option<PanelInputTarget>>);
 
+/// A panel input target that is valid for one open of a panel only, which the cloud clipboard panel keeps beside [`PanelInputState`] (see `panel_input`). Each open starts empty, a capture is only accepted for the open it was taken for, and closing the panel drops it.
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
+#[derive(Debug)]
+pub(crate) struct FreshInputTarget<T> {
+    open: u64,
+    target: Option<T>,
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
+impl<T> Default for FreshInputTarget<T> {
+    fn default() -> Self {
+        Self {
+            open: 0,
+            target: None,
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
+impl<T: Clone> FreshInputTarget<T> {
+    /// Starts a new open, forgetting the previous open's target, and returns the token its capture must be recorded with.
+    pub(crate) fn begin_open(&mut self) -> u64 {
+        self.open = self.open.wrapping_add(1);
+        self.target = None;
+        self.open
+    }
+
+    /// Records what the capture for `open` found. A capture taken for an open that has since been superseded or closed is discarded.
+    pub(crate) fn record(&mut self, open: u64, target: Option<T>) {
+        if open == self.open {
+            self.target = target;
+        }
+    }
+
+    pub(crate) fn close(&mut self) {
+        self.open = self.open.wrapping_add(1);
+        self.target = None;
+    }
+
+    pub(crate) fn target(&self) -> Option<T> {
+        self.target.clone()
+    }
+}
+
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 #[derive(Clone, Default)]
 struct DesktopSettingsLinger {
@@ -2082,64 +2125,101 @@ async fn dictionary_request(
     .map_err(|_| CommandError { code: "storage" })?
 }
 
+/// Where a desktop cloud clipboard request is served, in order of precedence: a provider socket named in the host options or the environment, the session of the macOS input method that launched this panel, a provider socket discovered in the user's runtime directory, and otherwise the account this shell is signed in to.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg_attr(not(unix), allow(dead_code))]
+#[derive(Debug, PartialEq)]
+enum CloudClipboardRoute<N> {
+    Provider(PathBuf),
+    Native(N),
+    Account,
+}
+
+/// Picks the [`CloudClipboardRoute`] for one request. A configured socket wins outright, and one that is not an absolute path is an error rather than a reason to fall through: the user asked for that provider, so the account must not answer in its place. The native session and discovery are only consulted when nothing is configured.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg_attr(not(unix), allow(dead_code))]
+fn cloud_clipboard_route<N>(
+    configured: Option<String>,
+    native: impl FnOnce() -> Option<N>,
+    discover: impl FnOnce() -> Option<PathBuf>,
+) -> Result<CloudClipboardRoute<N>, CommandError> {
+    if let Some(configured) = configured {
+        let path = PathBuf::from(configured);
+        return if path.is_absolute() {
+            Ok(CloudClipboardRoute::Provider(path))
+        } else {
+            Err(CommandError {
+                code: "unavailable",
+            })
+        };
+    }
+    if let Some(result) = native() {
+        return Ok(CloudClipboardRoute::Native(result));
+    }
+    Ok(discover()
+        .filter(|path| path.is_absolute())
+        .map_or(CloudClipboardRoute::Account, CloudClipboardRoute::Provider))
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn cloud_clipboard_request(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     options: tauri::State<'_, DictionaryHostOptions>,
+    account: tauri::State<'_, desktop_account::AccountState>,
     action: Value,
 ) -> Result<Value, CommandError> {
-    let _ = (&app, &window);
     msime_host_api::cloud_clipboard::validate_request(&action)
         .map_err(|_| CommandError { code: "invalid" })?;
-    let options = options.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        #[cfg(unix)]
-        {
+    // Windows has no provider socket or native session, so every request goes to the account.
+    #[cfg(unix)]
+    {
+        let options = options.inner().clone();
+        let label = window.label().to_owned();
+        let provider_action = action.clone();
+        let served = tauri::async_runtime::spawn_blocking(move || {
+            let _ = (&app, &label);
             let document = options.snapshot()?;
             let configured = document
                 .get("cloud_clipboard_provider_socket")
                 .and_then(Value::as_str)
-                .map(str::to_owned);
-            let configured = configured.or_else(|| {
-                std::env::var_os("MSIME_CLOUD_CLIPBOARD_PROVIDER_SOCKET")
-                    .and_then(|value| value.into_string().ok())
-            });
+                .map(str::to_owned)
+                .or_else(|| {
+                    std::env::var_os("MSIME_CLOUD_CLIPBOARD_PROVIDER_SOCKET")
+                        .and_then(|value| value.into_string().ok())
+                });
             #[cfg(target_os = "macos")]
-            if configured.is_none() {
-                if let Some(result) = app
-                    .state::<macos_cloud_clipboard::CloudState>()
-                    .request(window.label(), &action)
-                {
-                    return result;
-                }
+            let native = || {
+                app.state::<macos_cloud_clipboard::CloudState>()
+                    .request(&label, &provider_action)
+            };
+            #[cfg(not(target_os = "macos"))]
+            let native = || None::<Result<Value, CommandError>>;
+            match cloud_clipboard_route(configured, native, || {
+                discover_session_provider("cloud-clipboard.sock")
+            })? {
+                CloudClipboardRoute::Provider(path) => UnixSocketProvider::new(path)
+                    .cloud_clipboard(provider_action)
+                    .map(Some)
+                    .ok_or(CommandError {
+                        code: "unavailable",
+                    }),
+                CloudClipboardRoute::Native(result) => result.map(Some),
+                CloudClipboardRoute::Account => Ok(None),
             }
-            let path = configured
-                .map(PathBuf::from)
-                .or_else(|| discover_session_provider("cloud-clipboard.sock"))
-                .filter(|path| path.is_absolute())
-                .ok_or(CommandError {
-                    code: "unavailable",
-                })?;
-            UnixSocketProvider::new(path)
-                .cloud_clipboard(action)
-                .ok_or(CommandError {
-                    code: "unavailable",
-                })
+        })
+        .await
+        .map_err(|_| CommandError {
+            code: "unavailable",
+        })??;
+        if let Some(value) = served {
+            return Ok(value);
         }
-        #[cfg(not(unix))]
-        {
-            let _ = (options, action);
-            Err(CommandError {
-                code: "unavailable",
-            })
-        }
-    })
-    .await
-    .map_err(|_| CommandError {
-        code: "unavailable",
-    })?
+    }
+    #[cfg(not(unix))]
+    let _ = (app, window, options);
+    platform::cloud_clipboard::cloud_clipboard_request(&account.session, action).await
 }
 
 #[cfg(any(target_os = "ios", target_os = "android"))]
@@ -2151,17 +2231,21 @@ async fn cloud_clipboard_request(
     msime_host_api::cloud_clipboard::validate_request(&action).map_err(|_| CommandError {
         code: "invalid_cloud_clipboard",
     })?;
-    mobile_cloud_clipboard::cloud_clipboard_request(state.session(), action).await
+    platform::cloud_clipboard::cloud_clipboard_request(state.session(), action).await
 }
 
 #[tauri::command]
 fn cloud_clipboard_can_send_text(app: tauri::AppHandle, window: tauri::WebviewWindow) -> bool {
     #[cfg(target_os = "macos")]
     return macos_panel_session::can_submit_clipboard(&app, window.label());
-    #[cfg(not(target_os = "macos"))]
-    let _ = (app, window);
-    #[cfg(not(target_os = "macos"))]
-    cfg!(any(target_os = "linux", target_os = "windows"))
+    // Only an editor captured for this open of the panel counts; without one the page copies instead of typing.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    return window.label() == CLOUD_CLIPBOARD_PANEL && cloud_clipboard_input_target(&app).is_some();
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    {
+        let _ = (app, window);
+        false
+    }
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -3704,6 +3788,15 @@ async fn send_text(
 ) -> Result<(), HostActionError> {
     let _ = (&app, &window, &state);
     let _ = &typing_statistics;
+    // The cloud clipboard panel only types into the editor captured for its current open; a page that asks anyway, for instance one still running from before the target was dropped, is refused here rather than trusted to have checked `cloud_clipboard_can_send_text`.
+    #[cfg(target_os = "linux")]
+    if window.label() == CLOUD_CLIPBOARD_PANEL {
+        return panel_input::send_cloud_clipboard_text(app, &typing_statistics, text).await;
+    }
+    #[cfg(target_os = "windows")]
+    if window.label() == CLOUD_CLIPBOARD_PANEL {
+        return panel_input::send_cloud_clipboard_text_windows(&app, &text);
+    }
     #[cfg(target_os = "linux")]
     return send_panel_text(
         app,
@@ -4565,6 +4658,8 @@ pub fn run() {
                 }
             });
             app.manage(PanelInputState::default());
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            app.manage(panel_input::CloudClipboardInputState::default());
             // Before the settings page paints. The window is declared in tauri.conf.json, so this
             // is the first chance to colour it, and the theme is only knowable once it exists.
             if let Some(main) = app.get_webview_window("main") {
@@ -4793,14 +4888,14 @@ pub fn run() {
                     let panel_input = app.state::<PanelInputState>();
                     #[cfg(target_os = "linux")]
                     let position = {
-                        let _ = remember_panel_input_target(&panel_input, label, true);
+                        remember_opening_panel_target(app.handle(), &panel_input, label);
                         panel_position(&panel_input, label, width, height)
                     };
                     #[cfg(target_os = "windows")]
                     let height = panel_window::windows_panel_height(app.handle(), label, height);
                     #[cfg(target_os = "windows")]
                     let position = {
-                        let _ = remember_panel_input_target(&panel_input);
+                        remember_opening_panel_target(app.handle(), &panel_input, label);
                         windows_panel_position(width, height, surface.placement)
                     };
                     if let Some(window) = app.get_webview_window("main") {

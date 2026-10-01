@@ -5,9 +5,8 @@ import picker from '@ohos.file.picker';
 import util from '@ohos.util';
 import client from 'libmsimeclient.so';
 import {
-  AccountCloudBridge, AccountDownloadResponse, AccountSessionStore, AccountTransport,
-  AccountTransportResponse, MAX_DICTIONARY_EXPORT_BYTES, MAX_SNAPSHOT_DOWNLOAD_BYTES,
-  dictionaryChangePageChanged
+  AccountCloudBridge, AccountDownloadResponse, AccountTransportResponse,
+  MAX_DICTIONARY_EXPORT_BYTES, MAX_SNAPSHOT_DOWNLOAD_BYTES, dictionaryChangePageChanged
 } from './AccountCloudBridge';
 import { KeyboardSession } from '../keyboard/KeyboardSession';
 import { KeyboardFeedbackBridge } from '../keyboard/KeyboardFeedbackBridge';
@@ -23,41 +22,9 @@ import {
   localAccountPreferences,
   mergeAccountPreferences
 } from './AccountPreferencePlan';
-
-const ACCOUNT_ORIGIN: string = 'https://api.msime.app';
-
-class FileSessionStore implements AccountSessionStore {
-  private readonly file: string;
-
-  constructor(directory: string) {
-    this.file = `${directory}/account-session.json`;
-  }
-
-  load(): string | null {
-    try {
-      return fs.accessSync(this.file) ? fs.readTextSync(this.file) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  save(value: string): void {
-    const handle = fs.openSync(this.file, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-    try {
-      fs.writeSync(handle.fd, value);
-    } finally {
-      fs.closeSync(handle);
-    }
-  }
-
-  clear(): void {
-    try {
-      if (fs.accessSync(this.file)) fs.unlinkSync(this.file);
-    } catch {
-      // Clearing an already absent session is idempotent.
-    }
-  }
-}
+import {
+  ACCOUNT_ORIGIN, FileSessionStore, HarmonyAccountTransport, responseContentLength, responseContentType
+} from './HarmonyAccountTransport';
 
 interface SnapshotAction {
   operation: string;
@@ -146,93 +113,15 @@ interface SnapshotReply {
   error?: string;
 }
 
-interface HttpHeaders {
-  Accept: string;
-  Authorization?: string;
-  'Content-Type': string;
-}
-
 interface DownloadHeaders {
   Accept: string;
   Authorization: string;
   'Accept-Encoding': string;
 }
 
-function responseHeader(headers: Object, name: string): string | undefined {
-  const values: Record<string, Object> = headers as Record<string, Object>;
-  const keys: string[] = Object.keys(values);
-  for (const key of keys) {
-    if (key.toLowerCase() !== name) continue;
-    const raw: Object = values[key];
-    return typeof raw === 'string' ? raw : undefined;
-  }
-  return undefined;
-}
-
-/** A declared response size lets native downloads reject a connection that ended early. */
-function responseContentLength(headers: Object): number | undefined {
-  const raw: string | undefined = responseHeader(headers, 'content-length');
-  if (raw === undefined) return undefined;
-  const parsed: number = Number(raw);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : -1;
-}
-
-function responseContentType(headers: Object): string | undefined {
-  const raw: string | undefined = responseHeader(headers, 'content-type');
-  return raw === undefined ? undefined : raw.split(';')[0].trim().toLowerCase();
-}
-
-class HarmonyTransport implements AccountTransport {
-  private readonly activeRequests: Map<string, Set<http.HttpRequest>> =
-    new Map<string, Set<http.HttpRequest>>();
+/** The settings application's transport: the shared JSON requests plus the snapshot and export file transfers. */
+class HarmonyTransport extends HarmonyAccountTransport {
   private readonly activeDownloads: Set<http.HttpRequest> = new Set<http.HttpRequest>();
-
-  async request(method: string, path: string, token?: string, body?: Object,
-    timeoutMs?: number, requestTag?: string): Promise<AccountTransportResponse> {
-    if (!path.startsWith('/v1/') || path.includes('\\')) throw new Error('account_invalid');
-    const request = http.createHttp();
-    if (requestTag !== undefined && requestTag.length > 0) {
-      let requests: Set<http.HttpRequest> | undefined = this.activeRequests.get(requestTag);
-      if (requests === undefined) {
-        requests = new Set<http.HttpRequest>();
-        this.activeRequests.set(requestTag, requests);
-      }
-      requests.add(request);
-    }
-    const headers: HttpHeaders = { Accept: 'application/json', 'Content-Type': 'application/json' };
-    if (token !== undefined) headers.Authorization = `Bearer ${token}`;
-    // Only the read side takes the caller's budget. Connecting is connecting on every endpoint, and
-    // a chat request to an unreachable host should still fail in seconds rather than in two minutes.
-    const options: http.HttpRequestOptions = {
-      method: this.method(method),
-      header: headers,
-      connectTimeout: 30000,
-      readTimeout: timeoutMs === undefined ? 30000 : timeoutMs,
-      extraData: body === undefined ? undefined : JSON.stringify(body)
-    };
-    try {
-      const response = await request.request(`${ACCOUNT_ORIGIN}${path}`, options);
-      return {
-        status: response.responseCode,
-        body: typeof response.result === 'string' ? response.result : '',
-        contentLength: responseContentLength(response.header)
-      };
-    } finally {
-      if (requestTag !== undefined && requestTag.length > 0) {
-        const requests: Set<http.HttpRequest> | undefined = this.activeRequests.get(requestTag);
-        requests?.delete(request);
-        if (requests !== undefined && requests.size === 0) this.activeRequests.delete(requestTag);
-      }
-      request.destroy();
-    }
-  }
-
-  cancelRequests(requestTag: string): void {
-    const requests: Set<http.HttpRequest> | undefined = this.activeRequests.get(requestTag);
-    if (requests === undefined) return;
-    for (const request of requests) request.destroy();
-    this.activeRequests.delete(requestTag);
-  }
 
   /** Abort large file transfers when the account session is invalidated. */
   cancelDownloads(): void {
@@ -333,17 +222,6 @@ class HarmonyTransport implements AccountTransport {
       }
     } catch {
       return { status: 503, body: '' };
-    }
-  }
-
-  private method(value: string): http.RequestMethod {
-    switch (value) {
-      case 'POST': return http.RequestMethod.POST;
-      case 'PUT': return http.RequestMethod.PUT;
-      // The current SDK enum omits PATCH, but the HTTP stack accepts the wire method.
-      case 'PATCH': return 'PATCH' as http.RequestMethod;
-      case 'DELETE': return http.RequestMethod.DELETE;
-      default: return http.RequestMethod.GET;
     }
   }
 }

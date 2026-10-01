@@ -347,7 +347,7 @@ extension SkinCommunityTests {
 
     try await api.login(challenge: "fixture", identityToken: "synthetic")
     let id = "10000000-0000-4000-8000-000000000001"
-    let content = CommunityResourceContent(entries: [CommunityWord(kind: "pinyin", code: "a", word: "啊", weight: 1)], prompt: nil)
+    let content = CommunityResourceContent(entries: [CommunityWord(PersonalWord(kind: .pinyin, key: "a", value: "啊", weight: 1))], prompt: nil)
     do {
       try await api.publishResource(id: id, kind: .dictionary, name: "测试", description: "", content: content, revision: 1)
       XCTFail("expected invalid publish response rejection")

@@ -2145,3 +2145,115 @@ fn input_source_status_is_absent_when_no_start_time_check_ran() {
     );
     assert!(status.is_none());
 }
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[test]
+fn cloud_clipboard_route_keeps_providers_ahead_of_the_account() {
+    use super::{cloud_clipboard_route, CloudClipboardRoute};
+    use std::path::PathBuf;
+
+    let never_native = || -> Option<&'static str> { panic!("native session consulted") };
+    let never_discover = || -> Option<PathBuf> { panic!("discovery consulted") };
+
+    // A configured socket wins over the native session and discovery.
+    assert_eq!(
+        cloud_clipboard_route(
+            Some("/run/synthetic/cloud-clipboard.sock".into()),
+            never_native,
+            never_discover,
+        )
+        .unwrap(),
+        CloudClipboardRoute::Provider(PathBuf::from("/run/synthetic/cloud-clipboard.sock"))
+    );
+    // A configured socket that is not absolute is refused rather than quietly answered by the account.
+    assert_eq!(
+        cloud_clipboard_route(Some("relative.sock".into()), never_native, never_discover)
+            .unwrap_err()
+            .code,
+        "unavailable"
+    );
+    // The input method's own session comes before a discovered socket.
+    assert_eq!(
+        cloud_clipboard_route(None, || Some("native"), never_discover).unwrap(),
+        CloudClipboardRoute::Native("native")
+    );
+    assert_eq!(
+        cloud_clipboard_route(
+            None,
+            || None::<&str>,
+            || Some(PathBuf::from("/run/synthetic/discovered.sock")),
+        )
+        .unwrap(),
+        CloudClipboardRoute::Provider(PathBuf::from("/run/synthetic/discovered.sock"))
+    );
+    // With no provider at all, and for a discovered path that is not absolute, the signed-in account serves the request.
+    assert_eq!(
+        cloud_clipboard_route(None, || None::<&str>, || None).unwrap(),
+        CloudClipboardRoute::Account
+    );
+    assert_eq!(
+        cloud_clipboard_route(
+            None,
+            || None::<&str>,
+            || Some(PathBuf::from("relative.sock")),
+        )
+        .unwrap(),
+        CloudClipboardRoute::Account
+    );
+}
+
+#[test]
+fn cloud_clipboard_target_is_only_valid_for_the_open_it_was_captured_for() {
+    use super::FreshInputTarget;
+
+    let mut slot = FreshInputTarget::<&str>::default();
+    assert_eq!(slot.target(), None);
+
+    // A target captured while the panel opens is the one it may type into.
+    let first = slot.begin_open();
+    slot.record(first, Some("synthetic-editor"));
+    assert_eq!(slot.target(), Some("synthetic-editor"));
+
+    // Opening again forgets it before anything is captured, and a failed capture leaves the panel copy-only rather than falling back to the earlier editor.
+    let second = slot.begin_open();
+    assert_eq!(slot.target(), None);
+    slot.record(second, None);
+    assert_eq!(slot.target(), None);
+
+    // A capture that finishes after a newer open began belongs to the old open and is discarded.
+    let third = slot.begin_open();
+    slot.record(second, Some("synthetic-stale"));
+    assert_eq!(slot.target(), None);
+    slot.record(third, Some("synthetic-current"));
+    assert_eq!(slot.target(), Some("synthetic-current"));
+
+    // Closing the panel drops the target, and a capture for the closed open cannot bring it back.
+    slot.close();
+    assert_eq!(slot.target(), None);
+    slot.record(third, Some("synthetic-current"));
+    assert_eq!(slot.target(), None);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn sway_container_owner_is_read_from_the_matching_view() {
+    let tree = serde_json::json!({
+        "id": 1,
+        "nodes": [{
+            "id": 2,
+            "nodes": [{ "id": 3, "pid": 4242, "focused": true }],
+            "floating_nodes": [{ "id": 4, "pid": 4343 }],
+        }],
+    });
+    assert_eq!(
+        crate::panel_input::sway_pid_for_container(&tree, 3),
+        Some(4242)
+    );
+    assert_eq!(
+        crate::panel_input::sway_pid_for_container(&tree, 4),
+        Some(4343)
+    );
+    // A container without a pid, or one that is not in the tree, has no owner to compare against.
+    assert_eq!(crate::panel_input::sway_pid_for_container(&tree, 2), None);
+    assert_eq!(crate::panel_input::sway_pid_for_container(&tree, 9), None);
+}

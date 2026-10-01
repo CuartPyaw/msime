@@ -989,6 +989,7 @@ function makeClient(
     // The page is offered only on a 2in1, the form factor that plays packs and routes the / and @ modes; a phone hides it whatever the host supplies.
     plugins: pluginClient(native),
     openCloudClipboard: async () => openCloudClipboard(),
+    cloudClipboardRequest: cloudClipboardClient(native, () => undefined).request,
     openCloudDictionary: async () => openCloudDictionary(),
   };
 }
