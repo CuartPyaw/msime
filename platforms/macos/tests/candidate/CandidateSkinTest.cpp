@@ -63,6 +63,58 @@ int main() {
     assert(msime::mac::CandidateRowRadius(split, true, true, false) == split.radius);
     assert(msime::mac::CandidateRowRadius(split, false) == 3.0f);
 
+    // The user's 候选窗 style over a resolved skin. The defaults change nothing at all.
+    {
+        msime::mac::ResolvedSkin skin;
+        skin.tokens = NativeCandidateTokens(false);
+        skin.backgroundOpacity = 0.8;
+        skin.decorationTopDip = 40.0;
+        skin.decorationWidthDip = 60.0;
+        skin.minWidthDip = 200.0;
+        const auto untouched = msime::mac::StyledCandidateSkin(skin, {});
+        assert(SameTokens(untouched.tokens, skin.tokens) && untouched.tokens.candidateRadius == 6 && untouched.tokens.pad == 6);
+        assert(untouched.backgroundOpacity == 0.8 && untouched.decorationTopDip == 40.0 && untouched.minWidthDip == 200.0);
+
+        // A user radius beats the package's (already in tokens.radius) and pulls the rows in with it; a larger one leaves the rows at their own 6pt.
+        auto packaged = skin;
+        packaged.tokens.radius = 20.0f;
+        msime::mac::CandidateWindowStyle style;
+        style.cornerRadius = 3.0;
+        const auto tight = msime::mac::StyledCandidateSkin(packaged, style);
+        assert(tight.tokens.radius == 3.0f && tight.tokens.candidateRadius == 3.0f && tight.tokens.selectedRadius == 3.0f);
+        style.cornerRadius = 0.0;
+        assert(msime::mac::StyledCandidateSkin(packaged, style).tokens.radius == 0.0f);
+        style.cornerRadius = 14.0;
+        const auto loose = msime::mac::StyledCandidateSkin(packaged, style);
+        assert(loose.tokens.radius == 14.0f && loose.tokens.candidateRadius == 6.0f && loose.tokens.selectedRadius == 6.0f);
+        // Without a user radius the package's stays, and the rows keep the host's 6pt shape they drew before the setting existed.
+        auto square = skin;
+        square.tokens.radius = 2.0f;
+        const auto packageOnly = msime::mac::StyledCandidateSkin(square, {});
+        assert(packageOnly.tokens.radius == 2.0f && packageOnly.tokens.candidateRadius == 6.0f && packageOnly.tokens.selectedRadius == 6.0f);
+
+        // Opacity fades the card, its border and the package background, never the text, numbers or selection.
+        msime::mac::CandidateWindowStyle faded;
+        faded.opacity = 0.5;
+        const auto half = msime::mac::StyledCandidateSkin(skin, faded);
+        assert(std::abs(half.tokens.surface.a - skin.tokens.surface.a * 0.5f) < 0.00001f);
+        assert(std::abs(half.tokens.border.a - skin.tokens.border.a * 0.5f) < 0.00001f);
+        assert(std::abs(half.backgroundOpacity - 0.4) < 0.00001);
+        assert(SameColor(half.tokens.text, skin.tokens.text) && SameColor(half.tokens.number, skin.tokens.number));
+        assert(SameColor(half.tokens.selected, skin.tokens.selected) && SameColor(half.tokens.selectedText, skin.tokens.selectedText));
+        assert(SameColor(half.tokens.accent, skin.tokens.accent) && SameColor(half.tokens.hover, skin.tokens.hover));
+
+        // The scale multiplies every length the skin carries, after the radius is chosen, and leaves the hairline alone.
+        msime::mac::CandidateWindowStyle large;
+        large.scale = 1.5;
+        large.cornerRadius = 8.0;
+        const auto scaled = msime::mac::StyledCandidateSkin(skin, large);
+        assert(scaled.tokens.radius == 12.0f && scaled.tokens.candidateRadius == 9.0f && scaled.tokens.selectedRadius == 9.0f);
+        assert(scaled.tokens.pad == 9.0f && scaled.tokens.borderWidth == skin.tokens.borderWidth);
+        assert(scaled.decorationTopDip == 60.0 && scaled.decorationWidthDip == 90.0 && scaled.minWidthDip == 300.0);
+        assert(SameColor(scaled.tokens.surface, skin.tokens.surface) && scaled.backgroundOpacity == 0.8);
+    }
+
     // The picker is the shared catalog, in its order, and only its ids are themes.
     const auto &catalog = msime::mac::ThemeCatalog();
     const char *ids[] = {"system", "shuishan", "light", "paper", "night", "ink", "custom"};
@@ -116,7 +168,7 @@ int main() {
         CheckColor(custom.tokens.selected, 0xABCDEF);
         assert(SameColor(custom.tokens.selectedText, Rgba{0.1f, 0.1f, 0.1f, 1.0f}));
         assert(SameColor(custom.tokens.selectedNumber, Rgba{0.1f, 0.1f, 0.1f, 0.82f}));
-        // A dark picked accent keeps the native white, and a translucent picked selection falls back to the row's own colours.
+        // A dark picked accent keeps the native white. A picked selection colour has its foregrounds chosen by the shared core instead, black or white by its luminance (custom-theme-parity.json), so a light one reads in black.
         msime::mac::CustomTheme darkAccent;
         darkAccent.candidateColors.accent = "#1F4E3D";
         const auto darkFill = msime::mac::ResolveSkin("custom", darkAccent, dark, "horizontal", {});
@@ -126,7 +178,8 @@ int main() {
         lightFill.candidateColors.selected = "#E8E8E8";
         const auto light = msime::mac::ResolveSkin("custom", lightFill, dark, "horizontal", {});
         CheckColor(light.tokens.selected, 0xE8E8E8);
-        assert(SameColor(light.tokens.selectedText, Rgba{0.1f, 0.1f, 0.1f, 1.0f}));
+        CheckColor(light.tokens.selectedText, 0x000000);
+        CheckColor(light.tokens.selectedNumber, 0x000000, 0x9D / 255.f);
         // A custom theme over a built-in one takes that theme's mode and fills the unpicked slots from it.
         picked.base = "night";
         const auto overNight = msime::mac::ResolveSkin("custom", picked, dark, "horizontal", {});

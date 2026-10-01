@@ -138,6 +138,29 @@ static BOOL ValidFallbackFonts(id value) {
     return YES;
 }
 static NSString *const PreeditFontKey = @"MSIMEClientCandidatePreeditFontSize";
+/// The window's own size, card opacity and corner radius: candidate_scale_percent, candidate_opacity_percent and candidate_corner_radius. The radius is stored as a number of points, or as an empty string once the user has asked to follow the skin again, the same marker 候选窗英文字体 uses, because NSUserDefaults cannot hold NSNull and an absent entry has to keep meaning "never chosen here".
+static NSString *const CandidateScaleKey = @"MSIMEClientCandidateScalePercent";
+static NSString *const CandidateOpacityKey = @"MSIMEClientCandidateOpacityPercent";
+static NSString *const CandidateCornerRadiusKey = @"MSIMEClientCandidateCornerRadius";
+/// A whole number in [minimum, maximum], as the shared document's integer fields are: a boolean or a fraction is not one.
+static BOOL ValidCandidateStyleInteger(id value, NSInteger minimum, NSInteger maximum) {
+    return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID() &&
+           [value doubleValue] == [value integerValue] && [value integerValue] >= minimum && [value integerValue] <= maximum;
+}
+/// The ranges crates/client-core validates. The sliders offer less of them (75-150% and 0-16pt), but a value another surface wrote inside the shared range is honoured rather than refused.
+static BOOL ValidCandidateScale(id value) { return ValidCandidateStyleInteger(value, 50, 200); }
+static BOOL ValidCandidateOpacity(id value) { return ValidCandidateStyleInteger(value, 50, 100); }
+static BOOL ValidCandidateCornerRadius(id value) { return ValidCandidateStyleInteger(value, 0, 32); }
+/// The 候选字体 presets in the order the popup lists them: a title, then the families the preset writes. The first family is the one this host puts in 候选字体; all of them go to the front of the fallback list, because the document is shared and the Windows and Linux names are what those hosts will find there. 默认 is the shared default pair (crates/client-core) rather than a preset of its own.
+static NSArray<NSArray<NSString *> *> *CandidateFontPresets() {
+    return @[
+        @[ @"默认", @"Noto Sans SC", @"Microsoft YaHei" ],
+        @[ @"宋体", @"Songti SC", @"SimSun", @"Noto Serif CJK SC", @"Noto Serif SC" ],
+        @[ @"黑体", @"PingFang SC", @"Microsoft YaHei", @"Noto Sans CJK SC", @"Noto Sans SC" ],
+        @[ @"楷体", @"Kaiti SC", @"KaiTi", @"STKaiti", @"AR PL UKai CN" ],
+        @[ @"圆体", @"Yuanti SC", @"Noto Sans SC" ],
+    ];
+}
 static NSString *const CandidatePreeditKey = @"MSIMEClientCandidatePreeditStyle";
 static NSString *const PageShortcutKey = @"MSIMEClientCandidatePageShortcut";
 static NSString *const NavigationKey = @"MSIMEClientNavigation";
@@ -305,6 +328,9 @@ static NSDictionary<NSString *, NSString *> *SharedOverrideProperties() {
         ToolbarThemeKey : @"sharedToolbarTheme",
         FallbackFontsKey : @"sharedFallbackFonts",
         PreeditFontKey : @"sharedPreeditFontSize",
+        CandidateScaleKey : @"sharedCandidateScale",
+        CandidateOpacityKey : @"sharedCandidateOpacity",
+        CandidateCornerRadiusKey : @"sharedCandidateCornerRadius",
         CandidatePreeditKey : @"sharedCandidatePreedit",
         NavigationKey : @"sharedNavigation",
         WordCharacterKey : @"sharedWordCharacter",
@@ -409,6 +435,9 @@ static NSDictionary<NSString *, MSIMESettingProbe> *SettingProbes() {
             PageSizeKey : ^id(MSIMEAppearancePreferences *p) { return @(p.pageSize); },
             FontKey : ^id(MSIMEAppearancePreferences *p) { return @(p.fontSize); },
             PreeditFontKey : ^id(MSIMEAppearancePreferences *p) { return @(p.preeditFontSize); },
+            CandidateScaleKey : ^id(MSIMEAppearancePreferences *p) { return @(p.candidateScalePercent); },
+            CandidateOpacityKey : ^id(MSIMEAppearancePreferences *p) { return @(p.candidateOpacityPercent); },
+            CandidateCornerRadiusKey : ^id(MSIMEAppearancePreferences *p) { return p.candidateCornerRadius ?: NSNull.null; },
             CandidatePreeditKey : ^id(MSIMEAppearancePreferences *p) { return @(p.showsCandidatePreedit); },
             CandidateFollowCursorKey : ^id(MSIMEAppearancePreferences *p) { return @(p.candidateFollowCursor); },
             InputModeHUDKey : ^id(MSIMEAppearancePreferences *p) { return @(p.inputModeHUD); },
@@ -933,6 +962,18 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     NSMutableDictionary<NSString *, NSColorWell *> *_candidateColorWells;
     NSMutableDictionary<NSString *, NSButton *> *_candidateColorResets;
     NSNumber *_sharedPreeditFontSize;
+    NSNumber *_sharedCandidateScale;
+    NSNumber *_sharedCandidateOpacity;
+    /// A radius in points, or NSNull for a document that follows the skin.
+    id _sharedCandidateCornerRadius;
+    NSSlider *_candidateScaleSlider;
+    NSTextField *_candidateScaleLabel;
+    NSSlider *_candidateOpacitySlider;
+    NSTextField *_candidateOpacityLabel;
+    NSSlider *_candidateCornerRadiusSlider;
+    NSTextField *_candidateCornerRadiusLabel;
+    NSButton *_candidateCornerRadiusReset;
+    NSPopUpButton *_candidateFontPresetButton;
     NSString *_sharedCandidatePreedit;
     NSNumber *_sharedPageSize;
     NSString *_sharedTheme;
@@ -1214,6 +1255,10 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     if (_sharedToolbarTheme || [_defaults objectForKey:ToolbarThemeKey]) merged[@"toolbar_theme"] = self.toolbarTheme;
     if (_sharedFallbackFonts || [_defaults objectForKey:FallbackFontsKey]) merged[@"candidate_fallback_fonts"] = self.fallbackFonts;
     if (_sharedPreeditFontSize || [_defaults objectForKey:PreeditFontKey]) merged[@"candidate_preedit_font_size"] = @(self.preeditFontSize);
+    // Published every time, as candidate_font_size beside them is: what this host reads is either what the document said or what the user has since set here, and a restored section has neither, which has to reach the document as 100% and as following the skin rather than leave it holding the value just undone. The shared serializer drops a value at its default, so an untouched profile writes the same document it always did. The radius is cleared with an explicit null, because MSIMEMergePreferenceSnapshot keeps the old value for a missing key.
+    merged[@"candidate_scale_percent"] = @(self.candidateScalePercent);
+    merged[@"candidate_opacity_percent"] = @(self.candidateOpacityPercent);
+    merged[@"candidate_corner_radius"] = self.candidateCornerRadius ?: (id)NSNull.null;
     if (_sharedCandidatePreedit || [_defaults objectForKey:CandidatePreeditKey]) merged[@"candidate_preedit_style"] = self.showsCandidatePreedit ? @"pinyin" : @"empty";
     merged[@"chinese_punctuation"] = @(self.chinesePunctuation);
     merged[@"smart_punctuation"] = @(self.smartPunctuation);
@@ -2349,6 +2394,72 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     [_defaults setInteger:value >= 12 && value <= 32 ? value : 16 forKey:PreeditFontKey];
     [self preferencesChanged];
 }
+- (NSInteger)candidateScalePercent {
+    id value = _sharedCandidateScale ?: [_defaults objectForKey:CandidateScaleKey];
+    return ValidCandidateScale(value) ? [value integerValue] : 100;
+}
+- (void)setCandidateScalePercent:(NSInteger)value {
+    if (!ValidCandidateScale(@(value))) { [self refreshControls]; return; }
+    _sharedCandidateScale = nil;
+    [_defaults setInteger:value forKey:CandidateScaleKey];
+    [self preferencesChanged];
+}
+- (NSInteger)candidateOpacityPercent {
+    id value = _sharedCandidateOpacity ?: [_defaults objectForKey:CandidateOpacityKey];
+    return ValidCandidateOpacity(value) ? [value integerValue] : 100;
+}
+- (void)setCandidateOpacityPercent:(NSInteger)value {
+    if (!ValidCandidateOpacity(@(value))) { [self refreshControls]; return; }
+    _sharedCandidateOpacity = nil;
+    [_defaults setInteger:value forKey:CandidateOpacityKey];
+    [self preferencesChanged];
+}
+- (NSNumber *)candidateCornerRadius {
+    id value = _sharedCandidateCornerRadius ?: [_defaults objectForKey:CandidateCornerRadiusKey];
+    return ValidCandidateCornerRadius(value) ? @([value integerValue]) : nil;
+}
+- (void)setCandidateCornerRadius:(NSNumber *)value {
+    if (value && !ValidCandidateCornerRadius(value)) { [self refreshControls]; return; }
+    _sharedCandidateCornerRadius = nil;
+    [_defaults setObject:value ? @(value.integerValue) : @"" forKey:CandidateCornerRadiusKey];
+    [self preferencesChanged];
+}
+- (msime::mac::CandidateWindowStyle)candidateWindowStyle {
+    msime::mac::CandidateWindowStyle style;
+    style.scale = self.candidateScalePercent / 100.0;
+    style.opacity = self.candidateOpacityPercent / 100.0;
+    if (NSNumber *radius = self.candidateCornerRadius) style.cornerRadius = radius.doubleValue;
+    return style;
+}
+- (msime::mac::ResolvedSkin)candidateWindowSkinForDark:(BOOL)dark {
+    return msime::mac::StyledCandidateSkin([self resolvedSkinForDark:dark], [self candidateWindowStyle]);
+}
+- (NSInteger)candidateFontPreset {
+    NSString *family = self.fontFamily;
+    NSArray<NSArray<NSString *> *> *presets = CandidateFontPresets();
+    // 默认 first: Noto Sans SC is also the last resort of 黑体 and 圆体, and on its own it is the shared default.
+    for (NSUInteger index = 0; index < presets.count; ++index) {
+        NSArray<NSString *> *families = [presets[index] subarrayWithRange:NSMakeRange(1, presets[index].count - 1)];
+        if (index == 0 ? [family isEqual:families.firstObject] : [families containsObject:family]) return (NSInteger)index;
+    }
+    return -1;
+}
+- (void)setCandidateFontPreset:(NSInteger)value {
+    NSArray<NSArray<NSString *> *> *presets = CandidateFontPresets();
+    if (value < 0 || value >= (NSInteger)presets.count) { [self refreshControls]; return; }
+    NSArray<NSString *> *families = [presets[(NSUInteger)value] subarrayWithRange:NSMakeRange(1, presets[(NSUInteger)value].count - 1)];
+    NSMutableArray<NSString *> *fallbacks = [families mutableCopy];
+    // 默认 is the shared default pair as it stands; a preset goes in front of what the user already had, so the families added by hand are still tried after it.
+    if (value != 0)
+        for (NSString *family in self.fallbackFonts)
+            if (fallbacks.count < kFallbackFontLimit && ![fallbacks containsObject:family]) [fallbacks addObject:family];
+    // Both fields in one change, so the window redraws and the document is saved once.
+    _sharedFontFamily = nil;
+    _sharedFallbackFonts = nil;
+    [_defaults setObject:families.firstObject forKey:FontFamilyKey];
+    [_defaults setObject:fallbacks forKey:FallbackFontsKey];
+    [self preferencesChanged];
+}
 - (BOOL)showsCandidatePreedit {
     return ![(_sharedCandidatePreedit ?: [_defaults stringForKey:CandidatePreeditKey]) isEqual:@"empty"];
 }
@@ -2498,6 +2609,16 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     id preeditStyle = preferences[@"candidate_preedit_style"];
     if ([preeditFont isKindOfClass:NSNumber.class] && !LocalModeBoolean(preeditFont) && [preeditFont doubleValue] == [preeditFont integerValue] && [preeditFont integerValue] >= 12 && [preeditFont integerValue] <= 32) _sharedPreeditFontSize = preeditFont;
     if ([@[@"pinyin", @"empty"] containsObject:preeditStyle]) _sharedCandidatePreedit = preeditStyle;
+    // The shared serializer leaves out a style value at its default, so an omitted key always reads as 100% or as following the skin, on the first document too: these keys are newer than the shared document, so there is no native-only value to keep the way 候选窗英文字体 above does, and a stored value that outlived a reset elsewhere would otherwise draw and then be published back. A value outside the shared ranges is ignored rather than clamped.
+    id scale = preferences[@"candidate_scale_percent"];
+    if (ValidCandidateScale(scale)) _sharedCandidateScale = scale;
+    else if (!scale) _sharedCandidateScale = @100;
+    id opacity = preferences[@"candidate_opacity_percent"];
+    if (ValidCandidateOpacity(opacity)) _sharedCandidateOpacity = opacity;
+    else if (!opacity) _sharedCandidateOpacity = @100;
+    id cornerRadius = preferences[@"candidate_corner_radius"];
+    if (ValidCandidateCornerRadius(cornerRadius)) _sharedCandidateCornerRadius = cornerRadius;
+    else if (!cornerRadius || cornerRadius == NSNull.null) _sharedCandidateCornerRadius = NSNull.null;
     id page = preferences[@"candidate_page_size"];
     // Match the shared integer ranges; booleans and fractions are not sizes.
     if ([font isKindOfClass:NSNumber.class] && !LocalModeBoolean(font) && [font doubleValue] == [font integerValue] && [font integerValue] >= 12 && [font integerValue] <= 32) _sharedFontSize = font;
@@ -2698,6 +2819,20 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         [NSString stringWithFormat:@"已添加 %lu 项，最多 %lu 项。", (unsigned long)self.fallbackFonts.count,
                                    (unsigned long)kFallbackFontLimit];
     [_preeditFontButton selectItemAtIndex:self.preeditFontSize - 12];
+    _candidateScaleSlider.integerValue = self.candidateScalePercent;
+    _candidateScaleLabel.stringValue = [NSString stringWithFormat:@"%ld%%", (long)self.candidateScalePercent];
+    _candidateOpacitySlider.integerValue = self.candidateOpacityPercent;
+    _candidateOpacityLabel.stringValue = [NSString stringWithFormat:@"%ld%%", (long)self.candidateOpacityPercent];
+    // Following the skin, the slider and the figure show the radius the skin draws, and only a radius of the user's own can be put back.
+    NSNumber *cornerRadius = self.candidateCornerRadius;
+    if (_candidateCornerRadiusSlider != nil && cornerRadius == nil) {
+        NSAppearanceName match = [NSApp.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]];
+        cornerRadius = @(lround([self resolvedSkinForDark:[match isEqual:NSAppearanceNameDarkAqua]].tokens.radius));
+    }
+    _candidateCornerRadiusSlider.integerValue = cornerRadius.integerValue;
+    _candidateCornerRadiusLabel.stringValue = [NSString stringWithFormat:@"%ld pt", (long)cornerRadius.integerValue];
+    _candidateCornerRadiusReset.enabled = self.candidateCornerRadius != nil;
+    [_candidateFontPresetButton selectItemAtIndex:self.candidateFontPreset];
     [_candidatePreeditButton selectItemAtIndex:self.showsCandidatePreedit ? 0 : 1];
     // -1 deselects, which is what the menu has to show for a state none of its three items describes: an NSPopUpButton showing 「Page Up / Page Down」 over an unticked Page Up / Page Down box is the menu naming a binding the user does not have. The line under it says where the setting actually is, so the empty menu is not the whole answer.
     const NSInteger pagingPreset = self.pageShortcut;
@@ -3008,6 +3143,48 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     _preeditFontButton.accessibilityLabel = @"候选窗拼音字号";
     _preeditFontButton.target = self;
     _preeditFontButton.action = @selector(preeditFontChanged:);
+    // The three style settings are a size, a fade and a curve the user judges by looking at the preview above, so they are sliders that stop on the steps the shared settings page offers, each with the value it stands at printed beside it.
+    NSSlider *(^styleSlider)(double, double, double, NSString *) = ^NSSlider *(double minimum, double maximum, double step, NSString *label) {
+        NSSlider *slider = [NSSlider sliderWithValue:minimum minValue:minimum maxValue:maximum target:self action:@selector(candidateStyleSliderChanged:)];
+        slider.numberOfTickMarks = (NSInteger)lround((maximum - minimum) / step) + 1;
+        slider.allowsTickMarkValuesOnly = YES;
+        slider.continuous = YES;
+        slider.accessibilityLabel = label;
+        [slider.widthAnchor constraintEqualToConstant:180.0].active = YES;
+        return slider;
+    };
+    NSTextField *(^styleValueLabel)(void) = ^NSTextField * {
+        NSTextField *label = [NSTextField labelWithString:@""];
+        label.font = [NSFont monospacedDigitSystemFontOfSize:msime::mac::layout::kBodyFontSize weight:NSFontWeightRegular];
+        label.alignment = NSTextAlignmentRight;
+        [label.widthAnchor constraintEqualToConstant:52.0].active = YES;
+        return label;
+    };
+    _candidateScaleSlider = styleSlider(75.0, 150.0, 5.0, @"整体大小");
+    _candidateScaleLabel = styleValueLabel();
+    NSStackView *scaleControls = [NSStackView stackViewWithViews:@[ _candidateScaleSlider, _candidateScaleLabel ]];
+    scaleControls.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    _candidateOpacitySlider = styleSlider(50.0, 100.0, 5.0, @"不透明度");
+    _candidateOpacityLabel = styleValueLabel();
+    NSStackView *opacityControls = [NSStackView stackViewWithViews:@[ _candidateOpacitySlider, _candidateOpacityLabel ]];
+    opacityControls.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    _candidateCornerRadiusSlider = styleSlider(0.0, 16.0, 1.0, @"圆角大小");
+    _candidateCornerRadiusLabel = styleValueLabel();
+    _candidateCornerRadiusReset = [NSButton buttonWithTitle:@"跟随皮肤" target:self action:@selector(resetCandidateCornerRadius:)];
+    _candidateCornerRadiusReset.accessibilityLabel = @"圆角大小跟随皮肤";
+    NSStackView *cornerRadiusControls = [NSStackView stackViewWithViews:@[ _candidateCornerRadiusSlider, _candidateCornerRadiusLabel, _candidateCornerRadiusReset ]];
+    cornerRadiusControls.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    _candidateFontPresetButton = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    NSArray<NSArray<NSString *> *> *fontPresets = CandidateFontPresets();
+    for (NSUInteger index = 0; index < fontPresets.count; ++index) {
+        // 默认 is whatever the shared default resolves to; a named preset whose family this Mac does not have says so, because choosing it then draws the fallback list rather than the face its name promises.
+        NSArray<NSString *> *preset = fontPresets[index];
+        const BOOL missing = index > 0 && MSIMEInstalledFontFamilyDescriptor(preset[1]) == nil;
+        [_candidateFontPresetButton addItemWithTitle:missing ? [preset[0] stringByAppendingString:@"（未安装）"] : preset[0]];
+    }
+    _candidateFontPresetButton.accessibilityLabel = @"字体预设";
+    _candidateFontPresetButton.target = self;
+    _candidateFontPresetButton.action = @selector(candidateFontPresetChanged:);
     _candidatePreeditButton = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
     [_candidatePreeditButton addItemsWithTitles:@[@"显示拼音", @"隐藏"]];
     _candidatePreeditButton.accessibilityLabel = @"候选窗预编辑";
@@ -3419,6 +3596,18 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         [self settingRow:@"候选排列" control:_layoutButton aka:@[@"横排", @"竖排"]],
         [self settingRow:@"每页候选" control:_pageSizeButton aka:@[@"候选个数"]],
         [self settingRow:@"候选字号" control:_fontButton aka:@[@"字体大小"]],
+        [self settingRow:@"整体大小"
+                  detail:@"候选文字与窗口的边距、行高和圆角一同缩放。"
+                 control:scaleControls
+                     aka:@[@"缩放", @"候选窗大小"]],
+        [self settingRow:@"不透明度"
+                  detail:@"只淡化候选框底色、边框与皮肤背景图，文字和焦点高亮保持不透明。"
+                 control:opacityControls
+                     aka:@[@"透明度"]],
+        [self settingRow:@"圆角大小"
+                  detail:@"跟随皮肤时显示皮肤自带的圆角；拖动后以此值覆盖皮肤的圆角。"
+                 control:cornerRadiusControls
+                     aka:@[@"圆角"]],
         [self settingRow:@"候选窗拼音字号" control:_preeditFontButton],
         [self settingRow:@"候选窗预编辑" control:_candidatePreeditButton],
         [self settingRow:@"候选窗口跟随光标" control:_candidateFollowCursorToggle],
@@ -3435,6 +3624,10 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     // placed against the trailing edge rather than pinned to a width, so the card keeps one control
     // edge without the second fixed width these rows used to ask for.
     NSBox *fontCard = MSIMECardWithViews(@[
+        [self settingRow:@"字体预设"
+                  detail:@"写入候选字体，并把这一类字体在各平台的名称排到补充字体最前；本机未安装时按补充字体顺序回退。"
+                 control:_candidateFontPresetButton
+                     aka:@[@"宋体", @"黑体", @"楷体", @"圆体"]],
         [self settingRow:@"候选字体"
                   detail:@"可选择本机字体或输入字体家族名称；未安装时按补充字体顺序回退，最后使用系统字体，并保留原设置。"
                  control:_fontFamilyControl],
@@ -3468,7 +3661,8 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         // The preview writes nothing: 预览深色, the showcase checkbox and the sample text are ways of looking at the settings below, not settings, so this section has nothing to restore and nothing here outlives the window.
         [self sectionHeader:@"效果预览" keys:@[]], _preview, previewControls,
         [self sectionHeader:@"候选窗口"
-                       keys:@[LayoutKey, PageSizeKey, FontKey, PreeditFontKey, CandidatePreeditKey,
+                       keys:@[LayoutKey, PageSizeKey, FontKey, CandidateScaleKey, CandidateOpacityKey,
+                              CandidateCornerRadiusKey, PreeditFontKey, CandidatePreeditKey,
                               CandidateFollowCursorKey, InputModeHUDKey]],
         candidateWindowCard,
         [self sectionHeader:@"候选字体" keys:@[FontFamilyKey, CandidateEnglishFontKey, FallbackFontsKey]],
@@ -5021,6 +5215,20 @@ static NSString *CandidateColorHex(NSColor *color) {
 - (void)moveFallbackFontUp:(id)sender { (void)sender; [self moveFallbackFontBy:-1]; }
 - (void)moveFallbackFontDown:(id)sender { (void)sender; [self moveFallbackFontBy:1]; }
 - (void)preeditFontChanged:(NSPopUpButton *)sender { self.preeditFontSize = sender.indexOfSelectedItem + 12; }
+- (void)candidateStyleSliderChanged:(NSSlider *)sender {
+    const NSInteger value = sender.integerValue;
+    NSString *unit = sender == _candidateCornerRadiusSlider ? @" pt" : @"%";
+    NSTextField *label = sender == _candidateScaleSlider ? _candidateScaleLabel
+                       : sender == _candidateOpacitySlider ? _candidateOpacityLabel : _candidateCornerRadiusLabel;
+    label.stringValue = [NSString stringWithFormat:@"%ld%@", (long)value, unit];
+    // While the knob is dragged only the figure follows it. The value is written when the knob is let go, or at once from the keyboard, so one drag redraws the candidate window and saves the shared document once rather than at every step it passes.
+    if (NSApp.currentEvent.type == NSEventTypeLeftMouseDragged) return;
+    if (sender == _candidateScaleSlider) { if (value != self.candidateScalePercent) self.candidateScalePercent = value; }
+    else if (sender == _candidateOpacitySlider) { if (value != self.candidateOpacityPercent) self.candidateOpacityPercent = value; }
+    else if (sender == _candidateCornerRadiusSlider && ![self.candidateCornerRadius isEqual:@(value)]) self.candidateCornerRadius = @(value);
+}
+- (void)resetCandidateCornerRadius:(id)sender { (void)sender; self.candidateCornerRadius = nil; }
+- (void)candidateFontPresetChanged:(NSPopUpButton *)sender { self.candidateFontPreset = sender.indexOfSelectedItem; }
 - (void)candidatePreeditChanged:(NSPopUpButton *)sender { self.showsCandidatePreedit = sender.indexOfSelectedItem == 0; }
 
 #pragma mark - Fallback font order and application exception tables

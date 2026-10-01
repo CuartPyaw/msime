@@ -50,6 +50,14 @@ inline float CandidateRowRadius(const SkinTokens &tokens, bool highlighted, bool
     return radius;
 }
 
+// The user's own 候选窗 style from the shared preferences: candidate_scale_percent and candidate_opacity_percent as factors, and candidate_corner_radius in points, none to keep the theme's or the package's card radius. The defaults leave a skin exactly as it was resolved.
+struct CandidateWindowStyle
+{
+    double scale = 1.0;
+    double opacity = 1.0;
+    std::optional<double> cornerRadius;
+};
+
 struct SkinColors
 {
     std::string accent;
@@ -310,6 +318,10 @@ bool IsSafeSkinId(std::string_view id);
 SkinTokens NativeCandidateTokens(bool dark);
 // The selected row's foregrounds for a palette that left them to the platform, derived from the fill actually drawn (THEME_CONTRACT §5 step 6): white or near-black on an opaque fill, the number at 0.82 like the native one, and the row's own text and number colours on a translucent fill, where they are what stays readable. On the native solid accent this gives the native white.
 void DeriveSelectedForegrounds(SkinTokens &tokens, bool text, bool number);
+// A resolved candidate skin with the user's style laid over it, for the candidate window and its preview only: the floating toolbar and the colour wells keep the skin as resolved.
+//
+// The radius goes user value, then the package's corner_radius_dip (already in tokens.radius), then the native card radius, and a row is never rounder than the card it sits in. The opacity reaches the card surface, its border and the package background image and nothing else, so text, numbers and the selected fill stay as legible as the theme made them. The scale multiplies every length the skin carries, the radii, the inset and the package's decoration and minimum width, so the card keeps its proportions at any size; the hairline border keeps its width.
+ResolvedSkin StyledCandidateSkin(ResolvedSkin skin, const CandidateWindowStyle &style);
 // The seven global themes in picker order, read once from msime_client_theme_catalog.
 const std::vector<ThemeCatalogEntry> &ThemeCatalog();
 bool IsGlobalThemeId(std::string_view id);

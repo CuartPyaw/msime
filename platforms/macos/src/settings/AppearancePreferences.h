@@ -52,6 +52,15 @@ FOUNDATION_EXPORT NSString *const MSIMEAppearanceInputModeOnlyKey;
 - (NSFont *)candidateFontOfSize:(CGFloat)size englishFirst:(BOOL)englishFirst;
 @property(nonatomic) NSUInteger preeditFontSize;
 @property(nonatomic) BOOL showsCandidatePreedit;
+/// The candidate window's own style: `candidate_scale_percent` (50-200, 100 by default), which multiplies the candidate fonts and every length of the window; `candidate_opacity_percent` (50-100, 100 by default), which fades only the card surface, its border and a package background; and `candidate_corner_radius` (0-32 points), nil to keep the theme's or the package's card radius. A value outside its range is refused and leaves the setting as it was.
+@property(nonatomic) NSInteger candidateScalePercent;
+@property(nonatomic) NSInteger candidateOpacityPercent;
+@property(nonatomic, copy) NSNumber *candidateCornerRadius;
+- (msime::mac::CandidateWindowStyle)candidateWindowStyle;
+/// -resolvedSkinForDark: with -candidateWindowStyle laid over it, which is what the candidate window draws. The floating toolbar and the colour wells read the skin as resolved.
+- (msime::mac::ResolvedSkin)candidateWindowSkinForDark:(BOOL)dark;
+/// The 候选字体 preset: 0 默认, 1 宋体, 2 黑体, 3 楷体, 4 圆体, read back from `fontFamily`, or -1 for a family none of them writes. Setting one writes the preset's family for this host into `fontFamily` and puts all of its families, the other platforms' names included, at the front of `fallbackFonts`; 默认 restores the shared default pair.
+@property(nonatomic) NSInteger candidateFontPreset;
 @property(nonatomic, copy) NSString *candidateTextColor;
 /// The six other candidate pickers of `custom_theme.candidate_colors`, as the same 「#rrggbb」 strings, or nil while the theme's own colour is in use. Setting one selects the custom theme (a theme that was on screen becomes its base); setting nil clears only that slot. The candidate window draws with -resolvedSkinForDark:, which already has them applied.
 @property(nonatomic, copy) NSString *candidateNumberColor;

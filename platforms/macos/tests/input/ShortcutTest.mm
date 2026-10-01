@@ -7587,6 +7587,41 @@ int main(int argc, char **argv) {
         appearance.fontSize = 20;
         [controller appearanceChanged:nil];
         assert(layoutPanel.frame.size.height > normalHeight);
+        // 整体大小 multiplies the candidate fonts and the window's lengths together; 不透明度 fades the card and nothing on it, through the fill rather than the panel's alphaValue; 圆角大小 replaces the card radius at the window's scale and pulls the rows in with it.
+        {
+            MSIMECandidateButton *(^candidateRow)(BOOL) = ^MSIMECandidateButton *(BOOL highlighted) {
+                for (NSView *view in layoutPanel.contentView.subviews)
+                    if ([view isKindOfClass:MSIMECandidateButton.class] && view.tag >= 0 &&
+                        (!highlighted || ((MSIMECandidateButton *)view).candidateHighlighted)) return (id)view;
+                return nil;
+            };
+            const NSSize unscaled = layoutPanel.frame.size;
+            assert(candidateRow(NO) && candidateRow(NO).font.pointSize == 20.0);
+            appearance.candidateScalePercent = 150;
+            [controller appearanceChanged:nil];
+            MSIMECandidateButton *scaledRow = candidateRow(NO);
+            assert(scaledRow && std::abs(scaledRow.font.pointSize - 30.0) < 0.01 && scaledRow.chromeScale == 1.5);
+            assert(std::abs(scaledRow.numberFont.pointSize - 30.0 * MSIMECandidateNumberScale) < 0.01);
+            assert(layoutPanel.frame.size.height > unscaled.height * 1.3 && layoutPanel.frame.size.width >= unscaled.width);
+            appearance.candidateOpacityPercent = 50;
+            appearance.candidateCornerRadius = @4;
+            [controller appearanceChanged:nil];
+            MSIMECandidateChromeView *styledChrome = (id)layoutPanel.contentView;
+            NSString *match = [styledChrome.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
+            const auto plain = [appearance resolvedSkinForDark:[match isEqual:NSAppearanceNameDarkAqua]].tokens;
+            assert(styledChrome.cornerRadius == 6.0 && layoutPanel.alphaValue == 1.0);
+            assert(std::abs(styledChrome.fillColor.alphaComponent - plain.surface.a * 0.5) < 0.002);
+            assert(std::abs(styledChrome.strokeColor.alphaComponent - plain.border.a * 0.5) < 0.002);
+            scaledRow = candidateRow(NO);
+            assert([scaledRow.fillColor isEqual:SkinColor(plain.selected)] && scaledRow.cornerRadius <= styledChrome.cornerRadius);
+            if (MSIMECandidateButton *highlighted = candidateRow(YES)) assert([highlighted.titleColor isEqual:SkinColor(plain.selectedText)]);
+            appearance.candidateScalePercent = 100;
+            appearance.candidateOpacityPercent = 100;
+            appearance.candidateCornerRadius = nil;
+            [controller appearanceChanged:nil];
+            assert(NSEqualSizes(layoutPanel.frame.size, unscaled));
+            assert([((MSIMECandidateChromeView *)layoutPanel.contentView).fillColor isEqual:SkinColor(plain.surface)]);
+        }
         // Palette and native drawing coverage: every global theme, two layouts and both appearances.
         NSDictionary *preservedView = [[controller valueForKey:@"view"] copy];
         session.lastCommand = UINT32_MAX;

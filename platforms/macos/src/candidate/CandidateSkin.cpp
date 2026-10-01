@@ -124,6 +124,31 @@ void DeriveSelectedForegrounds(SkinTokens &tokens, bool text, bool number)
     }
 }
 
+ResolvedSkin StyledCandidateSkin(ResolvedSkin skin, const CandidateWindowStyle &style)
+{
+    SkinTokens &tokens = skin.tokens;
+    // Only a radius the user chose rounds the rows down with the card; a skin package's own radius keeps the host row radius it has always drawn.
+    if (style.cornerRadius)
+    {
+        tokens.radius = static_cast<float>(std::clamp(*style.cornerRadius, 0.0, 32.0));
+        tokens.candidateRadius = std::min(tokens.candidateRadius, tokens.radius);
+        tokens.selectedRadius = std::min(tokens.selectedRadius, tokens.radius);
+    }
+    const float opacity = static_cast<float>(std::clamp(style.opacity, 0.0, 1.0));
+    tokens.surface.a *= opacity;
+    tokens.border.a *= opacity;
+    skin.backgroundOpacity *= opacity;
+    const double scale = style.scale > 0.0 ? style.scale : 1.0;
+    tokens.radius = static_cast<float>(tokens.radius * scale);
+    tokens.candidateRadius = static_cast<float>(tokens.candidateRadius * scale);
+    tokens.selectedRadius = static_cast<float>(tokens.selectedRadius * scale);
+    tokens.pad = static_cast<float>(tokens.pad * scale);
+    skin.decorationTopDip *= scale;
+    skin.decorationWidthDip *= scale;
+    skin.minWidthDip *= scale;
+    return skin;
+}
+
 std::optional<Rgba> ParseCssColor(std::string_view text)
 {
     std::string value = Trim(std::string(text));

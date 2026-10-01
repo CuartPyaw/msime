@@ -489,16 +489,22 @@ static NSColor *MSIMEThemedSkinColor(NSString *name, msime::mac::Rgba lightColor
     }];
 }
 
+// candidate_scale_percent as a factor: the candidate window is laid out at 100% and every font and length of it is multiplied by this, so 150% is the same window half as large again rather than a larger font in the old frame.
+static CGFloat MSIMECandidateScale(MSIMEAppearancePreferences *appearance) {
+    return appearance.candidateScalePercent / 100.0;
+}
+
 // The reading in the candidate window's top row is set semibold (dc.html L1325) at the size the user picked for it. A resolved family is named by its face (Menlo-Regular), which pins the weight, so the face is swapped for the family and the fallback cascade is kept; a family whose nearest heavier face is bold draws bold, and one with no heavier face keeps its regular one.
 static NSFont *MSIMECandidatePreeditFont(MSIMEAppearancePreferences *appearance) {
-    NSFont *regular = [appearance candidateFontOfSize:appearance.preeditFontSize englishFirst:YES];
+    const CGFloat size = appearance.preeditFontSize * MSIMECandidateScale(appearance);
+    NSFont *regular = [appearance candidateFontOfSize:size englishFirst:YES];
     NSMutableDictionary *attributes = [regular.fontDescriptor.fontAttributes mutableCopy];
     if (attributes[NSFontNameAttribute] && regular.familyName) {
         [attributes removeObjectForKey:NSFontNameAttribute];
         attributes[NSFontFamilyAttribute] = regular.familyName;
     }
     attributes[NSFontTraitsAttribute] = @{NSFontWeightTrait: @(NSFontWeightSemibold)};
-    return [NSFont fontWithDescriptor:[NSFontDescriptor fontDescriptorWithFontAttributes:attributes] size:appearance.preeditFontSize] ?: regular;
+    return [NSFont fontWithDescriptor:[NSFontDescriptor fontDescriptorWithFontAttributes:attributes] size:size] ?: regular;
 }
 
 static BOOL MSIMEUnsignedCandidateIdentityValue(id value) {
@@ -4710,7 +4716,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     if (_glossEnabled && !_glossEnabled.boolValue && !_appearance.candidateEnglishGloss) return 0;
     const NSUInteger lines = MIN(MAX(_glossTargetLanguages.count, (NSUInteger)1), (NSUInteger)2);
     NSString *placeholder = lines > 1 ? @"X\nX" : @"X";
-    return MSIMETranslationTextSize(placeholder, glossFont).height + 4;
+    return MSIMETranslationTextSize(placeholder, glossFont).height + MSIMECandidateGlossPadding * MSIMECandidateScale(_appearance);
 }
 
 // Background music plays while one controller of this process is the active input method. IMK does not promise that the previous client's deactivateServer: comes before the next one's activateServer:, so only the controller that last let music play may stop it.
@@ -5695,12 +5701,14 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     MSIMECandidatePageGeometry geometry;
     const BOOL vertical = _appearance.vertical;
     const BOOL traditional = _appearance.traditionalOutput && MSIMEScriptConversionApplies(_view);
+    // The fonts arrive at the window's scale already; the row's own paddings follow them.
+    const CGFloat scale = MSIMECandidateScale(_appearance);
     NSFont *numberFont = MSIMECandidateNumberFont(font);
     NSMutableArray<NSString *> *texts = [NSMutableArray arrayWithCapacity:candidates.count];
     NSMutableArray<NSString *> *annotations = [NSMutableArray arrayWithCapacity:candidates.count];
     NSMutableArray<NSString *> *displays = [NSMutableArray arrayWithCapacity:candidates.count];
     NSMutableArray<NSString *> *translations = [NSMutableArray arrayWithCapacity:candidates.count];
-    CGFloat candidateRow = MSIMECandidateTextHeight(@"", font) + MSIMECandidateRowPadding;
+    CGFloat candidateRow = MSIMECandidateTextHeight(@"", font) + MSIMECandidateRowPadding * scale;
     CGFloat numberWidth = 0;
     NSUInteger index = 0;
     for (NSDictionary *candidate in candidates) {
@@ -5714,19 +5722,19 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
         NSString *number = [NSString stringWithFormat:@"%lu", (unsigned long)++index];
         numberWidth = MAX(numberWidth, [number sizeWithAttributes:@{NSFontAttributeName: numberFont}].width);
         // Fallback glyphs can stand taller than the primary font; a one-line row is as tall as its tallest.
-        candidateRow = MAX(candidateRow, MSIMECandidateTextHeight([text stringByAppendingString:annotation], font) + MSIMECandidateRowPadding);
+        candidateRow = MAX(candidateRow, MSIMECandidateTextHeight([text stringByAppendingString:annotation], font) + MSIMECandidateRowPadding * scale);
     }
     geometry.texts = texts;
     geometry.annotations = annotations;
     geometry.displays = displays;
-    geometry.contentLeft = MSIMECandidateTextLeft(showSelectedBar) + ceil(numberWidth) + MSIMECandidateNumberGap;
+    geometry.contentLeft = MSIMECandidateTextLeft(showSelectedBar, scale) + ceil(numberWidth) + MSIMECandidateNumberGap * scale;
     const msime::mac::CandidateLayoutMetrics metrics =
-        MSIMECandidateLayoutMetrics(font, glossFont, candidateRow, geometry.contentLeft + MSIMECandidateTextRight);
+        MSIMECandidateLayoutMetrics(font, glossFont, candidateRow, geometry.contentLeft + MSIMECandidateTextRight * scale, scale);
     std::vector<msime::mac::CandidateItemWidths> items;
     items.reserve(candidates.count);
     CGFloat natural = 0;
     for (NSUInteger i = 0; i < texts.count; ++i) {
-        items.push_back(MSIMECandidateItemWidths(texts[i], annotations[i], translations[i], font, glossFont));
+        items.push_back(MSIMECandidateItemWidths(texts[i], annotations[i], translations[i], font, glossFont, scale));
         const CGFloat itemWidth = ceil(msime::mac::CandidateItemNaturalWidth(items.back(), metrics, !vertical));
         natural = vertical ? MAX(natural, itemWidth) : natural + itemWidth;
     }
@@ -5741,13 +5749,13 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
             widthCap = MAX(widthCap, MIN(screenCap, natural + 2 * inset));
     }
     width = MIN(width, widthCap);
-    if (paging) width = MAX(width, 76);
+    if (paging) width = MAX(width, 76 * scale);
     // At least 7em of the candidate font, raised by the skin's floor; the 7em part stays within the half-screen cap (CandidateItemLayout.h).
     width = MAX(width, msime::mac::CandidateCardMinimumWidth(font.pointSize, minimumWidth, widthCap));
     geometry.width = width;
     geometry.lineWidth = MAX(1, width - 2 * inset);
-    const msime::mac::CandidatePageMeasure measure = [texts, annotations, translations, font, glossFont](std::size_t row, msime::mac::CandidateRun run, double runWidth) {
-        return MSIMECandidateRunMeasure(texts[row], annotations[row], translations[row], font, glossFont)(run, runWidth);
+    const msime::mac::CandidatePageMeasure measure = [texts, annotations, translations, font, glossFont, scale](std::size_t row, msime::mac::CandidateRun run, double runWidth) {
+        return MSIMECandidateRunMeasure(texts[row], annotations[row], translations[row], font, glossFont, scale)(run, runWidth);
     };
     // Horizontal rows keep the height a gloss will need even before it arrives, so the card does not grow under the user seconds after the composition started.
     const CGFloat minimumHeight = vertical ? 0 : candidateRow + [self reservedGlossHeightForFont:glossFont];
@@ -5790,8 +5798,9 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     [_keymapPanel setAccentColor:MSIMEThemedSkinColor(@"MSIMEKeymapAccent", [_appearance resolvedSkinForDark:NO].tokens.accent,
                                                       [_appearance resolvedSkinForDark:YES].tokens.accent)];
     [_keymapPanel updateHighlightedKey:MSIMEShuangpinKeymapHighlightedKey(_view)];
-    CGFloat clearance = _appearance.fontSize + 42.0;
-    if (_appearance.vertical) clearance = (_appearance.fontSize + 10.0) * MIN([_view[@"candidates"] count], _appearance.pageSize) + 24.0;
+    const CGFloat scale = MSIMECandidateScale(_appearance);
+    CGFloat clearance = (_appearance.fontSize + 42.0) * scale;
+    if (_appearance.vertical) clearance = ((_appearance.fontSize + 10.0) * MIN([_view[@"candidates"] count], _appearance.pageSize) + 24.0) * scale;
     NSArray *candidates = MSIMEReorderedPinnedCandidates(_view[@"candidates"], MSIMECandidatePinCode(_view));
     if ([candidates isKindOfClass:NSArray.class] && candidates.count) {
         // The same rows the candidate panel lays out, so a card that wraps a long candidate onto several lines is kept clear of in full.
@@ -5799,21 +5808,21 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
         for (NSScreen *candidateScreen in NSScreen.screens)
             if (NSPointInRect(NSMakePoint(NSMinX(cursor), NSMidY(cursor)), candidateScreen.frame)) { screen = candidateScreen; break; }
         screen = screen ?: NSScreen.mainScreen;
-        NSFont *font = [_appearance candidateFontOfSize:_appearance.fontSize englishFirst:YES];
-        NSFont *glossFont = [_appearance candidateFontOfSize:MSIMECandidateTranslationPointSize englishFirst:YES];
+        NSFont *font = [_appearance candidateFontOfSize:_appearance.fontSize * scale englishFirst:YES];
+        NSFont *glossFont = [_appearance candidateFontOfSize:MSIMECandidateTranslationPointSize * scale englishFirst:YES];
         const MSIMECandidatePageGeometry geometry =
-            [self candidatePageGeometry:candidates font:font glossFont:glossFont showSelectedBar:_skinShowsSelectedBar inset:12
+            [self candidatePageGeometry:candidates font:font glossFont:glossFont showSelectedBar:_skinShowsSelectedBar inset:12 * scale
                                  paging:[_view[@"page_count"] unsignedIntegerValue] > 1
                                 visible:screen ? screen.visibleFrame : NSMakeRect(0, 0, 1440, 900) preeditWidth:0 minimumWidth:0];
-        clearance = MAX(clearance, geometry.rowsHeight + 24);
+        clearance = MAX(clearance, geometry.rowsHeight + 24 * scale);
     }
     id preedit = [_view[@"preedit"] isKindOfClass:NSString.class] ? _view[@"preedit"] : editing;
     if ([_view[@"candidates"] count]) {
         // The card's top row: the brand mark, the reading when it is shown, and the page indicator whenever there is more than one page.
-        CGFloat header = [_view[@"page_count"] unsignedIntegerValue] > 1 || MSIMECandidateLogoImage() ? MSIMECandidateHeaderHeight : 0;
+        CGFloat header = [_view[@"page_count"] unsignedIntegerValue] > 1 || MSIMECandidateLogoImage() ? MSIMECandidateHeaderHeight * scale : 0;
         if (_appearance.showsCandidatePreedit && [preedit length]) {
             NSFont *preeditFont = MSIMECandidatePreeditFont(_appearance);
-            header = MAX(header, MAX(22.0, MSIMECandidateTextHeight(preedit, preeditFont) + 6.0));
+            header = MAX(header, MAX(22.0 * scale, MSIMECandidateTextHeight(preedit, preeditFont) + 6.0 * scale));
         }
         clearance += header;
     }
@@ -5870,31 +5879,37 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
     const BOOL vertical = _appearance.vertical;
     NSAppearance *currentAppearance = candidateAppearance ?: _panel.effectiveAppearance ?: NSApp.effectiveAppearance;
     NSString *currentTheme = [currentAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
-    const auto skin = [_appearance resolvedSkinForDark:[currentTheme isEqual:NSAppearanceNameDarkAqua]];
+    // The styled skin carries the window's scale in its pad, radii, decoration and minimum width; the fonts and the fixed lengths below take it from `scale`.
+    const auto skin = [_appearance candidateWindowSkinForDark:[currentTheme isEqual:NSAppearanceNameDarkAqua]];
     const auto geometry = skin.tokens;
     _skinShowsSelectedBar = geometry.showSelectedBar;
-    const CGFloat inset = MAX(2.0, geometry.pad);
-    NSFont *font = [_appearance candidateFontOfSize:_appearance.fontSize englishFirst:YES];
+    const CGFloat scale = MSIMECandidateScale(_appearance);
+    const CGFloat inset = MAX(2.0 * scale, geometry.pad);
+    NSFont *font = [_appearance candidateFontOfSize:_appearance.fontSize * scale englishFirst:YES];
     id preeditValue = _view[@"preedit"];
     if (![preeditValue isKindOfClass:NSString.class]) preeditValue = _view[@"editing_text"];
     NSString *preedit = _appearance.showsCandidatePreedit && [preeditValue isKindOfClass:NSString.class] ? preeditValue : @"";
     NSFont *preeditFont = MSIMECandidatePreeditFont(_appearance);
-    CGFloat preeditHeight = preedit.length ? MAX(22.0, MSIMECandidateTextHeight(preedit, preeditFont) + 6.0) : 0;
+    CGFloat preeditHeight = preedit.length ? MAX(22.0 * scale, MSIMECandidateTextHeight(preedit, preeditFont) + 6.0 * scale) : 0;
     const NSUInteger page = [_view[@"page"] unsignedIntegerValue];
     const NSUInteger pageCount = [_view[@"page_count"] unsignedIntegerValue];
     const BOOL paging = pageCount > 1;
     // The top row leads with the brand mark, as the floating toolbar and the mode HUD do, then the reading; 「1 / 3」 with ‹ › sit on the right.
     NSImage *logo = MSIMECandidateLogoImage();
-    const CGFloat logoWidth = logo ? MSIMECandidateLogoSide + MSIMECandidateLogoGap : 0;
-    NSFont *pageIndicatorFont = [NSFont monospacedDigitSystemFontOfSize:MSIMECandidatePageIndicatorPointSize weight:NSFontWeightRegular];
+    const CGFloat logoSide = MSIMECandidateLogoSide * scale;
+    const CGFloat logoWidth = logo ? logoSide + MSIMECandidateLogoGap * scale : 0;
+    const CGFloat headerRow = MSIMECandidateHeaderHeight * scale;
+    const CGFloat arrowWidth = MSIMECandidatePageArrowWidth * scale;
+    const CGFloat indicatorGap = MSIMECandidatePageIndicatorGap * scale;
+    NSFont *pageIndicatorFont = [NSFont monospacedDigitSystemFontOfSize:MSIMECandidatePageIndicatorPointSize * scale weight:NSFontWeightRegular];
     NSString *pageIndicator = paging ? [NSString stringWithFormat:@"%lu / %lu", (unsigned long)(page + 1), (unsigned long)pageCount] : @"";
     const CGFloat pageIndicatorWidth = paging ? ceil([pageIndicator sizeWithAttributes:@{NSFontAttributeName: pageIndicatorFont}].width) : 0;
-    const CGFloat pageControlsWidth = paging ? pageIndicatorWidth + MSIMECandidatePageIndicatorGap + 2 * MSIMECandidatePageArrowWidth : 0;
-    const CGFloat headerHeight = MAX(preeditHeight, paging || logo ? MSIMECandidateHeaderHeight : 0);
+    const CGFloat pageControlsWidth = paging ? pageIndicatorWidth + indicatorGap + 2 * arrowWidth : 0;
+    const CGFloat headerHeight = MAX(preeditHeight, paging || logo ? headerRow : 0);
     NSFont *numberFont = MSIMECandidateNumberFont(font);
-    NSFont *glossFont = [_appearance candidateFontOfSize:MSIMECandidateTranslationPointSize englishFirst:YES];
-    const CGFloat preeditWidth = preedit.length ? ceil([preedit sizeWithAttributes:@{NSFontAttributeName:preeditFont}].width) + 4 + MSIMEPreeditCaretGap : 0;
-    const CGFloat headerWidth = preedit.length || paging || logo ? 2 * inset + logoWidth + preeditWidth + (preedit.length && paging ? MSIMECandidatePageIndicatorGap : 0) + pageControlsWidth : 0;
+    NSFont *glossFont = [_appearance candidateFontOfSize:MSIMECandidateTranslationPointSize * scale englishFirst:YES];
+    const CGFloat preeditWidth = preedit.length ? ceil([preedit sizeWithAttributes:@{NSFontAttributeName:preeditFont}].width) + 4 * scale + MSIMEPreeditCaretGap : 0;
+    const CGFloat headerWidth = preedit.length || paging || logo ? 2 * inset + logoWidth + preeditWidth + (preedit.length && paging ? indicatorGap : 0) + pageControlsWidth : 0;
     const MSIMECandidatePageGeometry pageGeometry =
         [self candidatePageGeometry:candidates font:font glossFont:glossFont showSelectedBar:geometry.showSelectedBar inset:inset
                              paging:paging visible:visible preeditWidth:headerWidth
@@ -6004,6 +6019,7 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
         ++slot;
         button.font = font;
         button.numberFont = numberFont;
+        button.chromeScale = scale;
         button.lineBreakMode = NSLineBreakByWordWrapping;
         button.toolTip = display;
         button.annotation = row.item.annotation.width > 0 ? pageGeometry.annotations[slot - 1] : @"";
@@ -6025,20 +6041,21 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
     }
     if (paging) {
         // Right-aligned in the top row, centred on the reading when that is taller than the arrows.
-        const CGFloat controlsBottom = headerBottom + floor((headerHeight - MSIMECandidateHeaderHeight) / 2);
-        const CGFloat arrowsLeft = width - inset - 2 * MSIMECandidatePageArrowWidth;
+        const CGFloat controlsBottom = headerBottom + floor((headerHeight - headerRow) / 2);
+        const CGFloat arrowsLeft = width - inset - 2 * arrowWidth;
         NSTextField *indicator = [NSTextField labelWithString:pageIndicator];
         indicator.identifier = @"candidate-page-indicator";
         indicator.accessibilityLabel = [NSString stringWithFormat:@"第 %lu 页，共 %lu 页", (unsigned long)(page + 1), (unsigned long)pageCount];
         indicator.font = pageIndicatorFont;
         indicator.alignment = NSTextAlignmentRight;
         const CGFloat indicatorHeight = ceil([pageIndicator sizeWithAttributes:@{NSFontAttributeName: pageIndicatorFont}].height);
-        indicator.frame = NSMakeRect(arrowsLeft - MSIMECandidatePageIndicatorGap - pageIndicatorWidth,
-                                     controlsBottom + floor((MSIMECandidateHeaderHeight - indicatorHeight) / 2), pageIndicatorWidth, indicatorHeight);
+        indicator.frame = NSMakeRect(arrowsLeft - indicatorGap - pageIndicatorWidth,
+                                     controlsBottom + floor((headerRow - indicatorHeight) / 2), pageIndicatorWidth, indicatorHeight);
         [content addSubview:indicator];
         for (NSUInteger direction = 0; direction < 2; ++direction) {
             MSIMECandidateButton *button = [MSIMECandidateButton buttonWithTitle:direction == 0 ? @"‹" : @"›" target:self action:@selector(changeCandidatePage:)];
-            button.frame = NSMakeRect(arrowsLeft + direction * MSIMECandidatePageArrowWidth, controlsBottom, MSIMECandidatePageArrowWidth, MSIMECandidateHeaderHeight);
+            button.frame = NSMakeRect(arrowsLeft + direction * arrowWidth, controlsBottom, arrowWidth, headerRow);
+            button.font = [NSFont systemFontOfSize:NSFont.systemFontSize * scale];
             button.bordered = NO;
             button.tag = direction == 0 ? -1 : -2;
             button.enabled = direction == 0 ? page > 0 : page < pageCount - 1;
@@ -6065,7 +6082,7 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
         }
         label.showsCaret = [_view[@"focused"] isEqual:@YES];
         label.frame = NSMakeRect(inset + logoWidth, headerBottom + floor((headerHeight - preeditHeight) / 2),
-                                 width - 2 * inset - logoWidth - (paging ? pageControlsWidth + MSIMECandidatePageIndicatorGap : 0), preeditHeight);
+                                 width - 2 * inset - logoWidth - (paging ? pageControlsWidth + indicatorGap : 0), preeditHeight);
         [content addSubview:label];
     }
     if (logo) {
@@ -6073,8 +6090,7 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
         mark.identifier = @"candidate-logo";
         mark.accessibilityLabel = @"水杉输入法";
         mark.imageScaling = NSImageScaleProportionallyUpOrDown;
-        mark.frame = NSMakeRect(inset + 2, headerBottom + floor((headerHeight - MSIMECandidateLogoSide) / 2),
-                                MSIMECandidateLogoSide, MSIMECandidateLogoSide);
+        mark.frame = NSMakeRect(inset + 2 * scale, headerBottom + floor((headerHeight - logoSide) / 2), logoSide, logoSide);
         [content addSubview:mark];
     }
     content.cardTopInset = decorationHeight;
@@ -6113,12 +6129,13 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
     if (![_panel.contentView isKindOfClass:MSIMECandidateChromeView.class]) return;
     MSIMECandidateChromeView *content = (id)_panel.contentView;
     NSString *match = [content.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
-    const auto skin = [_appearance resolvedSkinForDark:[match isEqual:NSAppearanceNameDarkAqua]];
+    const auto skin = [_appearance candidateWindowSkinForDark:[match isEqual:NSAppearanceNameDarkAqua]];
     const auto &tokens = skin.tokens;
     if (tokens.showSelectedBar != _skinShowsSelectedBar) { [self renderCandidates]; return; }
+    // The card's own opacity is already in the surface and border alpha and in backgroundOpacity, rather than in the panel's alphaValue, which would fade the candidates along with the card.
     content.fillColor = SkinColor(tokens.surface);
     content.strokeColor = SkinColor(tokens.border);
-    // tokens.radius is the package's card radius when it sets one.
+    // tokens.radius is the user's radius when one is set, else the package's card radius when it sets one, at the window's scale.
     content.cornerRadius = tokens.radius;
     content.lineWidth = tokens.borderWidth;
     // Only in a mode whose resolution draws the package: one that supports a single mode draws no background in the other.
@@ -6165,7 +6182,7 @@ static __weak MSIMEInputController *MSIMECandidatePanelOwner;
         const BOOL first = button == candidateButtons.firstObject;
         const BOOL last = button == candidateButtons.lastObject;
         button.cornerRadius = msime::mac::CandidateRowRadius(tokens, button.candidateHighlighted, first, last);
-        button.selectionLeftInset = 1.0;
+        button.selectionLeftInset = MSIMECandidateScale(_appearance);
         button.contentTintColor = SkinColor(tokens.text);
         button.needsDisplay = YES;
     }
