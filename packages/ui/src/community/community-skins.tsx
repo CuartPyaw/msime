@@ -92,10 +92,12 @@ function CommunitySkinPublishDialog({
   const [signInRequired, setSignInRequired] = useState(false);
   const [publicationId, setPublicationId] = useState(randomUuid);
   const clientGeneration = useRef(0);
+  const actionRunning = useRef(false);
 
   useEffect(() => {
     const generation = ++clientGeneration.current;
     let active = true;
+    actionRunning.current = false;
     setBusy(true);
     void library
       .load()
@@ -125,7 +127,7 @@ function CommunitySkinPublishDialog({
   const selected = saved.find((item) => item.id === selectedId) ?? null;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy || !selected) return;
+    if (busy || actionRunning.current || !selected) return;
     const generation = clientGeneration.current;
     const normalizedName = name.trim();
     const normalizedDescription = description.trim();
@@ -139,24 +141,34 @@ function CommunitySkinPublishDialog({
       setError("请填写有效名称和说明，并确认拥有公开发布所需的素材权利。");
       return;
     }
+    actionRunning.current = true;
     setSignInRequired(false);
-    await runAsyncAction(
-      {
-        busy,
-        isCurrent: () => generation === clientGeneration.current,
-        setBusy,
-        setError,
-      },
-      async () => {
-        await client.publish(publicationId, normalizedName, normalizedDescription, selected.design);
-        if (generation !== clientGeneration.current) return;
-        await onPublished();
-      },
-      {
-        formatError: communitySkinPublishMessage,
-        onError: (publishError) => setSignInRequired(communityNeedsSignIn(publishError)),
-      },
-    );
+    try {
+      await runAsyncAction(
+        {
+          busy,
+          isCurrent: () => generation === clientGeneration.current,
+          setBusy,
+          setError,
+        },
+        async () => {
+          await client.publish(
+            publicationId,
+            normalizedName,
+            normalizedDescription,
+            selected.design,
+          );
+          if (generation !== clientGeneration.current) return;
+          await onPublished();
+        },
+        {
+          formatError: communitySkinPublishMessage,
+          onError: (publishError) => setSignInRequired(communityNeedsSignIn(publishError)),
+        },
+      );
+    } finally {
+      if (generation === clientGeneration.current) actionRunning.current = false;
+    }
   };
 
   return (

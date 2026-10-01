@@ -415,6 +415,33 @@ test("publishes a selected local design only after explicit rights confirmation"
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "发布我的皮肤" })).toBeNull());
 });
 
+test("publish dialog ignores a same-tick duplicate submission", async () => {
+  const local = { id: "30000000-0000-4000-0002", name: "重复提交设计", design };
+  const pending = deferred<void>();
+  const publish = vi.fn().mockReturnValue(pending.promise);
+  render(
+    <CommunitySkinsPage
+      client={client({ publish })}
+      theme="light"
+      localSkinLibrary={{
+        load: vi.fn().mockResolvedValue([local]),
+        mutate: vi.fn(),
+      }}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "发布我的设计" }));
+  await screen.findByRole("dialog", { name: "发布我的皮肤" });
+  fireEvent.click(screen.getByRole("checkbox", { name: "确认拥有发布素材权利" }));
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "公开发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "公开发布" }));
+  });
+  expect(publish).toHaveBeenCalledOnce();
+  pending.resolve();
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "发布我的皮肤" })).toBeNull());
+});
+
 test("a publish response from a replaced community client is ignored", async () => {
   const local = { id: "30000000-0000-4000-0001", name: "替换发布设计", design };
   const pending = deferred<void>();
