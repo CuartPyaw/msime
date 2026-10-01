@@ -4689,8 +4689,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     replyModel.objectWillChange.send()
     let skin = KeyboardTheme.current
     candidatePalette = currentCandidatePalette()
-    view.backgroundColor = skin.background
+    view.backgroundColor = skin.drawsNativeBackground ? .clear : skin.background
     skinBackdrop.skin = skin
+    // Only here, not in KeyboardSkinBackgroundView: the App's skin previews have no system backdrop behind them.
+    if skin.drawsNativeBackground { skinBackdrop.backgroundColor = .clear }
     func recolor(_ node: UIView) {
       if let button = node as? UIButton, var configuration = button.configuration {
         if configuration.background.customView is SkinKeySurfaceView || (configuration.background.backgroundColor?.cgColor.alpha ?? 0) > 0 {
