@@ -47,6 +47,12 @@ export type PluginPreferences = {
   combo_counter: boolean;
   /** Play the key sound pack's commit sample, pitched up, when the count reaches 10, 25, 50 and 100. */
   combo_tier_sound: boolean;
+  /** K 模式读取的已安装短语表包，按优先级排列；为空时文档里不写这个键。 */
+  phrase_tables: string[];
+  /** 全拼方案选用的已安装辅助码表包；为空表示沿用 `quanpin_helpcode.schema`。 */
+  helpcode_pack_quanpin: string;
+  /** 双拼方案选用的已安装辅助码表包；为空表示沿用 `shuangpin_helpcode.schema`。 */
+  helpcode_pack_shuangpin: string;
 };
 
 /** `client-core::plugins::DEFAULT_SOUND_PACK`. */
@@ -55,6 +61,8 @@ export const DEFAULT_SOUND_PACK = "default";
 export const DEFAULT_MELODY_PACK = "twinkle";
 /** `PluginPreferences::MAX_COMMAND_TABLES`. */
 export const MAX_COMMAND_TABLES = 16;
+/** `PluginPreferences::MAX_PHRASE_TABLES`。 */
+export const MAX_PHRASE_TABLES = 16;
 
 export const defaultPluginPreferences: PluginPreferences = {
   key_sound: { enabled: false, mode: "keys", pack: DEFAULT_SOUND_PACK, volume: 50 },
@@ -68,6 +76,9 @@ export const defaultPluginPreferences: PluginPreferences = {
   effect_pack: "",
   combo_counter: false,
   combo_tier_sound: false,
+  phrase_tables: [],
+  helpcode_pack_quanpin: "",
+  helpcode_pack_shuangpin: "",
 };
 
 /** The plugin section a draft holds, each part filled in from the defaults where the document left it out. */
@@ -85,6 +96,11 @@ export function pluginPreferences(draft?: Pick<Preferences, "plugins">): PluginP
     effect_pack: value?.effect_pack ?? defaultPluginPreferences.effect_pack,
     combo_counter: value?.combo_counter ?? defaultPluginPreferences.combo_counter,
     combo_tier_sound: value?.combo_tier_sound ?? defaultPluginPreferences.combo_tier_sound,
+    phrase_tables: value?.phrase_tables ?? defaultPluginPreferences.phrase_tables,
+    helpcode_pack_quanpin:
+      value?.helpcode_pack_quanpin ?? defaultPluginPreferences.helpcode_pack_quanpin,
+    helpcode_pack_shuangpin:
+      value?.helpcode_pack_shuangpin ?? defaultPluginPreferences.helpcode_pack_shuangpin,
   };
 }
 

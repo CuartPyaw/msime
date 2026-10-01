@@ -1276,6 +1276,15 @@ pub struct PluginPreferences {
     pub combo_counter: bool,
     /// Play the key sound pack's commit sample, pitched up, when the count reaches one of `plugins::COMBO_MILESTONES`.
     pub combo_tier_sound: bool,
+    /// K 模式读取的已安装短语表包，按优先级排列，最多 `MAX_PHRASE_TABLES` 个。为空时不写进文档，没有这个键的旧版本照样能读。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub phrase_tables: Vec<String>,
+    /// 全拼方案选用的已安装辅助码表包；为空表示沿用 `quanpin_helpcode.schema`；包载入失败时也回退到那个方案。为空时不写进文档。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub helpcode_pack_quanpin: String,
+    /// 双拼方案选用的已安装辅助码表包，规则同 `helpcode_pack_quanpin`。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub helpcode_pack_shuangpin: String,
 }
 
 impl Default for PluginPreferences {
@@ -1292,6 +1301,9 @@ impl Default for PluginPreferences {
             effect_pack: String::new(),
             combo_counter: false,
             combo_tier_sound: false,
+            phrase_tables: Vec::new(),
+            helpcode_pack_quanpin: String::new(),
+            helpcode_pack_shuangpin: String::new(),
         }
     }
 }
@@ -1299,6 +1311,8 @@ impl Default for PluginPreferences {
 impl PluginPreferences {
     /// Most command tables enabled at once.
     pub const MAX_COMMAND_TABLES: usize = 16;
+    /// 同时启用的短语表包上限。
+    pub const MAX_PHRASE_TABLES: usize = 16;
 
     fn is_default(&self) -> bool {
         *self == Self::default()
@@ -1316,6 +1330,12 @@ impl PluginPreferences {
             && self.command_tables.len() <= Self::MAX_COMMAND_TABLES
             && self.command_tables.iter().enumerate().all(|(index, id)| {
                 crate::skin::catalog::safe_id(id) && !self.command_tables[..index].contains(id)
+            })
+            && pack(&self.helpcode_pack_quanpin)
+            && pack(&self.helpcode_pack_shuangpin)
+            && self.phrase_tables.len() <= Self::MAX_PHRASE_TABLES
+            && self.phrase_tables.iter().enumerate().all(|(index, id)| {
+                crate::skin::catalog::safe_id(id) && !self.phrase_tables[..index].contains(id)
             })
     }
 }

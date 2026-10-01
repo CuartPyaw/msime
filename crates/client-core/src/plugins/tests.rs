@@ -182,6 +182,35 @@ fn scan_lists_each_kind_and_reports_what_is_not_a_pack() {
 }
 
 #[test]
+fn unknown_kinds_on_disk_never_fail_the_catalog() {
+    // 新版本装进来的类型目录（这里是 `theme`）不被扫描；已知目录里声明了未知 kind 的包记为一条 issue。旧版本因此不会因为新类型整页失败。
+    let root = tempdir().unwrap();
+    installed_sound(root.path(), SOUND);
+    let future = root.path().join("theme").join("neon");
+    fs::create_dir_all(&future).unwrap();
+    fs::write(
+        future.join(MANIFEST_FILE),
+        "schema_version = 1\nkind = 'theme'\nid = 'neon'\nname = 'Neon'\nversion = '1'\nlicense = 'CC0-1.0'\n",
+    )
+    .unwrap();
+    let stray = kind_directory(root.path(), PluginKind::Sound).join("x");
+    fs::create_dir_all(&stray).unwrap();
+    fs::write(
+        stray.join(MANIFEST_FILE),
+        "schema_version = 1\nkind = 'theme'\nid = 'x'\nname = 'X'\nversion = '1'\nlicense = 'CC0-1.0'\n",
+    )
+    .unwrap();
+
+    let catalog = scan(root.path(), None);
+    let listed: Vec<_> = catalog.packages.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(listed, ["typewriter"]);
+    assert_eq!(catalog.issues.len(), 1, "{:?}", catalog.issues);
+    assert_eq!(catalog.issues[0].kind, PluginKind::Sound);
+    assert_eq!(catalog.issues[0].folder, "x");
+    assert_eq!(catalog.issues[0].reason, "kind 不是已知的插件类型");
+}
+
+#[test]
 fn a_nonexistent_root_is_an_empty_catalog() {
     let root = tempdir().unwrap();
     assert_eq!(

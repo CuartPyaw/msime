@@ -964,6 +964,25 @@ test("fills the defaults the document leaves out and forgets removed packs", () 
       plugins: { effect_pack: "neon" } as unknown as Preferences["plugins"],
     }).effect_pack,
   ).toBe("neon");
+  // 短语表和辅助码表包的选择同样在保存时保留，缺省时为空。
+  expect(defaultPluginPreferences).toMatchObject({
+    phrase_tables: [],
+    helpcode_pack_quanpin: "",
+    helpcode_pack_shuangpin: "",
+  });
+  expect(
+    pluginPreferences({
+      plugins: {
+        phrase_tables: ["office"],
+        helpcode_pack_quanpin: "radicals",
+        helpcode_pack_shuangpin: "strokes",
+      } as unknown as Preferences["plugins"],
+    }),
+  ).toMatchObject({
+    phrase_tables: ["office"],
+    helpcode_pack_quanpin: "radicals",
+    helpcode_pack_shuangpin: "strokes",
+  });
   // A document written before the effect fields reads them as their defaults, and one that has them keeps them.
   expect(
     pluginPreferences({
