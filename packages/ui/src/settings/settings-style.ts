@@ -34,6 +34,10 @@ export const groupNote =
 export const groupBlock = "min-w-0 [padding:var(--p-row-pad)]";
 /** The fixed track a slider row gives its range input, so the row's title keeps the rest of the width. */
 export const sliderControl = "block w-40 max-phone:w-32";
+/** A slider row's track with its current value read out after it, as the reference window's slider rows show it. */
+export const sliderWithValue = "flex items-center gap-3";
+/** The value after a slider: wide enough for two digits, so the track does not shift as the value changes. */
+export const sliderValue = "min-w-[2ch] text-right tabular-nums";
 /** Rows that belong together inside a group, such as a labelled set of them; divided the way a group divides its own rows. */
 export const rowStack =
   "flex min-w-0 flex-col gap-[var(--p-row-gap)] [&>:not([hidden])~:not([hidden])]:[border-top:1px_solid_var(--p-row-divider)]";

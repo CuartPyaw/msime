@@ -187,6 +187,7 @@ export function Slider({
   onChange,
   disabled,
   valueText,
+  ticks = false,
   ...labels
 }: {
   value: number;
@@ -197,10 +198,13 @@ export function Slider({
   disabled?: boolean;
   /** Read out instead of the bare number, e.g. "18 号". */
   valueText?: string;
+  /** Marks every step along the track, for a slider over a handful of discrete values. */
+  ticks?: boolean;
 } & Labelled) {
   const names = useRowLabels(labels);
   const fill = max > min ? ((Math.min(Math.max(value, min), max) - min) / (max - min)) * 100 : 0;
-  return (
+  const steps = ticks && max > min && step > 0 ? Math.round((max - min) / step) : 0;
+  const input = (
     <input
       type="range"
       className="platform-slider"
@@ -216,6 +220,17 @@ export function Slider({
       }
       {...names}
     />
+  );
+  if (steps === 0) return input;
+  return (
+    <span className="platform-slider-ticks">
+      <span aria-hidden="true">
+        {Array.from({ length: steps + 1 }, (_, index) => (
+          <span key={index} style={{ "--tick": index / steps } as CSSProperties} />
+        ))}
+      </span>
+      {input}
+    </span>
   );
 }
 
