@@ -649,14 +649,8 @@ impl QuanpinDictionary {
 
     /// Whole-syllable continuations of complete segments (QD:732-749): typed segmentation as `pinyin`, the longer key as canonical.
     fn longer_phrase_candidates(&self, segmentation: &str, segments: &[String]) -> Vec<WordItem> {
-        let mut normalized = segments.to_vec();
-        normalize_umlaut_aliases(&mut normalized);
         self.database
-            .query_longer_phrases(
-                &normalized,
-                LONGER_PHRASE_EXTRA_SYLLABLES,
-                LONGER_PHRASE_LIMIT,
-            )
+            .query_longer_phrases(segments, LONGER_PHRASE_EXTRA_SYLLABLES, LONGER_PHRASE_LIMIT)
             .into_iter()
             .map(|row| {
                 WordItem::new(
