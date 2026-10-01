@@ -1603,6 +1603,7 @@ impl<E: InputEngine> Runtime<E> {
                     candidate_positions: Vec::new(),
                     candidate_corrected: Vec::new(),
                     candidate_answers_key: Vec::new(),
+                    candidate_list_open: false,
                     microsoft_shuangpin: false,
                     shuangpin_profile: String::new(),
                     answered_by_pinyin_fallback: true,

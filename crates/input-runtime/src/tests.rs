@@ -651,6 +651,7 @@ impl InputEngine for Fixture {
             },
             candidate_corrected: vec![false; self.words.len()],
             candidate_answers_key: vec![true; self.words.len()],
+            candidate_list_open: false,
             microsoft_shuangpin: false,
             shuangpin_profile: "xiaohe".into(),
             answered_by_pinyin_fallback: false,
@@ -1416,6 +1417,7 @@ impl InputEngine for PhraseEngine {
             candidate_positions: vec![0; self.words.len()],
             candidate_corrected: vec![false; self.words.len()],
             candidate_answers_key: vec![true; self.words.len()],
+            candidate_list_open: false,
             microsoft_shuangpin: false,
             shuangpin_profile: "xiaohe".into(),
             answered_by_pinyin_fallback: false,
@@ -2973,6 +2975,10 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine::host::EngineOpti
         },
         rescoring_context: String::new(),
         sentence_alternatives: true,
+        vietnamese_input_method: 0,
+        vietnamese_tone_style: 0,
+        cantonese_dictionary: String::new(),
+        zhuyin_dictionary: String::new(),
     }
 }
 
@@ -3446,6 +3452,7 @@ impl InputEngine for DigitCommitsEngine {
             candidate_positions: vec![0; count],
             candidate_corrected: vec![false; count],
             candidate_answers_key: vec![true; count],
+            candidate_list_open: false,
             microsoft_shuangpin: false,
             shuangpin_profile: "xiaohe".into(),
             answered_by_pinyin_fallback: false,
@@ -4020,6 +4027,7 @@ impl InputEngine for WubiMixedEngine {
             candidate_positions: vec![0; count],
             candidate_corrected: [false, false, true].into_iter().take(count).collect(),
             candidate_answers_key: vec![true; count],
+            candidate_list_open: false,
             microsoft_shuangpin: false,
             shuangpin_profile: "xiaohe".into(),
             answered_by_pinyin_fallback: self.answered_by_pinyin_fallback && count > 0,

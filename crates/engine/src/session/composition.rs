@@ -270,7 +270,9 @@ impl InputSession {
         selected_scheme: SchemeType,
     ) -> bool {
         // Japanese, Korean and native wubi selections always finish: their advancement never continues.
-        if self.is_japanese() || self.is_korean() || selected_scheme == SchemeType::Wubi {
+        if self.engine.current_scheme_type().selection_completes()
+            || selected_scheme == SchemeType::Wubi
+        {
             return true;
         }
         let request = self.engine.request();
@@ -637,7 +639,10 @@ impl InputSession {
 
     /// Whether the list reads the composition as pinyin, so selections advance and learn as pinyin.
     pub(super) fn candidates_follow_pinyin(&self) -> bool {
-        self.engine.current_scheme_type().is_pinyin() || !self.wubi_candidates_are_native()
+        self.engine
+            .current_scheme_type()
+            .follows_pinyin_candidates()
+            || !self.wubi_candidates_are_native()
     }
 }
 

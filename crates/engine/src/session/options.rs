@@ -99,4 +99,6 @@ pub struct SessionSnapshot {
     pub candidate_annotations: Vec<String>,
     /// Whether each candidate answers the whole key rather than a prefix of it or a completion past it.
     pub candidate_answers_key: Vec<bool>,
+    /// The scheme's openable candidate list is showing (the Korean Hanja list). Hosts read this instead of inferring it from the scheme and a non-empty list.
+    pub candidate_list_open: bool,
 }

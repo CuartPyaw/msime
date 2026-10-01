@@ -16,6 +16,7 @@ use crate::types::{
     WubiInputOptions,
 };
 use crate::user_dictionary::generation::prepare_runtime_paths;
+use crate::vietnamese::{InputMethod as VietnameseInputMethod, ToneStyle as VietnameseToneStyle};
 
 const MAX_TRANSLATION_SIDECAR_BYTES: u64 = 1024 * 1024;
 
@@ -73,9 +74,17 @@ pub struct EngineOptions {
     pub rescoring_context: String,
     /// Ask for every whole-sentence reading; the runtime reorders and crops them.
     pub sentence_alternatives: bool,
+    /// 0 Telex, 1 VNI (`vietnamese::InputMethod`).
+    pub vietnamese_input_method: u8,
+    /// 0 modern (hoà), 1 classic (hòa) (`vietnamese::ToneStyle`).
+    pub vietnamese_tone_style: u8,
+    /// Absolute path of `cantonese.db`, empty when the host has none; the Cantonese scheme is unavailable without it.
+    pub cantonese_dictionary: String,
+    /// Absolute path of `zhuyin.db`, empty when the host has none; the Zhuyin scheme is unavailable without it.
+    pub zhuyin_dictionary: String,
 }
 
-/// Stage the generation (`prepare_runtime_paths`) and fill the product defaults: quanpin, xiaohe, learning off, autocorrect and fuzzy off, helpcode on with `ziranma`, frequency `promote` 1/1, mixed English from 5 letters, every Shift+letter local mode of the reference on and the expression, command and mention modes off with empty tables, and explicit values for the fields the C++ left default-initialised (`shuangpin_preedit_uses_raw = true`, `wubi_mixed_pinyin = false`, `sentence_association` default, `sentence_alternatives = false`).
+/// Stage the generation (`prepare_runtime_paths`) and fill the product defaults: quanpin, xiaohe, Telex with modern tone placement and no language dictionaries, learning off, autocorrect and fuzzy off, helpcode on with `ziranma`, frequency `promote` 1/1, mixed English from 5 letters, every Shift+letter local mode of the reference on and the expression, command and mention modes off with empty tables, and explicit values for the fields the C++ left default-initialised (`shuangpin_preedit_uses_raw = true`, `wubi_mixed_pinyin = false`, `sentence_association` default, `sentence_alternatives = false`).
 pub fn prepare_options(
     resources: &str,
     user_data: &str,
@@ -132,10 +141,14 @@ pub fn prepare_options(
         sentence_association: SentenceAssociationOptions::default(),
         rescoring_context: String::new(),
         sentence_alternatives: false,
+        vietnamese_input_method: VietnameseInputMethod::Telex as u8,
+        vietnamese_tone_style: VietnameseToneStyle::Modern as u8,
+        cantonese_dictionary: String::new(),
+        zhuyin_dictionary: String::new(),
     })
 }
 
-/// `options_for`: map and validate (`UNSUPPORTED_INPUT_SCHEME`, `UNSUPPORTED_SHUANGPIN_PROFILE`, `UNSUPPORTED_FREQUENCY_MODE`), and refresh the translations sidecar in the generation directory.
+/// `options_for`: map and validate (`UNSUPPORTED_INPUT_SCHEME`, `UNSUPPORTED_SHUANGPIN_PROFILE`, `UNSUPPORTED_FREQUENCY_MODE`, `UNSUPPORTED_VIETNAMESE_METHOD`, `UNSUPPORTED_VIETNAMESE_TONE_STYLE`), and refresh the translations sidecar in the generation directory.
 pub fn session_options(options: &EngineOptions) -> Result<SessionOptions> {
     prepare_translation_sidecar(options)?;
     let scheme = SchemeType::from_u8(options.scheme)
@@ -143,6 +156,10 @@ pub fn session_options(options: &EngineOptions) -> Result<SessionOptions> {
     let shuangpin_profile = shuangpin_profile(options)?;
     let mode = FrequencyAdjustmentMode::from_name(&options.frequency_mode)
         .ok_or_else(|| EngineError::invalid(diagnostics::UNSUPPORTED_FREQUENCY_MODE))?;
+    VietnameseInputMethod::from_u8(options.vietnamese_input_method)
+        .ok_or_else(|| EngineError::invalid(diagnostics::UNSUPPORTED_VIETNAMESE_METHOD))?;
+    VietnameseToneStyle::from_u8(options.vietnamese_tone_style)
+        .ok_or_else(|| EngineError::invalid(diagnostics::UNSUPPORTED_VIETNAMESE_TONE_STYLE))?;
     // Only the two user switches; the quanpin dictionary widens them with missing and extra letters per request (`request_autocorrect_mask`), as the C++ did (bridge.cpp:376-378).
     let autocorrect_types = if options.autocorrect_transposition {
         autocorrect_type::TRANSPOSITION

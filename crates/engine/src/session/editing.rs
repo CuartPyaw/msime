@@ -99,7 +99,7 @@ impl InputSession {
                         let start = text[..caret].rfind('\'').map_or(0, |at| at + 1);
                         accepted = (caret - start) % 2 == 1;
                     }
-                    if value == b'\'' && scheme != SchemeType::Wubi {
+                    if value == b'\'' && scheme.accepts_apostrophe() {
                         accepted = caret > 0;
                     }
                 }
@@ -205,7 +205,10 @@ impl InputSession {
 
     /// Clamped to the editing text; recomputes the prefix candidates. Korean has no caret inside its open syllable, so the caret stays at the end.
     pub(super) fn set_caret(&mut self, caret: Option<usize>) {
-        if self.is_korean() && !self.dedicated_english && self.local_mode == LocalInputMode::None {
+        if self.engine.current_scheme_type().locks_caret()
+            && !self.dedicated_english
+            && self.local_mode == LocalInputMode::None
+        {
             self.caret = None;
             return;
         }

@@ -6,6 +6,7 @@
 
 pub mod assets;
 mod cache;
+pub mod cantonese;
 pub mod diagnostics;
 mod dictionary;
 mod error;
@@ -16,6 +17,7 @@ pub mod host;
 mod ime;
 mod japanese;
 mod korean;
+pub mod language_dictionary;
 mod lattice;
 mod local;
 mod nine_key;
@@ -28,7 +30,9 @@ mod shuangpin;
 mod text;
 mod types;
 mod user_dictionary;
+pub mod vietnamese;
 mod wubi;
+pub mod zhuyin;
 
 pub use error::{EngineError, Result};
 #[cfg(not(any(target_os = "android", target_env = "ohos")))]

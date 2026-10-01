@@ -279,6 +279,10 @@ fn discard_does_not_require_maintenance_lock_for_live_paths() {
         },
         rescoring_context: String::new(),
         sentence_alternatives: true,
+        vietnamese_input_method: 0,
+        vietnamese_tone_style: 0,
+        cantonese_dictionary: String::new(),
+        zhuyin_dictionary: String::new(),
     };
     registry().lock().unwrap().insert(
         456,
@@ -364,6 +368,10 @@ fn activation_case(nested_dictionaries: bool, hold_session: bool, handle: u64) {
         command_table: Vec::new(),
         mention_entries: Vec::new(),
         sentence_alternatives: true,
+        vietnamese_input_method: 0,
+        vietnamese_tone_style: 0,
+        cantonese_dictionary: String::new(),
+        zhuyin_dictionary: String::new(),
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
@@ -588,6 +596,10 @@ fn activation_reopens_the_personal_context_store_on_the_restored_journal() {
         command_table: Vec::new(),
         mention_entries: Vec::new(),
         sentence_alternatives: true,
+        vietnamese_input_method: 0,
+        vietnamese_tone_style: 0,
+        cantonese_dictionary: String::new(),
+        zhuyin_dictionary: String::new(),
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,

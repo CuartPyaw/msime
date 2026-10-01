@@ -101,6 +101,211 @@ impl SchemeType {
     pub fn is_pinyin(self) -> bool {
         matches!(self, Self::Quanpin | Self::Shuangpin)
     }
+
+    // ---- Scheme traits ----
+    //
+    // The one source of truth for what differs between schemes. Every predicate matches exhaustively, so a new scheme cannot compile until each trait is decided for it. The values for the existing schemes encode today's behaviour; input-runtime and host-api read them through `SchemeType::from_u8`.
+
+    /// A Chinese scheme: what 中文 returns to and what the Chinese statistics count.
+    pub const fn is_chinese(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
+            Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// The scheme's own text is Traditional Chinese, so no script conversion is wanted.
+    pub const fn outputs_traditional_natively(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji | Self::Korean => {
+                false
+            }
+        }
+    }
+
+    /// The host's Simplified-to-Traditional conversion applies to the scheme's commits and preedit.
+    pub const fn script_conversion_applies(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
+            Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// The engine translates punctuation through the Chinese table. Korean writes half-width ASCII marks instead; Japanese goes through the table like the Chinese schemes.
+    pub const fn uses_chinese_punctuation(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => true,
+            Self::Korean => false,
+        }
+    }
+
+    /// The host's smart punctuation (context-dependent marks) may run.
+    pub const fn host_smart_punctuation(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
+            Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// Commits are widened when the full-width switch is on.
+    pub const fn widens_full_width(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => true,
+            Self::Korean => false,
+        }
+    }
+
+    /// English words and emoji or kaomoji may be mixed into the candidate list.
+    pub const fn allows_english_emoji_mixing(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin => true,
+            Self::Wubi | Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// Shift+letter and the `/` and `@` keys open local modes while nothing is composed.
+    pub const fn opens_local_modes(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin => true,
+            Self::Wubi | Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// Selections adjust frequencies and store sentences in the main dictionary and journal.
+    pub const fn learns_into_main_dictionary(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
+            Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// Letters committed raw that are not a complete spelling are learned as an English word.
+    pub const fn learns_english_words(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin => true,
+            Self::Wubi | Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// The engine raises cloud queries for the composition.
+    pub const fn cloud_eligible(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin | Self::JapaneseRomaji => true,
+            Self::Wubi | Self::Korean => false,
+        }
+    }
+
+    /// Candidates may carry translation glosses.
+    pub const fn shows_glosses(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
+            Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// Focus loss or a scheme switch commits the composition instead of discarding it.
+    pub const fn commits_on_blur(self) -> bool {
+        match self {
+            Self::Korean => true,
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => false,
+        }
+    }
+
+    /// A partial selection is held as phrase progress rather than committed at once.
+    pub const fn holds_phrase_progress(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => true,
+            Self::Korean => false,
+        }
+    }
+
+    /// The candidate list may be reordered by the sentence model and the personal context.
+    pub const fn reranks_with_sentence_model(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin => true,
+            Self::Wubi | Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// The snapshot's `reading` carries the composed text (kana, Hangul) for the host to draw.
+    pub const fn draws_reading(self) -> bool {
+        match self {
+            Self::JapaneseRomaji | Self::Korean => true,
+            Self::Quanpin | Self::Shuangpin | Self::Wubi => false,
+        }
+    }
+
+    /// Candidates appear only in a list the user opens (`Command::ConvertHanja`), and the list can be closed again.
+    pub const fn has_openable_candidate_list(self) -> bool {
+        match self {
+            Self::Korean => true,
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => false,
+        }
+    }
+
+    /// Selecting any of the scheme's candidates finishes the composition. Native wubi rows also finish, which is decided per row because a mixed wubi list holds pinyin rows too.
+    pub const fn selection_completes(self) -> bool {
+        match self {
+            Self::JapaneseRomaji | Self::Korean => true,
+            Self::Quanpin | Self::Shuangpin | Self::Wubi => false,
+        }
+    }
+
+    /// The candidate list reads the composition as pinyin, so selections advance and learn as pinyin.
+    pub const fn follows_pinyin_candidates(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin => true,
+            Self::Wubi | Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// An apostrophe typed inside the composition is a syllable boundary the scheme keeps.
+    pub const fn accepts_apostrophe(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin | Self::JapaneseRomaji => true,
+            Self::Wubi | Self::Korean => false,
+        }
+    }
+
+    /// The caret stays at the end of the composition.
+    pub const fn locks_caret(self) -> bool {
+        match self {
+            Self::Korean => true,
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => false,
+        }
+    }
+
+    /// Fuzzy pinyin rules apply.
+    pub const fn supports_fuzzy(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin => true,
+            Self::Wubi | Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// Typo autocorrection applies and its outcomes are learned.
+    pub const fn supports_autocorrect(self) -> bool {
+        match self {
+            Self::Quanpin => true,
+            Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// The nine-key grid can spell the scheme's syllables.
+    pub const fn nine_key(self) -> bool {
+        match self {
+            Self::Quanpin => true,
+            Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
+
+    /// The scheme has a helpcode switch and its candidates carry helpcode annotations.
+    pub const fn helpcode(self) -> bool {
+        match self {
+            Self::Quanpin | Self::Shuangpin => true,
+            Self::Wubi | Self::JapaneseRomaji | Self::Korean => false,
+        }
+    }
 }
 
 /// Double-pinyin keyboard profile. The ordinal is the host ABI value (`EngineOptions::shuangpin_profile`).
@@ -300,6 +505,8 @@ pub enum SchemeKey {
     Semicolon,
     /// The Japanese long vowel mark.
     Minus,
+    /// Any other printable non-letter ASCII key a scheme claims through its spelling symbols (Zhuyin's `;`, `-`, digits and space). Kept apart from `Semicolon` and `Minus` so the shuangpin and Japanese meanings of those keys never change; the existing schemes ignore it.
+    Symbol(u8),
     Backspace,
     /// Re-run the query without changing the composition.
     Requery,
@@ -322,7 +529,7 @@ pub enum Command {
     CycleKanaVariant = 9,
     /// Japanese only: commit the kana reading.
     CommitReading = 10,
-    /// Korean only: open the composing syllable's Hanja list, or close it when it is open.
+    /// Open the active scheme's candidate list, or close it when it is open: the composing syllable's Hanja in Korean. Schemes without an openable list leave it unhandled. The name stays for the wire and the goldens.
     ConvertHanja = 11,
 }
 
@@ -707,6 +914,166 @@ impl Default for PersonalDictionaryEntry {
             key: String::new(),
             value: String::new(),
             weight: Self::DEFAULT_WEIGHT,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SchemeType;
+
+    type Row = (&'static str, fn(SchemeType) -> bool, [bool; 5]);
+
+    const SCHEMES: [SchemeType; 5] = [
+        SchemeType::Quanpin,
+        SchemeType::Shuangpin,
+        SchemeType::Wubi,
+        SchemeType::JapaneseRomaji,
+        SchemeType::Korean,
+    ];
+
+    // Each row lists Quanpin, Shuangpin, Wubi, Japanese and Korean; the values are the behaviour these schemes had before the checks became predicates.
+    #[test]
+    fn predicates_keep_the_behaviour_of_the_existing_schemes() {
+        let table: [Row; 25] = [
+            (
+                "is_chinese",
+                SchemeType::is_chinese,
+                [true, true, true, false, false],
+            ),
+            (
+                "outputs_traditional_natively",
+                SchemeType::outputs_traditional_natively,
+                [false; 5],
+            ),
+            (
+                "script_conversion_applies",
+                SchemeType::script_conversion_applies,
+                [true, true, true, false, false],
+            ),
+            (
+                "uses_chinese_punctuation",
+                SchemeType::uses_chinese_punctuation,
+                [true, true, true, true, false],
+            ),
+            (
+                "host_smart_punctuation",
+                SchemeType::host_smart_punctuation,
+                [true, true, true, false, false],
+            ),
+            (
+                "widens_full_width",
+                SchemeType::widens_full_width,
+                [true, true, true, true, false],
+            ),
+            (
+                "allows_english_emoji_mixing",
+                SchemeType::allows_english_emoji_mixing,
+                [true, true, false, false, false],
+            ),
+            (
+                "opens_local_modes",
+                SchemeType::opens_local_modes,
+                [true, true, false, false, false],
+            ),
+            (
+                "learns_into_main_dictionary",
+                SchemeType::learns_into_main_dictionary,
+                [true, true, true, false, false],
+            ),
+            (
+                "learns_english_words",
+                SchemeType::learns_english_words,
+                [true, true, false, false, false],
+            ),
+            (
+                "cloud_eligible",
+                SchemeType::cloud_eligible,
+                [true, true, false, true, false],
+            ),
+            (
+                "shows_glosses",
+                SchemeType::shows_glosses,
+                [true, true, true, false, false],
+            ),
+            (
+                "commits_on_blur",
+                SchemeType::commits_on_blur,
+                [false, false, false, false, true],
+            ),
+            (
+                "holds_phrase_progress",
+                SchemeType::holds_phrase_progress,
+                [true, true, true, true, false],
+            ),
+            (
+                "reranks_with_sentence_model",
+                SchemeType::reranks_with_sentence_model,
+                [true, true, false, false, false],
+            ),
+            (
+                "draws_reading",
+                SchemeType::draws_reading,
+                [false, false, false, true, true],
+            ),
+            (
+                "has_openable_candidate_list",
+                SchemeType::has_openable_candidate_list,
+                [false, false, false, false, true],
+            ),
+            (
+                "selection_completes",
+                SchemeType::selection_completes,
+                [false, false, false, true, true],
+            ),
+            (
+                "follows_pinyin_candidates",
+                SchemeType::follows_pinyin_candidates,
+                [true, true, false, false, false],
+            ),
+            (
+                "accepts_apostrophe",
+                SchemeType::accepts_apostrophe,
+                [true, true, false, true, false],
+            ),
+            (
+                "locks_caret",
+                SchemeType::locks_caret,
+                [false, false, false, false, true],
+            ),
+            (
+                "supports_fuzzy",
+                SchemeType::supports_fuzzy,
+                [true, true, false, false, false],
+            ),
+            (
+                "supports_autocorrect",
+                SchemeType::supports_autocorrect,
+                [true, false, false, false, false],
+            ),
+            (
+                "nine_key",
+                SchemeType::nine_key,
+                [true, false, false, false, false],
+            ),
+            (
+                "helpcode",
+                SchemeType::helpcode,
+                [true, true, false, false, false],
+            ),
+        ];
+        for (name, predicate, expected) in table {
+            for (scheme, want) in SCHEMES.into_iter().zip(expected) {
+                assert_eq!(predicate(scheme), want, "{name} for {scheme:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn existing_scheme_codes_are_unchanged() {
+        for (code, scheme) in SCHEMES.into_iter().enumerate() {
+            assert_eq!(scheme as u8, code as u8);
+            assert_eq!(SchemeType::from_u8(code as u8), Some(scheme));
         }
     }
 }

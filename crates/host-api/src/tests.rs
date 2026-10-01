@@ -219,6 +219,10 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         },
         rescoring_context: String::new(),
         sentence_alternatives: true,
+        vietnamese_input_method: 0,
+        vietnamese_tone_style: 0,
+        cantonese_dictionary: String::new(),
+        zhuyin_dictionary: String::new(),
     };
     apply_local_mode_resource_gates(&mut options);
     assert!(options.local_unicode);

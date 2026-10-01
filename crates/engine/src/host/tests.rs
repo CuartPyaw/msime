@@ -59,6 +59,10 @@ fn options(root: &Path) -> EngineOptions {
         },
         rescoring_context: String::new(),
         sentence_alternatives: true,
+        vietnamese_input_method: 0,
+        vietnamese_tone_style: 0,
+        cantonese_dictionary: String::new(),
+        zhuyin_dictionary: String::new(),
     }
 }
 
@@ -661,6 +665,13 @@ fn invalid_options_return_errors_instead_of_unwinding_into_rust() {
     value.frequency_mode = "sometimes".into();
     assert_eq!(message(&value), "Unsupported frequency mode");
     value.frequency_mode = "promote".into();
+    value.vietnamese_input_method = 2;
+    assert_eq!(message(&value), "Unsupported Vietnamese input method");
+    value.vietnamese_input_method = 1;
+    value.vietnamese_tone_style = 2;
+    assert_eq!(message(&value), "Unsupported Vietnamese tone style");
+    value.vietnamese_tone_style = 1;
+    assert!(Session::new(&value).is_ok());
     value.resources = "relative".into();
     assert_eq!(message(&value), "Runtime directories must be absolute");
 }
@@ -906,6 +917,45 @@ fn real_engine_composes_korean_with_the_hangul_as_its_reading() {
     session.character(b'k', false).unwrap();
     let result = session.punctuation(b',').unwrap();
     assert_eq!((result.handled, result.commit.as_str()), (true, "가,"));
+}
+
+#[test]
+fn the_korean_hanja_list_reports_itself_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 4;
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"gks");
+    let snapshot = session.snapshot().unwrap();
+    assert!(!snapshot.candidate_list_open);
+    assert!(snapshot.candidates.is_empty());
+
+    assert!(session.command(Command::ConvertHanja).unwrap().handled);
+    let snapshot = session.snapshot().unwrap();
+    assert!(snapshot.candidate_list_open);
+    assert!(snapshot
+        .candidates
+        .iter()
+        .any(|candidate| candidate == "韓"));
+
+    // The same command closes it again.
+    assert!(session.command(Command::ConvertHanja).unwrap().handled);
+    let snapshot = session.snapshot().unwrap();
+    assert!(!snapshot.candidate_list_open);
+    assert!(snapshot.candidates.is_empty());
+}
+
+#[test]
+fn schemes_without_an_openable_list_never_report_one_open() {
+    let dir = tempfile::tempdir().unwrap();
+    for scheme in 0..4 {
+        let mut value = options(dir.path());
+        value.scheme = scheme;
+        let mut session = Session::new(&value).unwrap();
+        type_text(&mut session, b"ka");
+        assert!(!session.command(Command::ConvertHanja).unwrap().handled);
+        assert!(!session.snapshot().unwrap().candidate_list_open);
+    }
 }
 
 #[test]

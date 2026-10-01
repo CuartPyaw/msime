@@ -183,7 +183,7 @@ impl CandidateQueries {
         if !anything_enabled
             || dedicated_english
             || local_mode != LocalInputMode::None
-            || !scheme.is_pinyin()
+            || !scheme.allows_english_emoji_mixing()
             || prefix.is_empty()
         {
             return candidates;

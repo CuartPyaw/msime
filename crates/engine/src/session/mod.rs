@@ -63,7 +63,7 @@ impl Session {
     pub fn character(&mut self, value: u8, shift_only: bool) -> KeyResult {
         // English is a mode rather than a scheme, so the grid stays available in it: the same digits spell words instead of syllables. A local mode still takes the keys, and the scheme underneath must be quanpin, the only one whose syllables the grid knows.
         if self.nine_key_enabled
-            && self.input.scheme() == SchemeType::Quanpin
+            && self.input.scheme().nine_key()
             && self.input.local_mode == LocalInputMode::None
             && self.input.preedit().is_empty()
             && (b'2'..=b'9').contains(&value)
@@ -349,6 +349,7 @@ impl Session {
                     input.selection_completes_composition(&item.pinyin, &item.word, item.scheme)
                 })
                 .collect(),
+            candidate_list_open: input.candidate_list_open(),
             candidates,
         }
     }

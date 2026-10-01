@@ -211,7 +211,7 @@ impl InputSession {
         if self.is_korean() {
             return self.handle_korean_character(value);
         }
-        if !self.has_composition() && self.scheme().is_pinyin() {
+        if !self.has_composition() && self.scheme().opens_local_modes() {
             let entry = if shift_only {
                 self.local_mode_for_entry(value)
             } else {
@@ -264,8 +264,11 @@ impl InputSession {
             SchemeKey::Semicolon
         } else if japanese_long_vowel {
             SchemeKey::Minus
-        } else {
+        } else if value.is_ascii_alphabetic() {
             SchemeKey::Letter(value)
+        } else {
+            // Only a key the scheme claims gets past the filter above; none of the current schemes claims one here.
+            SchemeKey::Symbol(value)
         };
         self.engine.handle_key(key);
         self.update_mixed_candidates();
@@ -507,8 +510,11 @@ impl InputSession {
         {
             return self.handle_character(value, false);
         }
-        // Korean writes half-width ASCII punctuation whatever the Chinese punctuation switches say. With a syllable open the mark follows it in one commit; with nothing open the host inserts the key itself.
-        if self.is_korean() && !self.dedicated_english && self.local_mode == LocalInputMode::None {
+        // A scheme without Chinese punctuation (Korean) writes half-width ASCII punctuation whatever the Chinese punctuation switches say. With a syllable open the mark follows it in one commit; with nothing open the host inserts the key itself.
+        if !self.engine.current_scheme_type().uses_chinese_punctuation()
+            && !self.dedicated_english
+            && self.local_mode == LocalInputMode::None
+        {
             if !self.has_composition() {
                 self.reset_commit_context();
                 return KeyResult::unhandled();
@@ -591,7 +597,7 @@ impl InputSession {
         if self.local_mode != LocalInputMode::None {
             return self.local_mode.spelling_symbols().to_owned();
         }
-        if self.has_composition() || !self.scheme().is_pinyin() {
+        if self.has_composition() || !self.scheme().opens_local_modes() {
             return String::new();
         }
         (*b"/@")
@@ -835,6 +841,15 @@ impl InputSession {
     /// The Korean scheme's own rules are in force: dedicated English and the local modes keep theirs inside it.
     pub(super) fn korean_rules_apply(&self) -> bool {
         self.is_korean() && self.local_mode == LocalInputMode::None && !self.dedicated_english
+    }
+
+    /// The scheme's openable candidate list is showing: the composing syllable's Hanja in Korean.
+    pub(super) fn candidate_list_open(&self) -> bool {
+        self.engine
+            .current_scheme_type()
+            .has_openable_candidate_list()
+            && self.korean_rules_apply()
+            && self.engine.korean_hanja_open()
     }
 
     /// The helpcode switch of the session's scheme; other schemes have none.
