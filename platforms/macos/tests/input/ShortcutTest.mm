@@ -4155,15 +4155,23 @@ static void TestInputMode(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     appearance.inputScheme = @"quanpin";
     appearance.shuangpinProfile = @"ziranma";
     NSMenuItem *schemeItem = [controller.menu itemAtIndex:9];
-    assert([schemeItem.title isEqual:@"输入方案（全拼）"] && schemeItem.submenu.numberOfItems == 5);
-    NSArray<NSString *> *schemeTitles = @[@"全拼", @"双拼（自然码）", @"五笔 86", @"日语", @"韩语"];
-    NSArray<NSString *> *schemeIDs = @[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"];
-    for (NSUInteger index = 0; index < schemeIDs.count; ++index) {
+    // Cantonese and Zhuyin are listed only where their dictionary is installed, which depends on the machine; the other six are always there, in the Engine's order.
+    assert([schemeItem.title isEqual:@"输入方案（全拼）"] && schemeItem.submenu.numberOfItems >= 6 && schemeItem.submenu.numberOfItems <= 8);
+    NSArray<NSString *> *schemeTitles = @[@"全拼", @"双拼（自然码）", @"五笔 86", @"日语", @"韩语", @"粤拼", @"注音", @"越南语"];
+    NSArray<NSString *> *schemeIDs = @[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean", @"cantonese", @"zhuyin", @"vietnamese"];
+    NSUInteger expected = 0;
+    for (NSInteger index = 0; index < schemeItem.submenu.numberOfItems; ++index) {
         NSMenuItem *item = [schemeItem.submenu itemAtIndex:index];
-        assert([item.title isEqual:schemeTitles[index]] && [item.representedObject isEqual:schemeIDs[index]]);
+        while (expected < schemeIDs.count && ![item.representedObject isEqual:schemeIDs[expected]]) {
+            assert(expected == 5 || expected == 6);
+            ++expected;
+        }
+        assert(expected < schemeIDs.count && [item.title isEqual:schemeTitles[expected]]);
         assert(item.action == @selector(selectInputScheme:) && item.target == controller);
-        assert(item.state == (index == 0 ? NSControlStateValueOn : NSControlStateValueOff));
+        assert(item.state == (expected == 0 ? NSControlStateValueOn : NSControlStateValueOff));
+        ++expected;
     }
+    assert(expected == schemeIDs.count);
     [NSApp sendAction:@selector(selectInputScheme:) to:controller from:[schemeItem.submenu itemAtIndex:2]];
     assert([appearance.inputScheme isEqual:@"wubi"]);
     schemeItem = [controller.menu itemAtIndex:9];

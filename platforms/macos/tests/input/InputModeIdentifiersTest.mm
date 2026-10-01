@@ -227,6 +227,62 @@ int main() {
         require(MSIMESharedSystemInputModeState().current == nil, "The shared record did not reset.");
         MSIMEAdoptReportedInputMode(state, MSIMEChineseInputModeID);
 
+        // Cantonese, Zhuyin and Vietnamese each have a mode of their own, and each mode maps back to its scheme.
+        for (NSString *scheme in @[@"cantonese", @"zhuyin", @"vietnamese"]) {
+            NSString *identifier = MSIMEInputModeID(MSIMEInputModeFor(NO, scheme));
+            require(MSIMEIsInputModeID(identifier) && MSIMEIsOptInInputModeID(identifier) &&
+                        [MSIMESchemeForInputMode(MSIMEInputModeForID(identifier)) isEqualToString:scheme] &&
+                        MSIMEInputModeFor(YES, scheme) == MSIMEInputMode::English,
+                    "A Cantonese, Zhuyin or Vietnamese scheme does not round-trip through its opt-in mode.");
+        }
+        require([MSIMEInputModeID(MSIMEInputMode::Cantonese) isEqualToString:@"app.msime.inputmethod.MetasequoiaIME.Cantonese"] &&
+                    [MSIMEInputModeID(MSIMEInputMode::Zhuyin) isEqualToString:@"app.msime.inputmethod.MetasequoiaIME.Zhuyin"] &&
+                    [MSIMEInputModeID(MSIMEInputMode::Vietnamese) isEqualToString:@"app.msime.inputmethod.MetasequoiaIME.Vietnamese"],
+                "The new modes do not use the identifiers Info.plist.in declares.");
+        require(!MSIMEIsOptInInputModeID(MSIMEChineseInputModeID) && !MSIMEIsOptInInputModeID(MSIMEKoreanInputModeID) && !MSIMEIsOptInInputModeID(nil),
+                "A mode every install enables was treated as opt-in.");
+        require([MSIMEInputSchemeNames() isEqualToArray:@[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean", @"cantonese", @"zhuyin", @"vietnamese"]],
+                "The scheme names are not in the Engine's wire order.");
+
+        // 中 from Vietnamese goes back to the Chinese scheme it was entered from, like Japanese and Korean; 中 picked over 粤 or 注 means quanpin, like over 双 or 五.
+        require([MSIMESchemeForReportedInputMode(MSIMEInputMode::Chinese, @"vietnamese", @"wubi", Available) isEqualToString:@"quanpin"] &&
+                    [MSIMESchemeForReportedInputMode(MSIMEInputMode::Chinese, @"vietnamese", @"quanpin", Available) isEqualToString:@"quanpin"],
+                "中 from Vietnamese did not leave it.");
+        gWubiModeEnabled = NO;
+        require([MSIMESchemeForReportedInputMode(MSIMEInputMode::Chinese, @"vietnamese", @"wubi", Available) isEqualToString:@"wubi"],
+                "中 from Vietnamese did not return to the Chinese scheme it was entered from.");
+        gWubiModeEnabled = YES;
+        require([MSIMESchemeForReportedInputMode(MSIMEInputMode::Chinese, @"cantonese", @"quanpin", Available) isEqualToString:@"quanpin"] &&
+                    [MSIMESchemeForReportedInputMode(MSIMEInputMode::Chinese, @"zhuyin", @"quanpin", Available) isEqualToString:@"quanpin"],
+                "中 picked over 粤 or 注 did not move to quanpin.");
+        require([MSIMESchemeForReportedInputMode(MSIMEInputMode::Vietnamese, @"quanpin", @"quanpin", Available) isEqualToString:@"vietnamese"],
+                "The Vietnamese mode did not select its scheme.");
+
+        // Cantonese and Zhuyin are available only with their dictionary in the HostOptions language_dictionaries directory; everything else needs nothing more.
+        NSString *directory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+        [NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
+        [NSData.data writeToFile:[directory stringByAppendingPathComponent:@"cantonese.db"] atomically:YES];
+        [NSFileManager.defaultManager createDirectoryAtPath:[directory stringByAppendingPathComponent:@"zhuyin.db"] withIntermediateDirectories:YES attributes:nil error:nil];
+        NSDictionary *hostOptions = @{@"language_dictionaries": directory};
+        require(MSIMEInputSchemeAvailable(@"cantonese", hostOptions) && !MSIMEInputSchemeAvailable(@"zhuyin", hostOptions) &&
+                    !MSIMEInputSchemeAvailable(@"cantonese", @{}) && !MSIMEInputSchemeAvailable(@"cantonese", nil) &&
+                    MSIMEInputSchemeAvailable(@"vietnamese", nil) && MSIMEInputSchemeAvailable(@"korean", @{}) &&
+                    !MSIMEInputSchemeAvailable(@"pinyin", hostOptions) && !MSIMEInputSchemeAvailable(nil, hostOptions),
+                "Scheme availability does not follow the installed language dictionaries.");
+        require([MSIMEEffectiveInputScheme(@"cantonese", @"wubi", hostOptions) isEqualToString:@"cantonese"] &&
+                    [MSIMEEffectiveInputScheme(@"zhuyin", @"wubi", hostOptions) isEqualToString:@"wubi"] &&
+                    [MSIMEEffectiveInputScheme(@"zhuyin", @"cantonese", @{}) isEqualToString:@"quanpin"] &&
+                    [MSIMEEffectiveInputScheme(@"zhuyin", nil, @{}) isEqualToString:@"quanpin"],
+                "An unavailable scheme did not fall back the way host-api does.");
+        [NSFileManager.defaultManager removeItemAtPath:directory error:nil];
+
+        // An opt-in mode is enabled when the scheme moves to it, not when a process starts on it, not for an unchanged scheme, and not for a scheme that cannot run.
+        require([MSIMEOptInInputModeToEnable(@"quanpin", @"cantonese", YES) isEqualToString:MSIMECantoneseInputModeID] &&
+                    [MSIMEOptInInputModeToEnable(@"korean", @"vietnamese", YES) isEqualToString:MSIMEVietnameseInputModeID] &&
+                    !MSIMEOptInInputModeToEnable(nil, @"zhuyin", YES) && !MSIMEOptInInputModeToEnable(@"zhuyin", @"zhuyin", YES) &&
+                    !MSIMEOptInInputModeToEnable(@"quanpin", @"zhuyin", NO) && !MSIMEOptInInputModeToEnable(@"quanpin", @"wubi", YES),
+                "An opt-in mode was enabled at the wrong time.");
+
         // A client that cannot switch modes is left alone.
         require(!MSIMESelectSystemInputMode(state, MSIMEEnglishInputModeID, [NSObject new], Available) && [state.current isEqualToString:MSIMEChineseInputModeID],
                 "A client without selectInputMode: was recorded as switched.");

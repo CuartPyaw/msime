@@ -2816,8 +2816,8 @@ static const NSTimeInterval kSettledRerankDelay = 0.15;
 - (void)refreshFloatingToolbarState {
     if (!_toolbar || !_appearance) return;
     const BOOL englishCandidateMode = [_view[@"dedicated_english"] boolValue] && !_appearance.englishMode;
-    // The view's scheme numbers, in the Engine's order: quanpin, shuangpin, wubi, japanese, korean.
-    NSArray<NSString *> *schemes = @[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"];
+    // The view's scheme numbers, in the Engine's order: quanpin, shuangpin, wubi, japanese, korean, cantonese, zhuyin, vietnamese.
+    NSArray<NSString *> *schemes = MSIMEInputSchemeNames();
     const NSInteger index = [_view[@"scheme"] integerValue];
     NSString *scheme = index >= 0 && index < (NSInteger)schemes.count ? schemes[index] : @"quanpin";
     NSString *profile = _view[@"shuangpin_profile"];
@@ -2828,6 +2828,9 @@ static const NSTimeInterval kSettledRerankDelay = 0.15;
         @"wubi": @"五笔 86",
         @"japanese": @"日语",
         @"korean": @"韩语",
+        @"cantonese": @"粤拼",
+        @"zhuyin": @"注音",
+        @"vietnamese": @"越南语",
     };
     [_toolbar updateEnglishInputMode:_appearance.englishMode
              englishCandidateMode:englishCandidateMode
@@ -2992,16 +2995,20 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     // The scheme and the theme are each one choice out of several, so each is a submenu whose row names the current one, the way the system lists an input source's modes. As a radio list under a header the scheme alone took six rows.
     NSString *profile = [NSString stringWithUTF8String:msime::mac::ShuangpinSchemaTitle(_appearance.shuangpinProfile.UTF8String ?: "")];
     if ([profile hasSuffix:@"双拼"] && profile.length > 2) profile = [profile substringToIndex:profile.length - 2];
-    NSArray<NSString *> *schemes = @[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"];
-    NSArray<NSString *> *schemeTitles = @[@"全拼", [NSString stringWithFormat:@"双拼（%@）", profile], @"五笔 86", @"日语", @"韩语"];
+    NSArray<NSString *> *schemes = MSIMEInputSchemeNames();
+    NSArray<NSString *> *schemeTitles = @[@"全拼", [NSString stringWithFormat:@"双拼（%@）", profile], @"五笔 86", @"日语", @"韩语", @"粤拼", @"注音", @"越南语"];
     NSMenu *schemeMenu = [[NSMenu alloc] initWithTitle:@"输入方案"];
     schemeMenu.autoenablesItems = NO;
     NSString *currentSchemeTitle = nil;
+    // A scheme that cannot run here (Cantonese or Zhuyin without its dictionary) is not offered, and the check is on the scheme actually running, so a preference naming one shows the scheme it fell back to.
+    NSDictionary *hostOptions = [self inputSchemeHostOptions];
+    NSString *effectiveScheme = MSIMEEffectiveInputScheme(_appearance.inputScheme, _appearance.lastChineseScheme, hostOptions);
     for (NSUInteger index = 0; index < schemes.count; ++index) {
+        if (!MSIMEInputSchemeAvailable(schemes[index], hostOptions)) continue;
         NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:schemeTitles[index] action:@selector(selectInputScheme:) keyEquivalent:@""];
         item.target = self;
         item.representedObject = schemes[index];
-        item.state = [_appearance.inputScheme isEqual:schemes[index]] ? NSControlStateValueOn : NSControlStateValueOff;
+        item.state = [effectiveScheme isEqual:schemes[index]] ? NSControlStateValueOn : NSControlStateValueOff;
         if (item.state == NSControlStateValueOn) currentSchemeTitle = schemeTitles[index];
         [schemeMenu addItem:item];
     }
@@ -3338,9 +3345,22 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
         [hud showEnglishInputMode:enabled nearCaretRect:caret];
     }
 }
-// Keeps the selected input mode - 中, 双, 五, 英, 日 or 한 in the input menu - in step with the Chinese/English state and the scheme. A switch the system reported is already recorded as shown, so this does not echo it back.
+// The HostOptions document the scheme checks read: the session's, or the one on disk before a session exists. Test sessions stand in without hostOptions, as MSIMEStatisticsHostOptions allows for.
+- (NSDictionary *)inputSchemeHostOptions {
+    return [_session respondsToSelector:@selector(hostOptions)] ? _session.hostOptions : MSIMELoadRuntimeOptions();
+}
+// Keeps the selected input mode - 中, 双, 五, 粤, 注, 英, 日, 한 or 越 in the input menu - in step with the Chinese/English state and the scheme actually running. A switch the system reported is already recorded as shown, so this does not echo it back.
+//
+// Every scheme change reaches this, whether made from the input menu, either settings window or a mode the user picked, so this is also where an opt-in mode is turned on: the first time the scheme moves to cantonese, zhuyin or vietnamese in this process, its mode is enabled before it is selected. System Settings cannot add it, since its add dialog does not list a third-party input method's modes. The scheme the process started on enables nothing, so a mode the user removed from the input menu is not added back at every launch.
 - (void)syncSystemInputModeForClient:(id)client {
-    NSString *mode = MSIMEInputModeID(MSIMEInputModeFor(_appearance.englishMode, _appearance.inputScheme));
+    static NSString *lastSyncedScheme = nil; // Process-wide, like the system's selected mode.
+    NSDictionary *hostOptions = [self inputSchemeHostOptions];
+    NSString *preferred = _appearance.inputScheme;
+    NSString *optIn = MSIMEOptInInputModeToEnable(lastSyncedScheme, preferred, MSIMEInputSchemeAvailable(preferred, hostOptions));
+    lastSyncedScheme = [preferred copy];
+    if (optIn) MSIMEEnableInputMode(optIn, TISCreateInputSourceList, TISEnableInputSource);
+    NSString *scheme = MSIMEEffectiveInputScheme(preferred, _appearance.lastChineseScheme, hostOptions);
+    NSString *mode = MSIMEInputModeID(MSIMEInputModeFor(_appearance.englishMode, scheme));
     MSIMESelectSystemInputMode(MSIMESharedSystemInputModeState(), mode, client, MSIMEInputSourceIsEnabled);
 }
 // The system reports the mode the user picked from the input menu or reached with Ctrl+Space; the controller's Chinese/English state and, for every mode but 英, its scheme follow it. A report that only repeats the mode already shown, or one delivered from inside this controller's own selectInputMode:, leaves the state alone.
@@ -4720,7 +4740,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
 - (void)selectInputScheme:(id)sender {
     [self ensureAppearance];
     NSString *scheme = [sender respondsToSelector:@selector(representedObject)] ? [sender representedObject] : nil;
-    if (![@[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"] containsObject:scheme] || [_appearance.inputScheme isEqual:scheme]) return;
+    if (![MSIMEInputSchemeNames() containsObject:scheme] || [_appearance.inputScheme isEqual:scheme]) return;
     // The composition was typed under the old scheme; commit it rather than reinterpret its keys.
     if (_session && _activeClient && [_view[@"editing_text"] length]) {
         NSDictionary *finished = [_session command:MSIME_FINISH_COMPOSITION error:nil];
