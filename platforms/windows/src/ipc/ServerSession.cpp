@@ -4,6 +4,7 @@
 #include "input/CandidateTextPolicy.h"
 #include "KeyEvent.h"
 #include "PunctuationPolicy.h"
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 
@@ -61,6 +62,7 @@ nlohmann::json ServerSession::activate(uint64_t epoch) {
   auto result = response(msime_client_focus(session_, input_enabled_));
   epoch_ = epoch;
   active_ = true;
+  refresh_typing_effect_settings();
   return result;
 }
 nlohmann::json ServerSession::deactivate(uint64_t epoch) {
@@ -451,6 +453,7 @@ nlohmann::json ServerSession::update_preferences(uint64_t epoch,
   // With nothing switched on the library starts no player, so it has not kept the earlier "active". Say it again, so music switched on while this client holds the focus starts now rather than at the next focus change.
   if (music_active_)
     (void)msime_client_music_set_active(session_, true);
+  refresh_typing_effect_settings();
   return result;
 }
 nlohmann::json ServerSession::page_candidate(uint64_t epoch, uint64_t session,
@@ -489,6 +492,25 @@ bool ServerSession::commit_sound() {
 uint32_t ServerSession::typing_effect(uint32_t event) {
   check_thread();
   return msime_client_typing_effect(session_, event);
+}
+void ServerSession::refresh_typing_effect_settings() {
+  // A settings answer that cannot be read leaves the effect as the preferences alone describe it rather than failing the focus change or the preference update it follows.
+  TypingEffectSettings settings;
+  try {
+    const auto value = response(msime_client_typing_effect_settings(session_));
+    const auto intensity = value.value("intensity", 50.0);
+    std::optional<uint32_t> duration;
+    if (value.contains("duration_ms") && value.at("duration_ms").is_number())
+      duration = static_cast<uint32_t>((std::max)(0.0, value.at("duration_ms").get<double>()));
+    std::optional<uint32_t> color;
+    if (value.contains("colors") && value.at("colors").is_array() && !value.at("colors").empty() &&
+        value.at("colors").front().is_string())
+      color = typing_effect_rgb(value.at("colors").front().get<std::string>());
+    settings = resolve_typing_effect_settings(static_cast<uint32_t>((std::max)(0.0, intensity)), duration, color);
+  } catch (...) {
+    settings = TypingEffectSettings{};
+  }
+  typing_effect_settings_ = settings;
 }
 void ServerSession::set_music_active(bool active) {
   check_thread();

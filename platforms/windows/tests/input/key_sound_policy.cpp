@@ -71,6 +71,25 @@ int main() {
     REQUIRE(typing_effect_flash_alpha(power, 50u, 0u) > typing_effect_flash_alpha(flash, 50u, 0u));
     REQUIRE(typing_effect_flash_alpha(power, 100u, 0u) <= 1.0f);
     REQUIRE(typing_effect_flash_alpha(decode_typing_effect(9u), 100u, 0u) == 0.0f);
+    // An effect pack's duration_ms is the flash length, clamped to 60-1500 ms.
+    REQUIRE(typing_effect_flash_alpha(flash, 50u, 300u, 600u) > 0.0f);
+    REQUIRE(typing_effect_flash_alpha(flash, 50u, 600u, 600u) == 0.0f);
+    REQUIRE(resolve_typing_effect_settings(50u, 10u, std::nullopt).flash_millis == 60u);
+    REQUIRE(resolve_typing_effect_settings(50u, 9000u, std::nullopt).flash_millis == 1500u);
+    REQUIRE(resolve_typing_effect_settings(500u, std::nullopt, std::nullopt).intensity == 100u);
+    REQUIRE(resolve_typing_effect_settings(50u, std::nullopt, std::nullopt).flash_millis == typing_effect_flash_millis);
+    // Only "#RRGGBB" is a colour.
+    REQUIRE(typing_effect_rgb("#FF8800") == 0xFF8800u);
+    REQUIRE(typing_effect_rgb("#00aaff") == 0x00AAFFu);
+    REQUIRE(!typing_effect_rgb("FF8800"));
+    REQUIRE(!typing_effect_rgb("#FF880"));
+    REQUIRE(!typing_effect_rgb("#GG8800"));
+    // The word handed to the UI thread round-trips, and an unpublished word is nothing so the host's own intensity stands.
+    const auto pack = resolve_typing_effect_settings(80u, 900u, 0x123456u);
+    REQUIRE(unpack_typing_effect_settings(pack_typing_effect_settings(pack)) == pack);
+    const TypingEffectSettings plain{};
+    REQUIRE(unpack_typing_effect_settings(pack_typing_effect_settings(plain)) == plain);
+    REQUIRE(!unpack_typing_effect_settings(0u));
     // The count shows from two keys on, until the library's 3 s idle window would have ended the combo.
     REQUIRE(!typing_effect_shows_combo(1u, 0u));
     REQUIRE(typing_effect_shows_combo(2u, 2999u));

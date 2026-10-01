@@ -71,9 +71,11 @@ void FocusedSession::record_commit(const std::optional<Commit> &delivered) {
   if (allowed)
     (void)session_.commit_sound();
   // The commit flash, on the session's current combo: a commit counts nothing and only reports the state.
-  if (session_.input_enabled())
+  if (session_.input_enabled()) {
+    TypingEffectSignal::instance().publish_settings(pack_typing_effect_settings(session_.typing_effect_settings()));
     TypingEffectSignal::instance().publish(
         session_.typing_effect(typing_effect_commit(allowed)));
+  }
   if (!delivered->typing)
     return;
   if (statistics_) {
@@ -548,6 +550,7 @@ std::optional<PendingReply> FocusedSession::configured_key(
           (void)session_.key_sound(*key_class);
         // The same keys drive the typing effect and its combo, which keep counting in a full-screen application but stay silent there. The candidate window draws it on the UI thread; this only posts the packed value.
         const bool auto_repeat = (packet.modifiers_down & PipeMetadata::AutoRepeat) != 0;
+        TypingEffectSignal::instance().publish_settings(pack_typing_effect_settings(session_.typing_effect_settings()));
         TypingEffectSignal::instance().publish(
             session_.typing_effect(typing_effect_key_event(*key_class, allowed, auto_repeat)));
       }

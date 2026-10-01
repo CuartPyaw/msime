@@ -1,6 +1,8 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
+#include <optional>
+#include <string_view>
 
 namespace msime::windows {
 // The events msime_client_typing_effect takes beyond the key_sound classes 0-3, the flag for an auto-repeated key (drawn but not counted toward the combo), and the flag that keeps its tier-up sound quiet.
@@ -37,9 +39,67 @@ inline TypingEffect decode_typing_effect(uint32_t packed) {
   return effect;
 }
 
-// Opacity of the flash `elapsed` milliseconds after the key, 0 once it has faded or when nothing is drawn. Windows draws every style as a flash of the candidate card (it has no particle overlay); the stronger styles and a new tier flash brighter. effect_intensity 50 is the nominal strength, 100 doubles it.
-inline float typing_effect_flash_alpha(const TypingEffect &effect, uint32_t intensity, uint64_t elapsed) {
-  if (effect.style == TypingEffectStyle::off || intensity == 0 || elapsed >= typing_effect_flash_millis)
+// The parts of msime_client_typing_effect_settings Windows draws: the intensity, the flash length (the pack's duration_ms, else the host's own 150 ms) and the flash colour (the pack's first colour, else the theme accent). Particles have nothing to drive on a card that only flashes, and the other colours of a pack are ignored.
+struct TypingEffectSettings {
+  uint32_t intensity = 50;
+  uint32_t flash_millis = typing_effect_flash_millis;
+  std::optional<uint32_t> color;
+  friend bool operator==(const TypingEffectSettings &left, const TypingEffectSettings &right) {
+    return left.intensity == right.intensity && left.flash_millis == right.flash_millis && left.color == right.color;
+  }
+};
+
+// "#RRGGBB" as 0xRRGGBB, the only form the settings carry; anything else is no colour.
+inline std::optional<uint32_t> typing_effect_rgb(std::string_view text) {
+  if (text.size() != 7 || text.front() != '#')
+    return std::nullopt;
+  uint32_t value = 0;
+  for (const char ch : text.substr(1)) {
+    uint32_t digit = 0;
+    if (ch >= '0' && ch <= '9')
+      digit = static_cast<uint32_t>(ch - '0');
+    else if (ch >= 'a' && ch <= 'f')
+      digit = static_cast<uint32_t>(ch - 'a' + 10);
+    else if (ch >= 'A' && ch <= 'F')
+      digit = static_cast<uint32_t>(ch - 'A' + 10);
+    else
+      return std::nullopt;
+    value = (value << 4) | digit;
+  }
+  return value;
+}
+
+// The settings clamped to the ranges the library documents (intensity 0-100, flash 60-1500 ms), so a value out of range from any producer still draws.
+inline TypingEffectSettings resolve_typing_effect_settings(uint32_t intensity, std::optional<uint32_t> duration_ms, std::optional<uint32_t> color) {
+  TypingEffectSettings settings;
+  settings.intensity = (std::min)(intensity, 100u);
+  if (duration_ms)
+    settings.flash_millis = (std::max)(60u, (std::min)(*duration_ms, 1500u));
+  if (color)
+    settings.color = *color & 0xFFFFFFu;
+  return settings;
+}
+
+// Packs the settings into one word the input thread hands the UI thread without a lock: bits 0-7 the intensity, 8-19 the flash length, 20 whether a colour is set, 32-55 the colour, 63 that settings were published at all.
+inline uint64_t pack_typing_effect_settings(const TypingEffectSettings &settings) {
+  return (1ull << 63) | (static_cast<uint64_t>(settings.color.value_or(0) & 0xFFFFFFu) << 32) |
+         (settings.color ? (1ull << 20) : 0ull) | (static_cast<uint64_t>(settings.flash_millis & 0xFFFu) << 8) |
+         static_cast<uint64_t>(settings.intensity & 0xFFu);
+}
+// Nothing for a word nobody published, which keeps the host's own preference-derived intensity.
+inline std::optional<TypingEffectSettings> unpack_typing_effect_settings(uint64_t packed) {
+  if ((packed & (1ull << 63)) == 0)
+    return std::nullopt;
+  std::optional<uint32_t> color;
+  if (packed & (1ull << 20))
+    color = static_cast<uint32_t>((packed >> 32) & 0xFFFFFFu);
+  return resolve_typing_effect_settings(static_cast<uint32_t>(packed & 0xFFu), static_cast<uint32_t>((packed >> 8) & 0xFFFu), color);
+}
+
+// Opacity of the flash `elapsed` milliseconds after the key, 0 once it has faded or when nothing is drawn. Windows draws every style as a flash of the candidate card (it has no particle overlay); the stronger styles and a new tier flash brighter. effect_intensity 50 is the nominal strength, 100 doubles it. `flash_millis` is how long the flash takes to fade, an effect pack's duration_ms.
+inline float typing_effect_flash_alpha(const TypingEffect &effect, uint32_t intensity, uint64_t elapsed,
+                                       uint32_t flash_millis = typing_effect_flash_millis) {
+  if (effect.style == TypingEffectStyle::off || intensity == 0 || flash_millis == 0 || elapsed >= flash_millis)
     return 0.0f;
   float base = 0.35f;
   if (effect.style == TypingEffectStyle::sparks)
@@ -49,7 +109,7 @@ inline float typing_effect_flash_alpha(const TypingEffect &effect, uint32_t inte
   if (effect.tier_up)
     base += 0.3f;
   const float strength = static_cast<float>((std::min)(intensity, 100u)) / 50.0f;
-  const float remaining = 1.0f - static_cast<float>(elapsed) / static_cast<float>(typing_effect_flash_millis);
+  const float remaining = 1.0f - static_cast<float>(elapsed) / static_cast<float>(flash_millis);
   return (std::min)(1.0f, base * strength) * remaining;
 }
 

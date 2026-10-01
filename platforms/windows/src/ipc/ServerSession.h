@@ -1,6 +1,7 @@
 #pragma once
 #include "CandidateAction.h"
 #include "NavigationPolicy.h"
+#include "TypingEffectPolicy.h"
 #include "WordCharacterPolicy.h"
 #include "windows_ipc.h"
 #include <nlohmann/json.hpp>
@@ -105,6 +106,11 @@ public:
   bool commit_sound();
   // The typing effect of one key or commit (msime_client_typing_effect): the packed combo count, tier-up bit and effect style the candidate window draws, 0 when effects and the combo counter are both off.
   uint32_t typing_effect(uint32_t event);
+  // The resolved typing effect (msime_client_typing_effect_settings) as Windows draws it: read when the session gains the focus and after each preference update, never per key, so the packed word the key path publishes is ready.
+  const TypingEffectSettings &typing_effect_settings() const {
+    check_thread();
+    return typing_effect_settings_;
+  }
   // Whether background music may play: true while this client holds the focus. Remembered, so a preference update can repeat it and destroying the session stops music it started.
   void set_music_active(bool active);
 
@@ -119,5 +125,7 @@ private:
   bool input_enabled_ = true;
   bool traditional_output_ = false;
   bool music_active_ = false;
+  TypingEffectSettings typing_effect_settings_{};
+  void refresh_typing_effect_settings();
 };
 } // namespace msime::windows

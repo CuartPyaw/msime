@@ -33,6 +33,10 @@ public:
     if (const HWND target = target_.load(std::memory_order_acquire))
       (void)PostMessageW(target, typing_effect_message, 0, 0);
   }
+  // Input thread: the session's resolved effect settings (pack_typing_effect_settings), stored before each publish so the flash the UI thread draws next uses the focused session's effect pack. Only the latest is kept and nothing is posted: the settings only matter when a flash comes.
+  void publish_settings(uint64_t packed) { settings_.store(packed, std::memory_order_release); }
+  // UI thread: the latest settings, 0 before any session published them.
+  uint64_t settings() const { return settings_.load(std::memory_order_acquire); }
   // UI thread: the waiting value, which may be 0, or nothing when an earlier message already took it.
   std::optional<uint32_t> take() {
     const uint32_t value = latest_.exchange(0, std::memory_order_acq_rel);
@@ -49,6 +53,7 @@ private:
   bool reported_ = false;
   TypingEffectSignal() = default;
   std::atomic<uint32_t> latest_{0};
+  std::atomic<uint64_t> settings_{0};
   std::atomic<HWND> target_{nullptr};
 };
 } // namespace msime::windows

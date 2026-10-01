@@ -377,6 +377,40 @@ TranslationWorker::translate(const FocusLease &lease, const std::string &query_b
     const auto &query = *document;
     const auto generation = query.at("generation").get<uint64_t>();
 
+    // `/fy` (command mode): one English sentence for the service the user selected, into the query's own target language, whatever the gloss switches say (command_translation_item in CandidateTranslationPolicy.h). The selected service alone is asked, in the same precedence as below, with no packaged gloss and no gloss cache, and its answer goes back through apply_translations, which makes it the command's first row.
+    if (query.value("sentence", false)) {
+      std::vector<std::string> texts;
+      for (const auto &candidate : query.at("candidates"))
+        texts.push_back(candidate.at("text").get<std::string>());
+      const auto command = msime::windows::command_translation_item(
+          true, texts, query.at("target_language").get<std::string>());
+      if (!command)
+        return std::nullopt;
+      const nlohmann::json item{{"text", command->text},
+                                {"key", command->text},
+                                {"source_language", command->source_language},
+                                {"target_language", command->target_language}};
+      auto translations = nlohmann::json::array().dump();
+      const auto niutrans = query.value("niutrans", nlohmann::json(nullptr));
+      const auto custom =
+          query.value("custom_translation", nlohmann::json(nullptr));
+      const auto tencent = query.value("tencent_tmt", nlohmann::json(nullptr));
+      if (niutrans.is_object() && niutrans.value("enabled", false)) {
+        append_niutrans_item(niutrans, item, translations, cancelled);
+      } else if (custom.is_object() && custom.value("enabled", false)) {
+        if (auto value = custom_translation(custom, item, cancelled))
+          translations = nlohmann::json::array(
+                             {{{"text", command->text}, {"translation", *value}}})
+                             .dump();
+      } else if (tencent.is_object() && tencent.value("enabled", false)) {
+        append_tencent_group(tencent, std::vector<nlohmann::json>{item},
+                             translations, cancelled);
+      }
+      if (cancelled() || nlohmann::json::parse(translations).empty())
+        return std::nullopt;
+      return TranslationWorker::Result{lease, generation, translations};
+    }
+
     // The host exposes one candidate translation field, while preferences may
     // request two target languages. Translate each target independently and
     // join successful rows in preference order, matching the desktop hosts'
