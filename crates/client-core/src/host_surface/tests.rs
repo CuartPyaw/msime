@@ -545,13 +545,10 @@ fn plugin_surfaces_are_claimed_only_by_the_hosts_that_wire_them() {
     ] {
         let capabilities = HostCapabilities::for_platform(platform);
         assert!(
-            capabilities.key_sound && capabilities.plugin_triggers && capabilities.music,
-            "{platform:?}"
-        );
-        // Only macOS draws typing effects so far; each other host claims them in the change that wires its overlay.
-        assert_eq!(
-            capabilities.typing_effects,
-            platform == HostPlatform::Macos,
+            capabilities.key_sound
+                && capabilities.plugin_triggers
+                && capabilities.music
+                && capabilities.typing_effects,
             "{platform:?}"
         );
     }
