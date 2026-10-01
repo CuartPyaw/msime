@@ -51,7 +51,11 @@ pub fn normalize_full_pinyin(input: &str, expected_syllables: usize) -> String {
     }
     let normalized = join_segments(&segments);
     // An alias cut (`laing` -> `liang`) changes the letters, and an import must keep what the user wrote.
-    if normalized.replace('\'', "") == source.replace('\'', "") {
+    let same_letters = normalized
+        .bytes()
+        .filter(|&byte| byte != b'\'')
+        .eq(source.bytes().filter(|&byte| byte != b'\''));
+    if same_letters {
         normalized
     } else {
         String::new()
