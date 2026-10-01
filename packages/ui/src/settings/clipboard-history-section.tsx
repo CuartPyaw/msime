@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as settings from "./settings-style";
 import { GroupList, Row, Switch } from "../core/platform-controls";
 
@@ -39,8 +39,10 @@ export function ClipboardHistorySection({
 }: ClipboardHistorySectionProps) {
   const [entries, setEntries] = useState<ClipboardHistoryEntry[]>([]);
   const [clearArmed, setClearArmed] = useState(false);
+  const generation = useRef(0);
 
   useEffect(() => {
+    const currentGeneration = ++generation.current;
     let active = true;
     if (!ios && !persistedHistoryEnabled) {
       setEntries([]);
@@ -51,7 +53,7 @@ export function ClipboardHistorySection({
     void client
       .list()
       .then((next) => {
-        if (active) {
+        if (active && currentGeneration === generation.current) {
           setEntries(next);
           setClearArmed(false);
         }
@@ -59,16 +61,24 @@ export function ClipboardHistorySection({
       .catch(() => undefined);
     return () => {
       active = false;
+      generation.current++;
     };
   }, [client, ios, page, persistedHistoryEnabled, revision]);
 
   const mutate = async (action: () => Promise<void>, failure: string) => {
+    const currentGeneration = generation.current;
+    const currentClient = client;
     try {
       await action();
+      if (currentGeneration !== generation.current) return;
       setClearArmed(false);
-      if (client?.list) setEntries(await client.list());
+      if (currentClient?.list) {
+        const next = await currentClient.list();
+        if (currentGeneration !== generation.current) return;
+        setEntries(next);
+      }
     } catch {
-      onError(failure);
+      if (currentGeneration === generation.current) onError(failure);
     }
   };
 
@@ -101,14 +111,18 @@ export function ClipboardHistorySection({
                   type="button"
                   className="secondary"
                   disabled={!historyEnabled || !persistedHistoryEnabled}
-                  onClick={() =>
+                  onClick={() => {
+                    const currentGeneration = generation.current;
                     void client.sync!()
                       .then((next) => {
+                        if (currentGeneration !== generation.current) return;
                         setEntries(next);
                         setClearArmed(false);
                       })
-                      .catch(() => onError("无法同步剪贴板历史"))
-                  }
+                      .catch(() => {
+                        if (currentGeneration === generation.current) onError("无法同步剪贴板历史");
+                      });
+                  }}
                 >
                   从系统剪贴板同步
                 </button>
