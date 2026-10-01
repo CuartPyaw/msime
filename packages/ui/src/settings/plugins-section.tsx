@@ -68,7 +68,7 @@ const MAX_MENTION_TEXT_UTF16 = 199;
 const MAX_MENTION_KEY_BYTES = 64;
 const MENTION_KEY = /^[a-z]+(?:'[a-z]+)*$/;
 
-const kindLabels: Record<PluginKind, string> = {
+export const kindLabels: Record<PluginKind, string> = {
   sound: "音效包",
   music: "音乐包",
   command_table: "指令表",
@@ -182,6 +182,8 @@ export interface PluginsSectionProps {
   typingEffects?: boolean;
   /** The host draws the effect styles, not only the combo count; false on Linux, which shows the count as text. */
   effectStyles?: boolean;
+  /** The host draws an installed effect pack's style and parameters (`msime_client_typing_effect_settings`); only read where `effectStyles` is true. */
+  effectPacks?: boolean;
   /** Loads the catalog and the name list each time this turns true, so a pack copied in by hand shows up on the next visit. */
   active: boolean;
   onChange: (preferences: PluginPreferences) => void;
@@ -198,6 +200,7 @@ export function PluginsSection({
   triggers,
   typingEffects = false,
   effectStyles = false,
+  effectPacks = false,
   active,
   onChange,
   onError,
@@ -251,6 +254,9 @@ export function PluginsSection({
   const melodyPacks = packs("sound").filter((pack) => pack.mode === "sequence");
   const musicPacks = packs("music");
   const commandPacks = packs("command_table");
+  const effectPackList = packs("effect");
+  // A selected pack replaces the style and intensity, so those two controls only describe what is drawn while no pack is selected.
+  const effectPackSelected = effectPacks && preferences.effect_pack !== "";
   const { key_sound, commit_sound, melody, achievements, command_tables } = preferences;
 
   // After an import or removal that already succeeded: a failed reread is reported as such, not as a failed import or removal.
@@ -422,6 +428,34 @@ export function PluginsSection({
         <GroupList title="打字效果">
           {effectStyles && (
             <>
+              {effectPacks && (
+                <Row
+                  title="特效包"
+                  description={
+                    effectPackSelected
+                      ? "特效包决定样式、强度、颜色和时长，下面的样式和强度不再生效。"
+                      : effectPackList.length === 0
+                        ? "还没有导入特效包。"
+                        : undefined
+                  }
+                >
+                  <Select
+                    value={preferences.effect_pack}
+                    onChange={(event) =>
+                      onChange({ ...preferences, effect_pack: event.target.value })
+                    }
+                  >
+                    <option value="">不使用</option>
+                    {packOptions(effectPackList, preferences.effect_pack, packsListed).map(
+                      (option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ),
+                    )}
+                  </Select>
+                </Row>
+              )}
               <Row
                 title="效果样式"
                 description="闪光：按键时候选栏闪一下；火花：按键和上屏时迸出火花；Power Mode：火花随连击变大。"
@@ -429,6 +463,7 @@ export function PluginsSection({
                 <Segmented
                   options={effectStyleOptions}
                   value={preferences.effect_style}
+                  disabled={effectPackSelected}
                   onChange={(effect_style) => onChange({ ...preferences, effect_style })}
                 />
               </Row>
@@ -437,7 +472,7 @@ export function PluginsSection({
                   <Slider
                     value={preferences.effect_intensity}
                     valueText={`${preferences.effect_intensity}%`}
-                    disabled={preferences.effect_style === "off"}
+                    disabled={effectPackSelected || preferences.effect_style === "off"}
                     onChange={(effect_intensity) => onChange({ ...preferences, effect_intensity })}
                   />
                 </span>

@@ -41,7 +41,8 @@ use panel_input::{send_panel_key_windows, send_panel_text_windows, windows_panel
 use platform::android::android_account;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 use platform::desktop::{
-    desktop_account, desktop_candidate_skin_community, desktop_plugins, desktop_preferences_monitor,
+    desktop_account, desktop_candidate_skin_community, desktop_plugin_community, desktop_plugins,
+    desktop_preferences_monitor,
 };
 #[cfg(target_os = "ios")]
 use platform::ios::ios_account;
@@ -5036,6 +5037,20 @@ pub fn run() {
             desktop_candidate_skin_community::candidate_skin_community_set_visibility,
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             desktop_candidate_skin_community::candidate_skin_community_sync,
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_plugin_community::plugin_community_list,
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_plugin_community::plugin_community_detail,
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_plugin_community::plugin_community_pack_preview,
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_plugin_community::plugin_community_publish,
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_plugin_community::plugin_community_install,
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_plugin_community::plugin_community_rate,
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_plugin_community::plugin_community_delete,
             #[cfg(target_os = "android")]
             android_account::app_icon_info,
             #[cfg(target_os = "android")]

@@ -7,6 +7,7 @@
 //! `mentions.json` beside the kind directories is the @ mode's name list, kept by `mentions`. It lives here rather than in the preferences document because that document is the one hosts copy and account sync reads from, and a contact list belongs to neither.
 
 pub mod command_table;
+pub mod community;
 pub mod effect_pack;
 mod failure;
 mod import;
@@ -69,7 +70,7 @@ pub fn achievement_milestone(before: u64, after: u64) -> Option<u64> {
 }
 
 /// What a pack supplies. Closed: a manifest naming anything else is listed as an issue, never loaded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginKind {
     /// Key, commit and achievement samples, or one sample a melody is played on.

@@ -11,6 +11,7 @@ import {
   mentionListIssue,
   pluginErrorMessage,
   pluginPreferences,
+  settingsCapabilities,
   withoutRemovedPack,
   type MentionEntry,
   type PluginCatalogResult,
@@ -431,6 +432,46 @@ test("switches the typing effect style, intensity, combo count and tier sound", 
   expect(next.onChange).toHaveBeenLastCalledWith({ ...on, combo_tier_sound: true });
 });
 
+test("selects an installed effect pack, which takes over the style and intensity", async () => {
+  const effects = fakeClient({
+    catalog: vi.fn(async () => ({
+      packages: [
+        ...catalog.packages,
+        pack({ id: "neon", kind: "effect", name: "霓虹", style: "sparks" }),
+      ],
+      issues: [],
+    })),
+  });
+  const { onChange } = renderSection({
+    client: effects,
+    typingEffects: true,
+    effectStyles: true,
+    effectPacks: true,
+  });
+  const select = (await screen.findByRole("combobox", { name: "特效包" })) as HTMLSelectElement;
+  await within(select).findByRole("option", { name: "霓虹" });
+  fireEvent.change(select, { target: { value: "neon" } });
+  expect(onChange).toHaveBeenLastCalledWith({ ...defaultPluginPreferences, effect_pack: "neon" });
+
+  cleanup();
+  renderSection(
+    { client: effects, typingEffects: true, effectStyles: true, effectPacks: true },
+    { ...defaultPluginPreferences, effect_style: "flash", effect_pack: "neon" },
+  );
+  await within(screen.getByRole("combobox", { name: "特效包" })).findByRole("option", {
+    name: "霓虹",
+  });
+  expect((screen.getByRole("radio", { name: "闪光" }) as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByRole("slider", { name: "效果强度" }) as HTMLInputElement).disabled).toBe(
+    true,
+  );
+
+  cleanup();
+  renderSection({ client: effects, typingEffects: true, effectStyles: true, effectPacks: false });
+  expect(screen.getByRole("radiogroup", { name: "效果样式" })).toBeTruthy();
+  expect(screen.queryByRole("combobox", { name: "特效包" })).toBeNull();
+});
+
 test("offers only the combo count where the host draws no effect styles", () => {
   renderSection({ client: undefined, typingEffects: true, effectStyles: false });
   expect(screen.getByRole("switch", { name: "连击计数" })).toBeTruthy();
@@ -695,6 +736,28 @@ test("the 扩展 page offers the typing effects where the host draws them, and o
   expect(within(linux).getByRole("switch", { name: "连击计数" })).toBeTruthy();
   expect(within(linux).queryByRole("radiogroup", { name: "效果样式" })).toBeNull();
   expect(within(linux).queryByRole("switch", { name: "升档音" })).toBeNull();
+});
+
+test("effect packs are offered where the host draws a style, not on Linux", () => {
+  const capabilities = (platform: "macos" | "windows" | "harmony" | "linux") =>
+    settingsCapabilities({
+      host: { platform, typing_effects: true } as never,
+      linux: platform === "linux",
+      android: false,
+      ios: false,
+      harmony: platform === "harmony",
+      windows: platform === "windows",
+      macos: platform === "macos",
+      mobile: platform === "harmony",
+      canRestartInputMethod: false,
+      canInstallInputSource: false,
+      canListVoiceCaptureDevices: false,
+    });
+  expect(capabilities("macos").showTypingEffectPacks).toBe(true);
+  expect(capabilities("windows").showTypingEffectPacks).toBe(true);
+  expect(capabilities("harmony").showTypingEffectStyles).toBe(true);
+  expect(capabilities("harmony").showTypingEffectPacks).toBe(true);
+  expect(capabilities("linux").showTypingEffectPacks).toBe(false);
 });
 
 test("the @ switch is offered only where the host can edit the name list", async () => {

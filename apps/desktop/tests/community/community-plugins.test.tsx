@@ -1,0 +1,321 @@
+// @vitest-environment jsdom
+import { afterEach, expect, test, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  CommunityPage,
+  CommunityPluginsPage,
+  type CommunityPlugin,
+  type CommunityPluginClient,
+  type PluginCatalogResult,
+  type PluginPackage,
+} from "@msime/ui";
+import { createDesktopPluginCommunity } from "../../src/core/desktop-host-services";
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+function plugin(id: string, name: string, overrides: Partial<CommunityPlugin> = {}) {
+  return {
+    id,
+    kind: "sound",
+    plugin_id: "rain",
+    name,
+    description: `${name} 的说明`,
+    author: "示例作者",
+    version: "1.0.0",
+    license: "CC-BY-4.0",
+    size: 2048,
+    sha256: "0".repeat(64),
+    downloads: 3,
+    rating_count: 1,
+    rating_average: 4,
+    owned: false,
+    my_rating: 0,
+    created_at: "2026-09-30T00:00:00Z",
+    ...overrides,
+  } satisfies CommunityPlugin;
+}
+
+const first = plugin("20000000-0000-4000-8000-000000000001", "雨声");
+const second = plugin("20000000-0000-4000-8000-000000000002", "雷雨", { plugin_id: "storm" });
+
+function pack(kind: PluginPackage["kind"], id: string, builtin = false): PluginPackage {
+  return {
+    id,
+    name: `本地 ${id}`,
+    version: "1.0.0",
+    license: "MIT",
+    author: null,
+    description: null,
+    builtin,
+    kind,
+  };
+}
+
+function catalog(packages: PluginPackage[]): () => Promise<PluginCatalogResult> {
+  return vi.fn().mockResolvedValue({ packages, issues: [] });
+}
+
+function client(overrides: Partial<CommunityPluginClient> = {}): CommunityPluginClient {
+  return {
+    list: vi.fn().mockResolvedValue({ plugins: [first], has_more: false }),
+    detail: vi.fn().mockImplementation(async (id: string) => (id === first.id ? first : second)),
+    packPreview: vi.fn().mockResolvedValue({
+      suggestedName: "我的雨声",
+      suggestedDescription: "下雨的声音",
+      version: "1.0.0",
+      license: "MIT",
+      fileCount: 3,
+      size: 1048576,
+    }),
+    publish: vi.fn().mockResolvedValue(plugin(first.id, "我的雨声", { owned: true })),
+    install: vi.fn().mockResolvedValue(pack("sound", "rain")),
+    rate: vi.fn().mockResolvedValue({ stars: 5 }),
+    delete: vi.fn().mockResolvedValue({ deleted: true }),
+    ...overrides,
+  };
+}
+
+async function openDetail(name = "雨声") {
+  fireEvent.click(await screen.findByRole("button", { name: `查看扩展包 ${name}` }));
+  return screen.findByRole("heading", { name });
+}
+
+test("the kind filter is sent with every page, including the ones load more appends", async () => {
+  const list = vi
+    .fn()
+    .mockResolvedValueOnce({ plugins: [first], has_more: false })
+    .mockResolvedValueOnce({ plugins: [first], has_more: true })
+    .mockResolvedValueOnce({ plugins: [second], has_more: false });
+  render(<CommunityPluginsPage client={client({ list })} />);
+  await waitFor(() => expect(list).toHaveBeenCalledWith(0, "", null));
+
+  fireEvent.click(screen.getByRole("button", { name: "音效包" }));
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith(0, "", "sound"));
+  expect(screen.getByRole("button", { name: "音效包" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("button", { name: "特效包" })).toBeNull();
+
+  fireEvent.click(await screen.findByRole("button", { name: "加载更多" }));
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith(1, "", "sound"));
+  expect(await screen.findByRole("button", { name: "查看扩展包 雷雨" })).not.toBeNull();
+});
+
+test("a kind filter whose first page fails is rolled back, so load more stays on the listed kind", async () => {
+  const list = vi
+    .fn()
+    .mockResolvedValueOnce({ plugins: [first], has_more: true })
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValueOnce({ plugins: [second], has_more: false });
+  render(<CommunityPluginsPage client={client({ list })} />);
+  await waitFor(() => expect(list).toHaveBeenCalledWith(0, "", null));
+
+  fireEvent.click(await screen.findByRole("button", { name: "音乐包" }));
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith(0, "", "music"));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "音乐包" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    ),
+  );
+
+  fireEvent.click(await screen.findByRole("button", { name: "加载更多" }));
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith(1, "", null));
+});
+
+test("installing over a pack of the same kind and id asks first, then reports the install", async () => {
+  const communityClient = client();
+  const onInstalled = vi.fn();
+  render(
+    <CommunityPluginsPage
+      client={communityClient}
+      localPlugins={catalog([pack("sound", "rain"), pack("music", "storm")])}
+      onInstalled={onInstalled}
+    />,
+  );
+  await openDetail();
+  fireEvent.click(screen.getByRole("button", { name: "一键安装" }));
+  const confirm = await screen.findByRole("alertdialog", { name: "确认替换扩展包" });
+  expect(communityClient.install).not.toHaveBeenCalled();
+
+  fireEvent.click(within(confirm).getByRole("button", { name: "替换安装" }));
+  await waitFor(() =>
+    expect(communityClient.install).toHaveBeenCalledWith(first.id, "sound", "rain"),
+  );
+  expect(await screen.findByText("已安装到扩展目录，可在「扩展」中选用。")).not.toBeNull();
+  expect(onInstalled).toHaveBeenCalledWith(pack("sound", "rain"));
+});
+
+test("a pack of another kind with the same id installs without asking", async () => {
+  const communityClient = client();
+  render(
+    <CommunityPluginsPage
+      client={communityClient}
+      localPlugins={catalog([pack("music", "rain")])}
+    />,
+  );
+  await openDetail();
+  fireEvent.click(screen.getByRole("button", { name: "一键安装" }));
+  await waitFor(() =>
+    expect(communityClient.install).toHaveBeenCalledWith(first.id, "sound", "rain"),
+  );
+  expect(screen.queryByRole("alertdialog", { name: "确认替换扩展包" })).toBeNull();
+});
+
+test("a download that fails its checksum is named", async () => {
+  const install = vi.fn().mockRejectedValue({ code: "plugin_community_checksum" });
+  render(<CommunityPluginsPage client={client({ install })} />);
+  await openDetail();
+  fireEvent.click(screen.getByRole("button", { name: "一键安装" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("下载的扩展包已损坏");
+});
+
+test("rates and takes down through the gallery", async () => {
+  const owned = plugin(second.id, "雷雨", { owned: true });
+  const communityClient = client({
+    list: vi.fn().mockResolvedValue({ plugins: [first, owned], has_more: false }),
+    detail: vi.fn().mockImplementation(async (id: string) => (id === first.id ? first : owned)),
+  });
+  render(<CommunityPluginsPage client={communityClient} />);
+  await openDetail();
+  fireEvent.click(screen.getByRole("button", { name: "评 5 星" }));
+  await waitFor(() => expect(communityClient.rate).toHaveBeenCalledWith(first.id, 5));
+  expect(await screen.findByText("已评分：5 星。")).not.toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "返回社区" }));
+  await openDetail("雷雨");
+  fireEvent.click(screen.getByRole("button", { name: "下架这个扩展包" }));
+  const confirm = await screen.findByRole("alertdialog", { name: "确认下架扩展包" });
+  fireEvent.click(within(confirm).getByRole("button", { name: "确认下架" }));
+  await waitFor(() => expect(communityClient.delete).toHaveBeenCalledWith(owned.id));
+});
+
+test("publishing offers only installed, shareable packs and retries under the same id", async () => {
+  const publish = vi
+    .fn()
+    .mockRejectedValueOnce({ code: "community_unavailable" })
+    .mockResolvedValueOnce(plugin(first.id, "我的雨声", { owned: true }));
+  const communityClient = client({ publish });
+  render(
+    <CommunityPluginsPage
+      client={communityClient}
+      localPlugins={catalog([
+        pack("sound", "default", true),
+        pack("effect", "sparkle"),
+        pack("command_table", "dates"),
+        pack("sound", "rain"),
+      ])}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "发布我的扩展包" }));
+  const dialog = await screen.findByRole("dialog", { name: "发布扩展包" });
+  const select = await within(dialog).findByRole("combobox", { name: "发布扩展包" });
+  const options = within(select)
+    .getAllByRole("option")
+    .map((option) => option.getAttribute("value"));
+  expect(options).toEqual(["command_table/dates", "sound/rain"]);
+
+  fireEvent.change(select, { target: { value: "sound/rain" } });
+  await waitFor(() =>
+    expect(communityClient.packPreview).toHaveBeenLastCalledWith("sound", "rain"),
+  );
+  const name = (await within(dialog).findByRole("textbox", {
+    name: "发布扩展包名称",
+  })) as HTMLInputElement;
+  await waitFor(() => expect(name.value).toBe("我的雨声"));
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "确认拥有发布内容权利" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "公开发布" }));
+  expect((await within(dialog).findByRole("alert")).textContent).toContain("社区暂时不可用");
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "公开发布" }));
+  await waitFor(() => expect(publish).toHaveBeenCalledTimes(2));
+  const [firstCall, retry] = publish.mock.calls;
+  expect(firstCall).toEqual(["sound", "rain", firstCall[2], "我的雨声", "下雨的声音"]);
+  expect(retry[2]).toBe(firstCall[2]);
+  expect(await screen.findByText("已发布到社区。")).not.toBeNull();
+});
+
+test("editing the name after a failed publish draws a new publication id", async () => {
+  const publish = vi.fn().mockRejectedValue({ code: "community_unavailable" });
+  render(
+    <CommunityPluginsPage
+      client={client({ publish })}
+      localPlugins={catalog([pack("sound", "rain")])}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "发布我的扩展包" }));
+  const dialog = await screen.findByRole("dialog", { name: "发布扩展包" });
+  const name = (await within(dialog).findByRole("textbox", {
+    name: "发布扩展包名称",
+  })) as HTMLInputElement;
+  await waitFor(() => expect(name.value).toBe("我的雨声"));
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "确认拥有发布内容权利" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "公开发布" }));
+  await within(dialog).findByRole("alert");
+  fireEvent.change(name, { target: { value: "新的雨声" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "公开发布" }));
+  await waitFor(() => expect(publish).toHaveBeenCalledTimes(2));
+  expect(publish.mock.calls[1][3]).toBe("新的雨声");
+  expect(publish.mock.calls[1][2]).not.toBe(publish.mock.calls[0][2]);
+});
+
+test("a pack the packer refuses says why before the form is shown", async () => {
+  const packPreview = vi.fn().mockRejectedValue({ code: "plugin_community_too_large" });
+  render(
+    <CommunityPluginsPage
+      client={client({ packPreview })}
+      localPlugins={catalog([pack("music", "lofi")])}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "发布我的扩展包" }));
+  const dialog = await screen.findByRole("dialog", { name: "发布扩展包" });
+  expect((await within(dialog).findByRole("alert")).textContent).toContain("8 MB");
+  expect(within(dialog).queryByRole("button", { name: "公开发布" })).toBeNull();
+});
+
+test("the desktop community page puts plugins on their own tab", async () => {
+  const pluginClient = client();
+  render(
+    <CommunityPage
+      theme="dark"
+      candidateSkins={
+        {
+          list: vi.fn().mockResolvedValue({ skins: [], has_more: false }),
+          sync: vi.fn(),
+        } as never
+      }
+      plugins={pluginClient}
+      localPlugins={catalog([])}
+    />,
+  );
+  const tabs = screen.getByRole("tablist", { name: "社区分类" });
+  expect(within(tabs).getByRole("tab", { name: "候选窗皮肤" }).getAttribute("aria-selected")).toBe(
+    "true",
+  );
+  expect(pluginClient.list).not.toHaveBeenCalled();
+  fireEvent.click(within(tabs).getByRole("tab", { name: "插件" }));
+  await waitFor(() => expect(pluginClient.list).toHaveBeenCalledWith(0, "", null));
+  expect(await screen.findByRole("heading", { name: "扩展包" })).not.toBeNull();
+});
+
+test("the desktop bridge names each command and its camelCase arguments", async () => {
+  const invoke = vi.fn().mockResolvedValue({});
+  const bridge = createDesktopPluginCommunity(invoke);
+  await bridge.list(20, "雨", "music");
+  await bridge.packPreview("sound", "rain");
+  await bridge.publish("sound", "rain", first.id, "雨声", "");
+  await bridge.install(first.id, "sound", "rain");
+  await bridge.rate(first.id, 4);
+  await bridge.delete(first.id);
+  expect(invoke.mock.calls).toEqual([
+    ["plugin_community_list", { offset: 20, search: "雨", kind: "music" }],
+    ["plugin_community_pack_preview", { kind: "sound", pluginId: "rain" }],
+    [
+      "plugin_community_publish",
+      { kind: "sound", pluginId: "rain", id: first.id, name: "雨声", description: "" },
+    ],
+    ["plugin_community_install", { id: first.id, kind: "sound", pluginId: "rain" }],
+    ["plugin_community_rate", { id: first.id, stars: 4 }],
+    ["plugin_community_delete", { id: first.id }],
+  ]);
+});

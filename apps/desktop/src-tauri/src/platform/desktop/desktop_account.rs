@@ -4,10 +4,12 @@
 
 use crate::platform::account_helpers::call_session;
 use crate::platform::desktop::desktop_candidate_skin_community::CandidateSkinCommunityState;
+use crate::platform::desktop::desktop_plugin_community::PluginCommunityState;
 use crate::shared::account_dto::{
     providers_response, ChallengeResponse, ProfileResponse, ProvidersResponse, StatusResponse,
 };
 use msime_client_core::account::{AccountError, BackendAccountClient, BackendAccountSession};
+use msime_client_core::plugins::community::BackendCommunityPluginService;
 use msime_client_core::skin::candidate_community::BackendCandidateSkinCommunityService;
 use std::sync::Arc;
 use tauri::Manager;
@@ -25,7 +27,7 @@ pub struct AccountState {
     pub(crate) session: Arc<Session>,
 }
 
-/// Builds the backend client and registers the account state around the platform's session storage, plus the candidate-skin community service that authenticates through the same session.
+/// Builds the backend client and registers the account state around the platform's session storage, plus the candidate-skin and plugin community services that authenticate through the same session.
 pub(crate) fn manage(
     app: &tauri::AppHandle,
     storage: Storage,
@@ -34,6 +36,12 @@ pub(crate) fn manage(
     let session = Arc::new(BackendAccountSession::new(client.clone(), storage));
     app.manage(CandidateSkinCommunityState {
         service: Arc::new(BackendCandidateSkinCommunityService::new(
+            client.clone(),
+            Arc::clone(&session),
+        )),
+    });
+    app.manage(PluginCommunityState {
+        service: Arc::new(BackendCommunityPluginService::new(
             client,
             Arc::clone(&session),
         )),

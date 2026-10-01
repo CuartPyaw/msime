@@ -49,6 +49,21 @@ export interface TypingEffectSettings {
   readonly comboCounter: boolean;
   /** The tier-up sound: on only with the combo counter, as host-api's `tier_sound` holds. */
   readonly tierSound: boolean;
+  /** The selected effect pack's id, "" for none. Its style comes back in each answer; `resolve` fills in the rest. */
+  readonly pack: string;
+  /** How long one flash takes to fade: `FLASH_MILLIS` unless the pack sets `duration_ms`. */
+  readonly flashMillis: number;
+  /** The flash colour as `#RRGGBB`, the pack's first colour; `undefined` uses the candidate accent. */
+  readonly color: string | undefined;
+}
+
+/** The value of `msime_client_typing_effect_settings`, as host-api resolves it. Only the fields this host draws are read; HarmonyOS draws no sparks, so `particles` is ignored. */
+export interface ResolvedTypingEffectDocument {
+  pack: string | null;
+  issue: string | null;
+  intensity: number;
+  colors: string[];
+  duration_ms: number | null;
 }
 
 /** One answer of `msime_client_typing_effect`, unpacked. */
@@ -67,7 +82,15 @@ export const TYPING_EFFECTS_OFF: TypingEffectSettings = {
   intensity: DEFAULT_INTENSITY,
   comboCounter: false,
   tierSound: false,
+  pack: "",
+  flashMillis: FLASH_MILLIS,
+  color: undefined,
 };
+
+const COLOR_PATTERN: RegExp = /^#[0-9a-fA-F]{6}$/;
+/** `effect.duration_ms`'s bounds in client-core. */
+const MIN_FLASH_MILLIS: number = 60;
+const MAX_FLASH_MILLIS: number = 1500;
 
 export class TypingEffectPolicy {
   /** The settings `preferences.plugins` asks for; a missing record or an unknown style is off. */
@@ -87,6 +110,39 @@ export class TypingEffectPolicy {
       intensity: intensity,
       comboCounter: comboCounter,
       tierSound: comboCounter && plugins.combo_tier_sound === true,
+      pack: typeof plugins.effect_pack === "string" ? plugins.effect_pack : "",
+      flashMillis: FLASH_MILLIS,
+      color: undefined,
+    };
+  }
+
+  /** `settings` with what host-api resolved for the session: a selected pack's intensity, flash length and colour replace the preference values. Without a pack, or when the pack did not load (host-api then answers style off), the preference values stand. */
+  static resolve(
+    settings: TypingEffectSettings,
+    resolved: ResolvedTypingEffectDocument,
+  ): TypingEffectSettings {
+    if (settings.pack === "" || resolved.pack === null || resolved.issue !== null) {
+      return settings;
+    }
+    const intensity: number =
+      typeof resolved.intensity === "number" && resolved.intensity >= 0 && resolved.intensity <= 100
+        ? Math.round(resolved.intensity)
+        : settings.intensity;
+    const flashMillis: number =
+      typeof resolved.duration_ms === "number"
+        ? Math.min(Math.max(Math.round(resolved.duration_ms), MIN_FLASH_MILLIS), MAX_FLASH_MILLIS)
+        : FLASH_MILLIS;
+    const first: string | undefined = Array.isArray(resolved.colors)
+      ? resolved.colors[0]
+      : undefined;
+    return {
+      style: settings.style,
+      intensity: intensity,
+      comboCounter: settings.comboCounter,
+      tierSound: settings.tierSound,
+      pack: settings.pack,
+      flashMillis: flashMillis,
+      color: typeof first === "string" && COLOR_PATTERN.test(first) ? first : undefined,
     };
   }
 
@@ -104,9 +160,11 @@ export class TypingEffectPolicy {
     return TypingEffectStyle.OFF;
   }
 
-  /** Whether keys are handed to `msime_client_typing_effect` at all: the header asks for the call only while a style is drawn or the combo is counted. */
+  /** Whether keys are handed to `msime_client_typing_effect` at all: the header asks for the call only while a style is drawn, an effect pack is selected or the combo is counted. */
   static active(settings: TypingEffectSettings): boolean {
-    return settings.style !== TypingEffectStyle.OFF || settings.comboCounter;
+    return (
+      settings.style !== TypingEffectStyle.OFF || settings.pack !== "" || settings.comboCounter
+    );
   }
 
   /** Unpack one answer. */

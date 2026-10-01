@@ -135,3 +135,8 @@ export const entryPreview =
 /** The category strip above the gallery: one column per tab, like the phone's other tab strips. */
 export const categoryTabs =
   "grid grid-cols-3 gap-[3px] rounded-[9px] bg-subtle p-[3px] [&>button]:min-h-[34px] [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-secondary [&>button[aria-selected=true]]:bg-raised [&>button[aria-selected=true]]:text-body [&>button[aria-selected=true]]:shadow-card";
+/** The desktop community's two galleries, candidate-window skins and plugin packs: the same strip as `categoryTabs` with two columns. */
+export const categoryTabsPair =
+  "grid grid-cols-2 gap-[3px] rounded-[9px] bg-subtle p-[3px] [&>button]:min-h-[34px] [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-secondary [&>button[aria-selected=true]]:bg-raised [&>button[aria-selected=true]]:text-body [&>button[aria-selected=true]]:shadow-card";
+/** The kind filter above the plugin gallery. */
+export const kindFilter = "flex flex-wrap gap-1.5 [&>button]:m-0 [&>button]:whitespace-nowrap";

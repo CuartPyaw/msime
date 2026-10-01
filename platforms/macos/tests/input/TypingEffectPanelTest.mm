@@ -91,6 +91,29 @@ int main() {
 
             [panel applyPreferences:@{@"plugins" : @{@"effect_style" : @"off", @"combo_counter" : @NO}}];
             Require(!panel.configured && !panel.isVisible, "turning effects off left something drawn");
+
+            // An effect pack selected with the style off still asks the library: the pack's style is the session's to resolve.
+            [panel applyPreferences:@{@"plugins" : @{@"effect_style" : @"off", @"effect_pack" : @"neon", @"combo_counter" : @NO}}];
+            Require(panel.configured, "a selected effect pack left the effect unconfigured");
+            Require(MSIMETypingEffectColor(@"#FF8800") != nil && MSIMETypingEffectColor(@"FF8800") == nil && MSIMETypingEffectColor(@"#GG8800") == nil &&
+                        MSIMETypingEffectColor(@3) == nil,
+                    "pack colour parsing");
+            [panel applySettings:@{@"pack" : @"neon", @"style" : @"sparks", @"intensity" : @70, @"colors" : @[@"#FF0000", @"bad", @"#00FF00"],
+                                   @"duration_ms" : @400, @"particles" : @12, @"combo_counter" : @NO}];
+            Require(panel.intensity == 70 && panel.effectColors.count == 2 && panel.effectDuration == 0.4 && panel.effectParticles == 12, "pack settings not applied");
+            [panel presentEffect:Pack(2, false, MSIMETypingEffectStyleSparks) commit:NO caretRect:caret candidateView:nil cardRect:NSZeroRect cornerRadius:0 reduceMotion:NO lowPower:NO];
+            Require(panel.emitting, "pack sparks not drawn");
+            [panel settle];
+            [panel applySettings:@{@"pack" : @"quiet", @"style" : @"sparks", @"intensity" : @50, @"colors" : @[], @"duration_ms" : [NSNull null], @"particles" : @0, @"combo_counter" : @NO}];
+            [panel presentEffect:Pack(1, false, MSIMETypingEffectStyleSparks) commit:NO caretRect:caret candidateView:nil cardRect:NSZeroRect cornerRadius:0 reduceMotion:NO lowPower:NO];
+            Require(!panel.emitting && panel.effectDuration == 0 && panel.effectColors.count == 0, "a pack with no particles emitted sparks");
+            [panel settle];
+            [panel applySettings:@{@"intensity" : @900, @"duration_ms" : @5, @"particles" : @500}];
+            Require(panel.intensity == 100 && panel.effectDuration == 0.06 && panel.effectParticles == 64, "pack settings not bounded");
+            [panel applySettings:nil];
+            Require(panel.effectColors.count == 0 && panel.effectDuration == 0 && panel.effectParticles == -1, "no settings kept a pack's hints");
+            [panel applyPreferences:@{@"plugins" : @{@"effect_style" : @"off", @"effect_pack" : @"", @"combo_counter" : @NO}}];
+            Require(!panel.configured, "an empty effect pack counted as selected");
         } catch (const std::exception &error) { std::fprintf(stderr, "%s\n", error.what()); return 1; }
     }
     return 0;

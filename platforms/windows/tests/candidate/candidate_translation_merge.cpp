@@ -87,6 +87,17 @@ int main() {
     REQUIRE(first_translation_sense("；世界") == "世界");
     REQUIRE(first_translation_sense("   ").empty());
 
+    // A `/fy` query is one English sentence into the query's own target, asked directly rather than through the candidate plan, which refuses a Chinese target.
+    const auto command = command_translation_item(true, Texts{"hello world"}, "zh");
+    REQUIRE(command && command->text == "hello world" &&
+            command->source_language == "en" && command->target_language == "zh");
+    // A candidate gloss query is never one, nor is a sentence query that does not hold exactly one non-empty text and a target.
+    REQUIRE(!command_translation_item(false, Texts{"hello world"}, "zh"));
+    REQUIRE(!command_translation_item(true, Texts{"hello", "world"}, "zh"));
+    REQUIRE(!command_translation_item(true, Texts{}, "zh"));
+    REQUIRE(!command_translation_item(true, Texts{""}, "zh"));
+    REQUIRE(!command_translation_item(true, Texts{"hello"}, ""));
+
     std::cout << "candidate translation merge policy ok\n";
     return 0;
   } catch (const std::exception &error) {

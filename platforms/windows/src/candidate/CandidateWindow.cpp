@@ -618,11 +618,16 @@ void CandidateWindow::take_typing_effect() {
   // A 0 decodes to no combo and no flash, which kills both timers below and clears a count still on the card.
   effect_ = decode_typing_effect(*packed);
   effect_started_ = GetTickCount64();
+  // The focused session's effect pack, published with the key; before any session has published one the preference-derived intensity and the host's own flash stand.
+  if (const auto settings = unpack_typing_effect_settings(TypingEffectSignal::instance().settings()))
+    effect_settings_ = *settings;
+  else
+    effect_settings_ = resolve_typing_effect_settings(effect_intensity_, std::nullopt, std::nullopt);
   // Windows' "Show animations" switch is its reduced motion setting: with it off the card does not flash, and the combo count still shows.
   BOOL animations = TRUE;
   if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0))
     animations = TRUE;
-  effect_flashing_ = animations && typing_effect_flash_alpha(effect_, effect_intensity_, 0) > 0.0f;
+  effect_flashing_ = animations && typing_effect_flash_alpha(effect_, effect_settings_.intensity, 0, effect_settings_.flash_millis) > 0.0f;
   if (effect_flashing_)
     SetTimer(window_, typing_flash_timer, typing_flash_frame_millis, nullptr);
   else
@@ -637,7 +642,7 @@ void CandidateWindow::take_typing_effect() {
 void CandidateWindow::typing_effect_tick(UINT_PTR timer) {
   if (timer == typing_combo_timer) {
     KillTimer(window_, typing_combo_timer);
-  } else if (GetTickCount64() - effect_started_ >= typing_effect_flash_millis) {
+  } else if (GetTickCount64() - effect_started_ >= effect_settings_.flash_millis) {
     KillTimer(window_, typing_flash_timer);
     effect_flashing_ = false;
   }
@@ -730,7 +735,7 @@ void CandidateWindow::paint() {
   target->FillRoundedRectangle(card, brush(candidate_faded(palette_.surface, style_)));
   const float background_opacity = background_.opacity * style_.opacity();
   const uint64_t effect_elapsed = GetTickCount64() - effect_started_;
-  const float flash = effect_flashing_ ? typing_effect_flash_alpha(effect_, effect_intensity_, effect_elapsed) : 0.0f;
+  const float flash = effect_flashing_ ? typing_effect_flash_alpha(effect_, effect_settings_.intensity, effect_elapsed, effect_settings_.flash_millis) : 0.0f;
   // The package background sits on the surface and under the border and the text, masked by the card's rounded outline.
   if (!background_.image.empty() && background_opacity > 0.0f) {
     D2D1_SIZE_F natural{};
@@ -757,12 +762,13 @@ void CandidateWindow::paint() {
   }
   target->DrawRoundedRectangle(card, brush(candidate_faded(palette_.border, style_)),
                                palette_.border_width);
-  // The typing flash: a faint accent wash over the surface, under the text, and an accent outline that grows with the style. Both fade with the flash.
+  // The typing flash: a faint accent wash over the surface, under the text, and an accent outline that grows with the style. Both fade with the flash. An effect pack's first colour takes the accent's place.
   if (flash > 0.0f) {
-    auto wash = palette_.accent;
+    const auto flash_color = effect_settings_.color ? candidate_rgb(*effect_settings_.color) : palette_.accent;
+    auto wash = flash_color;
     wash.a = flash * 0.12f;
     target->FillRoundedRectangle(card, brush(wash));
-    auto outline = palette_.accent;
+    auto outline = flash_color;
     outline.a = flash;
     target->DrawRoundedRectangle(card, brush(outline),
                                  palette_.border_width + static_cast<float>(static_cast<uint32_t>(effect_.style)));

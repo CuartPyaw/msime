@@ -19,6 +19,7 @@ export function PluginsSettingsPage() {
     showPluginTriggers,
     showTypingEffects,
     showTypingEffectStyles,
+    showTypingEffectPacks,
   } = useSettingsForm();
   const { onPreferencesChange } = createSettingsDraftActions({ setDraft });
   return (
@@ -32,6 +33,7 @@ export function PluginsSettingsPage() {
           triggers={showPluginTriggers}
           typingEffects={showTypingEffects}
           effectStyles={showTypingEffectStyles}
+          effectPacks={showTypingEffectPacks}
           active={page === "plugins"}
           onChange={(plugins) => onPreferencesChange({ plugins })}
           onError={setError}

@@ -74,7 +74,7 @@ public:
   }
   // The card radius a package asks for; none keeps the theme's.
   void set_skin_corner_radius(std::optional<float> radius) { skin_radius_ = radius; }
-  // preferences.plugins.effect_intensity, 0-100: how bright the typing flash is. The style and the combo come with each key from the input thread (TypingEffectSignal).
+  // preferences.plugins.effect_intensity, 0-100: how bright the typing flash is until a session publishes its resolved effect settings. The style, the combo and those settings come with each key from the input thread (TypingEffectSignal).
   void set_effect_intensity(uint32_t intensity) { effect_intensity_ = (std::min)(intensity, 100u); }
   // The user's scale, opacity and corner radius. Scale changes the card's size, so the next refresh lays it out again. Invalid values leave the previous style intact.
   bool set_style(const CandidateWindowStyle &style);
@@ -182,6 +182,8 @@ private:
   // The typing effect last taken from the input thread, when it arrived (GetTickCount64), and whether its flash is still fading. The combo count outlives the flash: it stays on the card until the library's idle window ends it.
   uint32_t effect_intensity_ = 50;
   TypingEffect effect_{};
+  // The settings the current flash is drawn with, adopted with it so a flash keeps its length and colour while it fades.
+  TypingEffectSettings effect_settings_{};
   uint64_t effect_started_ = 0;
   bool effect_flashing_ = false;
 };

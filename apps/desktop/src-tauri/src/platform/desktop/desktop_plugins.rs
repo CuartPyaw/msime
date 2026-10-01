@@ -16,6 +16,11 @@ impl PluginsState {
     pub(crate) fn new(state_directory: &Path) -> Self {
         Self(state_directory.join("plugins"))
     }
+
+    /// The plugins root, for the community commands that publish from and install into it.
+    pub(crate) fn root(&self) -> &Path {
+        &self.0
+    }
 }
 
 /// What the page asks the picker for. A native dialog chooses either files or folders, not both, so the page offers one button for each.

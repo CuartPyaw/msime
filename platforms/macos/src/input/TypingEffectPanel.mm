@@ -86,6 +86,21 @@ NSString *MSIMETypingEffectComboText(NSUInteger combo) {
     return combo >= 2 ? [NSString stringWithFormat:@"连击 ×%lu", (unsigned long)combo] : nil;
 }
 
+NSColor *MSIMETypingEffectColor(id value) {
+    if (![value isKindOfClass:NSString.class] || [value length] != 7 || ![value hasPrefix:@"#"]) return nil;
+    unsigned rgb = 0;
+    for (NSUInteger index = 1; index < 7; ++index) {
+        const unichar ch = [value characterAtIndex:index];
+        unsigned digit = 0;
+        if (ch >= '0' && ch <= '9') digit = ch - '0';
+        else if (ch >= 'a' && ch <= 'f') digit = ch - 'a' + 10;
+        else if (ch >= 'A' && ch <= 'F') digit = ch - 'A' + 10;
+        else return nil;
+        rgb = (rgb << 4) | digit;
+    }
+    return [NSColor colorWithSRGBRed:((rgb >> 16) & 0xFF) / 255.0 green:((rgb >> 8) & 0xFF) / 255.0 blue:(rgb & 0xFF) / 255.0 alpha:1.0];
+}
+
 @implementation MSIMETypingEffectFlashView
 - (BOOL)isOpaque { return NO; }
 - (NSView *)hitTest:(NSPoint)point {
@@ -98,7 +113,11 @@ NSString *MSIMETypingEffectComboText(NSUInteger combo) {
 @implementation MSIMETypingEffectPanel {
     NSString *_style;
     BOOL _comboCounter;
+    BOOL _packSelected;
     NSUInteger _intensity;
+    NSArray<NSColor *> *_effectColors;
+    NSTimeInterval _effectDuration;
+    NSInteger _effectParticles;
     CALayer *_root;
     CAEmitterLayer *_emitter;
     CALayer *_caretFlash;
@@ -137,6 +156,8 @@ NSString *MSIMETypingEffectComboText(NSUInteger combo) {
     self.animationBehavior = NSWindowAnimationBehaviorNone;
     _style = @"off";
     _intensity = kDefaultIntensity;
+    _effectColors = @[];
+    _effectParticles = -1;
 
     // Layer hosting: the panel draws nothing through AppKit, only these layers.
     NSView *host = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
@@ -195,6 +216,8 @@ NSString *MSIMETypingEffectComboText(NSUInteger combo) {
     if (![plugins isKindOfClass:NSDictionary.class]) return;
     id style = plugins[@"effect_style"];
     _style = [@[@"flash", @"sparks", @"power_mode"] containsObject:style] ? [style copy] : @"off";
+    id pack = plugins[@"effect_pack"];
+    _packSelected = [pack isKindOfClass:NSString.class] && [pack length] > 0;
     id counter = plugins[@"combo_counter"];
     _comboCounter = [counter isKindOfClass:NSNumber.class] && [counter boolValue];
     id intensity = plugins[@"effect_intensity"];
@@ -202,8 +225,30 @@ NSString *MSIMETypingEffectComboText(NSUInteger combo) {
     if (!self.configured) [self settle];
 }
 
-- (BOOL)configured { return ![_style isEqualToString:@"off"] || _comboCounter; }
+- (void)applySettings:(NSDictionary *)settings {
+    _effectColors = @[];
+    _effectDuration = 0;
+    _effectParticles = -1;
+    if (![settings isKindOfClass:NSDictionary.class]) return;
+    id intensity = settings[@"intensity"];
+    if ([intensity isKindOfClass:NSNumber.class]) _intensity = (NSUInteger)Clamp([intensity doubleValue], 0, 100);
+    NSMutableArray<NSColor *> *colors = [NSMutableArray array];
+    id listed = settings[@"colors"];
+    if ([listed isKindOfClass:NSArray.class])
+        for (id value in listed)
+            if (NSColor *color = MSIMETypingEffectColor(value)) [colors addObject:color];
+    _effectColors = [colors copy];
+    id duration = settings[@"duration_ms"];
+    if ([duration isKindOfClass:NSNumber.class]) _effectDuration = Clamp([duration doubleValue], 60, 1500) / 1000.0;
+    id particles = settings[@"particles"];
+    if ([particles isKindOfClass:NSNumber.class]) _effectParticles = (NSInteger)Clamp([particles doubleValue], 0, 64);
+}
+
+- (BOOL)configured { return ![_style isEqualToString:@"off"] || _packSelected || _comboCounter; }
 - (NSUInteger)intensity { return _intensity; }
+- (NSArray<NSColor *> *)effectColors { return _effectColors; }
+- (NSTimeInterval)effectDuration { return _effectDuration; }
+- (NSInteger)effectParticles { return _effectParticles; }
 - (BOOL)emitting { return _emitting; }
 - (MSIMETypingEffectStyle)drawnStyle { return _drawnStyle; }
 - (NSString *)displayedCombo { return self.isVisible && !_badge.hidden ? (NSString *)_badgeText.string : nil; }
@@ -275,9 +320,14 @@ NSString *MSIMETypingEffectComboText(NSUInteger combo) {
     const CGFloat scale = (screen ?: NSScreen.mainScreen).backingScaleFactor ?: 2.0;
     // The accent is a dynamic colour: resolve it in the panel's appearance, and hold the resolved colours for as long as their CGColors are used.
     __block NS_VALID_UNTIL_END_OF_SCOPE NSColor *accentColor = nil;
-    [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
-        accentColor = [NSColor.controlAccentColor colorUsingColorSpace:NSColorSpace.sRGBColorSpace] ?: NSColor.systemBlueColor;
-    }];
+    // An effect pack's first colour takes the accent's place.
+    if (_effectColors.count > 0) accentColor = _effectColors.firstObject;
+    else
+        [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
+            accentColor = [NSColor.controlAccentColor colorUsingColorSpace:NSColorSpace.sRGBColorSpace] ?: NSColor.systemBlueColor;
+        }];
+    // The sparks of one burst take the pack's colours in turn, one per key.
+    NS_VALID_UNTIL_END_OF_SCOPE NSColor *sparkColor = _effectColors.count > 0 ? _effectColors[effect.combo % _effectColors.count] : accentColor;
     NS_VALID_UNTIL_END_OF_SCOPE NSColor *badgeColor = [accentColor colorWithAlphaComponent:0.92];
     CGColorRef accent = accentColor.CGColor;
     CGColorRef badgeFill = badgeColor.CGColor;
@@ -291,12 +341,16 @@ NSString *MSIMETypingEffectComboText(NSUInteger combo) {
     _emitter.emitterPosition = local;
     _emitter.frame = _root.bounds;
 
-    const BOOL sparks = style == MSIMETypingEffectStyleSparks || style == MSIMETypingEffectStylePowerMode;
+    // A pack that asks for no particles draws its sparks style without sparks.
+    const BOOL sparks = (style == MSIMETypingEffectStyleSparks || style == MSIMETypingEffectStylePowerMode) && _effectParticles != 0;
     const BOOL power = style == MSIMETypingEffectStylePowerMode;
     if (sparks) {
         const CGFloat burst = (power ? 2.0 : 1.0) * (commit ? 2.0 : 1.0);
-        [_emitter setValue:(__bridge id)accent forKeyPath:@"emitterCells.spark.color"];
-        [_emitter setValue:@(220.0 * strength * burst) forKeyPath:@"emitterCells.spark.birthRate"];
+        // A pack's particle count is the sparks of one key's burst, so the birth rate spreads them over the burst.
+        const CGFloat birthRate = _effectParticles > 0 ? (CGFloat)_effectParticles * (commit ? 2.0 : 1.0) / (commit ? kCommitBurst : kKeyBurst)
+                                                       : 220.0 * strength * burst;
+        [_emitter setValue:(__bridge id)sparkColor.CGColor forKeyPath:@"emitterCells.spark.color"];
+        [_emitter setValue:@(birthRate) forKeyPath:@"emitterCells.spark.birthRate"];
         [_emitter setValue:@(power ? 170.0 : 120.0) forKeyPath:@"emitterCells.spark.velocity"];
         _emitter.hidden = NO;
         // A fresh begin time starts this burst now instead of continuing an emission the layer believes is long running.
@@ -327,7 +381,7 @@ NSString *MSIMETypingEffectComboText(NSUInteger combo) {
     }
 
     const BOOL flash = style == MSIMETypingEffectStyleFlash || power;
-    const NSTimeInterval flashDuration = commit ? kCommitFlash : kKeyFlash;
+    const NSTimeInterval flashDuration = _effectDuration > 0 ? _effectDuration : (commit ? kCommitFlash : kKeyFlash);
     const float peak = (float)((commit ? 0.32 : 0.2) * strength);
     if (flash && card) {
         [self flashCard:candidateView rect:cardRect cornerRadius:cornerRadius color:accent peak:peak duration:flashDuration];

@@ -1,4 +1,5 @@
 import { errorCode } from "../core/error-code";
+import { pluginErrorMessage } from "../settings/plugins-section";
 import type { CommunityResourceKind, CommunityResourceScope } from "./community-resources";
 
 export type Identified = { id: string };
@@ -128,6 +129,45 @@ export function candidateSkinMessage(error: unknown, publishing = false): string
       return "无法安全读取登录状态，请检查设备安全设置。";
   }
   return "社区暂时不可用，请稍后重试。";
+}
+
+/**
+ * Fixed sentences for the plugin gallery and its publish dialog. Pack failures come back with client-core's `plugin_*` codes, which read as they do on the 扩展 page, and the community ones with the host's HTTP-status `community_*` codes; backend text is never shown. `publishing` picks the sentence for a `community_invalid` or `community_conflict` publish, where the server has rejected something only it can check.
+ */
+export function communityPluginMessage(error: unknown, publishing = false): string {
+  switch (errorCode(error)) {
+    case "plugin_community_kind":
+      return "特效包暂不支持分享。";
+    case "plugin_community_too_large":
+      return "扩展包压缩后不能超过 8 MB。";
+    case "plugin_community_checksum":
+      return "下载的扩展包已损坏，请重试。";
+    case "plugin_community_mismatch":
+      return "下载的扩展包与作品信息不符，已停止安装。";
+    case "storage":
+      return "无法读写扩展目录，请检查数据目录的权限。";
+    case "community_invalid":
+      return publishing
+        ? "服务器未接受这个扩展包：请确认名称、说明和包内容符合发布要求。"
+        : "内容无效，请修改后重试。";
+    case "community_conflict":
+      return publishing
+        ? "发布信息已变更，或已达到发布上限（最多 20 个、合计 32 MB）。"
+        : "作品状态已变化，请刷新后重试。";
+    case "community_rate_limited":
+      return publishing ? "每小时最多发布 10 次，请稍后再试。" : "请求过于频繁，请稍后再试。";
+    case "community_forbidden":
+      return "下载后才能评分，且不能给自己的作品评分。";
+    case "community_unauthorized":
+      return "请先登录后执行此操作。";
+    case "community_not_found":
+      return "作品不存在或已下架。";
+    case "community_cancelled":
+      return "账号状态已变化，请重新加载。";
+    case "community_storage":
+      return "无法安全读取登录状态，请检查设备安全设置。";
+  }
+  return pluginErrorMessage(error, "社区暂时不可用，请稍后重试。");
 }
 
 /** A package size in megabytes with one decimal, as the publish dialog states it against the 2 MB limit. */

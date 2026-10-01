@@ -164,6 +164,10 @@ export const command: (handle: number, command: number) => string;
  * `msime_client_typing_effect`: count one key or commit into the session's combo and answer what to draw, packed into one integer. `event` bits 0-7 are 0 any other key, 1 space, 2 enter, 3 backspace, 4 commit, 5 a delete by another route; 0x100 marks an auto-repeat, 0x200 keeps the tier-up sound quiet. The answer's bits 0-15 are the combo count, bit 16 a tier-up, bits 17-19 the style (0 off, 1 flash, 2 sparks, 3 power mode) and bit 20 a tier-up sound this host plays itself; `TypingEffectPolicy.decode` unpacks it. 0 while the effect and the combo counter are both off. No disk, no allocation: safe on the key path.
  */
 export const typingEffect: (handle: number, event: number) => number;
+/**
+ * `msime_client_typing_effect_settings`: the session's resolved typing effect, `{ok, value: {pack, issue, style, intensity, colors, duration_ms, particles, combo_counter}}`. With an effect pack selected its parameters replace the preference values; a pack that does not load answers style off with `issue` saying why. Read it after the preferences change or a field gains focus, not per key.
+ */
+export const typingEffectSettings: (handle: number) => string;
 
 export const select: (handle: number, generation: number, index: number) => string;
 export const selectEdge: (

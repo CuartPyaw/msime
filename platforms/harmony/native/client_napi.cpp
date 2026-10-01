@@ -807,6 +807,16 @@ static napi_value TypingEffect(napi_env env, napi_callback_info info) {
     return output;
 }
 
+// The session's resolved typing effect as JSON: read after the preferences change or a field gains focus, never per key.
+static napi_value TypingEffectSettings(napi_env env, napi_callback_info info) {
+    std::vector<napi_value> argv;
+    uint64_t handle = 0;
+    if (!arguments(env, info, 1, argv) || !argumentHandle(env, argv[0], handle)) {
+        return invalid(env, "Expected a session handle");
+    }
+    return response(env, msime_client_typing_effect_settings(handle));
+}
+
 static napi_value FixCandidatePosition(napi_env env, napi_callback_info info) {
     std::vector<napi_value> argv;
     uint64_t handle = 0;
@@ -1133,6 +1143,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         ENTRY("balancePairedPunctuationAfterAutoClose", BalancePairedPunctuationAfterAutoClose),
         ENTRY("command", Command),
         ENTRY("typingEffect", TypingEffect),
+        ENTRY("typingEffectSettings", TypingEffectSettings),
         ENTRY("select", Select),
         ENTRY("selectEdge", SelectEdge),
         ENTRY("selectAnyCandidate", SelectAnyCandidate),
