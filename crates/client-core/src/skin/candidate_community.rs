@@ -3,6 +3,7 @@
 //! A shared package is an installed skin folder reduced to what the backend accepts: `skin.toml`, sent verbatim, plus the PNG or JPEG images its manifest references (the preview, the decoration image and the background image), base64-encoded. [`pack`] builds that payload from a folder under the host's skin root and [`install`] writes a downloaded one back as a folder the catalog lists. Both mirror every rule of the server (`internal/account/community_candidate.go`) the client can check, because the transport only reports an HTTP status and the page can then name the exact problem.
 
 use super::catalog::{self, SkinLicense, SkinSummary};
+use super::category::INCLUDE_CATEGORY;
 use crate::account::{
     request_with_account_session, AccountApi, AccountError, AccountSessionStorage,
     BackendAccountClient, BackendAccountSession,
@@ -50,8 +51,6 @@ const MAX_SYNC_RESPONSE_BYTES: usize = 512 * 1024;
 const MAX_SYNC_ENTRIES: usize = 1000;
 /// The query every list and detail request carries so the server includes `visibility`, `updated_at` and the signed-in user's private packages. Clients released before private packages existed read items with unknown fields refused, so the server sends the new fields only to clients that ask for them.
 const SYNC_FIELDS: &str = "fields=sync";
-/// 每个返回 `CandidateSkinItem` 的请求都带上这个查询参数，服务端才会在条目里加上 `category`。早于分类功能发布的客户端以 `deny_unknown_fields` 读取条目，所以服务端只对显式请求的客户端返回该字段。
-const INCLUDE_CATEGORY: &str = "include=category";
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(90);
 const MAX_RESOURCE_PATH_BYTES: usize = 256;
 /// 单张图片每边最多的像素数，与服务端 `maxCandidateSide` 一致：更大的图服务端会拒收，装进来也同步不上去。
@@ -96,49 +95,8 @@ pub enum CandidateSkinVisibility {
     Private,
 }
 
-/// 社区候选窗皮肤的发布分类。分类只是发布元数据，不属于 `skin.toml`。服务端将来新增的分类 id 一律读作 [`CandidateSkinCategory::Other`]，这样旧客户端不会因新分类而读取失败。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CandidateSkinCategory {
-    Nature,
-    Guofeng,
-    Acg,
-    Cute,
-    Food,
-    Tech,
-    Minimal,
-    #[default]
-    #[serde(other)]
-    Other,
-}
-
-impl CandidateSkinCategory {
-    /// 全部分类，顺序即界面上筛选按钮的顺序。
-    pub const ALL: [Self; 8] = [
-        Self::Nature,
-        Self::Guofeng,
-        Self::Acg,
-        Self::Cute,
-        Self::Food,
-        Self::Tech,
-        Self::Minimal,
-        Self::Other,
-    ];
-
-    /// 服务端使用的分类 id。
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Nature => "nature",
-            Self::Guofeng => "guofeng",
-            Self::Acg => "acg",
-            Self::Cute => "cute",
-            Self::Food => "food",
-            Self::Tech => "tech",
-            Self::Minimal => "minimal",
-            Self::Other => "other",
-        }
-    }
-}
+/// 社区候选窗皮肤的发布分类，与社区键盘皮肤共用同一套分类。分类只是发布元数据，不属于 `skin.toml`。
+pub use super::category::SkinCategory as CandidateSkinCategory;
 
 /// One published package as the gallery lists it. It never carries the manifest or any image bytes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

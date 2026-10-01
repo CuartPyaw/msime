@@ -27,6 +27,14 @@ import {
 import { CommunitySkinPublicationFields } from "./community-skin-publication-fields";
 import { CommunitySkinModerationSection } from "./community-skin-moderation-section";
 import { CommunitySkinCardMetrics } from "./community-skin-card-metrics";
+import {
+  CommunitySkinCategoryFilter,
+  CommunitySkinCategorySelect,
+  communitySkinCategoryLabel,
+  communitySkinCategoryLabels,
+  useCommunitySkinCategoryFilter,
+  type CommunitySkinCategory,
+} from "./community-skin-category";
 import type {
   CustomSkinLibraryClient,
   SavedTouchKeyboardSkin,
@@ -46,6 +54,8 @@ export type CommunitySkin = {
   my_rating: number;
   /** Sent only on the user's own skins; `removed` shows 已下架. */
   moderation?: CommunityModeration | null;
+  /** 发布分类；早于分类功能的服务端不返回。 */
+  category?: CommunitySkinCategory;
 };
 
 export type CommunitySkinPage = {
@@ -60,8 +70,13 @@ export type CommunitySkinDownload = {
 };
 
 export interface CommunitySkinClient {
-  /** `mine` lists only the signed-in user's own skins, removed ones included. */
-  list(offset: number, search: string, mine?: boolean): Promise<CommunitySkinPage>;
+  /** `mine` lists only the signed-in user's own skins, removed ones included. `category` 为 `null` 时列出全部分类。 */
+  list(
+    offset: number,
+    search: string,
+    mine: boolean,
+    category: CommunitySkinCategory | null,
+  ): Promise<CommunitySkinPage>;
   detail(id: string): Promise<CommunitySkin>;
   download(id: string, name: string): Promise<CommunitySkinDownload>;
   rate(id: string, stars: number): Promise<void>;
@@ -70,8 +85,11 @@ export interface CommunitySkinClient {
     name: string,
     description: string,
     design: TouchKeyboardSkinDesign,
+    category: CommunitySkinCategory,
   ): Promise<void>;
   unpublish(id: string): Promise<void>;
+  /** 修改自己作品的发布分类，返回修改后的条目。 */
+  setCategory(id: string, category: CommunitySkinCategory): Promise<CommunitySkin>;
   finishTrial(id: string, keep: boolean): Promise<void>;
   /** Reports another user's skin to the moderators. */
   report?(id: string, reason: CommunityReportReason, detail: string): Promise<void>;
@@ -96,6 +114,7 @@ function CommunitySkinPublishDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [agreed, setAgreed] = useState(false);
+  const [category, setCategory] = useState<CommunitySkinCategory>("other");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   // Kept next to the sentence because publishMessage collapses the code, and this is the one
@@ -168,6 +187,7 @@ function CommunitySkinPublishDialog({
             normalizedName,
             normalizedDescription,
             selected.design,
+            category,
           );
           if (generation !== clientGeneration.current) return;
           await onPublished();
@@ -243,6 +263,16 @@ function CommunitySkinPublishDialog({
               }}
               onAgreedChange={setAgreed}
             />
+            <CommunitySkinCategorySelect
+              ariaLabel="发布分类"
+              value={category}
+              disabled={busy}
+              onChange={(next) => {
+                // 分类也是这次发布的内容，换了分类就是另一次发布，不能沿用上一次的发布 id。
+                setPublicationId(randomUuid());
+                setCategory(next);
+              }}
+            />
             <p className={style.warning}>
               发布后设计及照片壁纸将公开。请勿包含私人照片或敏感信息；发布成功后可在“我的作品”中下架。
             </p>
@@ -282,6 +312,8 @@ function CommunitySkinCard({
       </span>
       <strong>{skin.name}</strong>
       <span className={style.cardAuthor}>
+        {communitySkinCategoryLabel(skin.category) &&
+          `${communitySkinCategoryLabel(skin.category)} · `}
         {skin.owned ? "我的作品" : skin.author}
         {skin.owned && skin.moderation === "removed" && " · 已下架"}
       </span>
@@ -310,10 +342,12 @@ export function CommunitySkinsPage({
   /** Where the account page is, for a publish that failed only because nobody is signed in. */
   onLogin?: () => void;
 }) {
+  const categoryFilter = useCommunitySkinCategoryFilter();
+  const categoryRequest = categoryFilter.request;
   const galleryClient = useMemo<CommunityGalleryClient<CommunitySkin>>(
     () => ({
       list: async (offset, search, mine) => {
-        const page = await client.list(offset, search, mine ?? false);
+        const page = await client.list(offset, search, mine ?? false, categoryRequest.current);
         return { items: page.skins, has_more: page.has_more };
       },
       detail: client.detail,
@@ -324,7 +358,7 @@ export function CommunitySkinsPage({
           client.report!(id, reason, detail),
       }),
     }),
-    [client],
+    [client, categoryRequest],
   );
   const gallery = useCommunityGallery({
     client: galleryClient,
@@ -446,6 +480,26 @@ export function CommunitySkinsPage({
     });
   };
 
+  const changeCategory = (next: CommunitySkinCategory | null) =>
+    categoryFilter.change(next, () => requestList(activeSearch, false));
+
+  const changeOwnCategory = async (next: CommunitySkinCategory) => {
+    if (!selected) return;
+    const target = selected;
+    await runAction(
+      async (currentClient) => {
+        const updated = await client.setCategory(target.id, next);
+        if (!gallery.isCurrent(currentClient)) return;
+        setSelected(updated);
+        gallery.setItems((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        );
+        setActionNotice(`已改为「${communitySkinCategoryLabels[next]}」分类。`);
+      },
+      { clearNotice: true },
+    );
+  };
+
   const unpublish = () => {
     if (trial) return;
     void unpublishSelected("已下架这款皮肤；其他用户将无法再下载，已有本地副本不会受影响。");
@@ -479,7 +533,11 @@ export function CommunitySkinsPage({
           <div className={style.detailTitle}>
             <div className={style.headingBody}>
               <h2 className={style.headingTitle}>{selected.name}</h2>
-              <p className={style.headingNote}>{selected.author}</p>
+              <p className={style.headingNote}>
+                {[communitySkinCategoryLabel(selected.category), selected.author]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
             </div>
             {selected.owned && <span className={style.detailBadge}>我的作品</span>}
             <CommunityRemovedBadge owned={selected.owned} moderation={selected.moderation} />
@@ -527,6 +585,14 @@ export function CommunitySkinsPage({
                 保留使用
               </button>
             </div>
+          )}
+          {selected.owned && (
+            <CommunitySkinCategorySelect
+              ariaLabel="修改分类"
+              value={selected.category ?? "other"}
+              disabled={actionBusy || detailBusy}
+              onChange={(next) => void changeOwnCategory(next)}
+            />
           )}
           <CommunitySkinModerationSection
             owned={selected.owned}
@@ -582,6 +648,11 @@ export function CommunitySkinsPage({
           )}
         </div>
       </div>
+      <CommunitySkinCategoryFilter
+        ariaLabel="键盘皮肤分类"
+        value={categoryFilter.category}
+        onChange={(next) => void changeCategory(next)}
+      />
       {error && (
         <CommunityErrorAlert message={error} signInRequired={signInRequired} onLogin={onLogin} />
       )}

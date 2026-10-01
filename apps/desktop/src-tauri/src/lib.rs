@@ -5378,6 +5378,8 @@ pub fn run() {
             #[cfg(any(target_os = "ios", target_os = "android"))]
             mobile_community::community_skin_unpublish,
             #[cfg(any(target_os = "ios", target_os = "android"))]
+            mobile_community::community_skin_set_category,
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             mobile_community::community_skin_finish_trial,
             #[cfg(any(target_os = "ios", target_os = "android"))]
             mobile_community::ai_skin_generate,

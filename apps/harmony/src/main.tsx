@@ -441,12 +441,13 @@ function communitySkinClient(native: NativeBridge): CommunitySkinClient {
     ).then(unwrap<T>);
   return {
     // 我的作品 asks the host for scope "mine", which it sends with the session and fields=moderation so a removed skin carries its 已下架 badge.
-    list: (offset, search, mine) =>
+    list: (offset, search, mine, category) =>
       request<CommunitySkinPage>({
         community_operation: "list",
         offset,
         search,
         ...(mine ? { scope: "mine" } : {}),
+        category,
       }),
     detail: (id) => request<CommunitySkin>({ community_operation: "detail", id }),
     download: (id, name) =>
@@ -454,9 +455,11 @@ function communitySkinClient(native: NativeBridge): CommunitySkinClient {
     rate: async (id, stars) => {
       await request({ community_operation: "rate", id, stars });
     },
-    publish: async (id, name, description, design) => {
-      await request({ community_operation: "publish", id, name, description, design });
+    publish: async (id, name, description, design, category) => {
+      await request({ community_operation: "publish", id, name, description, design, category });
     },
+    setCategory: (id, category) =>
+      request<CommunitySkin>({ community_operation: "set_category", id, category }),
     unpublish: async (id) => {
       await request({ community_operation: "unpublish", id });
     },
