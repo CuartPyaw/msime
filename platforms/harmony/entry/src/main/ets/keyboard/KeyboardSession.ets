@@ -3738,7 +3738,7 @@ export class KeyboardSession implements HardwareKeyTarget {
         appliedCurrent = applied.value.applied;
         this.render(applied.value.view);
       }
-      if (appliedCurrent && query.user_data !== undefined && query.user_data.length > 0
+      if (appliedCurrent && typeof query.user_data === 'string' && query.user_data.length > 0
         && TranslationPolicy.targets(query).includes('en')) {
         const saveRequest: TranslationGlossSaveRequest = {
           target_language: 'en', translations: entries
@@ -3754,18 +3754,26 @@ export class KeyboardSession implements HardwareKeyTarget {
   private async fetchTargetTranslations(query: TranslationQuery, target: string, provider: string,
     entries: TranslationEntry[], answered: TranslationEntry[], epoch: number, handle: number,
     deadline: number): Promise<boolean> {
-    let plan: TranslationPlanItem[] = [];
-    try {
-      const planDocument: string = TranslationPolicy.planRequest(target, query.candidates);
-      const planReply: NativeReply<TranslationPlanItem[]> =
-        JSON.parse(client.translationPlan(planDocument)) as NativeReply<TranslationPlanItem[]>;
-      if (planReply.ok && Array.isArray(planReply.value)) plan = planReply.value;
-    } catch (error) {
-      KeyboardLog.error(`translation plan unavailable: ${describeError(error)}`);
+    // `/fy` is asked as its own item, past the plan and the caches (TranslationPolicy.commandItem).
+    const command: TranslationPlanItem | null = TranslationPolicy.commandItem(query);
+    let plan: TranslationPlanItem[] = command !== null ? [command] : [];
+    if (command === null) {
+      try {
+        const planDocument: string = TranslationPolicy.planRequest(target, query.candidates);
+        const planReply: NativeReply<TranslationPlanItem[]> =
+          JSON.parse(client.translationPlan(planDocument)) as NativeReply<TranslationPlanItem[]>;
+        if (planReply.ok && Array.isArray(planReply.value)) plan = planReply.value;
+      } catch (error) {
+        KeyboardLog.error(`translation plan unavailable: ${describeError(error)}`);
+      }
     }
     if (plan.length === 0 || provider.length === 0) return true;
     const pending: TranslationPlanItem[] = [];
     for (const item of plan) {
+      if (command !== null) {
+        pending.push(item);
+        continue;
+      }
       if (target === 'en' && query.english_gloss
         && entries.some((entry: TranslationEntry): boolean => entry.text === item.text)) {
         continue;
@@ -3960,6 +3968,11 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   private recordTranslation(query: TranslationQuery, target: string, item: TranslationPlanItem,
     value: string | null, entries: TranslationEntry[]): void {
+    // A `/fy` answer is the command's row, not a candidate gloss: it is neither cached nor remembered as a failure.
+    if (query.sentence === true) {
+      if (value !== null) TranslationPolicy.append(entries, item.text, value);
+      return;
+    }
     if (value === null) {
       this.translationNegativeCache.set(TranslationPolicy.cacheKey(query, target, item),
         Date.now() + TranslationPolicy.NEGATIVE_CACHE_MS);

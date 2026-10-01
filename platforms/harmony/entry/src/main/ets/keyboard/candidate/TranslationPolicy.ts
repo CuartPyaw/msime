@@ -33,6 +33,8 @@ export interface TranslationQuery {
   tencent_tmt?: TencentTranslationConfig | null;
   niutrans?: NiuTransTranslationConfig | null;
   english_gloss: boolean;
+  /** True only for the `/fy` command's request: one English sentence for the selected service, into target_language. */
+  sentence?: boolean;
   resources?: string;
   user_data?: string;
   /** Non-English targets with an offline dictionary installed beside the resources; omitted when there are none. */
@@ -87,6 +89,16 @@ export class TranslationPolicy {
         continue;
       TranslationPolicy.append(answered, entry.text, entry.translation);
     }
+  }
+
+  /** The one item a `/fy` request (command mode) asks about, or null for a candidate gloss query. The shared query sends it whatever the gloss switches say, with one candidate, the English typed after the command, and its own target language (Chinese). The candidate plan cannot carry it - it refuses a Chinese target and judges single words, not sentences - so it is asked as this item directly, with no offline dictionary and no translation cache, and its answer becomes the command's first row. */
+  static commandItem(query: TranslationQuery): TranslationPlanItem | null {
+    if (query.sentence !== true || query.candidates.length !== 1) return null;
+    const text: string = query.candidates[0].text;
+    if (typeof text !== "string" || text.length === 0) return null;
+    if (typeof query.target_language !== "string" || query.target_language.length === 0)
+      return null;
+    return { text: text, key: text, source_language: "en", target_language: query.target_language };
   }
 
   static provider(query: TranslationQuery): string {

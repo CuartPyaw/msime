@@ -513,6 +513,41 @@ group("keeps translation provider policy bounded and credential-free in signatur
   );
 });
 
+group("asks a /fy sentence query as its own item into its own target", () => {
+  const query: TranslationQuery = {
+    generation: 5,
+    target_language: "zh",
+    target_languages: ["zh"],
+    candidates: [{ text: "hello world" }],
+    custom_translation: { enabled: true, endpoint: "https://translate.example", api_key: "key" },
+    english_gloss: false,
+    sentence: true,
+  };
+  const item = TranslationPolicy.commandItem(query);
+  check(
+    item !== null &&
+      item.text === "hello world" &&
+      item.key === "hello world" &&
+      item.source_language === "en" &&
+      item.target_language === "zh",
+    "a sentence query is one English item into the query's target",
+  );
+  check(TranslationPolicy.targets(query).join(",") === "zh", "the /fy target is the query's own");
+  check(
+    TranslationPolicy.commandItem({ ...query, sentence: undefined }) === null,
+    "a candidate gloss query is not a command request",
+  );
+  check(
+    TranslationPolicy.commandItem({ ...query, candidates: [{ text: "a" }, { text: "b" }] }) ===
+      null,
+    "a sentence query holds exactly one text",
+  );
+  check(
+    TranslationPolicy.commandItem({ ...query, candidates: [{ text: "" }] }) === null,
+    "an empty sentence is not asked",
+  );
+});
+
 group("merges translation rows without unbounded display growth", () => {
   const entries: TranslationEntry[] = [];
   TranslationPolicy.append(entries, "你好", "hello");
