@@ -217,6 +217,7 @@ import {
   AccountTransportResponse,
   MAX_DICTIONARY_EXPORT_BYTES,
   MAX_SNAPSHOT_DOWNLOAD_BYTES,
+  COMMUNITY_REPORT_REASONS,
   dictionaryChangePageChanged,
 } from "../entry/src/main/ets/account/AccountCloudBridge";
 import {
@@ -12581,3 +12582,128 @@ group("notices are shown from client-core's answer and their links leave the app
   check(!NoticePolicy.ownPage("https://msime.app"), "a link does not");
 });
 
+group("community reports, moderation state and refusals reach the page by name", () => {
+  let stored: string | null = null;
+  const store: AccountSessionStore = {
+    load: () => stored,
+    save: (value: string) => {
+      stored = value;
+    },
+    clear: () => {
+      stored = null;
+    },
+  };
+  const calls: { method: string; path: string; token?: string; body?: Record<string, unknown> }[] = [];
+  let reply: AccountTransportResponse = { status: 201, body: '{"reported":true}' };
+  const own = {
+    id: "10000000-0000-4000-8000-000000000002",
+    kind: "reply",
+    name: "回复",
+    description: "",
+    author: "我",
+    revision: 1,
+    saves: 0,
+    rating_count: 0,
+    rating_average: 0,
+    saved: false,
+    owned: true,
+    my_rating: 0,
+    content: { prompt: "你好" },
+  };
+  const transport: AccountTransport = {
+    request: async (method, path, token, body) => {
+      calls.push({ method, path, token, body });
+      if (path === "/v1/auth/login")
+        return {
+          status: 200,
+          body: JSON.stringify({
+            access_token: "a".repeat(64),
+            refresh_token: "b".repeat(64),
+            token_type: "Bearer",
+            expires_in: 3600,
+            user: { id: "u1", display_name: "Test", created_at: "2026-01-01" },
+          }),
+        };
+      return reply;
+    },
+  };
+  const bridge = new AccountCloudBridge(transport, store);
+  const skins = (action: Record<string, unknown>) =>
+    bridge.handle(JSON.stringify({ operation: "community_skin", ...action }));
+  const resources = (action: Record<string, unknown>) =>
+    bridge.handle(JSON.stringify({ operation: "community_resource", ...action }));
+  const id = "10000000-0000-4000-8000-000000000001";
+
+  check(COMMUNITY_REPORT_REASONS.join("|") === "侵权/抄袭|色情低俗|违法违规|垃圾广告|恶意插件|其他", "the fixed reasons, in order");
+  void skins({ community_operation: "report", id, reason: "其他" }).then((result) => {
+    check(JSON.parse(result).error === "community_unauthorized", "reporting needs a session");
+  });
+  void skins({ community_operation: "report", id, reason: "不喜欢" }).then((result) => {
+    check(JSON.parse(result).error === "community_invalid", "a reason off the list is refused");
+  });
+  void skins({ community_operation: "report", id, reason: "其他", detail: "x".repeat(1001) }).then((result) => {
+    check(JSON.parse(result).error === "community_invalid", "and a detail past 1000 characters");
+  });
+
+  void bridge
+    .handle('{"operation":"login","challenge_id":"challenge","credential":"123456"}')
+    .then(async () => {
+      reply = { status: 201, body: '{"reported":true}' };
+      let result = await skins({ community_operation: "report", id, reason: "垃圾广告" });
+      check(JSON.parse(result).ok === true, "a signed-in report is accepted");
+      let sent = calls[calls.length - 1];
+      check(
+        sent.method === "POST" && sent.path === "/v1/community/reports" && sent.token !== undefined,
+        "it is posted with the session",
+      );
+      check(
+        JSON.stringify(sent.body) === JSON.stringify({ kind: "skins", item_id: id, reason: "垃圾广告" }),
+        "carrying the kind, the item and the reason, and no empty detail",
+      );
+      reply = { status: 200, body: '{"reported":true}' };
+      result = await resources({ resource_operation: "report", kind: "dictionary", id, reason: "侵权/抄袭", detail: "抄的" });
+      sent = calls[calls.length - 1];
+      check(JSON.parse(result).ok === true, "reporting the same item again is still a success");
+      check(
+        sent.body?.kind === "dictionaries" && sent.body?.detail === "抄的",
+        "a shared dictionary is reported under the server's kind, with the detail",
+      );
+
+      reply = { status: 422, body: '{"error":{"code":"blocked_content","message":"blocked_content"}}' };
+      result = await skins({ community_operation: "rate", id, stars: 5 });
+      check(JSON.parse(result).error === "community_blocked_content", "screened-out text is named, not called an outage");
+      reply = { status: 503, body: '{"error":{"code":"screening_unavailable","message":"x"}}' };
+      result = await skins({ community_operation: "rate", id, stars: 5 });
+      check(JSON.parse(result).error === "community_screening_unavailable", "screening that is down is its own refusal");
+      reply = { status: 503, body: "" };
+      result = await skins({ community_operation: "rate", id, stars: 5 });
+      check(JSON.parse(result).error === "community_unavailable", "any other 503 is still the service being down");
+      const before = calls.length;
+      reply = { status: 403, body: '{"error":{"code":"account_banned","message":"account_banned"}}' };
+      result = await skins({ community_operation: "report", id, reason: "其他" });
+      check(JSON.parse(result).error === "community_account_banned", "a banned account is told so");
+      check(calls.length === before + 1, "without refreshing a token that is not the problem");
+      check(stored !== null, "and without signing the user out");
+
+      reply = { status: 200, body: JSON.stringify({ items: [{ ...own, moderation: "removed" }], has_more: false }) };
+      result = await resources({ resource_operation: "list", kind: "reply", scope: "mine", offset: 0, search: "" });
+      check(JSON.parse(result).value.items[0].moderation === "removed", "我的作品 carries the moderation state");
+      check(calls[calls.length - 1].path.includes("&fields=moderation"), "because it asks for it");
+      reply = { status: 200, body: JSON.stringify({ ...own, moderation: "approved" }) };
+      result = await resources({ resource_operation: "detail", id: own.id });
+      check(JSON.parse(result).ok === true, "a detail with its moderation state is accepted");
+      check(calls[calls.length - 1].path.endsWith(`${own.id}?fields=moderation`), "and the detail asks for it too");
+      reply = { status: 200, body: JSON.stringify({ ...own, moderation: "hidden" }) };
+      result = await resources({ resource_operation: "detail", id: own.id });
+      check(JSON.parse(result).error === "community_unavailable", "an unknown state is refused");
+      reply = { status: 200, body: '{"skins":[],"has_more":false}' };
+      result = await skins({ community_operation: "list", scope: "mine", offset: 0, search: "" });
+      check(JSON.parse(result).ok === true, "a skin author can list their own skins");
+      check(
+        calls[calls.length - 1].path.startsWith("/v1/community/skins?scope=mine&fields=moderation&"),
+        "with the moderation state",
+      );
+      result = await skins({ community_operation: "list", scope: "saved", offset: 0, search: "" });
+      check(JSON.parse(result).error === "community_invalid", "skins have no other scope");
+    });
+});
