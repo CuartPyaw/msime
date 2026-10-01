@@ -318,3 +318,38 @@ test("a dictionary failure retry from a replaced client cannot reload stale phra
   expect(nextList).not.toHaveBeenCalled();
   expect(result.current.phrases).toEqual([]);
 });
+
+test("a dictionary export response from a replaced client cannot publish stale feedback", async () => {
+  let resolveExport!: (path: string) => void;
+  const pendingExport = new Promise<string>((resolve) => {
+    resolveExport = resolve;
+  });
+  const oldClient: DictionaryManagerClient = {
+    dictionary: {
+      list: vi.fn(),
+      edit: vi.fn().mockResolvedValue(undefined),
+      export: vi.fn().mockResolvedValue({ text: "旧词\told", has_more: false }),
+    },
+    saveExport: vi.fn(() => pendingExport),
+  };
+  const nextClient: DictionaryManagerClient = {
+    dictionary: { list: vi.fn(), edit: vi.fn().mockResolvedValue(undefined) },
+    saveExport: vi.fn().mockResolvedValue("/new/export.txt"),
+  };
+  const { result, rerender } = renderHook(
+    ({ client }) => useDictionaryManager({ client, confirm: vi.fn() }),
+    { initialProps: { client: oldClient } },
+  );
+
+  let pendingExportAction!: Promise<void>;
+  act(() => {
+    pendingExportAction = result.current.exportPhrases();
+  });
+  await waitFor(() => expect(oldClient.saveExport).toHaveBeenCalled());
+  rerender({ client: nextClient });
+  resolveExport("/old/export.txt");
+  await act(async () => pendingExportAction);
+
+  expect(result.current.phraseNotice).toBe("");
+  expect(result.current.phraseError).toBe("");
+});
