@@ -168,6 +168,8 @@ impl TranslationGlossStore {
         };
         self.reject_symlinked_roots()?;
         let path = self.path(direction, &key);
+        let directory = path.parent().ok_or(GlossStoreError::InvalidRecord)?;
+        reject_symlink(directory)?;
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -226,7 +228,7 @@ impl TranslationGlossStore {
             return Err(GlossStoreError::InvalidRecord);
         }
         self.reject_symlinked_roots()?;
-        fs::create_dir_all(directory)?;
+        crate::storage::create_directory_and_check(directory)?;
         // NamedTempFile creates private files and persist atomically replaces only
         // this key; concurrent independent keys cannot lose each other's writes.
         let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
@@ -320,6 +322,33 @@ mod tests {
         assert!(matches!(
             store.lookup("en", En, "hello"),
             Err(GlossStoreError::InvalidRecord)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_direction_directories() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let learned = root.path().join("learned-translations-v1");
+        fs::create_dir(&learned).unwrap();
+        symlink(outside.path(), learned.join(En.directory())).unwrap();
+        let store = TranslationGlossStore::new(root.path());
+
+        assert!(matches!(
+            store.remember("en", En, "hello", "你好"),
+            Err(GlossStoreError::Io(_))
+        ));
+        assert!(!outside
+            .path()
+            .join(format!("{}.json", hex::encode(Sha256::digest(b"hello"))))
+            .exists());
+
+        assert!(matches!(
+            store.lookup("en", En, "hello"),
+            Err(GlossStoreError::Io(_))
         ));
     }
 
