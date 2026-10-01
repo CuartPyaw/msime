@@ -2,7 +2,7 @@
 //!
 //! Three files are read: `jyut6ping3.chars.dict.yaml` (one character, its toned reading and an optional `N%` share of that character's use per row), `jyut6ping3.words.dict.yaml` (one word and its toned readings per row) and `essay-cantonese.txt` (Rime's word frequency list, one `text<TAB>count` per line). `jyut6ping3.maps.dict.yaml` is ODbL and `jyut6ping3.phrase.dict.yaml` has no readings and no clear provenance, so neither is pinned or read; neither is `jyut6ping3.lettered.dict.yaml`.
 //!
-//! The scheme types toneless Jyutping, so every reading loses its tone digit and an entry's key is its toneless syllables joined by one space (`nei hou`). Readings that differ only in tone collapse into one entry with the largest weight. A word weighs its essay count, or 1 when the essay does not list it. A character weighs its essay count scaled by the row's share when the row gives one, never below 1.
+//! The scheme types toneless Jyutping, so every reading loses its tone digit and an entry's key is its toneless syllables joined by one space (`nei hou`). Readings that differ only in tone collapse into one entry with the largest weight. A word weighs its essay count. A word the essay does not list (about two in five, 食咗 and 我哋 among them) weighs `unlisted_word_weight`: 1 plus the base-2 logarithm of its rarest character's essay count, which orders such homophones by how common their characters are while staying far below the counts the essay gives the words it lists (most of them at least 100). A character weighs its essay count scaled by the row's share when the row gives one, never below 1.
 //!
 //! The words file lacks some of the commonest words because Rime composes them from characters at typing time (你好 is one), and the engine does not compose sentences. So an essay word the words file does not list becomes an entry too when the essay counts it at least `ESSAY_WORD_MIN_COUNT` times and each of its characters has exactly one toneless reading in the characters file, which makes its key certain.
 //!
@@ -179,6 +179,22 @@ impl Dictionary {
     }
 }
 
+/// The weight of a word the essay does not list: 1 plus the base-2 logarithm of the essay count of its rarest character, or 1 when one of its characters is not counted at all. Real counts top out near 2^24, so this stays below 64 and under almost every count the essay gives a listed word.
+fn unlisted_word_weight(text: &str, essay: &HashMap<&str, i64>) -> i64 {
+    let mut buffer = [0; 4];
+    let rarest = text
+        .chars()
+        .map(|character| {
+            essay
+                .get(&*character.encode_utf8(&mut buffer))
+                .copied()
+                .unwrap_or(0)
+        })
+        .min()
+        .unwrap_or(0);
+    1 + rarest.checked_ilog2().map_or(0, i64::from)
+}
+
 /// The dictionary of the three parsed inputs.
 pub fn build(characters: &[Row], words: &[Row], essay: &HashMap<&str, i64>) -> Dictionary {
     let mut dictionary = Dictionary::default();
@@ -198,11 +214,11 @@ pub fn build(characters: &[Row], words: &[Row], essay: &HashMap<&str, i64>) -> D
 
     let mut listed = HashSet::new();
     for row in words {
-        dictionary.insert(
-            row.syllables.join(" "),
-            row.text,
-            essay.get(row.text).copied().unwrap_or(1),
-        );
+        let weight = essay
+            .get(row.text)
+            .copied()
+            .unwrap_or_else(|| unlisted_word_weight(row.text, essay));
+        dictionary.insert(row.syllables.join(" "), row.text, weight);
         listed.insert(row.text);
     }
     dictionary.words = dictionary.entries.len() - dictionary.characters;
@@ -393,8 +409,8 @@ mod tests {
                 // 0% of 10 floors at 1.
                 ("hou", "號", 1),
                 ("ne", "呢", 2000),
-                // 5% of 2000.
                 ("nei", "你", 7000),
+                // 5% of 2000.
                 ("nei", "呢", 100),
                 ("nei", "妳", 1),
                 ("nei dei", "你哋", 40),
@@ -413,6 +429,26 @@ mod tests {
                 dictionary.essay_words
             ),
             (9, 3, 1)
+        );
+    }
+
+    #[test]
+    fn unlisted_homophone_words_follow_their_rarest_character() {
+        let characters = format!("{HEADER}食\tsik6\n識\tsik1\n咗\tzo2\n");
+        let words = format!("{HEADER}識咗\tsik1 zo2\n食咗\tsik6 zo2\n");
+        let dictionary = build(
+            &parse_characters(&characters).unwrap(),
+            &parse_words(&words).unwrap(),
+            &parse_essay("食\t873763\n識\t379707\n咗\t1995799\n").unwrap(),
+        );
+        // 食 (2^19..2^20) is commoner than 識 (2^18..2^19), so 食咗 outweighs 識咗 although the essay lists neither word.
+        assert_eq!(
+            dictionary.entries[&("sik zo".to_owned(), "食咗".to_owned())],
+            20
+        );
+        assert_eq!(
+            dictionary.entries[&("sik zo".to_owned(), "識咗".to_owned())],
+            19
         );
     }
 
