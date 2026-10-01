@@ -64,9 +64,10 @@ export const themeCarouselNav = "mt-2 flex items-center justify-center gap-3";
 export const themeCarouselArrow =
   "flex size-7 items-center justify-center rounded-full border border-edge bg-[var(--p-group-bg)] p-0 text-lg leading-none text-muted hover:text-body disabled:opacity-40 disabled:hover:text-muted";
 export const themeCarouselDots = "flex items-center gap-1.5";
-export const themeCarouselDot = (active: boolean) =>
-  `size-2 rounded-full border-0 p-0 ${active ? "bg-accent" : "bg-[var(--toggle-off-bg)] hover:bg-edge-strong"}`;
-export const themeCarouselCount = "min-w-10 text-center text-xs text-muted tabular-nums";
+export const themeCarouselDot = (active: boolean, edge = false) =>
+  `${edge ? "size-1.5" : "size-2"} shrink-0 rounded-full border-0 p-0 ${active ? "bg-accent" : "bg-[var(--toggle-off-bg)] hover:bg-edge-strong"}`;
+export const themeCarouselCount =
+  "min-w-10 shrink-0 text-center text-xs whitespace-nowrap text-muted tabular-nums";
 export const skinCard = (selected: boolean) =>
   `block overflow-hidden rounded-[var(--p-group-r)] border bg-[var(--p-group-bg)] p-0 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent hover:border-edge-strong ${
     selected

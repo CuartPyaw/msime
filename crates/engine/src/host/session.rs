@@ -22,6 +22,13 @@ use crate::user_dictionary::removal::learn_entered_english_word;
 /// The weight an entered English word is learned at: the C++ default argument of `learn_entered_english_word` (user_dictionary_journal.h:136-137), which the bridge relied on.
 const ENTERED_ENGLISH_WORD_WEIGHT: i64 = 10;
 
+fn temporary_japanese_word(commit: &str) -> String {
+    let mut word = String::with_capacity(1 + commit.len());
+    word.push('R');
+    word.push_str(commit);
+    word
+}
+
 /// The host's command numbering. `CommitRawWithoutLearning` has no engine counterpart, and took 11 before the engine's `ConvertHanja` existed, so that one is 12 here and mapped by name rather than by ordinal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -489,7 +496,7 @@ impl Session {
         if let Some(commit) = result.commit.as_deref().filter(|_| should_learn) {
             if !commit.is_empty() {
                 let word = if before.local_mode == LocalInputMode::TemporaryJapanese {
-                    format!("R{commit}")
+                    temporary_japanese_word(commit)
                 } else {
                     commit.to_owned()
                 };
@@ -569,4 +576,16 @@ fn online_request(
         session_id: query.session_id,
     };
     Some((request, source))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::temporary_japanese_word;
+
+    #[test]
+    fn temporary_japanese_word_allocates_only_result_bytes() {
+        let word = temporary_japanese_word("かな");
+        assert_eq!(word, "Rかな");
+        assert_eq!(word.capacity(), word.len());
+    }
 }

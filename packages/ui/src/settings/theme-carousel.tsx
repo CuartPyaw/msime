@@ -1,6 +1,19 @@
 import { Children, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import * as settings from "./settings-style";
 
+/** 导航最多显示的圆点数。每个已安装的皮肤都是一张卡片，主题多于这个数时，圆点改为跟随当前卡片的一段窗口，导航行的宽度不随皮肤数量增长。 */
+export const MAX_CAROUSEL_DOTS = 9;
+
+/** `index` 附近那段圆点窗口的第一张卡片，窗口始终落在卡片范围之内。 */
+export function carouselDotWindowStart(
+  index: number,
+  count: number,
+  size = MAX_CAROUSEL_DOTS,
+): number {
+  if (count <= size) return 0;
+  return Math.min(Math.max(index - Math.floor(size / 2), 0), count - size);
+}
+
 export interface ThemeCarouselProps {
   /** One name per slide, in order; the dots are labelled with them. */
   labels: string[];
@@ -16,6 +29,7 @@ export function ThemeCarousel({ labels, selectedIndex, children }: ThemeCarousel
   // The resize handler re-snaps to this without re-subscribing on every slide change.
   const current = useRef(index);
   const count = Children.count(children);
+  const windowStart = carouselDotWindowStart(index, labels.length);
 
   const show = useCallback(
     (next: number, smooth: boolean) => {
@@ -81,16 +95,23 @@ export function ThemeCarousel({ labels, selectedIndex, children }: ThemeCarousel
           ‹
         </button>
         <div className={settings.themeCarouselDots}>
-          {labels.map((label, slide) => (
-            <button
-              type="button"
-              key={slide}
-              className={settings.themeCarouselDot(slide === index)}
-              aria-label={`查看${label}`}
-              aria-current={slide === index ? "true" : undefined}
-              onClick={() => show(slide, true)}
-            />
-          ))}
+          {labels.slice(windowStart, windowStart + MAX_CAROUSEL_DOTS).map((label, offset) => {
+            const slide = windowStart + offset;
+            // 窗口没有到达第一张或最后一张时，两端的圆点画小一号，提示外面还有主题。
+            const edge =
+              (offset === 0 && windowStart > 0) ||
+              (offset === MAX_CAROUSEL_DOTS - 1 && windowStart + MAX_CAROUSEL_DOTS < labels.length);
+            return (
+              <button
+                type="button"
+                key={slide}
+                className={settings.themeCarouselDot(slide === index, edge)}
+                aria-label={`查看${label}`}
+                aria-current={slide === index ? "true" : undefined}
+                onClick={() => show(slide, true)}
+              />
+            );
+          })}
         </div>
         <span className={settings.themeCarouselCount}>
           {index + 1} / {count}

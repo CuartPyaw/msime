@@ -2892,6 +2892,28 @@ static const NSTimeInterval kSettledRerankDelay = 0.15;
 static MSIMEPreferenceSaveState MSIMESharedPreferenceSaveState;
 // The controller behind the queued save, which runs it when the one in flight finishes, whether or not the controller that started that one is still alive.
 static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
+// 当前持有焦点客户端的控制器。每个控制器都观察同一份外观设置，改动由最先注册的那个保存，而它往往是早已失去焦点的控制器；所以保存之后，要把文档载入会话的是这一个。
+static __weak MSIMEInputController *MSIMEFocusedController;
+// 方案只能经由共享偏好文档到达 Engine，而外观改动触发的保存在主线程之外进行，所以从 한 切到 中 之后紧接着敲的键仍按韩文组字，未完成的音节又会把新方案一直挡到它结束。因此切换时在这里、在下一个按键之前于主线程写入文档，并把写入的内容原样交给持有焦点的会话。切换方案前已经结束了组字，会话处于空闲状态，会立即应用新方案。外观改动另外触发的那次保存会再写一遍相同的偏好，会话视为没有变化。Fcitx5 切换方案时同样等待保存完成；这里保存失败时，切换交由那次后台保存完成。
+- (void)applyPreferencesToSessionNow {
+    if (!_session || !_activeClient || !_preferencesDirectory || !_appearance) return;
+    NSDictionary *overrides = [_appearance sharedPreferencesByMerging:@{}];
+    NSDictionary *saved = nil;
+    // 后台保存可能在中间抢先占用 revision；第二次尝试会像那次保存一样，在它写入的内容上合并。
+    for (int attempt = 0; attempt < 2 && !saved; ++attempt) {
+        NSDictionary *snapshot = [MSIMEClientSession loadPreferencesInDirectory:_preferencesDirectory error:nil];
+        NSDictionary *preferences = snapshot ? MSIMEMergePreferenceSnapshot(snapshot[@"preferences"], overrides) : nil;
+        if (!preferences) break;
+        id revision = snapshot[@"revision"] ?: @0;
+        saved = [MSIMEClientSession savePreferencesInDirectory:_preferencesDirectory expectedRevision:[revision unsignedLongLongValue]
+                                                     snapshot:@{ @"format_version": @1, @"revision": revision, @"preferences": preferences } error:nil];
+    }
+    if (![saved isKindOfClass:NSDictionary.class]) { msime_macos_diagnostic_write("preferences_save_failed"); return; }
+    // 走载入路径，这样 revision 会记为已应用，仍在进行的读取会被丢弃，而不是覆盖到它上面。
+    _preferenceLoadState.reset();
+    if (!_preferenceLoadState.begin()) return;
+    [self completePreferenceLoad:saved error:nil generation:_preferenceLoadState.generation session:_session client:_activeClient];
+}
 - (void)persistAppearancePreferences {
     if (!_preferencesDirectory) return;
     if (!MSIMESharedPreferenceSaveState.request()) { MSIMEQueuedPreferenceSaver = self; return; }
@@ -2923,7 +2945,12 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
             const bool again = MSIMESharedPreferenceSaveState.finish();
             MSIMEInputController *controller = weakSelf;
             if (!saved || saveError) msime_macos_diagnostic_write("preferences_save_failed");
-            else if (controller) [controller reloadPreferences];
+            else {
+                if (controller) [controller reloadPreferences];
+                // 从 한 切到 中 是一次方案切换，只能通过这份文档到达 Engine。如果等持有焦点的控制器每秒一次的轮询，期间敲的键仍按韩文组字，正在组的音节又会把新方案挡到它结束，于是菜单栏已经显示 中，用户打出来的却还是韩文。
+                MSIMEInputController *focused = MSIMEFocusedController;
+                if (focused && focused != controller) [focused reloadPreferences];
+            }
             if (again) {
                 MSIMEInputController *next = MSIMEQueuedPreferenceSaver ?: controller;
                 MSIMEQueuedPreferenceSaver = nil;
@@ -3393,6 +3420,9 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     [super setValue:value forTag:tag client:sender];
 }
 - (void)systemDidReportInputMode:(id)value client:(id)sender {
+    // 切换属于将收到下一个按键的会话，也就是持有焦点的控制器的会话，不论系统通知的是哪个控制器。
+    MSIMEInputController *focused = MSIMEFocusedController;
+    if (focused && focused != self) { [focused systemDidReportInputMode:value client:sender]; return; }
     if (!MSIMEAdoptReportedInputMode(MSIMESharedSystemInputModeState(), value)) return;
     [self ensureAppearance];
     // The report can arrive before activateServer: or handleEvent: has named the client, and the mode is remembered per application.
@@ -3411,6 +3441,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
             if (finished) [self apply:finished];
         }
         _appearance.inputScheme = target;
+        [self applyPreferencesToSessionNow];
     }
     [self setEnglishInputMode:mode == MSIMEInputMode::English];
     state.selecting = false;
@@ -4190,6 +4221,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
                             darkSkin:[_appearance toolbarSkinForDark:YES]];
     [_toolbar activateForDelegate:self visible:_appearance.floatingToolbarEnabled];
     _activeClient = sender;
+    MSIMEFocusedController = self;
     _preferenceLoadState.reset();
     [[NSNotificationCenter defaultCenter] removeObserver:self name:MSIMEClientSessionDidReplaceSnapshotNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(snapshotSessionReplaced:) name:MSIMEClientSessionDidReplaceSnapshotNotification object:nil];
@@ -4725,6 +4757,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     [self resetCandidateAnchor];
     [self hideCandidatePanel:"focus_out"];
     _activeClient = nil;
+    if (MSIMEFocusedController == self) MSIMEFocusedController = nil;
     [super deactivateServer:sender];
 }
 
@@ -4762,6 +4795,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     _appearance.candidateTranslations = !_appearance.candidateTranslations;
 }
 - (void)selectInputScheme:(id)sender {
+    MSIMEInputController *focused = MSIMEFocusedController;
+    if (focused && focused != self) { [focused selectInputScheme:sender]; return; }
     [self ensureAppearance];
     NSString *scheme = [sender respondsToSelector:@selector(representedObject)] ? [sender representedObject] : nil;
     if (![MSIMEInputSchemeNames() containsObject:scheme] || [_appearance.inputScheme isEqual:scheme]) return;
@@ -4772,6 +4807,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         [self apply:finished];
     }
     _appearance.inputScheme = scheme;
+    [self applyPreferencesToSessionNow];
 }
 - (void)selectGlobalTheme:(id)sender {
     [self ensureAppearance];
@@ -5120,6 +5156,7 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
         // Clear the previous client's marked text before accepting the new focus.
         [self apply:[_session setFocused:NO error:nil]];
         _activeClient = sender;
+        MSIMEFocusedController = self;
         // Whatever the previous client was last given says nothing about this one.
         [self invalidateSmartPunctuationShadow];
         [_appearance activateInputModeForApplication:[sender respondsToSelector:@selector(bundleIdentifier)] ? [sender bundleIdentifier] : nil];

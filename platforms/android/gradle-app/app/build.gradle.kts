@@ -49,7 +49,7 @@ android {
 dependencies {
     implementation("androidx.appcompat:appcompat:1.8.0")
     // Held at 1.13.1: androidx.core 1.19 declares a minimum of AGP 9.1, and AGP cannot move here without the Gradle wrapper, which belongs to the Tauri bundle. The other four in this group carry no such floor.
-    implementation("androidx.core:core:1.13.1")
+    implementation("androidx.core:core:1.19.1")
     implementation("androidx.activity:activity:1.10.1")
     implementation("androidx.constraintlayout:constraintlayout:2.2.2")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
