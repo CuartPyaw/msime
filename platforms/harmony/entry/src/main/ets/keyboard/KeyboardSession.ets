@@ -429,6 +429,16 @@ interface TranslationHttpDescriptor {
   expected_count?: number;
 }
 
+interface TranslationFetchResult {
+  current: boolean;
+  providerComplete: boolean;
+}
+
+interface TranslationProviderResult {
+  value: string | null;
+  completed: boolean;
+}
+
 interface TranslationResponseValue {
   generation: number;
   translations: TranslationEntry[];
@@ -3908,6 +3918,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     query: TranslationQuery, epoch: number, requestSignature: string): Promise<void> {
     if (!this.translationCurrent(handle, epoch)) return;
     const entries: TranslationEntry[] = [];
+    let providerComplete: boolean = true;
     if (query.english_gloss && typeof query.resources === 'string' && query.resources.length > 0) {
       this.appendOfflineGloss(query, entries);
     }
@@ -3922,11 +3933,13 @@ export class KeyboardSession implements HardwareKeyTarget {
       }
       // This target's answers are gathered apart, so the offline dictionary can fill only the candidates the online provider left unanswered.
       const answered: TranslationEntry[] = [];
-      if (!await this.fetchTargetTranslations(query, target, provider, entries, answered, epoch,
-        handle, deadline)) {
+      const result: TranslationFetchResult = await this.fetchTargetTranslations(query, target,
+        provider, entries, answered, epoch, handle, deadline);
+      if (!result.current) {
         this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
         return;
       }
+      providerComplete = providerComplete && result.providerComplete;
       TranslationPolicy.fill(answered, offline.get(target) ?? []);
       for (const entry of answered) TranslationPolicy.append(entries, entry.text, entry.translation);
     }
@@ -3951,6 +3964,10 @@ export class KeyboardSession implements HardwareKeyTarget {
         };
         client.translationGlossSave(JSON.stringify(saveRequest), query.user_data);
       }
+      if (appliedCurrent && TranslationPolicy.shouldReleaseAfterProviderFailure(provider,
+        providerComplete, entries.length > 0)) {
+        this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
+      }
       if (!appliedCurrent) this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
     } catch (error) {
       KeyboardLog.error(`candidate translations unavailable: ${describeError(error)}`);
@@ -3967,7 +3984,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** One target's online answers, added to `answered`. `entries` is read only for the English candidates the offline gloss already covers. False when the work went stale or ran out of time. */
   private async fetchTargetTranslations(query: TranslationQuery, target: string, provider: string,
     entries: TranslationEntry[], answered: TranslationEntry[], epoch: number, handle: number,
-    deadline: number): Promise<boolean> {
+    deadline: number): Promise<TranslationFetchResult> {
     // `/fy` is asked as its own item, past the plan and the caches (TranslationPolicy.commandItem).
     const command: TranslationPlanItem | null = TranslationPolicy.commandItem(query);
     let plan: TranslationPlanItem[] = command !== null ? [command] : [];
@@ -3981,7 +3998,12 @@ export class KeyboardSession implements HardwareKeyTarget {
         KeyboardLog.error(`translation plan unavailable: ${describeError(error)}`);
       }
     }
-    if (plan.length === 0 || provider.length === 0) return true;
+    if (plan.length === 0 || provider.length === 0) {
+      return {
+        current: this.translationCurrent(handle, epoch),
+        providerComplete: provider.length === 0 || plan.length > 0,
+      };
+    }
     const pending: TranslationPlanItem[] = [];
     for (const item of plan) {
       if (command !== null) {
@@ -4005,25 +4027,46 @@ export class KeyboardSession implements HardwareKeyTarget {
       }
       pending.push(item);
     }
-    if (pending.length === 0) return true;
+    if (pending.length === 0) {
+      return { current: this.translationCurrent(handle, epoch), providerComplete: true };
+    }
     if (provider === 'tencent' && query.tencent_tmt !== null
       && query.tencent_tmt !== undefined) {
-      await this.fetchTencentTranslations(query, pending, answered, epoch, handle, deadline);
+      const providerComplete: boolean = await this.fetchTencentTranslations(
+        query, pending, answered, epoch, handle, deadline);
+      return {
+        current: this.translationCurrent(handle, epoch),
+        providerComplete: providerComplete,
+      };
     } else {
+      let providerComplete: boolean = true;
       for (const item of pending) {
-        if (!this.translationCurrent(handle, epoch) || Date.now() >= deadline) return false;
+        if (!this.translationCurrent(handle, epoch) || Date.now() >= deadline) {
+          return { current: false, providerComplete: false };
+        }
         let value: string | null = null;
+        let completed: boolean = false;
         if (provider === 'niutrans' && query.niutrans !== null
           && query.niutrans !== undefined) {
-          value = await this.fetchNiuTranslation(query.niutrans, item, epoch, handle);
+          const result: TranslationProviderResult = await this.fetchNiuTranslation(
+            query.niutrans, item, epoch, handle);
+          value = result.value;
+          completed = result.completed;
         } else if (provider === 'custom' && query.custom_translation !== null
           && query.custom_translation !== undefined) {
-          value = await this.fetchCustomTranslation(query.custom_translation, item, epoch, handle);
+          const result: TranslationProviderResult = await this.fetchCustomTranslation(
+            query.custom_translation, item, epoch, handle);
+          value = result.value;
+          completed = result.completed;
         }
+        if (!completed) providerComplete = false;
         this.recordTranslation(query, target, item, value, answered);
       }
+      return {
+        current: this.translationCurrent(handle, epoch),
+        providerComplete: providerComplete,
+      };
     }
-    return this.translationCurrent(handle, epoch);
   }
 
   /** Each installed non-English target's offline glosses, read from the dictionary beside the resources. */
@@ -4089,7 +4132,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   }
 
   private async fetchTencentTranslations(query: TranslationQuery, items: TranslationPlanItem[],
-    entries: TranslationEntry[], epoch: number, handle: number, deadline: number): Promise<void> {
+    entries: TranslationEntry[], epoch: number, handle: number, deadline: number): Promise<boolean> {
+    let providerComplete: boolean = true;
     const groups: Map<string, TranslationPlanItem[]> = new Map<string, TranslationPlanItem[]>();
     for (const item of items) {
       const group: string = `${item.source_language}\n${item.target_language}`;
@@ -4098,9 +4142,12 @@ export class KeyboardSession implements HardwareKeyTarget {
       groups.set(group, values);
     }
     for (const group of groups.values()) {
-      if (!this.translationCurrent(handle, epoch) || Date.now() >= deadline) return;
+      if (!this.translationCurrent(handle, epoch) || Date.now() >= deadline) return false;
       const config: TencentTranslationConfig | null | undefined = query.tencent_tmt;
-      if (config === null || config === undefined) return;
+      if (config === null || config === undefined) {
+        providerComplete = false;
+        continue;
+      }
       const request: TencentTranslationRequest = {
         config: config,
         texts: group.map((item: TranslationPlanItem): string => item.key),
@@ -4118,25 +4165,36 @@ export class KeyboardSession implements HardwareKeyTarget {
       } catch (error) {
         KeyboardLog.error(`Tencent translation descriptor unavailable: ${describeError(error)}`);
       }
-      if (descriptor === null) continue;
+      if (descriptor === null) {
+        providerComplete = false;
+        continue;
+      }
       const body: string | null = await this.translationHttp(descriptor, false, epoch, handle);
-      if (body === null) continue;
+      if (body === null) {
+        providerComplete = false;
+        continue;
+      }
       try {
         const parsed: NativeReply<string[] | null> = JSON.parse(client.parseTencentTranslationResponse(
           body, group.length)) as NativeReply<string[] | null>;
-        if (!parsed.ok || parsed.value === null || parsed.value.length !== group.length) continue;
+        if (!parsed.ok || parsed.value === null || parsed.value.length !== group.length) {
+          providerComplete = false;
+          continue;
+        }
         for (let index: number = 0; index < group.length; index++) {
           this.recordTranslation(query, group[0].target_language, group[index], parsed.value[index],
             entries);
         }
       } catch (error) {
         KeyboardLog.error(`Tencent translation response unavailable: ${describeError(error)}`);
+        providerComplete = false;
       }
     }
+    return providerComplete;
   }
 
   private async fetchNiuTranslation(config: NiuTransTranslationConfig, item: TranslationPlanItem,
-    epoch: number, handle: number): Promise<string | null> {
+    epoch: number, handle: number): Promise<TranslationProviderResult> {
     const request: NiuTransTranslationRequest = {
         config: config,
         text: item.key,
@@ -4146,20 +4204,20 @@ export class KeyboardSession implements HardwareKeyTarget {
     };
     const descriptor: TranslationHttpDescriptor | null = this.translationDescriptor(
       client.niuTransTranslationHttpRequest(JSON.stringify(request)));
-    if (descriptor === null) return null;
+    if (descriptor === null) return { value: null, completed: false };
     const body: string | null = await this.translationHttp(descriptor, false, epoch, handle);
-    if (body === null) return null;
+    if (body === null) return { value: null, completed: false };
     try {
       const reply: NativeReply<string | null> = JSON.parse(
         client.parseNiuTransTranslationResponse(body)) as NativeReply<string | null>;
-      return reply.ok && reply.value !== null ? reply.value : null;
+      return { value: reply.ok ? reply.value : null, completed: reply.ok };
     } catch {
-      return null;
+      return { value: null, completed: false };
     }
   }
 
   private async fetchCustomTranslation(config: TranslationProviderConfig, item: TranslationPlanItem,
-    epoch: number, handle: number): Promise<string | null> {
+    epoch: number, handle: number): Promise<TranslationProviderResult> {
     const request: CustomTranslationRequest = {
         config: config,
         text: item.key,
@@ -4168,15 +4226,15 @@ export class KeyboardSession implements HardwareKeyTarget {
     };
     const descriptor: TranslationHttpDescriptor | null = this.translationDescriptor(
       client.customTranslationHttpRequest(JSON.stringify(request)));
-    if (descriptor === null) return null;
+    if (descriptor === null) return { value: null, completed: false };
     const body: string | null = await this.translationHttp(descriptor, true, epoch, handle);
-    if (body === null) return null;
+    if (body === null) return { value: null, completed: false };
     try {
       const reply: NativeReply<string | null> = JSON.parse(
         client.parseCustomTranslationResponse(body)) as NativeReply<string | null>;
-      return reply.ok && reply.value !== null ? reply.value : null;
+      return { value: reply.ok ? reply.value : null, completed: reply.ok };
     } catch {
-      return null;
+      return { value: null, completed: false };
     }
   }
 
