@@ -3572,7 +3572,7 @@ test("macOS exposes the shuangpin preedit presentation and persists the expanded
   });
 });
 
-test("font family controls preserve order, validate drafts and save Unicode", async () => {
+test("font family controls validate drafts and save Unicode without touching the fallback list", async () => {
   const save = vi.fn().mockImplementation(async (_revision, preferences) => ({
     ...initial,
     revision: 8,
@@ -3581,26 +3581,18 @@ test("font family controls preserve order, validate drafts and save Unicode", as
   const mounted = render(<SettingsPage client={{ load: async () => initial, save }} />);
   const primary = await screen.findByLabelText("候选窗主字体");
   expect((primary as HTMLInputElement).value).toBe("Noto Sans SC");
-  expect((screen.getByLabelText("补充字体 1") as HTMLInputElement).value).toBe("Noto Sans SC");
-  expect((screen.getByLabelText("补充字体 2") as HTMLInputElement).value).toBe("Microsoft YaHei");
-  fireEvent.change(primary, { target: { value: "示例主字体" } });
-  fireEvent.change(screen.getByLabelText("补充字体 1"), { target: { value: "" } });
-  // An empty fallback holds the automatic save back, and submitting the form does not force one.
+  // An empty family holds the automatic save back, and submitting the form does not force one.
+  fireEvent.change(primary, { target: { value: "" } });
   saveSettingsNow();
   fireEvent.submit(mounted.container.querySelector("form")!);
   expect(save).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("补充字体 1"), { target: { value: "示例一" } });
-  fireEvent.change(screen.getByLabelText("补充字体 2"), { target: { value: "示例二" } });
-  fireEvent.click(screen.getByRole("button", { name: "上移补充字体 2" }));
-  expect((screen.getByLabelText("补充字体 1") as HTMLInputElement).value).toBe("示例二");
+  fireEvent.change(primary, { target: { value: "示例主字体" } });
   saveSettingsNow();
   await screen.findByText("已保存");
   expect(save).toHaveBeenLastCalledWith(7, {
     ...initial.preferences,
     candidate_font_family: "示例主字体",
-    candidate_fallback_fonts: ["示例二", "示例一"],
   });
-  fireEvent.click(screen.getByRole("button", { name: "移除补充字体 1" }));
   const saves = save.mock.calls.length;
   fireEvent.change(primary, { target: { value: "字".repeat(43) } });
   saveSettingsNow();
@@ -3611,34 +3603,69 @@ test("font family controls preserve order, validate drafts and save Unicode", as
     expect(save).toHaveBeenLastCalledWith(8, {
       ...initial.preferences,
       candidate_font_family: "有效示例",
-      candidate_fallback_fonts: ["示例一"],
     }),
   );
 });
 
-test("font controls allow 32 existing fallbacks but prevent a 33rd", async () => {
+// The fallback list is written by the 候选字体 presets and has no editor of its own: a stored list, even a full one, is carried through a save unchanged.
+test("the candidate window page has no fallback font editor and keeps the stored list", async () => {
+  const fallbacks = Array.from({ length: 32 }, (_, i) => `示例${i}`);
+  const save = vi.fn().mockImplementation(async (_revision, preferences) => ({
+    ...initial,
+    revision: 8,
+    preferences,
+  }));
   render(
     <SettingsPage
       client={{
         load: async () => ({
           ...initial,
-          preferences: {
-            ...initial.preferences,
-            candidate_fallback_fonts: Array.from({ length: 32 }, (_, i) => `示例${i}`),
-          },
+          preferences: { ...initial.preferences, candidate_fallback_fonts: fallbacks },
         }),
-        save: vi.fn(),
+        save,
       }}
     />,
   );
-  await screen.findByLabelText("补充字体 32");
-  expect((screen.getByRole("button", { name: "添加补充字体" }) as HTMLButtonElement).disabled).toBe(
-    true,
+  const primary = await screen.findByLabelText("候选窗主字体");
+  expect(screen.queryByRole("button", { name: "添加补充字体" })).toBeNull();
+  expect(screen.queryByLabelText(/^补充字体/)).toBeNull();
+  expect(screen.queryByText(/补充字体/)).toBeNull();
+  fireEvent.change(primary, { target: { value: "示例主字体" } });
+  saveSettingsNow();
+  await screen.findByText("已保存");
+  expect(save).toHaveBeenLastCalledWith(7, {
+    ...initial.preferences,
+    candidate_font_family: "示例主字体",
+    candidate_fallback_fonts: fallbacks,
+  });
+});
+
+// The Windows renderer reads no candidate_font_family: Chinese text comes from the fallback chain, so there the main font also leads that chain, and the names typed on the way to it do not pile up behind it.
+test("on Windows the main font leads the fallback chain", async () => {
+  const save = vi.fn().mockImplementation(async (_revision, preferences) => ({
+    ...initial,
+    revision: 8,
+    preferences,
+  }));
+  render(
+    <SettingsPage
+      client={{
+        load: async () => initial,
+        save,
+        host: { platform: "windows", candidate_font_controls: true } as HostCapabilities,
+      }}
+    />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "移除补充字体 32" }));
-  expect((screen.getByRole("button", { name: "添加补充字体" }) as HTMLButtonElement).disabled).toBe(
-    false,
-  );
+  const primary = await screen.findByLabelText("候选窗主字体");
+  for (const typed of ["L", "LX", "LXGW WenKai"])
+    fireEvent.change(primary, { target: { value: typed } });
+  saveSettingsNow();
+  await screen.findByText("已保存");
+  expect(save).toHaveBeenLastCalledWith(7, {
+    ...initial.preferences,
+    candidate_font_family: "LXGW WenKai",
+    candidate_fallback_fonts: ["LXGW WenKai", "Microsoft YaHei"],
+  });
 });
 
 test("automatic color swatch follows candidate theme without persisting a color override", async () => {
@@ -4983,11 +5010,10 @@ test("Linux help network section says what goes online and where credentials liv
   expect(text).toContain("Google input-tools");
   expect(text).toContain("msime-linux-online-provider");
   expect(text).toContain("msime-linux-voice-provider");
-  // A custom translation service goes online with only an endpoint, its API key being optional, and the MSIME account translates only once chosen, so the gate is a configured service rather than a credential.
-  expect(text).toContain(
-    "只在启用并配置好对应服务（凭据、自定义翻译服务，或显式选择水杉账号）后联网",
-  );
-  expect(text).toContain("选择水杉账号才会把候选词发送到 api.msime.app");
+  // Fresh Linux installs translate candidates through the MSIME account, so the copy says what it sends and how to switch away; voice and AI still wait for a configured service.
+  expect(text).toContain("候选词翻译默认用水杉账号，会把当前页的中文候选词发送到 api.msime.app");
+  expect(text).toContain("可在翻译服务里改选自己的服务或不使用在线翻译");
+  expect(text).toContain("语音识别和 AI 功能只在启用并配置好对应服务后联网");
   expect(text).not.toContain("填好凭据后联网");
   // The provider credentials are private files; NiuTrans and custom translation keys are the exception and the copy says so.
   expect(text).toContain("ai-provider.json、tencent-provider.json 和 voice-provider.json");
@@ -5444,11 +5470,7 @@ const referenceSections: {
     button: "候选窗口",
     titles: [
       "候选窗口跟随光标",
-      // 候选窗主字体 is not asserted: this repo hides it on the Windows host, which shows
-      // 候选窗英文字体 and the fallback list instead (candidate-font-controls.tsx branches on
-      // `windows`, and the English row carries Windows' own "保存后自动应用" note). That is an
-      // existing decision about the Windows font path, not HarmonyOS drift, so it is recorded
-      // rather than forced.
+      "候选窗主字体",
       "候选窗字号",
       "候选窗预编辑字号",
       "每页候选项数量",
@@ -6074,8 +6096,8 @@ test.each(optionHosts)(
     ];
     const ordered = present.filter((text) => reference.includes(text));
     expect(ordered).toEqual(reference.filter((title) => ordered.includes(title)));
-    // Windows shows 候选窗英文字体 in place of 候选窗主字体 (see the section table above), so one may be missing.
-    expect(ordered.length).toBeGreaterThanOrEqual(reference.length - 1);
+    // Every host shows 候选窗主字体 now, Windows included, so none may go missing.
+    expect(ordered.length).toBe(reference.length);
   },
 );
 
