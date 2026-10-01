@@ -5208,8 +5208,7 @@ fn a_cantonese_partial_selection_commits_at_once_and_learns_nothing() {
         )
         .unwrap();
 
-    // The control: the same pick under Quanpin with the same options writes the journal, so the comparison below would see a Cantonese write.
-    let initial = database_rows(directory.path());
+    // The control: the same pick under Quanpin with the same options writes the journal, so the comparison below would see a Cantonese write. The baseline is taken after composing, because reading candidates can already create the journal with empty tables, so only the pick itself can change the counts.
     let mut options = real_engine_options(directory.path());
     options.learning = true;
     let mut quanpin = Runtime::new(msime_engine::host::Session::new(&options).unwrap(), 5).unwrap();
@@ -5217,13 +5216,25 @@ fn a_cantonese_partial_selection_commits_at_once_and_learns_nothing() {
     for value in *b"nihao" {
         character(&mut quanpin, value);
     }
+    let initial = database_rows(directory.path());
     assert_eq!(
         character(&mut quanpin, b'2').commit.as_deref(),
         Some("拟好")
     );
     drop(quanpin);
     msime_engine::flush_personal_learning();
-    assert_ne!(database_rows(directory.path()), initial);
+    // Some table must gain rows; a journal created with empty tables does not count as a write.
+    let learned = database_rows(directory.path());
+    assert!(
+        learned.iter().any(|(file, table, count)| {
+            let previous = initial
+                .iter()
+                .find(|(before_file, before_table, _)| before_file == file && before_table == table)
+                .map_or(0, |(_, _, before)| *before);
+            *count > previous
+        }),
+        "the Quanpin pick wrote no rows: {initial:?} -> {learned:?}"
+    );
 
     let mut runtime = cantonese_runtime(directory.path());
     runtime.set_phrase_preedit(true);
