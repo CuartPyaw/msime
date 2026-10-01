@@ -5586,7 +5586,8 @@ public final class MSIMEInputService extends InputMethodService {
                 java.util.List<BackendAccount.ClipboardItem> items = java.util.List.of();
                 try {
                     BackendAccount account = new BackendAccount(this);
-                    if (account.accessToken().isEmpty()) {
+                    // Throws when the session owner cannot tell right now, which is a retry, not a sign-in.
+                    if (account.currentAccessToken().isEmpty()) {
                         status = CloudClipboardPanelPolicy.Status.SIGNED_OUT;
                     } else {
                         BackendAccount.ClipboardPage page = account.clipboard("");

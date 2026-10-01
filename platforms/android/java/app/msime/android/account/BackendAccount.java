@@ -70,7 +70,7 @@ public final class BackendAccount {
 
     private final SessionStore sessions;
     private final Requester requester;
-    private final TokenSource owner;
+    private final TokenSource ownerProcess;
 
     /**
      * The account as this process may use it.
@@ -96,7 +96,7 @@ public final class BackendAccount {
     BackendAccount(SessionStore sessions, Requester requester, TokenSource owner) {
         this.sessions = sessions;
         this.requester = requester;
-        this.owner = owner;
+        this.ownerProcess = owner;
     }
 
     private static TokenSource sessionOwner(Context context) {
@@ -105,7 +105,10 @@ public final class BackendAccount {
         return () -> {
             Bundle reply = application.getContentResolver().call(
                 uri, AccountSessionRoutingPolicy.METHOD_ACCESS_TOKEN, null, null);
-            return reply == null ? "" : reply.getString(AccountSessionRoutingPolicy.KEY_ACCESS_TOKEN, "");
+            if (reply == null) throw new IllegalStateException("account session unavailable");
+            return AccountSessionRoutingPolicy.tokenFromReply(
+                reply.getString(AccountSessionRoutingPolicy.KEY_STATE),
+                reply.getString(AccountSessionRoutingPolicy.KEY_ACCESS_TOKEN));
         };
     }
 
@@ -158,55 +161,73 @@ public final class BackendAccount {
         }
     }
 
-    /** The saved access token, or an empty string when this device is not signed in. */
+    /** The saved access token, or an empty string when this device is not signed in or the token cannot be had right now. */
     public String accessToken() {
-        if (owner != null) {
+        try {
+            return currentAccessToken();
+        } catch (Exception | LinkageError error) {
+            return "";
+        }
+    }
+
+    /**
+     * The access token, an empty string when this device is not signed in, or an exception when that cannot be told right now (a refresh that failed on the network, a session owner that could not be reached).
+     *
+     * <p>For callers that word the two differently: signed out asks the user to sign in, the other asks them to retry.
+     */
+    String currentAccessToken() throws Exception {
+        if (ownerProcess != null) {
+            String token = ownerProcess.accessToken();
+            return AccountTokenPolicy.validToken(token) ? token : "";
+        }
+        FutureTask<String> flight;
+        boolean owner = false;
+        synchronized (SESSION_LOCK) {
+            String saved = sessions.load();
+            if (saved == null) return "";
+            JSONObject session = new JSONObject(saved);
+            JSONObject tokens = session.getJSONObject("tokens");
+            if (!AccountTokenPolicy.validSession(tokens.optString("token_type", ""),
+                    tokens.optString("access_token", ""), tokens.optString("refresh_token", ""),
+                    tokens.optLong("expires_in", 0))) return "";
+            long now = System.currentTimeMillis();
+            long expiry = session.optLong("expires_at_unix_ms", 0);
+            if (expiry > now + MAX_SESSION_MILLISECONDS) return "";
+            if (expiry > now + 30_000L) {
+                return tokens.optString("access_token", "");
+            }
+            if (refreshFlight != null) {
+                flight = refreshFlight;
+            } else {
+                long generation = sessionGeneration;
+                String refresh = tokens.optString("refresh_token", "");
+                flight = new FutureTask<>(() -> refresh(refresh, generation));
+                refreshFlight = flight;
+                owner = true;
+            }
+        }
+        if (owner) {
             try {
-                String token = owner.accessToken();
-                return AccountTokenPolicy.validToken(token) ? token : "";
-            } catch (Exception | LinkageError error) {
-                return "";
+                flight.run();
+            } finally {
+                synchronized (SESSION_LOCK) {
+                    if (refreshFlight == flight) refreshFlight = null;
+                }
             }
         }
         try {
-            FutureTask<String> flight;
-            boolean owner = false;
-            synchronized (SESSION_LOCK) {
-                String saved = sessions.load();
-                if (saved == null) return "";
-                JSONObject session = new JSONObject(saved);
-                JSONObject tokens = session.getJSONObject("tokens");
-                if (!AccountTokenPolicy.validSession(tokens.optString("token_type", ""),
-                        tokens.optString("access_token", ""), tokens.optString("refresh_token", ""),
-                        tokens.optLong("expires_in", 0))) return "";
-                long now = System.currentTimeMillis();
-                long expiry = session.optLong("expires_at_unix_ms", 0);
-                if (expiry > now + MAX_SESSION_MILLISECONDS) return "";
-                if (expiry > now + 30_000L) {
-                    return tokens.optString("access_token", "");
-                }
-                if (refreshFlight != null) {
-                    flight = refreshFlight;
-                } else {
-                    long generation = sessionGeneration;
-                    String refresh = tokens.optString("refresh_token", "");
-                    flight = new FutureTask<>(() -> refresh(refresh, generation));
-                    refreshFlight = flight;
-                    owner = true;
-                }
-            }
-            if (owner) {
-                try {
-                    flight.run();
-                } finally {
-                    synchronized (SESSION_LOCK) {
-                        if (refreshFlight == flight) refreshFlight = null;
-                    }
-                }
-            }
             return flight.get();
-        } catch (Exception | LinkageError error) {
-            return "";
+        } catch (java.util.concurrent.ExecutionException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof Exception exception) throw exception;
+            throw error;
+        }
+    }
+
+    /** Whether this process's own store holds a session at all, expired or not. */
+    boolean hasSession() throws Exception {
+        synchronized (SESSION_LOCK) {
+            return sessions.load() != null;
         }
     }
 
