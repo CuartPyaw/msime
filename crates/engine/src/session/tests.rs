@@ -2972,3 +2972,21 @@ fn vietnamese_dedicated_english_keeps_its_own_rules() {
     assert!(session.command(Command::Cancel).handled);
     assert!(session.snapshot().preedit.is_empty());
 }
+
+#[test]
+fn vietnamese_option_change_keeps_the_raw_key_display() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Vietnamese);
+    type_text(&mut session, "hoaf");
+    assert_eq!(session.snapshot().preedit, "hoà");
+    assert!(session.command(Command::Cancel).handled);
+    assert_eq!(session.snapshot().preedit, "hoaf");
+    session.input.engine.set_vietnamese_options(
+        crate::vietnamese::InputMethod::Telex,
+        crate::vietnamese::ToneStyle::Classic,
+    );
+    assert_eq!(session.snapshot().preedit, "hoaf");
+    // The second Esc still clears rather than taking the raw-restore step again.
+    assert!(session.command(Command::Cancel).handled);
+    assert!(session.snapshot().preedit.is_empty());
+}

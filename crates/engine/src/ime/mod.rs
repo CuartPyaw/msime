@@ -207,7 +207,7 @@ impl ImeSession {
         korean.take_committed()
     }
 
-    /// The Telex or VNI method and the tone style Vietnamese spells with. A composing Vietnamese word keeps its keystrokes and is shown again under the new rules.
+    /// The Telex or VNI method and the tone style Vietnamese spells with. A composing Vietnamese word keeps its keystrokes and is shown again under the new rules, or as the raw keys if the first Esc already showed them.
     pub fn set_vietnamese_options(
         &mut self,
         method: VietnameseInputMethod,
@@ -219,8 +219,12 @@ impl ImeSession {
             return;
         };
         let raw = vietnamese.raw().to_owned();
+        let locked = vietnamese.raw_locked();
         *vietnamese = VietnameseScheme::new(method, style);
         vietnamese.set_raw_input(&raw, &raw);
+        if locked {
+            vietnamese.restore_raw();
+        }
         self.refresh_candidates();
     }
 
