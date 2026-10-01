@@ -3924,9 +3924,14 @@ extern "C" void voice_provider_stream_update(const uint8_t *text,
   auto *stream = static_cast<VoiceStreamContext *>(context);
   if (!stream || !stream->progress || !text || length == 0 || length > 4096)
     return;
-  stream->progress(msime_voice_bound_result(
-                       std::string(reinterpret_cast<const char *>(text), length)),
-                   final);
+  try {
+    stream->progress(msime_voice_bound_result(
+                         std::string(reinterpret_cast<const char *>(text), length)),
+                     final);
+  } catch (...) {
+    // Provider callbacks cross a C ABI; allocation or queue failures must not
+    // escape into the provider worker and terminate the input method.
+  }
 }
 // English mode has no Engine session to issue a voice generation, so the host numbers those recordings itself. The top bit keeps them apart from Engine generations, which count up from 1 in every session, so a late callback of one kind can never match a recording of the other.
 uint64_t next_sessionless_voice_generation() {
