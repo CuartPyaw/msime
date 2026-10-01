@@ -269,7 +269,6 @@ struct Hypothesis {
 
 struct Search {
     best: Vec<Vec<Hypothesis>>,
-    finalized: Vec<bool>,
     arrival: usize,
     /// `(parent sequence, syllable) -> sequence`; the seed's empty sequence is 0.
     sequences: HashMap<(usize, &'static str), usize>,
@@ -277,10 +276,16 @@ struct Search {
 }
 
 impl Search {
-    fn finalize(&mut self, position: usize) {
-        if std::mem::replace(&mut self.finalized[position], true) {
-            return;
+    fn new(length: usize, k: usize) -> Self {
+        Self {
+            best: (0..=length).map(|_| Vec::with_capacity(k)).collect(),
+            arrival: 0,
+            sequences: HashMap::new(),
+            k,
         }
+    }
+
+    fn finalize(&mut self, position: usize) {
         let list = &mut self.best[position];
         if list.len() < 2 {
             return;
@@ -352,13 +357,7 @@ pub fn autocorrect_cut_kbest(
     let index = correction_index();
     let bytes = pinyin.as_bytes();
     let length = bytes.len();
-    let mut search = Search {
-        best: (0..=length).map(|_| Vec::with_capacity(k)).collect(),
-        finalized: vec![false; length + 1],
-        arrival: 0,
-        sequences: HashMap::new(),
-        k,
-    };
+    let mut search = Search::new(length, k);
     search.best[0].push(Hypothesis {
         edge_count: 0,
         prev_index: NO_PREDECESSOR,
@@ -531,6 +530,13 @@ mod tests {
                 .push((wrong.to_owned(), correct.to_owned()));
         }
         tables
+    }
+
+    #[test]
+    fn search_allocates_only_position_beams() {
+        let search = Search::new(4, 3);
+        assert_eq!(search.best.len(), 5);
+        assert!(search.best.iter().all(|slot| slot.capacity() >= 3));
     }
 
     fn reading(cut: &AutocorrectCut) -> String {
