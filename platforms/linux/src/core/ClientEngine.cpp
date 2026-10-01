@@ -313,6 +313,8 @@ struct State {
   // The combo count the session last answered msime_client_typing_effect with, shown at the end of the candidate aux line, and the key held down, so an auto-repeat is drawn but not counted.
   uint32_t typing_combo = 0;
   msime::linux_host::KeyRepeat key_repeat;
+  // Per-key press counts for the key heatmap, written in batches; see KeyPressCounter.
+  msime::linux_host::KeyPressCounter key_presses;
   guint preferences_timer = 0;
   bool preferences_loading = false;
   // IBus hide notifications can trail the next confirmed candidate update;
@@ -1233,6 +1235,78 @@ void record_typing_statistics(IBusEngine *engine, std::string text,
     g_task_return_boolean(task, TRUE);
   });
   g_object_unref(task);
+}
+
+// Sends one batch to the store's record_keys operation on the calling thread.
+void write_key_presses(const msime::linux_host::KeyPressBatch &request) {
+  try {
+    const auto encoded = Json{
+        {"directory", request.directory},
+        {"action", Json{{"operation", "record_keys"},
+                          {"day", request.day},
+                          {"keys", request.keys}}}}
+                              .dump();
+    auto *raw = msime_client_typing_statistics(
+        reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size());
+    if (raw)
+      msime_client_string_free(raw);
+  } catch (...) {
+    // Statistics are best effort and must never affect typing.
+  }
+}
+// Key press writes still running on worker threads, which msime_ibus_shutdown_key_presses waits for.
+msime::linux_host::PendingWrites key_press_writes;
+// Set once the IBus main loop has quit: the process is about to exit, and a write handed to a worker thread now would die with it.
+bool key_presses_shutting_down = false;
+// Every live engine's state, so the last batches can be written at shutdown whether or not the factory destroys its engines first.
+std::set<State *> key_press_states;
+// Writes a batch of key press counts on a worker thread, or on this one once the process is shutting down. The task has no source object because destroy() flushes too, while the engine is being disposed.
+void flush_key_presses(std::optional<msime::linux_host::KeyPressBatch> batch) {
+  // Presses counted before statistics were turned off are dropped rather than sent; the store would not write them either.
+  if (!batch || !typing_statistics_switch.enabled())
+    return;
+  if (key_presses_shutting_down) {
+    write_key_presses(*batch);
+    return;
+  }
+  auto task = g_task_new(nullptr, nullptr, nullptr, nullptr);
+  g_task_set_task_data(task, new msime::linux_host::KeyPressBatch(std::move(*batch)),
+                       [](gpointer value) {
+                         delete static_cast<msime::linux_host::KeyPressBatch *>(value);
+                       });
+  key_press_writes.begin();
+  g_task_run_in_thread(task, [](GTask *task, gpointer, gpointer data,
+                                GCancellable *) {
+    write_key_presses(*static_cast<msime::linux_host::KeyPressBatch *>(data));
+    key_press_writes.end();
+    g_task_return_boolean(task, TRUE);
+  });
+  g_object_unref(task);
+}
+
+// Every key event the engine receives passes through here before the Engine sees it, so the heatmap counts keys the IME consumes for a composition as well as keys it hands back to the application. Only key downs count, once per physical press; keycode 0 is a synthetic event with no physical key behind it. IBus passes no event time, so a repeat that arrives as a release and press pair is told apart by when the events reach the engine.
+void count_key_press(IBusEngine *engine, guint keycode, guint flags) {
+  auto &s = state(engine);
+  if (flags & IBUS_RELEASE_MASK) {
+    s.key_presses.up(keycode, g_get_monotonic_time());
+    return;
+  }
+  // With statistics off nothing is buffered; password, PIN, number and private fields are never counted, the same contexts commits are not recorded in.
+  if (keycode == 0 || !typing_statistics_switch.enabled() || !s.focused || s.blocked ||
+      s.private_input)
+    return;
+  const auto now = g_get_monotonic_time();
+  const auto id = s.key_presses.down(
+      keycode, now, msime::linux_host::KeyPressCounter::kArrivalRepeatGapMicroseconds);
+  if (id.empty())
+    return;
+  const auto directory = configured.value("preferences_directory", std::string{});
+  if (directory.empty() || directory.front() != '/')
+    return;
+  const auto day = msime::linux_host::local_day(std::time(nullptr));
+  if (day.empty())
+    return;
+  flush_key_presses(s.key_presses.add(id, directory, day, now));
 }
 
 msime::linux_host::TypingSource typing_source(const State &s) {
@@ -4324,6 +4398,8 @@ msime::linux_host::PanelInputDelivery panel_input_deliver(
   // Through this engine first, the way SendInput passes through the IME on Windows: letters compose, and digits, Space and BackSpace act on an open composition.
   msime::linux_host::deliver_panel_key_stroke(
       [&](bool release) {
+        // A screen-keyboard key is a key press like a physical one, and the Fcitx5 host counts it because it arrives through the same keyEvent.
+        count_key_press(engine, request.keycode, modifiers | (release ? IBUS_RELEASE_MASK : 0));
         return process_key(engine, keyval, request.keycode,
                            modifiers | (release ? IBUS_RELEASE_MASK : 0)) != FALSE;
       },
@@ -4462,6 +4538,8 @@ void focus_in(IBusEngine *engine) {
 void focus_out(IBusEngine *engine) {
   guarded(engine, "focus_out", [&] {
     auto &s = state(engine);
+    flush_key_presses(s.key_presses.take());
+    s.key_presses.forget_held();
     s.remember_app_input_mode();
     msime_linux_diagnostic_write("focus_out");
     voice_cancel(engine);
@@ -7508,6 +7586,7 @@ void save_menu_preference(IBusEngine *engine, MenuPreference preference, Json va
 gboolean reload_preferences(gpointer data) {
   auto engine = IBUS_ENGINE(data);
   auto &s = state(engine);
+  flush_key_presses(s.key_presses.take_due(g_get_monotonic_time()));
   // Release the session, and with it the shared dictionary lock, when the settings window asks for maintenance. The composition is finished first, so nothing typed is lost; open() starts a new session once the lease is gone.
   if (s.session && msime::linux_host::dictionary_quiesced(configured.value("user_data", std::string{}))) {
     guarded(engine, "dictionary_quiesce", [&] {
@@ -7624,6 +7703,10 @@ void destroy(IBusObject *object) {
   if (panel_input_engine == IBUS_ENGINE(object)) panel_input_engine = nullptr;
   if (self->state && self->state->preferences_timer)
     g_source_remove(self->state->preferences_timer);
+  if (self->state) {
+    flush_key_presses(self->state->key_presses.take());
+    key_press_states.erase(self->state);
+  }
   delete self->state;
   self->state = nullptr;
   IBUS_OBJECT_CLASS(msime_ibus_engine_parent_class)->destroy(object);
@@ -7660,6 +7743,7 @@ void play_key_sound(IBusEngine *engine, guint key, guint flags) {
 // Characters the IME hands back to the application are still typed text: Windows counts them in the statistics (ShouldCountPassthroughChar), so English-mode letters and Chinese-mode keys the Engine declines show up in the daily totals. Keys the IME consumed already recorded their committed text.
 gboolean process_key_and_count(IBusEngine *engine, guint key, guint keycode,
                                guint flags) {
+  count_key_press(engine, keycode, flags);
   const gboolean handled = process_key(engine, key, keycode, flags);
   play_key_sound(engine, key, flags);
   if (handled || (flags & IBUS_RELEASE_MASK) || !typing_statistics_switch.enabled())
@@ -7687,6 +7771,7 @@ gboolean process_key_and_count(IBusEngine *engine, guint key, guint keycode,
 
 static void msime_ibus_engine_init(MsimeIbusEngine *engine) {
   engine->state = new State();
+  key_press_states.insert(engine->state);
   engine->state->wave_overlay_surface =
       msime::linux_host::create_wave_overlay_surface(
           IBUS_ENGINE(engine), [engine](msime::linux_host::WaveOverlayModel::Action action) {
@@ -7787,6 +7872,13 @@ void msime_ibus_configure(const std::string &options) {
                                          ? directory->get<std::string>()
                                          : std::string{});
   }
+}
+void msime_ibus_shutdown_key_presses() {
+  key_presses_shutting_down = true;
+  for (auto *state : key_press_states)
+    flush_key_presses(state->key_presses.take());
+  // A store write takes milliseconds; the bound only keeps a wedged store from holding the exit.
+  key_press_writes.wait_idle(std::chrono::seconds(2));
 }
 bool msime_ibus_maintenance_stop_requested() { return maintenance_stop_requested; }
 bool msime_ibus_upgrade_restart_requested() { return upgrade_restart_requested; }
