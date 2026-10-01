@@ -8431,7 +8431,7 @@ group("applying writes only what the schema declares", () => {
   // The one exception is the scheme: a newer device may name one this host does not offer, and refusing would stop every other setting from syncing.
   for (const unknown of ["cantonese", "zhuyin", "vietnamese", "esperanto"]) {
     const kept = applyAccountPreferences(
-      local,
+      { ...local, scheme: "wubi" },
       {
         revision: 1,
         settings: { "input.schema": unknown, "input.learning": false },
@@ -8439,10 +8439,7 @@ group("applying writes only what the schema declares", () => {
       schema,
       syncFeedback,
     );
-    check(
-      kept.preferences.scheme === "quanpin",
-      `an unknown scheme ${unknown} keeps the local one`,
-    );
+    check(kept.preferences.scheme === "wubi", `an unknown scheme ${unknown} keeps the local one`);
     check(kept.preferences.learning === false, `and the rest of the sync applies past ${unknown}`);
   }
 
