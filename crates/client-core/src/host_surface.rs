@@ -162,6 +162,9 @@ pub struct HostCapabilities {
     /// the focused application, so a separate preedit size would have nothing to change there.
     #[serde(default)]
     pub candidate_preedit_font: bool,
+    /// The host can hide the candidate panel's page indicator without changing pagination.
+    #[serde(default)]
+    pub candidate_page_number: bool,
     /// The host can apply candidate foreground/background RGB row colors.
     /// Linux exposes these through IBusText attributes even though it cannot
     /// draw the native card geometry or hover state.
@@ -438,6 +441,7 @@ impl HostCapabilities {
             // candidate size into the panel's font: the IBus panel settings or
             // the Fcitx5 classic UI.
             candidate_font_controls: true,
+            candidate_page_number: matches!(platform, HostPlatform::Linux),
             // The iOS strip scales its composition line by `candidate_preedit_font_size`.
             candidate_preedit_font: matches!(
                 platform,

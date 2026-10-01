@@ -1293,6 +1293,7 @@ export interface HostCapabilities {
   voice_capture_devices: boolean;
   candidate_font_controls: boolean;
   candidate_preedit_font?: boolean;
+  candidate_page_number?: boolean;
   candidate_row_colors: boolean;
   candidate_selection_appearance: boolean;
   /** The host outlines the candidate panel in the border colour. Linux does (Fcitx5's classic UI theme) without any hover state; a host older than the field reads it from `candidate_selection_appearance`. */
@@ -1426,6 +1427,7 @@ export type Preferences = {
   /** Inline (host-drawn) preedit. Linux applies it via ClientEngine preedit_style(). */
   tsf_preedit_style?: "raw" | "pinyin" | "empty";
   candidate_preedit_style?: "pinyin" | "empty";
+  show_candidate_page_number?: boolean;
   /** The one theme for the candidate window, floating toolbar, menus and touch keyboard. `theme` stays the light/dark mode that `system` and the settings window follow. */
   global_theme?: GlobalTheme;
   /** What the `custom` global theme is made of: an external candidate skin package, the seven candidate colour pickers and the keyboard editor design. */

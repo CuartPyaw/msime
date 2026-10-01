@@ -26,10 +26,13 @@ def wait(predicate):
 
 
 def main():
-    resources, library, addon = map(Path, sys.argv[1:])
+    resources, library, addon = map(Path, sys.argv[1:4])
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()
     assert not bus.name_has_owner("org.fcitx.Fcitx5"), "Requires isolated D-Bus session"
+    if "--page-number" in sys.argv[4:]:
+        # The fixture has no desktop portal; prevent a theme probe from starting one.
+        bus.request_name("org.freedesktop.portal.Desktop")
     with tempfile.TemporaryDirectory(prefix="msime-fcitx-daemon-") as directory:
         root = Path(directory)
         host = ctypes.CDLL(str(library))
@@ -67,6 +70,8 @@ def main():
                    XDG_DATA_HOME=str(root / "data"), XDG_RUNTIME_DIR=str(runtime),
                    MSIME_FCITX5_OPTIONS=str(root / "options.json"),
                    FCITX_ADDON_DIRS=f"{addon.parent}:{system_lib}/fcitx5")
+        if "--page-number" in sys.argv[4:]:
+            env["FCITX_X11_USE_CLIENT_SIDE_UI"] = "1"
         with (root / "daemon.log").open("w") as log:
             daemon = subprocess.Popen(["fcitx5", "-D", "--keep"], env=env,
                                       stdout=log, stderr=log)
@@ -95,6 +100,54 @@ def main():
                 assert context.ProcessKeyEvent(32, 0, 0, False, 0), "Commit key rejected"
                 wait(lambda: len(commits) == 1)
                 assert commits == ["你好"], "Unexpected committed result"
+                if "--page-number" in sys.argv[4:]:
+                    panels = []
+                    context.connect_to_signal("UpdateClientSideUI", lambda *args: panels.append(args))
+                    context.FocusOut()
+                    context.SetCapability(dbus.UInt64(2 | 16 | 64 | (1 << 39)))
+                    context.FocusIn()
+
+                    def compose(show_page, preedit="empty"):
+                        options["preferences"]["candidate_preedit_style"] = preedit
+                        options["preferences"]["navigation"]["brackets"] = True
+                        options["preferences"]["word_character"]["enabled"] = False
+                        if show_page is None:
+                            options["preferences"].pop("show_candidate_page_number", None)
+                        else:
+                            options["preferences"]["show_candidate_page_number"] = show_page
+                        (root / "options.json").write_text(json.dumps(options))
+                        control.ReloadAddonConfig("msime")
+                        panels.clear()
+                        for character in "nihao":
+                            assert context.ProcessKeyEvent(ord(character), 0, 0, False, 0)
+                        wait(lambda: panels and panels[-1][4])
+                        return panels[-1]
+
+                    def aux(panel):
+                        return "".join(str(part[0]) for parts in (panel[2], panel[3]) for part in parts)
+
+                    # Missing keys retain the old page indicator, independently of reading text.
+                    assert aux(compose(None)).startswith("1/"), "Legacy page indicator missing"
+                    first = compose(False)
+                    assert aux(first) == "", "Hidden page/preedit left an auxiliary line"
+                    assert context.ProcessKeyEvent(ord("]"), 0, 0, False, 0)
+                    wait(lambda: panels[-1][4] != first[4])
+                    assert aux(panels[-1]) == "", "Paging restored the hidden indicator"
+                    assert context.ProcessKeyEvent(ord("["), 0, 0, False, 0)
+                    wait(lambda: panels[-1][4] == first[4])
+                    assert context.ProcessKeyEvent(32, 0, 0, False, 0)
+                    wait(lambda: len(commits) == 2)
+                    assert commits[-1] == "你好", "Hidden indicator broke candidate selection"
+                    assert aux(compose(True)).startswith("1/"), "Re-enabled page indicator missing"
+                    reading = aux(compose(False, "pinyin"))
+                    assert "ni" in reading and "/" not in reading and not reading.startswith(" · "), \
+                        "Page visibility changed the independent reading or left a separator"
+                    context.FocusOut()
+                    context.DestroyIC()
+                    control.Exit()
+                    assert daemon.wait(timeout=10) == 0, "Daemon failed on shutdown"
+                    print("Fcitx5 page-number visibility, paging and selection passed")
+                    return
                 # Screen keyboard keys come over panel-input.sock and go through MSIME before the editor, the way SendInput passes through the IME on Windows. Keycodes are evdev codes, as the panel sends them.
                 forwarded = []
                 context.connect_to_signal("ForwardKey", lambda sym, states, release: forwarded.append((int(sym), bool(release))))

@@ -7,12 +7,14 @@ export interface PreeditSettingsPreferences {
   shuangpin_preedit_uses_raw?: boolean;
   tsf_preedit_style?: TsfPreeditStyle;
   candidate_preedit_style?: CandidatePreeditStyle;
+  show_candidate_page_number?: boolean;
 }
 
 export interface PreeditSettingsSectionProps {
   preferences: PreeditSettingsPreferences;
   mobile: boolean;
   showShuangpinPreedit: boolean;
+  showPageNumber?: boolean;
   inlinePreedit?: boolean;
   inlinePreeditBusy: boolean;
   onChange: (patch: Partial<PreeditSettingsPreferences>) => void;
@@ -24,6 +26,7 @@ export function PreeditSettingsSection({
   preferences,
   mobile,
   showShuangpinPreedit,
+  showPageNumber = false,
   inlinePreedit,
   inlinePreeditBusy,
   onChange,
@@ -83,6 +86,14 @@ export function PreeditSettingsSection({
           <option value="empty">不显示</option>
         </Select>
       </Row>
+      {showPageNumber && (
+        <Row title="显示页码" description="显示候选列表的当前页与总页数；关闭后仍可正常翻页。">
+          <Switch
+            checked={preferences.show_candidate_page_number !== false}
+            onChange={(checked) => onChange({ show_candidate_page_number: checked })}
+          />
+        </Row>
+      )}
     </>
   );
 }

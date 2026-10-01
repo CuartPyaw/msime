@@ -55,3 +55,44 @@ test("touch preedit uses the host feedback switch", () => {
   expect(screen.getByLabelText("候选栏预编辑")).toBeTruthy();
   expect(screen.queryByLabelText("双拼预编辑")).toBeNull();
 });
+
+test("page numbers default on, toggle independently, and hide on unsupported hosts", () => {
+  const onChange = vi.fn();
+  const { rerender } = render(
+    <PreeditSettingsSection
+      preferences={preferences}
+      mobile={false}
+      showShuangpinPreedit={false}
+      showPageNumber
+      inlinePreeditBusy={false}
+      onChange={onChange}
+    />,
+  );
+  const toggle = screen.getByLabelText("显示页码") as HTMLInputElement;
+  expect(toggle.checked).toBe(true);
+  fireEvent.click(toggle);
+  expect(onChange).toHaveBeenCalledWith({ show_candidate_page_number: false });
+  rerender(
+    <PreeditSettingsSection
+      preferences={{ ...preferences, show_candidate_page_number: false }}
+      mobile={false}
+      showShuangpinPreedit={false}
+      showPageNumber
+      inlinePreeditBusy={false}
+      onChange={onChange}
+    />,
+  );
+  expect((screen.getByLabelText("显示页码") as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(screen.getByLabelText("显示页码"));
+  expect(onChange).toHaveBeenCalledWith({ show_candidate_page_number: true });
+  rerender(
+    <PreeditSettingsSection
+      preferences={preferences}
+      mobile={false}
+      showShuangpinPreedit={false}
+      inlinePreeditBusy={false}
+      onChange={onChange}
+    />,
+  );
+  expect(screen.queryByLabelText("显示页码")).toBeNull();
+});

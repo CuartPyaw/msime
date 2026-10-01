@@ -42,6 +42,7 @@ struct Observation {
   // Attributes carried by the last UpdatePreeditText, as the client receives them over D-Bus.
   std::vector<PreeditAttribute> preedit_attributes;
   std::string auxiliary;
+  gboolean auxiliary_visible = FALSE;
   std::vector<std::string> candidates;
   std::vector<std::string> labels;
   std::string forbidden_gloss;
@@ -111,6 +112,7 @@ void signal(GDBusConnection *, const gchar *, const gchar *, const gchar *,
   }
   if (std::string(name) == "HideAuxiliaryText") {
     seen.auxiliary.clear();
+    seen.auxiliary_visible = FALSE;
     return;
   }
   if (std::string(name) == "ForwardKeyEvent") {
@@ -138,8 +140,10 @@ void signal(GDBusConnection *, const gchar *, const gchar *, const gchar *,
   if (!object)
     std::abort();
   g_object_ref_sink(object);
-  if (std::string(name) == "UpdateAuxiliaryText")
+  if (std::string(name) == "UpdateAuxiliaryText") {
     seen.auxiliary = ibus_text_get_text(IBUS_TEXT(object));
+    g_variant_get_child(parameters, 1, "b", &seen.auxiliary_visible);
+  }
   auto observe_property = [&](auto &&self, IBusProperty *property) -> void {
     const std::string key = ibus_property_get_key(property);
     if (key == "CandidateActions") {
@@ -313,7 +317,7 @@ GVariant *call(GDBusConnection *connection, const char *destination,
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 2)
+  if (argc != 2 && !(argc == 3 && std::string(argv[2]) == "--page-number"))
     return 2;
   try {
     // This fixture asserts RegisterProperties and must exercise the real menu path.
@@ -476,6 +480,58 @@ int main(int argc, char **argv) {
                             .c_str());
     };
     invoke("FocusIn");
+    const auto finish = [&] {
+      g_dbus_connection_signal_unsubscribe(client, subscription);
+      ibus_object_destroy(IBUS_OBJECT(engine));
+      g_object_unref(engine);
+      g_dbus_connection_close_sync(client, nullptr, nullptr);
+      g_dbus_connection_close_sync(server, nullptr, nullptr);
+      g_object_unref(client);
+      g_object_unref(server);
+      g_test_dbus_down(bus);
+      g_object_unref(bus);
+    };
+    if (argc == 3) {
+      auto visibility = options;
+      visibility.erase("preferences_directory");
+      visibility["preferences"]["candidate_preedit_style"] = "empty";
+      visibility["preferences"].erase("show_candidate_page_number");
+      const auto compose = [&] {
+        msime_ibus_configure(visibility.dump());
+        invoke("FocusIn");
+        invoke("Reset");
+        phrase();
+      };
+      compose();
+      require(seen.auxiliary.rfind("1/", 0) == 0 && seen.auxiliary_visible,
+              "Legacy page indicator missing");
+      visibility["preferences"]["show_candidate_page_number"] = false;
+      msime_ibus_configure(visibility.dump());
+      require(wait_until([&] { return seen.auxiliary.empty() && !seen.auxiliary_visible; }) &&
+                  seen.lookup_visible && seen.preedit == "nihao",
+              "Page visibility did not hot-reload or hid the candidates");
+      const auto first = seen.candidates;
+      require(key(IBUS_Page_Down) && seen.candidates != first && seen.auxiliary.empty(),
+              "Hidden indicator broke forward paging");
+      require(key(IBUS_Page_Up) && seen.candidates == first,
+              "Hidden indicator broke backward paging");
+      require(key(IBUS_space) && seen.committed == "你好",
+              "Hidden indicator broke selection");
+      visibility["preferences"]["show_candidate_page_number"] = true;
+      compose();
+      require(seen.auxiliary.rfind("1/", 0) == 0, "Re-enabled page indicator missing");
+      visibility["preferences"]["show_candidate_page_number"] = false;
+      visibility["preferences"]["candidate_preedit_style"] = "pinyin";
+      compose();
+      require(seen.auxiliary.find("ni") != std::string::npos &&
+                  seen.auxiliary.find('/') == std::string::npos &&
+                  seen.auxiliary.rfind("  · ", 0) != 0 && seen.auxiliary_visible,
+              "Page visibility changed the independent reading or left a separator");
+      invoke("Disable");
+      finish();
+      std::cout << "IBus page-number visibility, paging and selection passed\n";
+      return 0;
+    }
     require(!seen.emoji_candidates,
             "Missing mixed Emoji preference did not default to disabled");
     require(seen.global_theme == "system",
@@ -3701,15 +3757,7 @@ int main(int argc, char **argv) {
     }
     invoke("Disable");
     require(!key('n'), "Disabled engine consumed input");
-    g_dbus_connection_signal_unsubscribe(client, subscription);
-    ibus_object_destroy(IBUS_OBJECT(engine));
-    g_object_unref(engine);
-    g_dbus_connection_close_sync(client, nullptr, nullptr);
-    g_dbus_connection_close_sync(server, nullptr, nullptr);
-    g_object_unref(client);
-    g_object_unref(server);
-    g_test_dbus_down(bus);
-    g_object_unref(bus);
+    finish();
     std::cout << "IBus D-Bus shared-runtime acceptance passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
