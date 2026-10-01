@@ -194,7 +194,9 @@ export function useCommunityGallery<T extends { id: string }>({
             options.onError?.(failure);
           },
         },
-      );
+      ).finally(() => {
+        if (isCurrent(generation)) actionBusyRef.current = false;
+      });
     },
     [actionBusy, errorMessage, isCurrent, needsSignIn],
   );
