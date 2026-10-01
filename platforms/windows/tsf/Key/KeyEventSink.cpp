@@ -870,7 +870,8 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
             return TRUE;
         }
 
-        if (!freshCompositionState && _candidateMode != CANDIDATE_NONE &&
+        // Korean's only list is the Hanja list, whose rows carry no translation, and the Server has no Korean route for the key: it stays the application's like any other Ctrl chord.
+        if (!korean && !freshCompositionState && _candidateMode != CANDIDATE_NONE &&
             IsTranslationCommitShortcut(*pCodeOut, shortcutModifiers))
         {
             if (pKeyState)
