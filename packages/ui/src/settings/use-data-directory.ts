@@ -33,9 +33,11 @@ export function useDataDirectory({ client, enabled, confirm }: UseDataDirectoryO
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("");
   const generation = useRef(0);
+  const actionRunning = useRef(false);
 
   useEffect(() => {
     const current = ++generation.current;
+    actionRunning.current = false;
     setBusy(false);
     if (!enabled || !client)
       return () => {
@@ -57,8 +59,9 @@ export function useDataDirectory({ client, enabled, confirm }: UseDataDirectoryO
   }, [client, enabled]);
 
   async function choose() {
-    if (!client || busy) return;
+    if (!client || busy || actionRunning.current) return;
     const current = generation.current;
+    actionRunning.current = true;
     setBusy(true);
     setResult("");
     try {
@@ -98,7 +101,10 @@ export function useDataDirectory({ client, enabled, confirm }: UseDataDirectoryO
                 : "移动失败，仍在使用原目录，原有数据未被删除。",
       );
     } finally {
-      if (generation.current === current) setBusy(false);
+      if (generation.current === current) {
+        actionRunning.current = false;
+        setBusy(false);
+      }
     }
   }
 
