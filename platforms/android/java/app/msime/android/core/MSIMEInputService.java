@@ -2461,6 +2461,12 @@ public final class MSIMEInputService extends InputMethodService {
             view.optString("local_mode", "none"), entries == null ? 0 : entries.length());
     }
 
+    /** Drops the composition without writing it. With a Korean Hanja list open the first cancel only closes the list, so this sends as many as KoreanInputPolicy.cancelsToDiscard says. */
+    private void discardComposition() {
+        for (int cancels = KoreanInputPolicy.cancelsToDiscard(koreanHanjaListOpen()); cancels > 0; cancels--)
+            command(3);
+    }
+
     /** Whether the Hanja command applies now: a Korean syllable is composing, with or without its list open. */
     private boolean koreanConvertsHanja() {
         return view != null && KoreanInputPolicy.convertsHanja(koreanSchemeActive(),
@@ -2999,8 +3005,8 @@ public final class MSIMEInputService extends InputMethodService {
             if (koreanSchemeActive()) recordTypingStatistics(view.optString("reading", ""), typingSource());
             try {
                 // With a Korean Hanja list open the first cancel only closes the list (msime_client.h), so it takes a second to drop the syllable the editor now holds as typed text.
-                if (koreanHanjaListOpen()) value(NativeClient.command(session, 3));
-                value(NativeClient.command(session, 3));
+                for (int cancels = KoreanInputPolicy.cancelsToDiscard(koreanHanjaListOpen()); cancels > 0; cancels--)
+                    value(NativeClient.command(session, 3));
             } catch (JSONException | LinkageError error) { fail(); }
             if (connection != null) bridge.abandon(sink(typingSource()));
             view = null;
@@ -3178,7 +3184,8 @@ public final class MSIMEInputService extends InputMethodService {
                             backspaceRepeated = true;
                             if (hasEngineComposition()) {
                                 playFeedback(button);
-                                command(3);
+                                // A held delete drops the whole syllable, also through an open Hanja list.
+                                discardComposition();
                                 backspaceClearedComposition = true;
                                 main.removeCallbacks(this);
                                 backspaceRepeatTask = null;
@@ -8347,7 +8354,7 @@ public final class MSIMEInputService extends InputMethodService {
             pagingKey("上一页", "上一页候选", () -> command(101));
             pagingKey("下一页", "下一页候选", () -> command(100));
             pagingKey("删除", "删除光标后一个字符", () -> command(8));
-            pagingKey("取消", "取消本次组词", () -> command(3));
+            pagingKey("取消", "取消本次组词", this::discardComposition);
         }
         if (hasDiagnostic) closeCandidatePanel();
         resetCandidateScrollIfViewChanged();

@@ -63,6 +63,11 @@ public final class KoreanInputPolicySmoke {
             "other schemes' and dedicated English's candidates are not a Hanja list");
         check(!KoreanInputPolicy.hanjaListOpen(true, "temporary_english", 3),
             "a local mode keeps its own candidates");
+        // A held delete or the paging row's cancel key drops the syllable; with the list open the first cancel only closes it.
+        check(KoreanInputPolicy.cancelsToDiscard(true) == 2,
+            "discarding with the Hanja list open closes the list and then drops the syllable");
+        check(KoreanInputPolicy.cancelsToDiscard(false) == 1,
+            "discarding without a Hanja list takes one cancel");
         check(KoreanInputPolicy.convertsHanja(true, "none", "gks"),
             "a composing syllable offers its Hanja");
         check(KoreanInputPolicy.convertsHanja(true, "none", "r"),

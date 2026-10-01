@@ -59,6 +59,15 @@ public final class KoreanInputPolicy {
     }
 
     /**
+     * How many cancel commands it takes to drop the composition without writing it.
+     *
+     * <p>With the Hanja list open the first cancel only closes the list and leaves the syllable composing (the Korean contract in msime_client.h), so a host action that discards the composition, such as a held delete or the paging row's cancel key, sends a second one. Otherwise one cancel ends any composition.
+     */
+    public static int cancelsToDiscard(boolean hanjaListOpen) {
+        return hanjaListOpen ? 2 : 1;
+    }
+
+    /**
      * Whether the Hanja command applies, which is also when the candidate bar shows its 漢 button: while a syllable composes, and so also while its list is open, where the command closes it.
      *
      * <p>A lone jamo composes too and has no Hanja. The Engine answers the command unhandled then and nothing changes; this host does not tell the two apart, because that would take a jamo table of its own.
