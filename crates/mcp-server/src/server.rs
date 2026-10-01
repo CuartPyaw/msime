@@ -5,6 +5,7 @@
 use crate::config::Config;
 use crate::diagnostics::{self, LogRequest, LogView, SwitchRequest, SwitchView};
 use crate::preferences::{self, PreferencesChange, PreferencesView};
+use crate::prompts::WRITE_PROMPTS;
 use crate::skins::{self, CreateSkinRequest, CreatedSkin, SkinList};
 use crate::statistics::{self, StatisticsRequest, StatisticsView};
 use crate::words;
@@ -14,11 +15,12 @@ use crate::words::{
 };
 use msime_client_core::dictionary::quiesce::QuiescedHosts;
 use msime_host_api::{DictionaryOptions, QuickPhrase, QuickPhraseEdit, WordEdit};
+use rmcp::handler::server::router::prompt::PromptRouter;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::schemars::JsonSchema;
-use rmcp::{tool, tool_handler, tool_router, Json, ServerHandler};
+use rmcp::{prompt_handler, tool, tool_handler, tool_router, Json, ServerHandler};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -50,6 +52,7 @@ pub struct MsimeServer {
     /// Set while a write runs. rmcp runs each request as its own task and a write can outlast the interval, so spacing alone would let two overlap on the quiesce lease and on a check-then-write edit.
     writing: Arc<AtomicBool>,
     tool_router: ToolRouter<Self>,
+    prompt_router: PromptRouter<Self>,
 }
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
@@ -170,11 +173,18 @@ impl MsimeServer {
         {
             tool_router.remove_route(name);
         }
+        let mut prompt_router = Self::prompt_router();
+        if !config.allow_write {
+            for name in WRITE_PROMPTS {
+                prompt_router.remove_route(name);
+            }
+        }
         Self {
             config: Arc::new(config),
             last_write: Arc::new(Mutex::new(None)),
             writing: Arc::new(AtomicBool::new(false)),
             tool_router,
+            prompt_router,
         }
     }
 
@@ -561,11 +571,17 @@ impl MsimeServer {
 }
 
 #[tool_handler(router = self.tool_router)]
+#[prompt_handler(router = self.prompt_router)]
 impl ServerHandler for MsimeServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("msime", env!("CARGO_PKG_VERSION")))
-            .with_instructions(INSTRUCTIONS)
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_prompts()
+                .build(),
+        )
+        .with_server_info(Implementation::new("msime", env!("CARGO_PKG_VERSION")))
+        .with_instructions(INSTRUCTIONS)
     }
 }
 
