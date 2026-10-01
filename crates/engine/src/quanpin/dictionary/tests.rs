@@ -31,6 +31,17 @@ fn segmentation_cache_lookup_uses_one_owned_key() {
 }
 
 #[test]
+fn resolution_cache_key_hash_matches_borrowed_parts() {
+    let key = "3\u{1f}nihao\u{1f}ni'hao";
+    assert_eq!(
+        resolution_cache_hash(3, "nihao", "ni'hao"),
+        resolution_cache_hash(3, "nihao", "ni'hao")
+    );
+    assert!(resolution_cache_key_matches(key, 3, "nihao", "ni'hao"));
+    assert!(!resolution_cache_key_matches(key, 3, "niha", "ni'hao"));
+}
+
+#[test]
 fn primary_segmentation_is_checked_without_owning_a_key_copy() {
     let seen = HashSet::new();
     assert!(is_duplicate_segmentation("ni'hao", &seen, "ni'hao"));
