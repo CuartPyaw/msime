@@ -95,6 +95,36 @@ fn resource_verification_rejects_a_symlinked_state_root() {
     assert!(!outside.path().join("verified-resources.json").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn resource_verification_rejects_an_existing_state_root_below_a_symlink() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    std::fs::write(resources.join("fixture.db"), b"fixture").unwrap();
+    let specification = ResourceSet {
+        source_commit: "a".repeat(40),
+        artifacts: vec![msime_client_core::resources::Artifact {
+            name: "fixture.db".into(),
+            url: "https://example.invalid/fixture.db".into(),
+            sha256: hex::encode(Sha256::digest(b"fixture")),
+            size: 7,
+        }],
+    };
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir(outside.path().join("state")).unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let linked = parent.path().join("linked");
+    std::os::unix::fs::symlink(outside.path(), &linked).unwrap();
+    let state = linked.join("state");
+
+    assert!(verify_resources_once(&resources, &specification, &state).is_err());
+    assert!(!outside
+        .path()
+        .join("state/verified-resources.json")
+        .exists());
+}
+
 #[test]
 fn resource_verification_removes_the_retired_pinyin_dictionary_in_place() {
     let root = tempfile::tempdir().unwrap();
