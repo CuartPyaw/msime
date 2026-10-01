@@ -1,5 +1,7 @@
 //! Selection advancement, segmentation getters and preedit display (core-session.md §5.8, §5.10-§5.11), including the wubi mixed routing rules that key advancement on the selected row's producer (overlays.md §3.3).
 
+use std::borrow::Cow;
+
 use super::input::{CreatingWordProgress, InputSession};
 use crate::helpcode::compute_helpcodes;
 use crate::japanese::romaji::convert_romaji;
@@ -31,28 +33,35 @@ pub(super) struct SelectionTransition {
 
 /// A shuangpin composition split into the pinyin keys and a trailing helpcode (input_session_composition.cpp:111-163).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(super) struct ShuangpinCompositionBase {
-    pub raw_input: String,
-    pub raw_input_with_cases: String,
+pub(super) struct ShuangpinCompositionBase<'a> {
+    pub raw_input: Cow<'a, str>,
+    pub raw_input_with_cases: Cow<'a, str>,
     /// Manual delimiters removed.
-    pub effective_raw_input: String,
-    pub effective_raw_input_with_cases: String,
+    pub effective_raw_input: Cow<'a, str>,
+    pub effective_raw_input_with_cases: Cow<'a, str>,
     pub helpcode_length: usize,
 }
 
-pub(super) fn resolve_shuangpin_composition_base(
-    request: &QueryRequest,
+pub(super) fn resolve_shuangpin_composition_base<'a>(
+    request: &'a QueryRequest,
     profile: &ShuangpinProfile,
-) -> ShuangpinCompositionBase {
-    let raw_input = request.raw_input.clone();
+) -> ShuangpinCompositionBase<'a> {
+    let raw_input = Cow::Borrowed(request.raw_input.as_str());
     let raw_input_with_cases = if request.raw_input_with_cases.is_empty() {
-        request.raw_input.clone()
+        Cow::Borrowed(request.raw_input.as_str())
     } else {
-        request.raw_input_with_cases.clone()
+        Cow::Borrowed(request.raw_input_with_cases.as_str())
     };
+    let effective_raw_input = remove_manual_delimiters_cow(request.raw_input.as_str());
+    let raw_input_with_cases_source = if request.raw_input_with_cases.is_empty() {
+        request.raw_input.as_str()
+    } else {
+        request.raw_input_with_cases.as_str()
+    };
+    let effective_raw_input_with_cases = remove_manual_delimiters_cow(raw_input_with_cases_source);
     let mut base = ShuangpinCompositionBase {
-        effective_raw_input: remove_manual_delimiters(&raw_input),
-        effective_raw_input_with_cases: remove_manual_delimiters(&raw_input_with_cases),
+        effective_raw_input,
+        effective_raw_input_with_cases,
         raw_input,
         raw_input_with_cases,
         helpcode_length: 0,
@@ -76,6 +85,14 @@ pub(super) fn resolve_shuangpin_composition_base(
         }
     }
     base
+}
+
+fn remove_manual_delimiters_cow(raw: &str) -> Cow<'_, str> {
+    if raw.contains('\'') {
+        Cow::Owned(remove_manual_delimiters(raw))
+    } else {
+        Cow::Borrowed(raw)
+    }
 }
 
 fn remove_delimiters(segmented: &str) -> String {
@@ -292,7 +309,7 @@ impl InputSession {
                 if base.helpcode_length > 0 && total >= base.helpcode_length {
                     base.effective_raw_input[..total - base.helpcode_length].to_owned()
                 } else {
-                    base.effective_raw_input.clone()
+                    base.effective_raw_input.clone().into_owned()
                 };
             if transition.continues_composition {
                 let (start, end) = if base.helpcode_length > 0 {
@@ -696,5 +713,30 @@ mod tests {
                 "{raw}/{raw_with_cases}/{enabled}"
             );
         }
+    }
+
+    #[test]
+    fn shuangpin_composition_base_borrows_unseparated_input() {
+        let request = QueryRequest {
+            raw_input: "nihc".to_owned(),
+            raw_input_with_cases: "nihc".to_owned(),
+            ..QueryRequest::default()
+        };
+        let profile =
+            crate::shuangpin::profile::profile(crate::types::ShuangpinProfileKind::Xiaohe);
+        let base = resolve_shuangpin_composition_base(&request, profile);
+        assert!(matches!(base.raw_input, std::borrow::Cow::Borrowed(_)));
+        assert!(matches!(
+            base.raw_input_with_cases,
+            std::borrow::Cow::Borrowed(_)
+        ));
+        assert!(matches!(
+            base.effective_raw_input,
+            std::borrow::Cow::Borrowed(_)
+        ));
+        assert!(matches!(
+            base.effective_raw_input_with_cases,
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 }
