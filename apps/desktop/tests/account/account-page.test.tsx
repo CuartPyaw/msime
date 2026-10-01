@@ -501,7 +501,7 @@ test("account cancellation does not show a stale error alert", async () => {
     status: vi.fn().mockRejectedValue({ code: "account_cancelled" }),
   });
   render(<AccountPage client={client} />);
-  expect(await screen.findByRole("heading", { name: "登录方式" })).not.toBeNull();
+  expect(await screen.findByRole("heading", { name: "欢迎来到水杉" })).not.toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
 });
 

@@ -23,6 +23,24 @@ export const actionRow =
   "flex flex-wrap items-center gap-[9px] [&>.secondary]:m-0 [&>.danger-text]:m-0";
 export const stack = "flex flex-col gap-4";
 
+/** A status line from the page's own actions, set apart from the cards instead of floating as bare text above them. */
+export const status = "m-0 rounded-lg bg-subtle px-3.5 py-2.5 text-[13px] text-secondary";
+
+// ---- signing in ----
+
+/** The signed-out page is one card: the welcome, the providers and the repair actions, centred in a column narrow enough that the buttons read as a list rather than as banners. */
+export const signIn = "flex flex-col items-center gap-5 py-8 text-center";
+export const signInHeader = "flex flex-col items-center gap-3 [&_h2]:text-[17px] [&_p]:mt-1.5";
+export const signInBody = "flex w-full max-w-[320px] flex-col gap-2.5 text-left";
+export const provider =
+  "w-full cursor-pointer rounded-lg border border-control-border bg-[var(--dropdown-bg)] px-3.5 py-2.5 text-center font-medium text-body not-disabled:hover:border-edge-strong disabled:cursor-default disabled:opacity-60";
+export const submit =
+  "w-full rounded-lg border border-accent-soft-border bg-accent-strong px-3.5 py-2.5 font-medium text-white disabled:opacity-60";
+/** The actions that repair a broken sign-in rather than perform one: present, but quiet. */
+export const signInFooter = "flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5";
+export const link =
+  "cursor-pointer border-0 bg-transparent p-0 text-xs [color:var(--p-sub)] not-disabled:hover:[color:var(--p-text)] not-disabled:hover:underline disabled:cursor-default disabled:opacity-60";
+
 export const hero = "flex items-center gap-4";
 export const avatar = (size: "small" | "medium" | "large") =>
   `grid place-items-center rounded-full bg-accent-strong font-[650] text-white ${
