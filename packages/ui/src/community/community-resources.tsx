@@ -132,9 +132,11 @@ function ResourceEditor({
   const [error, setError] = useState("");
   const mounted = useRef(true);
   const clientGeneration = useRef(0);
+  const actionRunning = useRef(false);
   useEffect(() => {
     const generation = ++clientGeneration.current;
     mounted.current = true;
+    actionRunning.current = false;
     setBusy(false);
     return () => {
       mounted.current = false;
@@ -163,7 +165,7 @@ function ResourceEditor({
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || actionRunning.current) return;
     const normalizedName = name.trim();
     const normalizedDescription = description.trim();
     const valid =
@@ -181,27 +183,32 @@ function ResourceEditor({
       return;
     }
     const generation = clientGeneration.current;
-    await runAsyncAction(
-      {
-        busy,
-        isCurrent: () => mounted.current && generation === clientGeneration.current,
-        setBusy,
-        setError,
-      },
-      async () => {
-        await client.publish(
-          id,
-          kind,
-          normalizedName,
-          normalizedDescription,
-          kind === "reply" ? { prompt } : { entries },
-          existing?.revision ?? 0,
-        );
-        if (!mounted.current || generation !== clientGeneration.current) return;
-        await onPublished();
-      },
-      { formatError: resourceMessage },
-    );
+    actionRunning.current = true;
+    try {
+      await runAsyncAction(
+        {
+          busy,
+          isCurrent: () => mounted.current && generation === clientGeneration.current,
+          setBusy,
+          setError,
+        },
+        async () => {
+          await client.publish(
+            id,
+            kind,
+            normalizedName,
+            normalizedDescription,
+            kind === "reply" ? { prompt } : { entries },
+            existing?.revision ?? 0,
+          );
+          if (!mounted.current || generation !== clientGeneration.current) return;
+          await onPublished();
+        },
+        { formatError: resourceMessage },
+      );
+    } finally {
+      if (generation === clientGeneration.current) actionRunning.current = false;
+    }
   };
   return (
     <div className={style.backdrop}>
