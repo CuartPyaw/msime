@@ -1484,7 +1484,7 @@ fn transport_filters_by_category_and_always_includes_it() {
     assert_eq!(page.skins, vec![item()]);
     let (head, _) = received.recv().unwrap();
     assert!(head.starts_with(
-        "GET /v1/community/candidate-skins?offset=0&q=&category=acg&fields=sync&include=category HTTP/1.1"
+        "GET /v1/community/candidate-skins?offset=0&q=&fields=sync&category=acg&include=category HTTP/1.1"
     ));
 
     let (origin, received) = serve_once(serde_json::to_vec(&item()).unwrap());
@@ -1492,7 +1492,7 @@ fn transport_filters_by_category_and_always_includes_it() {
     assert_eq!(client.candidate_skin(item().id, None).unwrap(), item());
     let (head, _) = received.recv().unwrap();
     assert!(head.starts_with(&format!(
-        "GET /v1/community/candidate-skins/{}?fields=sync&include=category HTTP/1.1",
+        "GET /v1/community/candidate-skins/{}?fields=sync&fields=moderation&include=category HTTP/1.1",
         item().id.hyphenated()
     )));
 }
