@@ -1,4 +1,5 @@
 import type { Preferences } from "../index";
+import { isChineseScheme } from "./input-scheme-options";
 
 export type TouchKeyboardScheme =
   | "quanpin"
@@ -67,8 +68,7 @@ export function inferredTouchKeyboardScheme(preferences: Preferences): TouchKeyb
   const enabled = preferences.touch_keyboard_schemes?.enabled ?? allTouchKeyboardSchemes;
   const selected = preferences.touch_keyboard_schemes?.selected;
   if (selected && enabled.includes(selected)) return selected;
-  let inferred: TouchKeyboardScheme =
-    preferences.scheme === "shuangpin" ? preferences.shuangpin_profile : preferences.scheme;
+  let inferred = touchSchemeOf(preferences, preferences.scheme);
   if (preferences.touch_keyboard_layout === "handwriting" && preferences.scheme === "quanpin")
     inferred = "handwriting";
   else if (preferences.touch_keyboard_layout === "nine_key" && preferences.scheme !== "korean")
@@ -76,11 +76,33 @@ export function inferredTouchKeyboardScheme(preferences: Preferences): TouchKeyb
   return enabled.includes(inferred) ? inferred : (enabled[0] ?? "quanpin");
 }
 
-/** The Chinese scheme a Japanese or Korean selection returns to; switching between those two keeps the one already remembered. */
+/** The touch scheme for a document scheme. Cantonese, Zhuyin and Vietnamese have no touch keyboard, so they map to the remembered Chinese scheme's touch scheme, or 全拼 when that has none either. */
+function touchSchemeOf(
+  preferences: Preferences,
+  scheme: Preferences["scheme"],
+): TouchKeyboardScheme {
+  switch (scheme) {
+    case "shuangpin":
+      return preferences.shuangpin_profile;
+    case "quanpin":
+    case "wubi":
+    case "japanese":
+    case "korean":
+      return scheme;
+    case "cantonese":
+    case "zhuyin":
+    case "vietnamese": {
+      const remembered = preferences.last_chinese_scheme;
+      return remembered === "quanpin" || remembered === "shuangpin" || remembered === "wubi"
+        ? touchSchemeOf(preferences, remembered)
+        : "quanpin";
+    }
+  }
+}
+
+/** The Chinese scheme a Japanese, Korean or Vietnamese selection returns to; switching among those keeps the one already remembered. */
 function rememberedChineseScheme(preferences: Preferences): Preferences["last_chinese_scheme"] {
-  return preferences.scheme === "japanese" || preferences.scheme === "korean"
-    ? preferences.last_chinese_scheme
-    : preferences.scheme;
+  return isChineseScheme(preferences.scheme) ? preferences.scheme : preferences.last_chinese_scheme;
 }
 
 export function selectTouchKeyboardScheme(

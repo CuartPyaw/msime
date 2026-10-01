@@ -3,6 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import {
   allTouchKeyboardSchemes,
+  inferredTouchKeyboardScheme,
   selectHomeTouchKeyboardScheme,
   updateTouchKeyboardSchemeEnabled,
   type Preferences,
@@ -125,6 +126,36 @@ test("switching from Japanese to Korean keeps the remembered Chinese scheme", ()
   );
 
   expect(next.last_chinese_scheme).toBe("shuangpin");
+});
+
+test.each(["cantonese", "zhuyin", "vietnamese"] as const)(
+  "%s, which has no touch keyboard, maps to the remembered Chinese touch scheme",
+  (scheme) => {
+    const untouched = { ...preferences, scheme, touch_keyboard_schemes: undefined };
+    expect(
+      inferredTouchKeyboardScheme({
+        ...untouched,
+        last_chinese_scheme: "shuangpin",
+        shuangpin_profile: "ziranma",
+      }),
+    ).toBe("ziranma");
+    expect(inferredTouchKeyboardScheme({ ...untouched, last_chinese_scheme: "wubi" })).toBe("wubi");
+    expect(inferredTouchKeyboardScheme({ ...untouched, last_chinese_scheme: "zhuyin" })).toBe(
+      "quanpin",
+    );
+    expect(inferredTouchKeyboardScheme({ ...untouched, last_chinese_scheme: null })).toBe(
+      "quanpin",
+    );
+  },
+);
+
+test("selecting Japanese from Vietnamese keeps the remembered Chinese scheme", () => {
+  const next = selectHomeTouchKeyboardScheme(
+    { ...preferences, scheme: "vietnamese", last_chinese_scheme: "cantonese" },
+    "japanese",
+  );
+
+  expect(next.last_chinese_scheme).toBe("cantonese");
 });
 
 test("Korean is appended last to the stable scheme order", () => {

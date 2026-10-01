@@ -7,6 +7,7 @@ import { HandwritingPlatformNotice } from "./handwriting-platform-notice";
 import { MobileInputAiNotice } from "./mobile-input-ai-notice";
 import { MobileKeyboardFeedbackSettings } from "./mobile-keyboard-feedback-settings";
 import { InputSchemeSettingsContent } from "./input-scheme-settings-content";
+import { supportedInputSchemes } from "./input-scheme-options";
 import { NavigationSection, defaultNavigation } from "./navigation-section";
 import type { TouchKeyboardScheme as TouchKeyboardSchemePreference } from "./touch-keyboard-scheme-helpers";
 import { TranslationSettingsContent } from "./translation-settings-content";
@@ -192,6 +193,7 @@ export function InputSettingsPanel({
         touchKeyboardSchemes={touchKeyboardSchemes}
         selectedTouchKeyboardScheme={selectedTouchKeyboardScheme}
         macos={macosPlatform}
+        inputSchemes={supportedInputSchemes(client.host)}
         macosShuangpinKeymap={
           macosPlatform && client.loadMacosShuangpinKeymap && macosShuangpinKeymap !== undefined
             ? macosShuangpinKeymap

@@ -1416,8 +1416,7 @@ export type Preferences = {
   word_character?: { enabled: boolean; keys: "brackets" | "minus_equal" };
   navigation?: NavigationPreferences;
   keybindings?: KeybindingPreferences;
-  /** Narrower than `InputScheme` until the settings page handles Cantonese, Zhuyin and Vietnamese; a document naming one of those still loads. */
-  scheme: "quanpin" | "shuangpin" | "wubi" | "japanese" | "korean";
+  scheme: InputScheme;
   /** Width used when desktop hosts commit printable ASCII characters. */
   character_width?: "halfwidth" | "fullwidth";
   wubi_code_hint?: boolean;
@@ -1430,8 +1429,7 @@ export type Preferences = {
   touch_toolbar?: Partial<TouchToolbarPreferences>;
   default_ime_mode?: "chinese" | "english";
   ime_mode_scope?: "app" | "global";
-  /** Narrower than `ChineseScheme` for the same reason as `scheme`. */
-  last_chinese_scheme?: "quanpin" | "shuangpin" | "wubi" | null;
+  last_chinese_scheme?: ChineseScheme | null;
   shuangpin_profile: "xiaohe" | "ziranma" | "shoudao" | "microsoft";
   /** macOS exposes the native shuangpin preedit presentation in the appearance page. */
   shuangpin_preedit_uses_raw?: boolean;
