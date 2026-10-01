@@ -101,12 +101,14 @@ export function CandidateSkinPublishDialog({
   const [publicationId, setPublicationId] = useState(randomUuid);
   const clientGeneration = useRef(0);
   const packGeneration = useRef(0);
+  const actionRunning = useRef(false);
   // The package whose name the form was filled from, so switching visibility re-checks the package without discarding a name the user typed.
   const namedSkin = useRef("");
 
   useEffect(() => {
     const generation = ++clientGeneration.current;
     let active = true;
+    actionRunning.current = false;
     setBusy(false);
     if (localSkins) {
       setOptionsLoading(true);
@@ -255,32 +257,37 @@ export function CandidateSkinPublishDialog({
   const ready = Boolean(pack) && !packLoading && nameValid && descriptionValid && agreed;
 
   const submit = async () => {
-    if (busy || !ready || !skinId) return;
+    if (busy || actionRunning.current || !ready || !skinId) return;
     const generation = clientGeneration.current;
+    actionRunning.current = true;
     setSignInRequired(false);
-    await runAsyncAction(
-      {
-        busy,
-        isCurrent: () => generation === clientGeneration.current,
-        setBusy,
-        setError,
-      },
-      async (isCurrent) => {
-        const published = await client.publish(
-          skinId,
-          publicationId,
-          normalizedName,
-          normalizedDescription,
-          visibility,
-        );
-        if (!isCurrent()) return;
-        await onPublished(published);
-      },
-      {
-        formatError: (publishError) => candidateSkinMessage(publishError, true),
-        onError: (publishError) => setSignInRequired(communityNeedsSignIn(publishError)),
-      },
-    );
+    try {
+      await runAsyncAction(
+        {
+          busy,
+          isCurrent: () => generation === clientGeneration.current,
+          setBusy,
+          setError,
+        },
+        async (isCurrent) => {
+          const published = await client.publish(
+            skinId,
+            publicationId,
+            normalizedName,
+            normalizedDescription,
+            visibility,
+          );
+          if (!isCurrent()) return;
+          await onPublished(published);
+        },
+        {
+          formatError: (publishError) => candidateSkinMessage(publishError, true),
+          onError: (publishError) => setSignInRequired(communityNeedsSignIn(publishError)),
+        },
+      );
+    } finally {
+      if (generation === clientGeneration.current) actionRunning.current = false;
+    }
   };
 
   const openFolder = async () => {
