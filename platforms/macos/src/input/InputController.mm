@@ -2840,13 +2840,11 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     englishCandidates.state = !_appearance.englishMode && [_view[@"dedicated_english"] isEqual:@YES] ? NSControlStateValueOn : NSControlStateValueOff;
     [menu addItem:englishCandidates];
     [menu addItem:NSMenuItem.separatorItem];
-    for (NSUInteger script = 0; script < 2; ++script) {
-        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:script ? @"繁体输出" : @"简体输出" action:script ? @selector(selectTraditionalOutput:) : @selector(selectSimplifiedOutput:) keyEquivalent:@""];
-        item.target = self;
-        item.state = _appearance.traditionalOutput == (script == 1) ? NSControlStateValueOn : NSControlStateValueOff;
-        [menu addItem:item];
-    }
-    [menu addItem:NSMenuItem.separatorItem];
+    // Simplified output is the off state of this one toggle rather than a second row: a radio pair spent a row on the default.
+    NSMenuItem *traditional = [[NSMenuItem alloc] initWithTitle:@"繁体输出" action:@selector(toggleTraditionalOutput:) keyEquivalent:@""];
+    traditional.target = self;
+    traditional.state = _appearance.traditionalOutput ? NSControlStateValueOn : NSControlStateValueOff;
+    [menu addItem:traditional];
     // The three typing toggles the floating toolbar also carries, so they stay reachable with the toolbar hidden. The key equivalents are only labels for the chords handleEvent already claims (Ctrl+Shift+Space and Ctrl+.), not a second binding.
     NSMenuItem *fullWidth = [[NSMenuItem alloc] initWithTitle:@"全角字符" action:@selector(toggleFullWidthInput:) keyEquivalent:@" "];
     fullWidth.target = self;
@@ -2865,48 +2863,25 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     translations.state = _appearance.candidateTranslations ? NSControlStateValueOn : NSControlStateValueOff;
     [menu addItem:translations];
     [menu addItem:NSMenuItem.separatorItem];
-    // NSMenuItem.sectionHeaderWithTitle: needs macOS 14 and this input source still runs on 13, so the section title is a disabled row.
-    NSMenuItem *schemeHeader = [[NSMenuItem alloc] initWithTitle:@"输入方案" action:nil keyEquivalent:@""];
-    schemeHeader.enabled = NO;
-    [menu addItem:schemeHeader];
+    // The scheme and the theme are each one choice out of several, so each is a submenu whose row names the current one, the way the system lists an input source's modes. As a radio list under a header the scheme alone took six rows.
     NSString *profile = [NSString stringWithUTF8String:msime::mac::ShuangpinSchemaTitle(_appearance.shuangpinProfile.UTF8String ?: "")];
     if ([profile hasSuffix:@"双拼"] && profile.length > 2) profile = [profile substringToIndex:profile.length - 2];
     NSArray<NSString *> *schemes = @[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"];
     NSArray<NSString *> *schemeTitles = @[@"全拼", [NSString stringWithFormat:@"双拼（%@）", profile], @"五笔 86", @"日语", @"韩语"];
+    NSMenu *schemeMenu = [[NSMenu alloc] initWithTitle:@"输入方案"];
+    schemeMenu.autoenablesItems = NO;
+    NSString *currentSchemeTitle = nil;
     for (NSUInteger index = 0; index < schemes.count; ++index) {
         NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:schemeTitles[index] action:@selector(selectInputScheme:) keyEquivalent:@""];
         item.target = self;
         item.representedObject = schemes[index];
-        item.indentationLevel = 1;
         item.state = [_appearance.inputScheme isEqual:schemes[index]] ? NSControlStateValueOn : NSControlStateValueOff;
-        [menu addItem:item];
+        if (item.state == NSControlStateValueOn) currentSchemeTitle = schemeTitles[index];
+        [schemeMenu addItem:item];
     }
-    [menu addItem:NSMenuItem.separatorItem];
-    // The floating toolbar is one click from the language bar in the reference - the first item of
-    // its tray menu, with a tick showing the state. Here it could only be reached by opening the
-    // settings window and finding a checkbox, which is a long way round for something the user
-    // turns on and off while typing.
-    NSMenuItem *toolbar = [[NSMenuItem alloc] initWithTitle:@"悬浮工具栏" action:@selector(toggleFloatingToolbar:) keyEquivalent:@""];
-    toolbar.target = self;
-    toolbar.state = _appearance.floatingToolbarEnabled ? NSControlStateValueOn : NSControlStateValueOff;
-    [menu addItem:toolbar];
-
-    // Keep the live input tools one click away. Account, update and support destinations stay in the settings window; listing those management pages here made this menu taller than the screen, but hiding the tools behind a second submenu made the useful part too hard to reach. The dictionary is the one management page the redesigned menu names, next to the theme below.
-    NSMenuItem *emoji = [[NSMenuItem alloc] initWithTitle:@"水杉表情面板…" action:@selector(showEmoji:) keyEquivalent:@""];
-    emoji.target = self;
-    [menu addItem:emoji];
-    NSMenuItem *keyboard = [[NSMenuItem alloc] initWithTitle:@"水杉屏幕键盘…" action:@selector(showScreenKeyboard:) keyEquivalent:@""];
-    keyboard.target = self;
-    [menu addItem:keyboard];
-    NSMenuItem *handwriting = [[NSMenuItem alloc] initWithTitle:@"手写输入…" action:@selector(showHandwriting:) keyEquivalent:@""];
-    handwriting.target = self;
-    [menu addItem:handwriting];
-    NSMenuItem *voice = [[NSMenuItem alloc] initWithTitle:@"开始/结束语音输入" action:@selector(showVoicePanel) keyEquivalent:@""];
-    voice.target = self;
-    [menu addItem:voice];
-
-    [menu addItem:NSMenuItem.separatorItem];
-    // The theme is the one appearance choice worth a shortcut past the settings window. NSMenu has no trailing hint text, so the current theme's name rides in the title and the tick marks it in the submenu.
+    NSMenuItem *scheme = [[NSMenuItem alloc] initWithTitle:currentSchemeTitle ? [NSString stringWithFormat:@"输入方案（%@）", currentSchemeTitle] : @"输入方案" action:nil keyEquivalent:@""];
+    scheme.submenu = schemeMenu;
+    [menu addItem:scheme];
     NSString *currentTheme = _appearance.globalTheme ?: @"system";
     NSMenu *themes = [[NSMenu alloc] initWithTitle:@"主题"];
     themes.autoenablesItems = NO;
@@ -2924,15 +2899,32 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     NSMenuItem *theme = [[NSMenuItem alloc] initWithTitle:currentThemeTitle ? [NSString stringWithFormat:@"主题（%@）", currentThemeTitle] : @"主题" action:nil keyEquivalent:@""];
     theme.submenu = themes;
     [menu addItem:theme];
-    NSMenuItem *dictionary = [[NSMenuItem alloc] initWithTitle:@"词库…" action:@selector(showDictionary:) keyEquivalent:@""];
-    dictionary.target = self;
-    [menu addItem:dictionary];
+    [menu addItem:NSMenuItem.separatorItem];
+    // The floating toolbar is one click from the language bar in the reference - the first item of its tray menu, with a tick showing the state. Here it could only be reached by opening the settings window and finding a checkbox, which is a long way round for something the user turns on and off while typing.
+    NSMenuItem *toolbar = [[NSMenuItem alloc] initWithTitle:@"悬浮工具栏" action:@selector(toggleFloatingToolbar:) keyEquivalent:@""];
+    toolbar.target = self;
+    toolbar.state = _appearance.floatingToolbarEnabled ? NSControlStateValueOn : NSControlStateValueOff;
+    [menu addItem:toolbar];
+
+    // Keep the live input tools one click away. Account, update and support destinations stay in the settings window; listing those management pages here made this menu taller than the screen, but hiding the tools behind a second submenu made the useful part too hard to reach.
+    NSMenuItem *emoji = [[NSMenuItem alloc] initWithTitle:@"水杉表情面板…" action:@selector(showEmoji:) keyEquivalent:@""];
+    emoji.target = self;
+    [menu addItem:emoji];
+    NSMenuItem *keyboard = [[NSMenuItem alloc] initWithTitle:@"水杉屏幕键盘…" action:@selector(showScreenKeyboard:) keyEquivalent:@""];
+    keyboard.target = self;
+    [menu addItem:keyboard];
+    NSMenuItem *handwriting = [[NSMenuItem alloc] initWithTitle:@"手写输入…" action:@selector(showHandwriting:) keyEquivalent:@""];
+    handwriting.target = self;
+    [menu addItem:handwriting];
+    NSMenuItem *voice = [[NSMenuItem alloc] initWithTitle:@"开始/结束语音输入" action:@selector(showVoicePanel) keyEquivalent:@""];
+    voice.target = self;
+    [menu addItem:voice];
+
+    [menu addItem:NSMenuItem.separatorItem];
     NSMenuItem *settings = [[NSMenuItem alloc] initWithTitle:@"水杉输入法设置…" action:@selector(showAppearance:) keyEquivalent:@""];
     settings.target = self;
     [menu addItem:settings];
-    // The reference tray menu ends with 关于, which opens the settings window on its about page. One row
-    // does not make the menu too tall, and without it the version and licence notices are only reachable
-    // by knowing to open settings and scroll to the last page.
+    // The reference tray menu ends with 关于, which opens the settings window on its about page. One row does not make the menu too tall, and without it the version and licence notices are only reachable by knowing to open settings and scroll to the last page.
     NSMenuItem *about = [[NSMenuItem alloc] initWithTitle:@"关于水杉输入法…" action:@selector(showAbout:) keyEquivalent:@""];
     about.target = self;
     [menu addItem:about];
@@ -3278,6 +3270,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
 }
 - (void)selectSimplifiedOutput:(id)sender { (void)sender; [self ensureAppearance]; _appearance.traditionalOutput = NO; }
 - (void)selectTraditionalOutput:(id)sender { (void)sender; [self ensureAppearance]; _appearance.traditionalOutput = YES; }
+- (void)toggleTraditionalOutput:(id)sender { (void)sender; [self ensureAppearance]; _appearance.traditionalOutput = !_appearance.traditionalOutput; }
 - (void)selectEnglishMode:(id)sender { (void)sender; [self setEnglishInputMode:YES]; }
 - (void)showSystemCharacterPalette { [NSApp orderFrontCharacterPalette:nil]; }
 - (void)checkForUpdates:(id)sender {

@@ -54,20 +54,19 @@ static NSControl *PreferenceControl(MSIMEAppearancePreferences *preferences, SEL
 }
 
 static void CheckMenu(NSMenu *menu, id controller) {
-    // "" is a separator and "*" a row without a controller action: the disabled scheme header and the theme submenu, whose action AppKit sets to submenuAction:.
+    // "" is a separator and "*" a submenu row, the scheme and the theme, whose action AppKit sets to submenuAction:.
     NSArray<NSString *> *actions = @[
         @"selectChineseMode:", @"selectEnglishMode:", @"toggleDedicatedEnglishMode:", @"",
-        @"selectSimplifiedOutput:", @"selectTraditionalOutput:", @"",
-        @"toggleFullWidthInput:", @"toggleChinesePunctuation:", @"toggleCandidateTranslations:", @"",
-        @"*", @"selectInputScheme:", @"selectInputScheme:", @"selectInputScheme:", @"selectInputScheme:", @"selectInputScheme:", @"",
+        @"toggleTraditionalOutput:", @"toggleFullWidthInput:", @"toggleChinesePunctuation:", @"toggleCandidateTranslations:", @"",
+        @"*", @"*", @"",
         @"toggleFloatingToolbar:", @"showEmoji:", @"showScreenKeyboard:", @"showHandwriting:",
-        @"showVoicePanel", @"", @"*", @"showDictionary:", @"showAppearance:", @"showAbout:"
+        @"showVoicePanel", @"", @"showAppearance:", @"showAbout:"
     ];
     assert(menu.numberOfItems == (NSInteger)actions.count && !menu.autoenablesItems);
     for (NSUInteger index = 0; index < actions.count; ++index) {
         NSMenuItem *item = [menu itemAtIndex:index];
         if (actions[index].length == 0) assert(item.separatorItem);
-        else if ([actions[index] isEqual:@"*"]) assert(!item.separatorItem && ((item.action == nil && item.target == nil) || item.hasSubmenu));
+        else if ([actions[index] isEqual:@"*"]) assert(!item.separatorItem && item.hasSubmenu);
         else {
             assert(item.action == NSSelectorFromString(actions[index]));
             assert(item.target == controller && [controller respondsToSelector:item.action]);
@@ -651,7 +650,7 @@ static void TestSharedTraditionalOutput() {
         [controller applySharedToolbarPreferences:@{@"traditional_chinese_output":enabled}];
         assert(prefs.traditionalOutput == enabled.boolValue && saves == 0);
         assert([toggle.title isEqual:enabled.boolValue ? @"繁" : @"简"]);
-        assert([controller.menu itemAtIndex:enabled.boolValue ? 5 : 4].state == NSControlStateValueOn);
+        assert([controller.menu itemAtIndex:4].state == (enabled.boolValue ? NSControlStateValueOn : NSControlStateValueOff));
         assert([[prefs cloudSettingsSnapshot][@"platform.macos.traditional_chinese_output"] isEqual:enabled]);
     }
     assert([defaults objectForKey:@"MSIMEClientTraditionalOutput"] == nil);
@@ -3753,22 +3752,29 @@ static void TestInputMode(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     CheckMenu(menu, controller);
     assert([menu itemAtIndex:0].state == NSControlStateValueOn);
     assert([menu itemAtIndex:1].state == NSControlStateValueOff);
-    assert(menu.numberOfItems == 28);
-    assert([[menu itemAtIndex:18].title isEqual:@"悬浮工具栏"]);
+    assert(menu.numberOfItems == 20);
+    assert([[menu itemAtIndex:12].title isEqual:@"悬浮工具栏"]);
     NSArray<NSString *> *toolTitles = @[@"水杉表情面板…", @"水杉屏幕键盘…", @"手写输入…", @"开始/结束语音输入"];
     NSArray<NSString *> *toolActions = @[@"showEmoji:", @"showScreenKeyboard:", @"showHandwriting:", @"showVoicePanel"];
     for (NSUInteger index = 0; index < toolTitles.count; ++index) {
-        NSMenuItem *tool = [menu itemAtIndex:19 + index];
+        NSMenuItem *tool = [menu itemAtIndex:13 + index];
         assert([tool.title isEqual:toolTitles[index]] && tool.action == NSSelectorFromString(toolActions[index]));
     }
-    assert([menu itemAtIndex:23].separatorItem);
-    assert([[menu itemAtIndex:25].title isEqual:@"词库…"] && [menu itemAtIndex:25].action == @selector(showDictionary:));
-    assert([[menu itemAtIndex:26].title isEqual:@"水杉输入法设置…"] &&
-           [menu itemAtIndex:26].action == @selector(showAppearance:));
-    assert([[menu itemAtIndex:27].title isEqual:@"关于水杉输入法…"] &&
-           [menu itemAtIndex:27].action == @selector(showAbout:));
+    assert([menu itemAtIndex:17].separatorItem);
+    assert([[menu itemAtIndex:18].title isEqual:@"水杉输入法设置…"] && [menu itemAtIndex:18].action == @selector(showAppearance:));
+    assert([[menu itemAtIndex:19].title isEqual:@"关于水杉输入法…"] && [menu itemAtIndex:19].action == @selector(showAbout:));
+    // Simplified output is the off state of the one 繁体输出 toggle.
+    const BOOL traditionalOutput = appearance.traditionalOutput;
+    appearance.traditionalOutput = NO;
+    NSMenuItem *traditional = [controller.menu itemAtIndex:4];
+    assert([traditional.title isEqual:@"繁体输出"] && traditional.state == NSControlStateValueOff);
+    [NSApp sendAction:traditional.action to:traditional.target from:traditional];
+    assert(appearance.traditionalOutput && [controller.menu itemAtIndex:4].state == NSControlStateValueOn);
+    [NSApp sendAction:traditional.action to:traditional.target from:traditional];
+    assert(!appearance.traditionalOutput);
+    appearance.traditionalOutput = traditionalOutput;
     // The typing toggles mirror the toolbar's runtime state, show the chords handleEvent claims, and flip through the same paths.
-    NSMenuItem *fullWidth = [menu itemAtIndex:7], *punctuation = [menu itemAtIndex:8], *translations = [menu itemAtIndex:9];
+    NSMenuItem *fullWidth = [menu itemAtIndex:5], *punctuation = [menu itemAtIndex:6], *translations = [menu itemAtIndex:7];
     assert([fullWidth.title isEqual:@"全角字符"] && [fullWidth.keyEquivalent isEqual:@" "] &&
            fullWidth.keyEquivalentModifierMask == (NSEventModifierFlagControl | NSEventModifierFlagShift));
     assert([punctuation.title isEqual:@"中文标点"] && [punctuation.keyEquivalent isEqual:@"."] &&
@@ -3779,53 +3785,57 @@ static void TestInputMode(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     session.widthCalls = 0;
     [NSApp sendAction:fullWidth.action to:fullWidth.target from:fullWidth];
     assert(appearance.runtimeFullWidthInput == !runtimeWidth && session.widthCalls == 1 && session.fullwidth == !runtimeWidth);
-    assert([controller.menu itemAtIndex:7].state == (runtimeWidth ? NSControlStateValueOff : NSControlStateValueOn));
+    assert([controller.menu itemAtIndex:5].state == (runtimeWidth ? NSControlStateValueOff : NSControlStateValueOn));
     [NSApp sendAction:fullWidth.action to:fullWidth.target from:fullWidth];
     assert(appearance.runtimeFullWidthInput == runtimeWidth);
     NSString *lock = appearance.punctuationLock;
     appearance.punctuationLock = @"follow";
     const BOOL runtimePunctuation = appearance.runtimeChinesePunctuation;
-    punctuation = [controller.menu itemAtIndex:8];
+    punctuation = [controller.menu itemAtIndex:6];
     assert(punctuation.enabled && punctuation.state == (runtimePunctuation ? NSControlStateValueOn : NSControlStateValueOff));
     [NSApp sendAction:punctuation.action to:punctuation.target from:punctuation];
     assert(appearance.runtimeChinesePunctuation == !runtimePunctuation && session.chinesePunctuation == !runtimePunctuation);
-    assert([controller.menu itemAtIndex:8].state == (runtimePunctuation ? NSControlStateValueOff : NSControlStateValueOn));
+    assert([controller.menu itemAtIndex:6].state == (runtimePunctuation ? NSControlStateValueOff : NSControlStateValueOn));
     [NSApp sendAction:punctuation.action to:punctuation.target from:punctuation];
     assert(appearance.runtimeChinesePunctuation == runtimePunctuation);
     appearance.punctuationLock = @"english";
-    assert(![controller.menu itemAtIndex:8].enabled);
+    assert(![controller.menu itemAtIndex:6].enabled);
     appearance.punctuationLock = lock;
     const BOOL showTranslations = appearance.candidateTranslations;
     assert(translations.state == (showTranslations ? NSControlStateValueOn : NSControlStateValueOff));
     [NSApp sendAction:translations.action to:translations.target from:translations];
     assert(appearance.candidateTranslations == !showTranslations);
-    assert([controller.menu itemAtIndex:9].state == (showTranslations ? NSControlStateValueOff : NSControlStateValueOn));
+    assert([controller.menu itemAtIndex:7].state == (showTranslations ? NSControlStateValueOff : NSControlStateValueOn));
     appearance.candidateTranslations = showTranslations;
-    // The scheme is a radio group under a disabled header, the 双拼 row naming the selected profile.
+    // The scheme is a radio submenu whose parent row names the selected scheme, the 双拼 row naming the selected profile.
     NSString *scheme = appearance.inputScheme, *profile = appearance.shuangpinProfile;
     appearance.inputScheme = @"quanpin";
     appearance.shuangpinProfile = @"ziranma";
-    menu = controller.menu;
-    assert([[menu itemAtIndex:11].title isEqual:@"输入方案"] && ![menu itemAtIndex:11].enabled);
+    NSMenuItem *schemeItem = [controller.menu itemAtIndex:9];
+    assert([schemeItem.title isEqual:@"输入方案（全拼）"] && schemeItem.submenu.numberOfItems == 5);
     NSArray<NSString *> *schemeTitles = @[@"全拼", @"双拼（自然码）", @"五笔 86", @"日语", @"韩语"];
     NSArray<NSString *> *schemeIDs = @[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"];
     for (NSUInteger index = 0; index < schemeIDs.count; ++index) {
-        NSMenuItem *item = [menu itemAtIndex:12 + index];
+        NSMenuItem *item = [schemeItem.submenu itemAtIndex:index];
         assert([item.title isEqual:schemeTitles[index]] && [item.representedObject isEqual:schemeIDs[index]]);
+        assert(item.action == @selector(selectInputScheme:) && item.target == controller);
         assert(item.state == (index == 0 ? NSControlStateValueOn : NSControlStateValueOff));
     }
-    [NSApp sendAction:@selector(selectInputScheme:) to:controller from:[menu itemAtIndex:14]];
+    [NSApp sendAction:@selector(selectInputScheme:) to:controller from:[schemeItem.submenu itemAtIndex:2]];
     assert([appearance.inputScheme isEqual:@"wubi"]);
-    assert([controller.menu itemAtIndex:14].state == NSControlStateValueOn && [controller.menu itemAtIndex:12].state == NSControlStateValueOff);
-    [NSApp sendAction:@selector(selectInputScheme:) to:controller from:[menu itemAtIndex:16]];
+    schemeItem = [controller.menu itemAtIndex:9];
+    assert([schemeItem.title isEqual:@"输入方案（五笔 86）"]);
+    assert([schemeItem.submenu itemAtIndex:2].state == NSControlStateValueOn && [schemeItem.submenu itemAtIndex:0].state == NSControlStateValueOff);
+    [NSApp sendAction:@selector(selectInputScheme:) to:controller from:[schemeItem.submenu itemAtIndex:4]];
     assert([appearance.inputScheme isEqual:@"korean"] && [appearance.lastChineseScheme isEqual:@"wubi"]);
-    assert([controller.menu itemAtIndex:16].state == NSControlStateValueOn && [controller.menu itemAtIndex:14].state == NSControlStateValueOff);
+    schemeItem = [controller.menu itemAtIndex:9];
+    assert([schemeItem.submenu itemAtIndex:4].state == NSControlStateValueOn && [schemeItem.submenu itemAtIndex:2].state == NSControlStateValueOff);
     appearance.inputScheme = scheme;
     appearance.shuangpinProfile = profile;
     // The theme submenu is the shared catalog, ticked at the current theme, whose name the parent row carries.
     NSString *globalTheme = appearance.globalTheme;
     appearance.globalTheme = @"system";
-    NSMenuItem *themeItem = [controller.menu itemAtIndex:24];
+    NSMenuItem *themeItem = [controller.menu itemAtIndex:10];
     const auto &catalog = msime::mac::ThemeCatalog();
     assert(themeItem.submenu.numberOfItems == (NSInteger)catalog.size());
     assert(([themeItem.title isEqual:[NSString stringWithFormat:@"主题（%@）", @(catalog[0].title.c_str())]]));
@@ -3836,7 +3846,7 @@ static void TestInputMode(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     }
     [NSApp sendAction:@selector(selectGlobalTheme:) to:controller from:[themeItem.submenu itemAtIndex:1]];
     assert([appearance.globalTheme isEqual:@(catalog[1].id.c_str())]);
-    themeItem = [controller.menu itemAtIndex:24];
+    themeItem = [controller.menu itemAtIndex:10];
     assert(([themeItem.title isEqual:[NSString stringWithFormat:@"主题（%@）", @(catalog[1].title.c_str())]]));
     assert([themeItem.submenu itemAtIndex:1].state == NSControlStateValueOn);
     // A theme with a mode of its own fixes the menus' mode as it fixes the candidate window's and the toolbar's, over an explicit menu theme.
@@ -7923,7 +7933,7 @@ int main(int argc, char **argv) {
         NSDictionary *preserved = [[controller valueForKey:@"view"] copy];
         [controller selectTraditionalOutput:nil];
         [controller appearanceChanged:nil];
-        assert([controller.menu itemAtIndex:5].state == NSControlStateValueOn);
+        assert([controller.menu itemAtIndex:4].state == NSControlStateValueOn);
         assert([[[MSIMEAppearancePreferences alloc] initWithDefaults:defaults skinsRoot:appearance.skinsRoot] traditionalOutput]);
         MSIMECandidateButton *scriptButton = PageButton(layoutPanel.contentView, 0);
         assert([scriptButton.toolTip isEqual:@"漢語"] && [scriptButton.title containsString:@"漢語"]);
@@ -8050,7 +8060,7 @@ int main(int argc, char **argv) {
                             @"view": @{@"scheme": @0, @"local_mode": @"none", @"editing_text": @"", @"candidates": @[]}}];
         assert([client.committed isEqual:@"日本国"]);
         [controller selectSimplifiedOutput:nil];
-        assert([controller.menu itemAtIndex:4].state == NSControlStateValueOn);
+        assert([controller.menu itemAtIndex:4].state == NSControlStateValueOff);
         [controller apply:@{@"commit": @"汉语", @"commit_context": @{@"scheme": @0, @"local_mode": @"none"}, @"view": @{@"editing_text": @"", @"candidates": @[]}}];
         assert([client.committed isEqual:@"汉语"]);
         TestInputMode(defaults, appearance);
