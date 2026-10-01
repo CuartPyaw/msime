@@ -96,7 +96,20 @@ impl CantoneseScheme {
     /// The typed letters with a space at each syllable boundary (`nei hou`). Letters no syllable reads follow after a space as typed, and a trailing `'` stays visible so the key shows an effect.
     pub fn editing_text(&self) -> String {
         let reading = self.segmentation();
-        let mut text = reading.texts(&self.input).collect::<Vec<_>>().join(" ");
+        let mut text = String::with_capacity(
+            reading
+                .syllables
+                .iter()
+                .map(|syllable| syllable.end - syllable.start)
+                .sum::<usize>()
+                .saturating_add(reading.syllables.len().saturating_sub(1)),
+        );
+        for (index, syllable) in reading.syllables.iter().enumerate() {
+            if index > 0 {
+                text.push(' ');
+            }
+            text.push_str(&self.input[syllable.start..syllable.end]);
+        }
         let rest = self.input[reading.end()..].trim_start_matches('\'');
         if !rest.is_empty() {
             if !text.is_empty() {
@@ -430,7 +443,9 @@ mod tests {
 
         scheme.set_raw_input("'Nei'' hou1");
         assert_eq!(scheme.input(), "nei'hou");
-        assert_eq!(scheme.editing_text(), "nei hou");
+        let editing = scheme.editing_text();
+        assert_eq!(editing, "nei hou");
+        assert_eq!(editing.capacity(), editing.len());
         scheme.reset();
         assert!(scheme.is_empty());
         assert_eq!(scheme.editing_text(), "");
