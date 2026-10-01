@@ -54,6 +54,14 @@ const SYNC_FIELDS: &str = "fields=sync";
 const INCLUDE_CATEGORY: &str = "include=category";
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(90);
 const MAX_RESOURCE_PATH_BYTES: usize = 256;
+/// 单张图片每边最多的像素数，与服务端 `maxCandidateSide` 一致：更大的图服务端会拒收，装进来也同步不上去。
+const MAX_IMAGE_SIDE: u32 = 2048;
+/// 一个包里所有图片解码后的像素合计上限，与服务端 `maxCandidatePixels` 一致。
+const MAX_PACKAGE_PIXELS: u64 = 8_000_000;
+/// 解码一张图时允许分配的内存上限。每边 2048 的图按 16 位 RGBA 展开是 32 MiB，这里留出一倍给解码器自己的缓冲。尺寸在完整解码前就从文件头读出并按 [`MAX_IMAGE_SIDE`] 拒绝，这道上限是第二道防线：1 MiB 以内的文件声明巨大尺寸（解压炸弹）时，解码器也无法因此分配超出它的内存。
+const MAX_IMAGE_DECODE_ALLOC: u64 = 64 << 20;
+/// 一张 JPEG 最多的扫描段（SOS）数，与服务端 `maxCandidateJPEGScans` 一致。
+const MAX_JPEG_SCANS: usize = 32;
 const MANIFEST_FILE: &str = "skin.toml";
 /// Where [`install`] writes a package before swapping it in. It sits in the skin root, so the rename that publishes it never crosses a filesystem.
 const STAGING_DIRECTORY: &str = ".community-staging";
@@ -896,6 +904,91 @@ fn magic_matches(content_type: &str, bytes: &[u8]) -> bool {
     }
 }
 
+/// 按 `content_type` 指定的编码完整解码 `bytes`，返回像素数。只看文件头的签名会放过截断或损坏的图，而服务端发布时会完整解码并重新编码，这样的包装进来之后就同步不上去。
+///
+/// 先只读文件头取尺寸，任一边为 0 或超过 [`MAX_IMAGE_SIDE`] 时返回 `candidate_skin_too_large`（与服务端相同），不做完整解码；解码失败、编码与扩展名不符时返回 `candidate_skin_image_invalid`。
+fn check_image(content_type: &str, bytes: &[u8]) -> Result<u64, &'static str> {
+    let format = match content_type {
+        "image/png" => image::ImageFormat::Png,
+        "image/jpeg" => image::ImageFormat::Jpeg,
+        _ => return Err(IMAGE_INVALID),
+    };
+    // 编码由扩展名决定，不按内容猜：名为 .png 的 JPEG 也要拒绝。
+    if !magic_matches(content_type, bytes) {
+        return Err(IMAGE_INVALID);
+    }
+    if format == image::ImageFormat::Jpeg && !jpeg_reaches_end(bytes) {
+        return Err(IMAGE_INVALID);
+    }
+    let reader = |bytes| {
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(MAX_IMAGE_SIDE);
+        limits.max_image_height = Some(MAX_IMAGE_SIDE);
+        limits.max_alloc = Some(MAX_IMAGE_DECODE_ALLOC);
+        let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
+        reader.limits(limits);
+        reader
+    };
+    let (width, height) = reader(bytes)
+        .into_dimensions()
+        .map_err(|error| match error {
+            image::ImageError::Limits(_) => TOO_LARGE,
+            _ => IMAGE_INVALID,
+        })?;
+    if width == 0 || height == 0 || width > MAX_IMAGE_SIDE || height > MAX_IMAGE_SIDE {
+        return Err(TOO_LARGE);
+    }
+    reader(bytes).decode().map_err(|_| IMAGE_INVALID)?;
+    Ok(u64::from(width) * u64::from(height))
+}
+
+/// 从 SOI 按段走到 EOI，扫描段不超过 [`MAX_JPEG_SCANS`] 时返回 `true`；EOI 之后的多余字节不管，服务端的解码器也不读它们。
+///
+/// `image` 的 JPEG 解码器固定用宽松模式，数据提前结束时用灰色补齐剩下的像素并报告成功，截断在扫描数据中间的 JPEG 因此能“解码成功”。服务端的解码器遇到这种文件会报错，所以这里另外确认文件完整地走到了 EOI。
+fn jpeg_reaches_end(bytes: &[u8]) -> bool {
+    let mut scans = 0;
+    let mut i = JPEG_MAGIC.len() - 1;
+    while i + 1 < bytes.len() {
+        if bytes[i] != 0xFF {
+            return false;
+        }
+        let marker = bytes[i + 1];
+        match marker {
+            // 段之间允许任意多个填充用的 0xFF。
+            0xFF => i += 1,
+            0xD9 => return true,
+            0x01 | 0xD0..=0xD7 => i += 2,
+            0x00 => return false,
+            _ => {
+                let Some(length) = bytes.get(i + 2..i + 4) else {
+                    return false;
+                };
+                let length = usize::from(u16::from_be_bytes([length[0], length[1]]));
+                if length < 2 {
+                    return false;
+                }
+                i += 2 + length;
+                if marker != 0xDA {
+                    continue;
+                }
+                scans += 1;
+                if scans > MAX_JPEG_SCANS {
+                    return false;
+                }
+                // 跳过熵编码数据：其中的 0xFF 后面只会跟 0x00（字节填充）或 RSTn，其它组合就是下一个标记。
+                while i + 1 < bytes.len()
+                    && (bytes[i] != 0xFF
+                        || bytes[i + 1] == 0x00
+                        || (0xD0..=0xD7).contains(&bytes[i + 1]))
+                {
+                    i += 1;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Length of the padded standard base64 encoding of `bytes` bytes.
 fn base64_length(bytes: usize) -> usize {
     bytes.div_ceil(3) * 4
@@ -961,7 +1054,7 @@ fn shared_preview(summary: &SkinSummary) -> Result<&str, &'static str> {
     Ok(preview)
 }
 
-/// Build the publish payload for the installed package `id` under `root`: `skin.toml` verbatim and exactly the images it references. Every rule the server applies that the client can check is applied here, each with its own error code, so a package the server would refuse is refused before anything is uploaded. Image dimensions and decodability are left to the server, which re-encodes every image.
+/// 为 `root` 下已安装的包 `id` 生成发布内容：原样的 `skin.toml` 加上它引用的那几张图，不多不少。服务端的规则凡是客户端能检查的都在这里检查，各有各的错误码，服务端会拒收的包在上传前就被拒绝。每张图都按扩展名完整解码一遍，尺寸和整包像素合计也按服务端的上限检查；服务端重新编码之后的大小仍由服务端判断。
 pub fn pack(root: &Path, id: &str) -> Result<PackedSkin, &'static str> {
     pack_as(root, id, CandidateSkinVisibility::Public)
 }
@@ -1008,6 +1101,7 @@ pub fn pack_as(
     let directory = root.join(id);
     let mut files = BTreeMap::new();
     let mut size = 0_usize;
+    let mut pixels = 0_u64;
     for path in &referenced {
         // read_resource follows links inside the package; a shared image must be a file the package itself holds.
         let metadata = fs::symlink_metadata(directory.join(path)).map_err(|_| PACKAGE)?;
@@ -1026,9 +1120,7 @@ pub fn pack_as(
             catalog::ResourceError::TooLarge => TOO_LARGE,
             _ => PACKAGE,
         })?;
-        if image_content_type(path) != Some(resource.content_type)
-            || !magic_matches(resource.content_type, &resource.bytes)
-        {
+        if image_content_type(path) != Some(resource.content_type) {
             return Err(IMAGE_INVALID);
         }
         if resource.bytes.len() > limit {
@@ -1036,6 +1128,10 @@ pub fn pack_as(
         }
         size += resource.bytes.len();
         if size > MAX_PACKAGE_BYTES {
+            return Err(TOO_LARGE);
+        }
+        pixels += check_image(resource.content_type, &resource.bytes)?;
+        if pixels > MAX_PACKAGE_PIXELS {
             return Err(TOO_LARGE);
         }
         files.insert(path.clone(), BASE64.encode(&resource.bytes));
@@ -1094,16 +1190,17 @@ pub fn add_preview(root: &Path, id: &str, bytes: &[u8]) -> Result<String, &'stat
     {
         return Err(PACKAGE);
     }
-    let extension = if magic_matches("image/png", bytes) {
-        "png"
+    let (extension, content_type) = if magic_matches("image/png", bytes) {
+        ("png", "image/png")
     } else if magic_matches("image/jpeg", bytes) {
-        "jpg"
+        ("jpg", "image/jpeg")
     } else {
         return Err(IMAGE_INVALID);
     };
     if bytes.len() > MAX_PREVIEW_BYTES {
         return Err(TOO_LARGE);
     }
+    check_image(content_type, bytes)?;
     let directory = root.join(id);
     let manifest_path = directory.join(MANIFEST_FILE);
     let input = fs::File::open(&manifest_path).map_err(|_| PACKAGE)?;
@@ -1312,6 +1409,7 @@ fn decode_files(files: &BTreeMap<String, String>) -> Result<Vec<(&str, Vec<u8>)>
     }
     let mut decoded = Vec::with_capacity(files.len());
     let mut total = 0_usize;
+    let mut pixels = 0_u64;
     for (path, data) in files {
         if data.len() > base64_length(MAX_PACKAGE_FILE_BYTES) {
             return Err(TOO_LARGE);
@@ -1325,8 +1423,9 @@ fn decode_files(files: &BTreeMap<String, String>) -> Result<Vec<(&str, Vec<u8>)>
             return Err(TOO_LARGE);
         }
         let content_type = image_content_type(path).ok_or(FILE_TYPE)?;
-        if !magic_matches(content_type, &bytes) {
-            return Err(IMAGE_INVALID);
+        pixels += check_image(content_type, &bytes)?;
+        if pixels > MAX_PACKAGE_PIXELS {
+            return Err(TOO_LARGE);
         }
         decoded.push((path.as_str(), bytes));
     }
