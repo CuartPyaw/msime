@@ -33,9 +33,9 @@ constexpr std::uint32_t kTypingEffectRepeat = 0x100;
 // The combo count in a msime_client_typing_effect answer: its low 16 bits, zero while the combo counter is off or the call was refused.
 constexpr std::uint32_t typing_effect_combo(std::uint32_t answer) { return answer & 0xffffu; }
 
-// The combo as the Linux hosts show it, as one more segment of the candidate aux line; empty while there is none. Linux draws no flash or sparks: neither IBus nor Fcitx5 gives an input method a reliable place on screen for an overlay under Wayland, so the count in the text the panel already shows is the whole effect.
+// The combo as the Linux hosts show it, as one more segment of the candidate aux line; empty below two, as on the other hosts, so a single key is not called a combo. Linux draws no flash or sparks: neither IBus nor Fcitx5 gives an input method a reliable place on screen for an overlay under Wayland, so the count in the text the panel already shows is the whole effect.
 inline std::string typing_combo_label(std::uint32_t combo) {
-  return combo == 0 ? std::string{} : "连击 ×" + std::to_string(combo);
+  return combo < 2 ? std::string{} : "连击 ×" + std::to_string(combo);
 }
 
 // Whether a press is an auto-repeat of the key still held. Neither IBus nor Fcitx5 tells an input method that a press repeats, but both pass it releases, and where a held key arrives as more presses of the same keysym with no release between them (Wayland, and X11 clients with detectable auto-repeat, which GDK turns on) that is the repeat; where X11 sends a fake release before each repeat, a repeat counts as a press. A release lost to a focus change misreads at most the next press of that key, and reset() at focus out avoids even that.

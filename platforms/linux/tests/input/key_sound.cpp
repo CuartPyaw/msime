@@ -26,7 +26,7 @@ int main() {
   assert(!key_press_sounds(false, true, false));
   assert(!key_press_sounds(false, false, true));
 
-  // The typing effect: the combo is the answer's low 16 bits, shown only while there is one.
+  // The typing effect: the combo is the answer's low 16 bits, shown from two keys on.
   using msime::linux_host::KeyRepeat;
   using msime::linux_host::typing_combo_label;
   using msime::linux_host::typing_effect_combo;
@@ -36,6 +36,8 @@ int main() {
   assert(typing_effect_combo(0x0010000c) == 12);
   assert(typing_effect_combo(0x0005ffff) == 65535);
   assert(typing_combo_label(0).empty());
+  assert(typing_combo_label(1).empty());
+  assert(typing_combo_label(2) == "连击 ×2");
   assert(typing_combo_label(12) == "连击 ×12");
 
   // A press of the key still held is its auto-repeat; a release, another key or a reset ends that.
