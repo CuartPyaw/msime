@@ -381,6 +381,12 @@ impl VerifiedMarker {
     /// A marker that is absent, unreadable or not the shape this version writes is simply a miss:
     /// the caller hashes, and writes a fresh one.
     pub fn read(path: &Path) -> Option<Self> {
+        if path
+            .parent()
+            .is_some_and(|parent| crate::storage::reject_symlink(parent).is_err())
+        {
+            return None;
+        }
         let metadata = fs::symlink_metadata(path).ok()?;
         if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
             return None;
@@ -824,5 +830,29 @@ mod tests {
             .write(&linked.join("verified-resources.json"))
             .is_err());
         assert!(!outside.path().join("verified-resources.json").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn marker_read_ignores_a_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let resources = root.path().join("resources");
+        fs::create_dir(&resources).unwrap();
+        fs::write(resources.join("msime.db"), b"fixture").unwrap();
+        let marker = VerifiedMarker::describe(&resources, &specification())
+            .unwrap()
+            .unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_path = outside.path().join("verified-resources.json");
+        marker.write(&outside_path).unwrap();
+        let linked = root.path().join("linked");
+        symlink(outside.path(), &linked).unwrap();
+
+        assert_eq!(
+            VerifiedMarker::read(&linked.join("verified-resources.json")),
+            None
+        );
     }
 }
