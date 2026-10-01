@@ -36,6 +36,7 @@ struct Row {
     visibility: CandidateSkinVisibility,
     updated_at: String,
     digest: String,
+    category: Option<CandidateSkinCategory>,
 }
 
 /// The user's library as the server keeps it. Downloads return every image with one byte appended, standing in for the server's re-encoding, so a downloaded package never has the uploaded bytes.
@@ -84,6 +85,7 @@ impl Library {
                 visibility: CandidateSkinVisibility::Private,
                 updated_at,
                 digest,
+                category: None,
             },
         );
         id
@@ -124,6 +126,7 @@ impl Library {
             updated_at: row.updated_at.clone(),
             request_sha256: row.digest.clone(),
             moderation: None,
+            category: row.category,
         })
     }
 
@@ -192,6 +195,7 @@ impl CandidateSkinSyncRemote for Library {
                     &request.files,
                 )
                 .unwrap(),
+                category: request.category,
             },
         );
         self.item(request.id)
@@ -235,6 +239,19 @@ impl CandidateSkinSyncRemote for Library {
             .get_mut(&id)
             .ok_or(AccountError::NotFound)?
             .visibility = visibility;
+        self.item(id)
+    }
+    fn set_category(
+        &self,
+        id: Uuid,
+        category: CandidateSkinCategory,
+    ) -> Result<CandidateSkinItem, AccountError> {
+        self.log(&format!("category {}", category.as_str()));
+        self.rows
+            .borrow_mut()
+            .get_mut(&id)
+            .ok_or(AccountError::NotFound)?
+            .category = Some(category);
         self.item(id)
     }
     fn download(&self, id: Uuid) -> Result<CandidateSkinPackage, AccountError> {
@@ -632,15 +649,38 @@ fn publishing_a_synced_package_updates_its_row_in_place() {
         "公开樱花".into(),
         "说明".into(),
         CandidateSkinVisibility::Public,
+        Some(CandidateSkinCategory::Guofeng),
     )
     .unwrap();
     assert_eq!(item.id, id);
     assert_eq!(item.visibility, CandidateSkinVisibility::Public);
-    assert_eq!(fixture.library.calls(), ["replace 公开樱花", "visibility"]);
+    // 同步存入的私有行没有分类，原地更新时由发布补上。
+    assert_eq!(item.category, Some(CandidateSkinCategory::Guofeng));
+    assert_eq!(
+        fixture.library.calls(),
+        ["replace 公开樱花", "visibility", "category guofeng"]
+    );
     assert_eq!(
         fixture.library.row_names(),
         [("sakura".to_owned(), "公开樱花".to_owned())]
     );
+    assert_eq!(fixture.sync(), CandidateSkinSyncReport::default());
+
+    // 分类已经一致时不再多发一次请求；分类不计入内容摘要，所以同步仍视为一致。
+    fixture.library.calls();
+    publish(
+        &fixture.root,
+        &fixture.state,
+        &fixture.library,
+        "sakura",
+        Uuid::new_v4(),
+        "公开樱花".into(),
+        "说明".into(),
+        CandidateSkinVisibility::Public,
+        Some(CandidateSkinCategory::Guofeng),
+    )
+    .unwrap();
+    assert_eq!(fixture.library.calls(), ["replace 公开樱花"]);
     assert_eq!(fixture.sync(), CandidateSkinSyncReport::default());
 }
 
@@ -659,6 +699,7 @@ fn publishing_a_new_package_creates_a_row_that_sync_then_knows() {
             "樱花".into(),
             String::new(),
             CandidateSkinVisibility::Public,
+            None,
         ),
         Err(CandidateSkinPublishError::Package(
             "candidate_skin_license_required"
@@ -673,9 +714,11 @@ fn publishing_a_new_package_creates_a_row_that_sync_then_knows() {
         "樱花".into(),
         String::new(),
         CandidateSkinVisibility::Private,
+        Some(CandidateSkinCategory::Cute),
     )
     .unwrap();
     assert_eq!(item.id, publication);
+    assert_eq!(item.category, Some(CandidateSkinCategory::Cute));
     fixture.library.calls();
     assert_eq!(fixture.sync(), CandidateSkinSyncReport::default());
     assert_eq!(fixture.library.calls(), ["list"]);
@@ -789,6 +832,7 @@ fn publishing_updates_a_row_sync_has_not_recorded_yet() {
         "新樱花".into(),
         String::new(),
         CandidateSkinVisibility::Private,
+        None,
     )
     .unwrap();
     assert_eq!(item.id, id);

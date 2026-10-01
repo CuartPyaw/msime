@@ -714,6 +714,7 @@ fn item() -> CandidateSkinItem {
         updated_at: "2026-09-30T00:00:00Z".into(),
         request_sha256: String::new(),
         moderation: None,
+        category: Some(CandidateSkinCategory::Nature),
     }
 }
 
@@ -727,6 +728,7 @@ fn publish_request() -> CandidateSkinPublishRequest {
         manifest: manifest("sakura", TOP, "", "", LICENSE),
         files,
         visibility: CandidateSkinVisibility::Public,
+        category: Some(CandidateSkinCategory::Guofeng),
     }
 }
 
@@ -754,6 +756,7 @@ impl AccountSessionStorage for MemoryStorage {
 struct FakeApi {
     calls: Arc<AtomicUsize>,
     refreshes: Arc<AtomicUsize>,
+    preview_bearers: Arc<Mutex<Vec<Option<String>>>>,
 }
 
 impl FakeApi {
@@ -801,6 +804,7 @@ impl CandidateSkinCommunityApi for FakeApi {
         _: usize,
         _: &str,
         mine: bool,
+        _: Option<CandidateSkinCategory>,
         bearer: Option<&str>,
     ) -> Result<CandidateSkinPage, AccountError> {
         self.call(bearer)?;
@@ -822,8 +826,16 @@ impl CandidateSkinCommunityApi for FakeApi {
         value.id = id;
         Ok(value)
     }
-    fn candidate_skin_preview(&self, _: Uuid) -> Result<CandidateSkinPreview, AccountError> {
-        self.call(None)?;
+    fn candidate_skin_preview(
+        &self,
+        _: Uuid,
+        bearer: Option<&str>,
+    ) -> Result<CandidateSkinPreview, AccountError> {
+        self.preview_bearers
+            .lock()
+            .unwrap()
+            .push(bearer.map(str::to_owned));
+        self.call(bearer)?;
         Ok(CandidateSkinPreview {
             path: PREVIEW.into(),
             content_type: "image/png".into(),
@@ -886,6 +898,18 @@ impl CandidateSkinCommunityApi for FakeApi {
         value.visibility = visibility;
         Ok(value)
     }
+    fn set_candidate_skin_category(
+        &self,
+        id: Uuid,
+        category: CandidateSkinCategory,
+        bearer: &str,
+    ) -> Result<CandidateSkinItem, AccountError> {
+        self.call(Some(bearer))?;
+        let mut value = item();
+        value.id = id;
+        value.category = Some(category);
+        Ok(value)
+    }
 }
 
 fn service(
@@ -916,7 +940,10 @@ fn service_refuses_nil_ids_and_anonymous_writes_before_any_transport_call() {
         Err(AccountError::Unauthorized)
     );
     assert_eq!(service.download(item().id), Err(AccountError::Unauthorized));
-    assert_eq!(service.list(0, "", true), Err(AccountError::Unauthorized));
+    assert_eq!(
+        service.list(0, "", true, None),
+        Err(AccountError::Unauthorized)
+    );
     assert_eq!(api.calls.load(Ordering::SeqCst), 0);
 }
 
@@ -925,13 +952,31 @@ fn service_reads_anonymously_without_creating_a_session() {
     let api = FakeApi::default();
     let storage = MemoryStorage::default();
     let service = service(&api, storage.clone());
-    assert_eq!(service.list(0, "", false).unwrap().skins.len(), 1);
+    assert_eq!(service.list(0, "", false, None).unwrap().skins.len(), 1);
     assert_eq!(service.detail(item().id).unwrap().package_id, "sakura");
     assert_eq!(
         service.preview(item().id).unwrap().content_type,
         "image/png"
     );
     assert!(storage.load().unwrap().is_none());
+    assert_eq!(*api.preview_bearers.lock().unwrap(), vec![None]);
+}
+
+// A private package's preview is served to its owner only, so a signed-in owner's request must carry the session (refreshed like any other) or every private card shows 预览图加载失败.
+#[test]
+fn service_preview_carries_the_session_when_signed_in() {
+    let api = FakeApi::default();
+    let storage = MemoryStorage::default();
+    *storage.0.lock().unwrap() = Some(saved(b'a'));
+    let service = service(&api, storage);
+    assert_eq!(
+        service.preview(item().id).unwrap().content_type,
+        "image/png"
+    );
+    let bearers = api.preview_bearers.lock().unwrap().clone();
+    assert_eq!(bearers.len(), 2, "stale token refused, then retried");
+    assert!(bearers.iter().all(Option::is_some));
+    assert_eq!(api.refreshes.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -947,7 +992,7 @@ fn service_writes_refresh_once_after_unauthorized() {
     assert_eq!(service.download(item().id).unwrap().id, item().id);
     service.rate(item().id, 4).unwrap();
     service.unpublish(item().id).unwrap();
-    assert_eq!(service.list(0, "", true).unwrap().skins.len(), 1);
+    assert_eq!(service.list(0, "", true, None).unwrap().skins.len(), 1);
     assert_eq!(api.refreshes.load(Ordering::SeqCst), 1);
     assert_eq!(api.calls.load(Ordering::SeqCst), 6);
 }
@@ -1052,12 +1097,12 @@ fn transport_lists_with_scope_and_encoded_search() {
     let (origin, received) = serve_once(response);
     let client = BackendAccountClient::loopback(&origin).unwrap();
     let page = client
-        .candidate_skins(20, "樱 花", true, Some(&token(b'a')))
+        .candidate_skins(20, "樱 花", true, None, Some(&token(b'a')))
         .unwrap();
     assert_eq!(page.skins, vec![item()]);
     let (head, _) = received.recv().unwrap();
     assert!(head.starts_with(
-        "GET /v1/community/candidate-skins?offset=20&q=%E6%A8%B1%20%E8%8A%B1&scope=mine&fields=sync&fields=moderation HTTP/1.1"
+        "GET /v1/community/candidate-skins?offset=20&q=%E6%A8%B1%20%E8%8A%B1&scope=mine&fields=sync&fields=moderation&include=category HTTP/1.1"
     ));
     assert!(head.contains("authorization: Bearer "));
 }
@@ -1080,7 +1125,7 @@ fn transport_publishes_a_body_larger_than_the_account_default() {
         response
     );
     let (head, body) = received.recv().unwrap();
-    assert!(head.starts_with("POST /v1/community/candidate-skins HTTP/1.1"));
+    assert!(head.starts_with("POST /v1/community/candidate-skins?include=category HTTP/1.1"));
     assert!(head.contains("authorization: Bearer "));
     assert!(body.len() > 2_880_000);
     let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -1090,7 +1135,8 @@ fn transport_publishes_a_body_larger_than_the_account_default() {
     assert_eq!(body["manifest"], request.manifest);
     assert_eq!(body["files"][BACKGROUND].as_str().unwrap().len(), 960_000);
     assert_eq!(body["visibility"], "public");
-    assert_eq!(body.as_object().unwrap().len(), 6);
+    assert_eq!(body["category"], "guofeng");
+    assert_eq!(body.as_object().unwrap().len(), 7);
 }
 
 #[test]
@@ -1293,7 +1339,7 @@ fn transport_replaces_and_sets_visibility_by_id() {
     );
     let (head, body) = received.recv().unwrap();
     assert!(head.starts_with(&format!(
-        "PUT /v1/community/candidate-skins/{} HTTP/1.1",
+        "PUT /v1/community/candidate-skins/{}?include=category HTTP/1.1",
         item().id.hyphenated()
     )));
     let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -1315,7 +1361,7 @@ fn transport_replaces_and_sets_visibility_by_id() {
     );
     let (head, body) = received.recv().unwrap();
     assert!(head.starts_with(&format!(
-        "PATCH /v1/community/candidate-skins/{} HTTP/1.1",
+        "PATCH /v1/community/candidate-skins/{}?include=category HTTP/1.1",
         item().id.hyphenated()
     )));
     assert_eq!(
@@ -1334,4 +1380,126 @@ fn transport_replaces_and_sets_visibility_by_id() {
         ),
         Err(AccountError::Unavailable)
     );
+}
+
+#[test]
+fn categories_round_trip_by_their_server_ids() {
+    let ids = [
+        "nature", "guofeng", "acg", "cute", "food", "tech", "minimal", "other",
+    ];
+    for (category, id) in CandidateSkinCategory::ALL.into_iter().zip(ids) {
+        assert_eq!(category.as_str(), id);
+        assert_eq!(serde_json::to_value(category).unwrap(), id);
+        assert_eq!(
+            serde_json::from_value::<CandidateSkinCategory>(serde_json::json!(id)).unwrap(),
+            category
+        );
+    }
+    let value = item();
+    let parsed: CandidateSkinItem =
+        serde_json::from_value(serde_json::to_value(&value).unwrap()).unwrap();
+    assert_eq!(parsed, value);
+}
+
+#[test]
+fn an_unknown_future_category_reads_as_other() {
+    let mut value = serde_json::to_value(item()).unwrap();
+    value["category"] = serde_json::json!("seasonal");
+    let parsed: CandidateSkinItem = serde_json::from_value(value).unwrap();
+    assert_eq!(parsed.category, Some(CandidateSkinCategory::Other));
+}
+
+#[test]
+fn items_without_a_category_still_read_and_other_unknown_fields_are_refused() {
+    let mut value = serde_json::to_value(item()).unwrap();
+    value.as_object_mut().unwrap().remove("category");
+    let parsed: CandidateSkinItem = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(parsed.category, None);
+    // 不带分类的条目也不会把 `category` 写回给页面。
+    assert!(!serde_json::to_value(&parsed)
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .contains_key("category"));
+    value["unexpected"] = serde_json::json!(1);
+    assert!(serde_json::from_value::<CandidateSkinItem>(value).is_err());
+}
+
+#[test]
+fn a_publish_request_without_a_category_omits_it() {
+    let mut request = publish_request();
+    request.category = None;
+    let body = serde_json::to_value(&request).unwrap();
+    assert!(!body.as_object().unwrap().contains_key("category"));
+}
+
+#[test]
+fn transport_filters_by_category_and_always_includes_it() {
+    let response = serde_json::to_vec(&CandidateSkinPage {
+        skins: vec![item()],
+        has_more: false,
+    })
+    .unwrap();
+    let (origin, received) = serve_once(response);
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    let page = client
+        .candidate_skins(0, "", false, Some(CandidateSkinCategory::Acg), None)
+        .unwrap();
+    assert_eq!(page.skins, vec![item()]);
+    let (head, _) = received.recv().unwrap();
+    assert!(head.starts_with(
+        "GET /v1/community/candidate-skins?offset=0&q=&category=acg&fields=sync&include=category HTTP/1.1"
+    ));
+
+    let (origin, received) = serve_once(serde_json::to_vec(&item()).unwrap());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    assert_eq!(client.candidate_skin(item().id, None).unwrap(), item());
+    let (head, _) = received.recv().unwrap();
+    assert!(head.starts_with(&format!(
+        "GET /v1/community/candidate-skins/{}?fields=sync&include=category HTTP/1.1",
+        item().id.hyphenated()
+    )));
+}
+
+#[test]
+fn transport_sets_the_category_by_id() {
+    let mut food = item();
+    food.category = Some(CandidateSkinCategory::Food);
+    let (origin, received) = serve_once(serde_json::to_vec(&food).unwrap());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    assert_eq!(
+        client
+            .set_candidate_skin_category(item().id, CandidateSkinCategory::Food, &token(b'c'))
+            .unwrap(),
+        food
+    );
+    let (head, body) = received.recv().unwrap();
+    assert!(head.starts_with(&format!(
+        "PATCH /v1/community/candidate-skins/{}?include=category HTTP/1.1",
+        item().id.hyphenated()
+    )));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+        serde_json::json!({ "category": "food" })
+    );
+
+    // 回显的分类不是请求的分类，说明修改没有生效。
+    let (origin, _received) = serve_once(serde_json::to_vec(&item()).unwrap());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    assert_eq!(
+        client.set_candidate_skin_category(item().id, CandidateSkinCategory::Food, &token(b'c')),
+        Err(AccountError::Unavailable)
+    );
+
+    let api = FakeApi::default();
+    let service = service(&api, MemoryStorage::default());
+    assert_eq!(
+        service.set_category(Uuid::nil(), CandidateSkinCategory::Food),
+        Err(AccountError::Invalid)
+    );
+    assert_eq!(
+        service.set_category(item().id, CandidateSkinCategory::Food),
+        Err(AccountError::Unauthorized)
+    );
+    assert_eq!(api.calls.load(Ordering::SeqCst), 0);
 }

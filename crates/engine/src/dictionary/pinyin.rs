@@ -248,8 +248,7 @@ impl PinyinDatabase {
                 return false;
             };
             // A table that fails to prepare is skipped (QQ:1034-1038).
-            let Ok(mut statement) = connection
-                .prepare_cached(&format!("SELECT 1 FROM \"{table}\" WHERE value=?1 LIMIT 1"))
+            let Ok(mut statement) = connection.prepare_cached(&han_char_exists_sql(table.as_str()))
             else {
                 return false;
             };
@@ -262,11 +261,7 @@ impl PinyinDatabase {
         let connection = self.connection.as_ref()?;
         let table = build_table_name(&split_segments(key))?;
         // A missing table or a failed step is "not found" in the reference (QD:490-497).
-        let mut statement = connection
-            .prepare_cached(&format!(
-                "SELECT weight FROM \"{table}\" WHERE key=?1 AND value=?2 LIMIT 1"
-            ))
-            .ok()?;
+        let mut statement = connection.prepare_cached(&find_weight_sql(&table)).ok()?;
         let mut rows = statement.query((key, value)).ok()?;
         let row = rows.next().ok()??;
         column_i64(row, 0).ok()
@@ -280,9 +275,7 @@ impl PinyinDatabase {
             .ok_or_else(|| EngineError::invalid(INVALID_DICTIONARY_KEY))?;
         let jp = segments_to_jianpin(&segments);
         connection
-            .prepare_cached(&format!(
-                "INSERT INTO \"{table}\" (\"key\", \"jp\", \"value\", \"weight\") VALUES (?1, ?2, ?3, ?4)"
-            ))?
+            .prepare_cached(&insert_word_sql(&table))?
             .execute((key, jp.as_str(), value, INSERTED_WEIGHT))?;
         Ok(())
     }
@@ -451,6 +444,36 @@ fn jianpin_sql(table: &str) -> String {
     sql
 }
 
+fn han_char_exists_sql(table: &str) -> String {
+    const PREFIX: &str = "SELECT 1 FROM \"";
+    const SUFFIX: &str = "\" WHERE value=?1 LIMIT 1";
+    let mut sql = String::with_capacity(PREFIX.len() + table.len() + SUFFIX.len());
+    sql.push_str(PREFIX);
+    sql.push_str(table);
+    sql.push_str(SUFFIX);
+    sql
+}
+
+fn find_weight_sql(table: &str) -> String {
+    const PREFIX: &str = "SELECT weight FROM \"";
+    const SUFFIX: &str = "\" WHERE key=?1 AND value=?2 LIMIT 1";
+    let mut sql = String::with_capacity(PREFIX.len() + table.len() + SUFFIX.len());
+    sql.push_str(PREFIX);
+    sql.push_str(table);
+    sql.push_str(SUFFIX);
+    sql
+}
+
+fn insert_word_sql(table: &str) -> String {
+    const PREFIX: &str = "INSERT INTO \"";
+    const SUFFIX: &str = "\" (\"key\", \"jp\", \"value\", \"weight\") VALUES (?1, ?2, ?3, ?4)";
+    let mut sql = String::with_capacity(PREFIX.len() + table.len() + SUFFIX.len());
+    sql.push_str(PREFIX);
+    sql.push_str(table);
+    sql.push_str(SUFFIX);
+    sql
+}
+
 fn initial_sql(first: u8) -> String {
     let mut sql = String::with_capacity(111);
     sql.push_str("SELECT \"key\", \"value\", \"weight\" FROM \"tbl_1_");
@@ -551,6 +574,33 @@ mod tests {
         assert_eq!(
             sql,
             "SELECT \"key\", \"value\", \"weight\" FROM \"tbl_2_n\" WHERE \"jp\" = ? ORDER BY \"weight\" DESC LIMIT ?"
+        );
+        assert_eq!(sql.capacity(), sql.len());
+    }
+
+    #[test]
+    fn han_char_exists_sql_writes_the_lookup_statement_directly() {
+        let sql = han_char_exists_sql("tbl_1_n");
+        assert_eq!(sql, "SELECT 1 FROM \"tbl_1_n\" WHERE value=?1 LIMIT 1");
+        assert_eq!(sql.capacity(), sql.len());
+    }
+
+    #[test]
+    fn find_weight_sql_writes_the_lookup_statement_directly() {
+        let sql = find_weight_sql("tbl_2_n");
+        assert_eq!(
+            sql,
+            "SELECT weight FROM \"tbl_2_n\" WHERE key=?1 AND value=?2 LIMIT 1"
+        );
+        assert_eq!(sql.capacity(), sql.len());
+    }
+
+    #[test]
+    fn insert_word_sql_writes_the_lookup_statement_directly() {
+        let sql = insert_word_sql("tbl_2_n");
+        assert_eq!(
+            sql,
+            "INSERT INTO \"tbl_2_n\" (\"key\", \"jp\", \"value\", \"weight\") VALUES (?1, ?2, ?3, ?4)"
         );
         assert_eq!(sql.capacity(), sql.len());
     }

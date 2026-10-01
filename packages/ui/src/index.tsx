@@ -1005,6 +1005,10 @@ export {
 export { CredentialActions, type CredentialActionsProps } from "./settings/credential-actions";
 export { SettingToggle, type SettingToggleProps } from "./settings/setting-toggle";
 export { SettingField, type SettingFieldProps } from "./settings/setting-field";
+export {
+  SettingActionHeader,
+  type SettingActionHeaderProps,
+} from "./settings/setting-action-header";
 export { SettingTextarea, type SettingTextareaProps } from "./settings/setting-textarea";
 export { ModelSelect, type ModelSelectProps } from "./settings/model-select";
 export {
@@ -1127,6 +1131,9 @@ export {
 } from "./community/community-resources";
 export {
   CommunityCandidateSkinsPage,
+  candidateSkinCategories,
+  candidateSkinCategoryLabels,
+  type CandidateSkinCategory,
   type CandidateSkinCommunityClient,
   type CandidateSkinPackPreview,
   type CandidateSkinSyncReport,
@@ -1187,6 +1194,12 @@ export {
   polishProviderUpdate,
   type ProviderDefaults,
 } from "./voice/voice-providers";
+export {
+  ASR_PROVIDER_OPTIONS,
+  POLISH_PROVIDER_OPTIONS,
+  VoiceProviderOptions,
+  type VoiceProviderOption,
+} from "./voice/voice-provider-options";
 export {
   asrProviderCredentialTestConfig,
   asrServiceCredentialTestConfig,

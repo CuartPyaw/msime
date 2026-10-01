@@ -2823,6 +2823,119 @@ static void TestPreferenceClientGeneration() {
     }
 }
 
+@interface ReloadCountingController : ModeController
+@property(nonatomic) NSUInteger reloads;
+@end
+@implementation ReloadCountingController
+- (void)reloadPreferences {
+    ++self.reloads;
+    [super reloadPreferences];
+}
+@end
+
+// 每个控制器都观察同一份外观设置，所以改动由最先注册的那个保存，而它往往是早已失去焦点的控制器。保存后只重新载入它，持有焦点的会话就停留在原来的设置上：从 한 切到 中 要等下一次每秒一次的轮询才到达 Engine，在此之前敲的键按韩文组字，音节又把新方案挡到它结束。保存完成后，持有焦点的控制器应立即载入保存的文档。
+static void TestSavedPreferencesReachTheFocusedController() {
+    NSString *suite = [@"msime.preference-focus-save." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    ReloadCountingController *saver = [ReloadCountingController alloc];
+    [saver setValue:prefs forKey:@"appearance"];
+    [saver setValue:root forKey:@"preferencesDirectory"];
+    ReloadCountingController *focused = [ReloadCountingController alloc];
+    [focused setValue:prefs forKey:@"appearance"];
+    ShortcutClient *client = [ShortcutClient new];
+    assert(![focused handleEvent:TapEvent(NSEventTypeFlagsChanged, 56, 0, 1) client:client]);
+    focused.reloads = 0;
+    saver.reloads = 0;
+    [saver persistAppearancePreferences];
+    SettleWindowLayout();
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    while (focused.reloads == 0 && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    assert(saver.reloads == 1 && focused.reloads == 1);
+    NSError *error = nil;
+    assert([MSIMEClientSession loadPreferencesInDirectory:root error:&error] && !error);
+    [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+}
+
+// 切换输入模式就是切换方案，而方案只能通过共享文档到达 Engine。Ctrl+Space 之后敲的第一个键必须按新方案组字，此时后台保存和轮询都还没轮到运行循环：切换当场写入文档并应用到会话。用真实会话逐个方向检查，也检查输入法菜单，并且随后的保存不能改动这次切换。
+static void TestModeSwitchReachesTheSessionBeforeTheNextKey() {
+    NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    NSMutableDictionary *options = [@{@"api_version": @1,
+        @"preferences": @{@"scheme": @"quanpin", @"default_ime_mode": @"chinese", @"candidate_page_size": @5,
+                          @"learning": @NO, @"chinese_punctuation": @YES}} mutableCopy];
+    for (NSString *name in @[@"resources", @"user_data", @"cache", @"dictionaries", @"preferences"]) {
+        NSString *path = [root stringByAppendingPathComponent:name];
+        assert([NSFileManager.defaultManager createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil]);
+        if (![name isEqual:@"preferences"]) options[name] = path;
+    }
+    NSError *error = nil;
+    MSIMEClientSession *session = [[MSIMEClientSession alloc] initWithOptions:options error:&error];
+    assert(session && !error);
+    assert([session setFocused:YES error:&error] && !error);
+    NSString *suite = [@"msime.mode-switch-session." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *prefs =
+        [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults skinsRoot:[NSURL fileURLWithPath:root]];
+    prefs.inputScheme = @"quanpin";
+    prefs.englishMode = NO;
+    ShortcutClient *client = [ShortcutClient new];
+    client.document = @"";
+    client.caret = NSMakeRect(100, 100, 1, 16);
+    ModeController *controller = [ModeController alloc];
+    [controller setValue:prefs forKey:@"appearance"];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:client forKey:@"activeClient"];
+    [controller setValue:[root stringByAppendingPathComponent:@"preferences"] forKey:@"preferencesDirectory"];
+    [controller setValue:[[HiddenCandidatePanel alloc] init] forKey:@"panel"];
+    MSIMEFocusedController = controller;
+    MSIMEResetSystemInputModeState(MSIMESharedSystemInputModeState());
+    auto scheme = ^NSInteger { return [[controller valueForKey:@"view"][@"scheme"] integerValue]; };
+    auto type = ^(unsigned short keyCode, NSString *letter) {
+        assert([controller handleEvent:KeypadKey(keyCode, letter, 0, NO) client:client]);
+    };
+
+    // 中 切到 한：紧接着的字母就是韩文字母（자모）。
+    [controller systemDidReportInputMode:MSIMEKoreanInputModeID client:client];
+    type(15, @"r");
+    assert(scheme() == msime::mac::KoreanScheme && [client.marked isEqual:@"\u3131"]);
+    // 音节未完成时从 한 切到 中：先把音节上屏，下一个字母按拼音处理。
+    [controller systemDidReportInputMode:MSIMEChineseInputModeID client:client];
+    assert([client.insertions.lastObject isEqual:@"\u3131"]);
+    type(45, @"n");
+    assert(scheme() == 0 && [client.marked isEqual:@"n"]);
+    // 中 切到 日 再切回来。
+    [controller systemDidReportInputMode:MSIMEJapaneseInputModeID client:client];
+    type(40, @"k");
+    assert(scheme() == 3);
+    [controller systemDidReportInputMode:MSIMEChineseInputModeID client:client];
+    type(45, @"n");
+    assert(scheme() == 0 && [client.marked isEqual:@"n"]);
+    // 输入法菜单里的方案项走同一条路径。
+    NSMenuItem *korean = [[NSMenuItem alloc] initWithTitle:@"韩语" action:@selector(selectInputScheme:) keyEquivalent:@""];
+    korean.representedObject = @"korean";
+    [controller selectInputScheme:korean];
+    type(15, @"r");
+    assert(scheme() == msime::mac::KoreanScheme && [client.marked isEqual:@"\u3131"]);
+
+    // 外观改动触发的后台保存会再写一遍相同的偏好，之后的重新载入既不会再切换一次，也不会切回去。
+    [controller persistAppearancePreferences];
+    SettleWindowLayout();
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1.5];
+    while (deadline.timeIntervalSinceNow > 0) [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    type(15, @"r");
+    assert(scheme() == msime::mac::KoreanScheme && [prefs.inputScheme isEqual:@"korean"]);
+    NSDictionary *stored = [MSIMEClientSession loadPreferencesInDirectory:[root stringByAppendingPathComponent:@"preferences"] error:&error];
+    assert(!error && [stored[@"preferences"][@"scheme"] isEqual:@"korean"]);
+
+    MSIMEFocusedController = nil;
+    MSIMEResetSystemInputModeState(MSIMESharedSystemInputModeState());
+    [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+}
+
 // The poll reads the preferences document once a second, and most of those reads find exactly what
 // was applied a second ago. Applying it again walks every preference, goes back into the Engine and
 // writes a diagnostic line - once a second, for nothing. It also buried the diagnostic log under
@@ -8410,6 +8523,8 @@ int main(int argc, char **argv) {
         TestStaleClientDeactivation();
         TestSoundsFollowKeysCommitsAndActivation();
         TestPreferenceClientGeneration();
+        TestSavedPreferencesReachTheFocusedController();
+        TestModeSwitchReachesTheSessionBeforeTheNextKey();
         TestPreferenceRevisionSkipsUnchangedDocuments();
         TestUnreadablePreferencesAreRecoveredOnce();
         TestProviderSettingsPersistTheSharedSnapshot();

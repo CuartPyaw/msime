@@ -229,8 +229,8 @@ int main()
         NSArray<NSString *> *offered = MSIMEEnableNewInputModes(appBundle, nil, CopyInputSources, GetInputSourceProperty, EnableInputSource);
         require([listedBundleIdentifier isEqualToString:appBundle] && enableCapableOnly && includedAllInstalled,
                 "New-mode discovery did not list every installed source of the bundle.");
-        require(enabledSources.size() == 3 && enabledSources[0] == koreanModeSource && enabledSources[1] == shuangpinModeSource &&
-                    enabledSources[2] == wubiModeSource,
+        require(enabledSources.size() == 2 && enabledSources[0] == shuangpinModeSource &&
+                    enabledSources[1] == wubiModeSource,
                 "The first recorded launch did not enable exactly the modes added since the earlier installs.");
         require([offered isEqualToArray:@[MSIMEChineseInputModeID, MSIMEEnglishInputModeID, MSIMEJapaneseInputModeID,
                                           MSIMEKoreanInputModeID, MSIMEShuangpinInputModeID, MSIMEWubiInputModeID]],
@@ -272,7 +272,8 @@ int main()
 
         // Without the system calls nothing is enabled and the record is only seeded.
         require([MSIMEEnableNewInputModes(appBundle, nil, nullptr, GetInputSourceProperty, EnableInputSource)
-                    isEqualToArray:@[MSIMEChineseInputModeID, MSIMEEnglishInputModeID, MSIMEJapaneseInputModeID]],
+                    isEqualToArray:@[MSIMEChineseInputModeID, MSIMEEnglishInputModeID, MSIMEJapaneseInputModeID,
+                                     MSIMEKoreanInputModeID]],
                 "A missing lister did not leave just the seeded record.");
 
         require(MSIMERegisterAndEnableInputSources(bundleURL, bundleIdentifier, RejectRegistration,

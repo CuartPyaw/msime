@@ -1,6 +1,7 @@
 //! `hanzi_to_pinyin`, the reading lookup the dictionary import uses (bridge.cpp:239-305, 735-776). Bridge-local logic in the C++; it reads the working `msime.db` directly.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
@@ -63,10 +64,7 @@ fn open(path: &Path) -> Option<Connection> {
 /// bridge.cpp:285-305. The table is `tbl_<len>_<c>` written out for every letter, not `quanpin_table`, so past seven characters no table exists and the per-character path answers; tables that fail to prepare (`i`, `u`, `v`) are skipped.
 fn exact_hanzi_pinyin(connection: &Connection, word: &str, length: usize) -> String {
     for initial in b'a'..=b'z' {
-        let sql = format!(
-            "SELECT \"key\" FROM \"tbl_{length}_{}\" WHERE \"value\"=?1 ORDER BY \"weight\" DESC, \"key\" ASC LIMIT 1",
-            initial as char
-        );
+        let sql = exact_hanzi_sql(length, initial);
         let Ok(mut statement) = connection.prepare_cached(&sql) else {
             continue;
         };
@@ -85,6 +83,24 @@ fn exact_hanzi_pinyin(connection: &Connection, word: &str, length: usize) -> Str
     String::new()
 }
 
+fn exact_hanzi_sql(length: usize, initial: u8) -> String {
+    const PREFIX: &str = "SELECT \"key\" FROM \"tbl_";
+    const SUFFIX: &str = "\" WHERE \"value\"=?1 ORDER BY \"weight\" DESC, \"key\" ASC LIMIT 1";
+    let mut digits = 1;
+    let mut value = length;
+    while value >= 10 {
+        digits += 1;
+        value /= 10;
+    }
+    let mut sql = String::with_capacity(PREFIX.len() + digits + 2 + SUFFIX.len());
+    sql.push_str(PREFIX);
+    write!(&mut sql, "{length}").expect("writing to a String cannot fail");
+    sql.push('_');
+    sql.push(initial as char);
+    sql.push_str(SUFFIX);
+    sql
+}
+
 /// Walks all single-character tables, heaviest first, keeping the first key per character (bridge.cpp:239-256). The flag is false when a table could not be read because the file was busy, so the partial map is used once but not cached.
 fn single_hanzi_map(connection: &Connection) -> (HanziReadings, bool) {
     let busy = |error: &rusqlite::Error| {
@@ -96,10 +112,7 @@ fn single_hanzi_map(connection: &Connection) -> (HanziReadings, bool) {
     let mut complete = true;
     let mut result = HanziReadings::new();
     for initial in b'a'..=b'z' {
-        let sql = format!(
-            "SELECT \"key\", \"value\" FROM \"tbl_1_{}\" ORDER BY \"weight\" DESC, \"key\" ASC",
-            initial as char
-        );
+        let sql = single_hanzi_sql(initial);
         let mut statement = match connection.prepare_cached(&sql) {
             Ok(statement) => statement,
             Err(error) => {
@@ -126,6 +139,16 @@ fn single_hanzi_map(connection: &Connection) -> (HanziReadings, bool) {
         }
     }
     (result, complete)
+}
+
+fn single_hanzi_sql(initial: u8) -> String {
+    const PREFIX: &str = "SELECT \"key\", \"value\" FROM \"tbl_1_";
+    const SUFFIX: &str = "\" ORDER BY \"weight\" DESC, \"key\" ASC";
+    let mut sql = String::with_capacity(PREFIX.len() + 1 + SUFFIX.len());
+    sql.push_str(PREFIX);
+    sql.push(initial as char);
+    sql.push_str(SUFFIX);
+    sql
 }
 
 /// The single-character scan walks about twenty thousand rows with no index to sort by, and the personal dictionary validation calls this once per word for up to a thousand words, so the map is built once per dictionary path (bridge.cpp:257-284). Keyed by path because two sessions may point at different dictionaries. It is built outside the lock: two callers arriving together may both scan, the first to finish wins, and no caller waits behind another's scan.
@@ -182,6 +205,26 @@ mod tests {
                 ),
             ],
         )
+    }
+
+    #[test]
+    fn exact_hanzi_sql_writes_the_lookup_statement_directly() {
+        let sql = exact_hanzi_sql(2, b'n');
+        assert_eq!(
+            sql,
+            "SELECT \"key\" FROM \"tbl_2_n\" WHERE \"value\"=?1 ORDER BY \"weight\" DESC, \"key\" ASC LIMIT 1"
+        );
+        assert_eq!(sql.capacity(), sql.len());
+    }
+
+    #[test]
+    fn single_hanzi_sql_writes_the_lookup_statement_directly() {
+        let sql = single_hanzi_sql(b'n');
+        assert_eq!(
+            sql,
+            "SELECT \"key\", \"value\" FROM \"tbl_1_n\" ORDER BY \"weight\" DESC, \"key\" ASC"
+        );
+        assert_eq!(sql.capacity(), sql.len());
     }
 
     #[test]

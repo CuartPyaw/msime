@@ -24,7 +24,7 @@ sha2.workspace = true
 thiserror.workspace = true
 time = { workspace = true, features = ["formatting", "local-offset"] }
 unicode-segmentation.workspace = true
-wana_kana = "4"
+wana_kana = "5"
 
 [dev-dependencies]
 tempfile.workspace = true
