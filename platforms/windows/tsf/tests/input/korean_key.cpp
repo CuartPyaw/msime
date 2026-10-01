@@ -96,6 +96,30 @@ int main() {
     check(korean_hanja_key(0x22, 0).value == MSIME_NEXT_PAGE, "Page Down turns the page");
     check(korean_hanja_key(0xBC, L',').kind == KoreanHanjaKeyKind::None, "comma is not a list key");
 
+    // Behind the deferred-key barrier the list is projected through the queue. The Hanja key opens a closed list and closes an open one, and the syllable keeps composing either way.
+    using msime::tsf::project_korean_hanja_key;
+    const auto projects = [](unsigned vk, wchar_t wch, bool open, bool listOpen, bool syllableEnds) {
+        const auto projected = project_korean_hanja_key(vk, wch, open);
+        return projected.listOpen == listOpen && projected.syllableEnds == syllableEnds;
+    };
+    const unsigned hanja = msime::tsf::kVirtualKeyHanja;
+    check(projects(hanja, L'\0', false, true, false), "a queued Hanja key opens the projected list");
+    check(projects(hanja, L'\0', true, false, false), "a second Hanja key closes it and keeps the syllable");
+    // Escape and Backspace queued behind the Hanja key close the list and keep the syllable, as the Server's session does with them, rather than cancelling or editing it.
+    check(projects(0x1B, 0x1B, true, false, false), "Escape closes the projected list and keeps the syllable");
+    check(projects(0x08, L'\b', true, false, false), "Backspace closes the projected list and keeps the syllable");
+    // Moving in the list keeps it open and the syllable composing.
+    for (const unsigned vk : {0x25u, 0x26u, 0x27u, 0x28u, 0x21u, 0x22u, 0x24u, 0x23u})
+        check(projects(vk, L'\0', true, true, false), "a move keeps the projected list open");
+    // Space, Enter and a digit from either row choose and end the syllable.
+    for (const auto &[vk, wch] : {std::pair<unsigned, wchar_t>{0x20, L' '}, {0x0D, L'\r'}, {'1', L'1'}, {0x69, L'9'}})
+        check(projects(vk, wch, true, false, true), "a choice ends the syllable");
+    // With the list projected closed only the Hanja key is queued as a list key; every other key keeps its action, so an arrow still commits the syllable and a Backspace after it is the application's again.
+    check(korean_key_action(0x25, L'\0', true, false) == KoreanKeyAction::CommitAndPass,
+          "an arrow with the list projected closed commits and passes");
+    check(korean_key_action(0x1B, 0x1B, true, false) == KoreanKeyAction::Default,
+          "Escape with the list projected closed cancels the syllable");
+
     // Keys with no character and no editing role are left to the ordinary classification.
     check(korean_key_action(0x70, L'\0', true) == KoreanKeyAction::Default, "F1 is ordinary");
 

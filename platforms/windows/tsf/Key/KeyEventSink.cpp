@@ -49,6 +49,8 @@ struct DeferredShadowState
     size_t caret = 0;
     bool candidateActive = false;
     bool unicodeMode = false;
+    // Korean: whether the composing syllable's Hanja list is open once the keys ahead have run (see project_korean_hanja_key).
+    bool koreanHanjaListOpen = false;
     bool projectionValid = true;
 };
 
@@ -73,7 +75,8 @@ bool IsBareModifierKey(UINT code)
     }
 }
 
-void ApplyDeferredKeyState(DeferredShadowState &shadow, const _KEYSTROKE_STATE &keyState, WCHAR wch = 0)
+void ApplyDeferredKeyState(DeferredShadowState &shadow, const _KEYSTROKE_STATE &keyState, WCHAR wch = 0,
+                           UINT code = 0)
 {
     const auto clearComposition = [&shadow]() {
         shadow.inputLength = 0;
@@ -81,11 +84,14 @@ void ApplyDeferredKeyState(DeferredShadowState &shadow, const _KEYSTROKE_STATE &
         shadow.caret = 0;
         shadow.candidateActive = false;
         shadow.unicodeMode = false;
+        shadow.koreanHanjaListOpen = false;
     };
 
     switch (keyState.Function)
     {
     case FUNCTION_INPUT:
+        // A Korean letter closes the Hanja list and keeps composing.
+        shadow.koreanHanjaListOpen = false;
         if (shadow.inputLength == 0)
         {
             shadow.unicodeMode = (wch == L'U');
@@ -112,6 +118,7 @@ void ApplyDeferredKeyState(DeferredShadowState &shadow, const _KEYSTROKE_STATE &
         shadow.inputLength = shadow.rawInput.size();
         shadow.candidateActive = false;
         shadow.unicodeMode = (wch == L'U');
+        shadow.koreanHanjaListOpen = false;
         break;
     case FUNCTION_BACKSPACE:
         shadow.caret = min(shadow.caret, shadow.rawInput.size());
@@ -168,13 +175,16 @@ void ApplyDeferredKeyState(DeferredShadowState &shadow, const _KEYSTROKE_STATE &
             ++shadow.caret;
         }
         break;
-    case FUNCTION_KOREAN_HANJA_KEY:
-        // Space, Enter and a digit end the syllable whether the Hanja list turns out to be open when they run (a Hanja is chosen) or not (the Hangul is committed). The Hanja key and the list's other keys leave it composing.
-        if (wch == L' ' || wch == L'\r' || (wch >= L'1' && wch <= L'9'))
+    case FUNCTION_KOREAN_HANJA_KEY: {
+        // Only the Hanja key, and a list key while the projection has the list open, are queued as this function.
+        const auto projected = msime::tsf::project_korean_hanja_key(code, wch, shadow.koreanHanjaListOpen);
+        if (projected.syllableEnds)
         {
             clearComposition();
         }
+        shadow.koreanHanjaListOpen = projected.listOpen;
         break;
+    }
     case FUNCTION_FINALIZE_TEXTSTORE:
     case FUNCTION_COMMIT_SYLLABLE:
     case FUNCTION_COMMIT_SYLLABLE_AND_REPLAY:
@@ -1234,9 +1244,11 @@ void CMetasequoiaIME::_EnsureDeferredKeyProjection()
     _deferredProjectedCandidateActive = _candidateMode == CANDIDATE_ORIGINAL;
     _deferredProjectedUnicodeMode =
         _pCompositionProcessorEngine && _pCompositionProcessorEngine->IsUnicodeModeComposition() != FALSE;
+    _deferredProjectedKoreanHanjaListOpen =
+        Global::KoreanInputModeEnabled.load(std::memory_order_relaxed) && _IsKoreanHanjaListOpen();
 }
 
-void CMetasequoiaIME::_ApplyDeferredKeyProjection(const _KEYSTROKE_STATE &keyState, WCHAR wch)
+void CMetasequoiaIME::_ApplyDeferredKeyProjection(const _KEYSTROKE_STATE &keyState, WCHAR wch, UINT code)
 {
     _EnsureDeferredKeyProjection();
     DeferredShadowState shadow;
@@ -1248,7 +1260,8 @@ void CMetasequoiaIME::_ApplyDeferredKeyProjection(const _KEYSTROKE_STATE &keySta
     shadow.caret = _deferredProjectedCaret;
     shadow.candidateActive = _deferredProjectedCandidateActive;
     shadow.unicodeMode = _deferredProjectedUnicodeMode;
-    ApplyDeferredKeyState(shadow, keyState, wch);
+    shadow.koreanHanjaListOpen = _deferredProjectedKoreanHanjaListOpen;
+    ApplyDeferredKeyState(shadow, keyState, wch, code);
     if (!shadow.projectionValid)
     {
         _deferredKeyProjectionValid = false;
@@ -1257,6 +1270,7 @@ void CMetasequoiaIME::_ApplyDeferredKeyProjection(const _KEYSTROKE_STATE &keySta
         _deferredProjectedCaret = 0;
         _deferredProjectedCandidateActive = false;
         _deferredProjectedUnicodeMode = false;
+        _deferredProjectedKoreanHanjaListOpen = false;
         return;
     }
     _deferredProjectedInputLength = shadow.inputLength;
@@ -1264,6 +1278,7 @@ void CMetasequoiaIME::_ApplyDeferredKeyProjection(const _KEYSTROKE_STATE &keySta
     _deferredProjectedCaret = shadow.caret;
     _deferredProjectedCandidateActive = shadow.candidateActive;
     _deferredProjectedUnicodeMode = shadow.unicodeMode;
+    _deferredProjectedKoreanHanjaListOpen = shadow.koreanHanjaListOpen;
     if (keyState.Function == FUNCTION_BACKSPACE && shadow.inputLength == 0)
         _backspaceHoldArmed = true;
 }
@@ -1286,6 +1301,7 @@ void CMetasequoiaIME::_ApplyDeferredPreservedKeyProjection(REFGUID preservedKey)
         _deferredProjectedCaret = 0;
         _deferredProjectedCandidateActive = false;
         _deferredProjectedUnicodeMode = false;
+        _deferredProjectedKoreanHanjaListOpen = false;
         break;
     case CCompositionProcessorEngine::PreservedKeyAction::ToggleDoubleSingleByteMode:
         _deferredProjectedDoubleSingleByteOpen = !_deferredProjectedDoubleSingleByteOpen;
@@ -1485,6 +1501,7 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
         shadow.caret = _deferredProjectedCaret;
         shadow.candidateActive = _deferredProjectedCandidateActive;
         shadow.unicodeMode = _deferredProjectedUnicodeMode;
+        shadow.koreanHanjaListOpen = _deferredProjectedKoreanHanjaListOpen;
     }
     else
     {
@@ -1503,6 +1520,8 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
             min(static_cast<size_t>(_pCompositionProcessorEngine->GetCaretPosition()), shadow.rawInput.size());
         shadow.candidateActive = _candidateMode == CANDIDATE_ORIGINAL;
         shadow.unicodeMode = _pCompositionProcessorEngine->IsUnicodeModeComposition() != FALSE;
+        shadow.koreanHanjaListOpen =
+            Global::KoreanInputModeEnabled.load(std::memory_order_relaxed) && _IsKoreanHanjaListOpen();
     }
 
     if (static_cast<UINT>(wParam) == VK_BACK && _backspaceHoldArmed && IsAutoRepeat(lParam) &&
@@ -1528,13 +1547,9 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
         }
         // Keys queued ahead of this one may still be composing, so a syllable counts as open when the projection or the document has one.
         const bool composing = shadow.inputLength > 0 || _IsComposing() != FALSE;
-        // Keys queued ahead may also open or close the Hanja list. A list key that would end the syllable without a list is eaten either way, so it is left to FUNCTION_KOREAN_HANJA_KEY, which decides when it runs; Escape and Backspace keep their own meaning unless the list is open now.
-        const auto withoutList = msime::tsf::korean_key_action(*classifiedCode, *classifiedWch, composing);
-        const bool hanjaListKey =
-            composing && msime::tsf::is_korean_hanja_list_key(*classifiedCode, *classifiedWch) &&
-            (withoutList == msime::tsf::KoreanKeyAction::CommitWithText ||
-             withoutList == msime::tsf::KoreanKeyAction::CommitAndPass || _IsKoreanHanjaListOpen());
-        switch (msime::tsf::korean_key_action(*classifiedCode, *classifiedWch, composing, hanjaListKey))
+        // Keys queued ahead may also open or close the Hanja list, so the list is read from the projection, which carries it forward from the host session's. With the list projected closed every key keeps the action it has without one, which is what commits a syllable ended by an arrow so a Backspace queued after it still reaches the application; with it projected open the list's keys become FUNCTION_KOREAN_HANJA_KEY, which decides against the host session when it runs, as the Server does against its own.
+        switch (msime::tsf::korean_key_action(*classifiedCode, *classifiedWch, composing,
+                                              composing && shadow.koreanHanjaListOpen))
         {
         case msime::tsf::KoreanKeyAction::ConvertHanja:
         case msime::tsf::KoreanKeyAction::HanjaList:
@@ -1934,7 +1949,8 @@ bool CMetasequoiaIME::_QueueDeferredKeyDown(_In_ ITfContext *pContext, WPARAM wP
     _deferredKeyDowns.push_back(key);
     if (key.kind == DeferredKeyDown::Kind::KeyDown)
     {
-        _ApplyDeferredKeyProjection(keyState, translatedWch);
+        _ApplyDeferredKeyProjection(keyState, translatedWch,
+                                    VKeyFromVKPacketAndWchar(static_cast<UINT>(wParam), translatedWch));
     }
     else
     {
@@ -2026,6 +2042,7 @@ void CMetasequoiaIME::_ClearDeferredKeyDowns()
     _deferredProjectedCaret = 0;
     _deferredProjectedCandidateActive = false;
     _deferredProjectedUnicodeMode = false;
+    _deferredProjectedKoreanHanjaListOpen = false;
     _shiftHotkeyArmed = false;
     _ctrlHotkeyArmed = false;
 }
@@ -2057,6 +2074,7 @@ void CMetasequoiaIME::_CompleteDeferredKeyReplay(uint64_t replayToken)
         _deferredProjectedCaret = 0;
         _deferredProjectedCandidateActive = false;
         _deferredProjectedUnicodeMode = false;
+        _deferredProjectedKoreanHanjaListOpen = false;
         (void)_RefreshDeferredRecoveryPrefix(context);
         _deferredKeyInFlight = {};
         _hasDeferredKeyInFlight = false;

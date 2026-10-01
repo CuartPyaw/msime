@@ -80,6 +80,27 @@ constexpr KoreanKeyAction korean_key_action(uint32_t vk, wchar_t wch, bool compo
     return KoreanKeyAction::Default;
 }
 
+// The Hanja list as the deferred-key projection carries it. A key behind the deferred-key barrier is classified before the keys ahead of it have run, so the list's state is projected from the host session's forward through the queue, and a list key is classified as the list's own (KoreanKeyAction::HanjaList) only while the projection has the list open. Every other key keeps the action it has with no list, so typing that never presses the Hanja key projects exactly as it did before Hanja conversion existed.
+struct KoreanHanjaProjection {
+    bool listOpen = false;
+    // The key ends the syllable: a Hanja is chosen with the list open, and the Hangul is committed without one.
+    bool syllableEnds = false;
+};
+
+// How a key queued as the Hanja key, or as a key of a projected open list, changes the projection. The Hanja key opens a closed list and closes an open one; Escape and Backspace close it and keep the syllable; Space, Enter and a digit choose and end the syllable; the arrows, paging and Home/End only move in it. Opening assumes the syllable has Hanja, which a lone jamo does not: the keys classified on that assumption are still decided against the host session when they run, and the Server decides them against its own session the same way, so the two stay in step and only the projection is off until the queue drains.
+constexpr KoreanHanjaProjection project_korean_hanja_key(uint32_t vk, wchar_t wch, bool list_open) {
+    if (vk == kVirtualKeyHanja)
+        return {!list_open, false};
+    const auto key = msime::windows::korean_hanja_key(vk, static_cast<uint32_t>(wch));
+    if (key.kind == msime::windows::KoreanHanjaKeyKind::Select ||
+        (key.kind == msime::windows::KoreanHanjaKeyKind::Command && key.value == MSIME_COMMIT_CANDIDATE))
+        return {false, true};
+    if (key.kind == msime::windows::KoreanHanjaKeyKind::Command &&
+        (key.value == MSIME_CANCEL || key.value == MSIME_BACKSPACE))
+        return {false, false};
+    return {list_open, false};
+}
+
 // The letter the Engine receives: Shift decides the case, and with it the tense consonants and ㅒ ㅖ, whatever Caps Lock says.
 constexpr wchar_t korean_letter(wchar_t wch, bool shift) {
     const wchar_t lower = (wch >= L'A' && wch <= L'Z') ? static_cast<wchar_t>(wch - L'A' + L'a') : wch;
