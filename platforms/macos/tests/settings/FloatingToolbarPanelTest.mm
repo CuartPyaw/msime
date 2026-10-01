@@ -446,6 +446,18 @@ int main() {
                          fullWidthEnabled:NO
           traditionalChineseOutputEnabled:NO];
         assert([inputMode.title isEqualToString:@"五"] && [inputMode.toolTip isEqualToString:@"五笔 86 · 切换到英文输入"]);
+        // The opt-in schemes carry their input menu badges too.
+        for (NSArray<NSString *> *entry in @[@[@"cantonese", @"粤拼", @"粤"], @[@"zhuyin", @"注音", @"注"], @[@"vietnamese", @"越南语", @"越"]]) {
+            [panel updateEnglishInputMode:NO
+                     englishCandidateMode:NO
+                                   scheme:entry[0]
+                              schemeTitle:entry[1]
+                                 capsLock:NO
+                    chinesePunctuationEnabled:YES
+                             fullWidthEnabled:NO
+              traditionalChineseOutputEnabled:NO];
+            assert([inputMode.title isEqualToString:entry[2]]);
+        }
         [panel updateEnglishInputMode:NO
                  englishCandidateMode:NO
                                scheme:@"quanpin"
