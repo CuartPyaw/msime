@@ -139,9 +139,12 @@ pub fn canonical_lattice_syllable(syllable: &str) -> &str {
 
 /// The reverse spelling map, per `'`-chunk with separators kept (QU:447-469). Only the outgoing cloud query text uses it.
 pub fn to_google_spelling(segmentation: &str) -> String {
-    segmentation
-        .split('\'')
-        .map(|chunk| match chunk {
+    let mut result = String::with_capacity(segmentation.len());
+    for (index, chunk) in segmentation.split('\'').enumerate() {
+        if index > 0 {
+            result.push('\'');
+        }
+        result.push_str(match chunk {
             "jv" => "ju",
             "qv" => "qu",
             "xv" => "xu",
@@ -153,9 +156,9 @@ pub fn to_google_spelling(segmentation: &str) -> String {
             "lve" => "lue",
             "nve" => "nue",
             other => other,
-        })
-        .collect::<Vec<_>>()
-        .join("'")
+        });
+    }
+    result
 }
 
 /// Alternative readings queried when a quanpin result is sparse (fewer than 8 rows) and its first segment is one of the listed spellings (QU:64-73, QU:510-536). Each returned segmentation is queried in order and appended uniquely by word.
