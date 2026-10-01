@@ -275,9 +275,7 @@ impl PinyinDatabase {
             .ok_or_else(|| EngineError::invalid(INVALID_DICTIONARY_KEY))?;
         let jp = segments_to_jianpin(&segments);
         connection
-            .prepare_cached(&format!(
-                "INSERT INTO \"{table}\" (\"key\", \"jp\", \"value\", \"weight\") VALUES (?1, ?2, ?3, ?4)"
-            ))?
+            .prepare_cached(&insert_word_sql(&table))?
             .execute((key, jp.as_str(), value, INSERTED_WEIGHT))?;
         Ok(())
     }
@@ -466,6 +464,16 @@ fn find_weight_sql(table: &str) -> String {
     sql
 }
 
+fn insert_word_sql(table: &str) -> String {
+    const PREFIX: &str = "INSERT INTO \"";
+    const SUFFIX: &str = "\" (\"key\", \"jp\", \"value\", \"weight\") VALUES (?1, ?2, ?3, ?4)";
+    let mut sql = String::with_capacity(PREFIX.len() + table.len() + SUFFIX.len());
+    sql.push_str(PREFIX);
+    sql.push_str(table);
+    sql.push_str(SUFFIX);
+    sql
+}
+
 fn initial_sql(first: u8) -> String {
     let mut sql = String::with_capacity(111);
     sql.push_str("SELECT \"key\", \"value\", \"weight\" FROM \"tbl_1_");
@@ -583,6 +591,16 @@ mod tests {
         assert_eq!(
             sql,
             "SELECT weight FROM \"tbl_2_n\" WHERE key=?1 AND value=?2 LIMIT 1"
+        );
+        assert_eq!(sql.capacity(), sql.len());
+    }
+
+    #[test]
+    fn insert_word_sql_writes_the_lookup_statement_directly() {
+        let sql = insert_word_sql("tbl_2_n");
+        assert_eq!(
+            sql,
+            "INSERT INTO \"tbl_2_n\" (\"key\", \"jp\", \"value\", \"weight\") VALUES (?1, ?2, ?3, ?4)"
         );
         assert_eq!(sql.capacity(), sql.len());
     }
