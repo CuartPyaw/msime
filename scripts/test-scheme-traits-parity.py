@@ -6,7 +6,7 @@ The engine's `SchemeType` const fns (crates/engine/src/types.rs) are the one sou
 This reads all of them and checks:
 
 - the header's scheme constants are the engine ordinals;
-- every header function documented as mirroring a `SchemeType` predicate (a comment starting with that predicate's name in backticks) answers the same as the engine for every scheme, and false for a number the engine does not know;
+- every header function that mirrors a `SchemeType` predicate, either by being named after it in CamelCase or by a comment starting with that predicate's name in backticks, answers the same as the engine for every scheme, and false for a number the engine does not know;
 - the header's host-only `OpensCandidateList` is the engine's `has_openable_candidate_list`, which is the same list under a host name;
 - the page's `chineseInputSchemeOptions` and `nonChineseSchemes` split the engine's schemes by `is_chinese`, in engine order, and `knownInputSchemes` names every scheme;
 - the page's `InputScheme` and `ChineseScheme` types, and client-core's `InputScheme` and `ChineseScheme` enums they mirror, name the same schemes in engine order.
@@ -165,8 +165,11 @@ def check_header(engine: Engine, header: Header, errors: list[str]) -> int:
         errors.append(f"{rel(HEADER)}: scheme constant `{constant}` has no engine `SchemeType` variant")
 
     compared = 0
+    compared_functions: set[str] = set()
     for function, (mirrored, _) in header.functions.items():
-        predicate = mirrored or HOST_ALIASES.get(function)
+        # A function named after an engine predicate is compared whatever its comment says, so dropping or rewording the comment cannot turn the comparison off.
+        named = snake_case(function) if snake_case(function) in engine.predicates else None
+        predicate = mirrored or named or HOST_ALIASES.get(function)
         if predicate is None:
             continue
         if predicate not in engine.predicates:
@@ -175,6 +178,7 @@ def check_header(engine: Engine, header: Header, errors: list[str]) -> int:
         if mirrored and snake_case(function) != predicate:
             errors.append(f"{rel(HEADER)}: `{function}` mirrors `{predicate}`, so it should be named after it")
         compared += 1
+        compared_functions.add(function)
         try:
             for variant, ordinal in engine.ordinals.items():
                 want = variant in engine.predicates[predicate]
@@ -191,8 +195,8 @@ def check_header(engine: Engine, header: Header, errors: list[str]) -> int:
     if compared == 0:
         errors.append(f"{rel(HEADER)}: no function is documented as mirroring a SchemeType predicate")
     # Host-only traits still have to answer false for an unknown number.
-    for function, (mirrored, _) in header.functions.items():
-        if mirrored or function in HOST_ALIASES:
+    for function in header.functions:
+        if function in compared_functions:
             continue
         try:
             for unknown in UNKNOWN_SCHEMES:
