@@ -1,8 +1,8 @@
 import { actionRow, primary } from "../account/account-style";
 
 export type InputSourceStartupStatus = {
-  /** `login_required`: the input method is installed, but this login session's input source list only picks it up after the user logs in again. */
-  action: "installed" | "updated" | "up_to_date" | "login_required" | "failed";
+  /** `login_required`: the input method is installed, but this login session's input source list only picks it up after the user logs in again. `not_installed`: a first install, left for the user to start from the install window. */
+  action: "installed" | "updated" | "up_to_date" | "not_installed" | "login_required" | "failed";
   /** Whether the input source is in the System Settings list; `null` when that list could not be read. */
   enabled: boolean | null;
   bundled_version: string | null;
@@ -24,7 +24,10 @@ const openSettingsError = `无法打开系统设置，请手动前往${settingsP
 /** Whether the status leaves the user something to add in System Settings, which is what the settings page keeps re-reading the list for. */
 export function inputSourceNeedsAdding(status: InputSourceStartupStatus | null): boolean {
   return (
-    status?.enabled === false && status.action !== "failed" && status.action !== "login_required"
+    status?.enabled === false &&
+    status.action !== "failed" &&
+    status.action !== "login_required" &&
+    status.action !== "not_installed"
   );
 }
 
@@ -60,6 +63,9 @@ export function InputSourceStartupNotice({
   if (failed) {
     title = "水杉输入法没能自动安装或更新";
     detail = "请在「快捷键」页的「输入法服务」中点「安装 / 更新」重试。";
+  } else if (status.action === "not_installed") {
+    title = "水杉输入法还没有安装到本机";
+    detail = "请在「快捷键」页的「输入法服务」中点「安装 / 更新」。";
   } else if (loginRequired) {
     title = "重新登录后才能添加水杉输入法";
     detail = `水杉输入法已装到本机，但 macOS 只在登录时读取新装的输入法，这次登录的输入法列表里还找不到它。请注销并重新登录，然后在${settingsPath}中点「编辑…」添加水杉输入法。以后更新不需要再重新登录。`;
