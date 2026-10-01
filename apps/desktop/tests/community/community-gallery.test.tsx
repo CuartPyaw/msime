@@ -117,3 +117,31 @@ test("runs custom gallery actions through the shared busy and error lifecycle", 
   expect(result.current.error).toBe("请先登录");
   expect(result.current.signInRequired).toBe(true);
 });
+
+test("ignores a duplicate gallery action while the first request is pending", async () => {
+  let resolveRate!: () => void;
+  const gallery = client({
+    rate: vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRate = resolve;
+        }),
+    ),
+  });
+  const { result } = renderHook(() => useCommunityGallery({ client: gallery }));
+  act(() => result.current.setSelected(item("one")));
+
+  let first!: Promise<void>;
+  let second!: Promise<void>;
+  act(() => {
+    first = result.current.rateSelected(5);
+    second = result.current.rateSelected(5);
+  });
+  expect(gallery.rate).toHaveBeenCalledOnce();
+
+  resolveRate();
+  await act(async () => {
+    await first;
+    await second;
+  });
+});
