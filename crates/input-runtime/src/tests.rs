@@ -4886,3 +4886,162 @@ fn ascii_punctuation_reaches_a_scheme_that_spells_with_marks() {
     assert!(literal.commit.is_none());
     assert_eq!(literal.view.editing_text, "");
 }
+
+const VIETNAMESE_SCHEME: u8 = 7;
+
+/// A real Engine on the Vietnamese scheme with the given input method (0 Telex, 1 VNI), focused.
+fn vietnamese_runtime(directory: &std::path::Path, input_method: u8) -> Runtime {
+    let mut options = real_engine_options(directory);
+    options.scheme = VIETNAMESE_SCHEME;
+    options.vietnamese_input_method = input_method;
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+/// Types `keys` as plain characters, each one composing without a commit.
+fn compose_vietnamese(runtime: &mut Runtime, keys: &str) -> Transition {
+    let mut last = None;
+    for value in keys.bytes() {
+        let transition = character(runtime, value);
+        assert!(
+            transition.handled && transition.commit.is_none(),
+            "{keys}: {}",
+            value as char
+        );
+        last = Some(transition);
+    }
+    last.unwrap()
+}
+
+/// A Telex word is shown with its diacritics and no candidates, and Space commits the word and then leaves the space itself to the host, so the text reads `việt ` in that order. The scheme is not Chinese: nothing is script-converted and the host has no smart punctuation to apply.
+#[test]
+fn a_telex_word_commits_before_the_space_that_ends_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = vietnamese_runtime(directory.path(), 0);
+    assert!(!runtime.punctuation_host_context_available(false));
+
+    let typed = compose_vietnamese(&mut runtime, "vieejt");
+    assert_eq!(typed.view.scheme, VIETNAMESE_SCHEME);
+    assert_eq!(typed.view.editing_text, "việt");
+    assert_eq!(typed.view.caret_position, "việt".len());
+    assert_eq!(typed.view.reading, "");
+    assert!(typed.view.candidates.is_empty());
+    assert!(!typed.view.candidate_list_open);
+    assert!(!typed.view.chinese_text);
+    assert!(!typed.view.script_conversion);
+    assert!(!runtime.punctuation_host_context_available(false));
+    assert!(runtime.online_query().unwrap().is_none());
+
+    // Space commits the word and passes through, so the host inserts the space after it.
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(!space.handled);
+    assert_eq!(space.commit.as_deref(), Some("việt"));
+    let context = space.commit_context.unwrap();
+    assert_eq!(context.scheme, VIETNAMESE_SCHEME);
+    assert!(!context.script_conversion);
+    assert_eq!(space.view.editing_text, "");
+
+    // Punctuation ends the word and stays ASCII after it.
+    compose_vietnamese(&mut runtime, "nam");
+    let period = character(&mut runtime, b'.');
+    assert!(period.handled);
+    assert_eq!(period.commit.as_deref(), Some("nam."));
+    compose_vietnamese(&mut runtime, "nam");
+    let comma = runtime.dispatch(Action::Punctuation(b',')).unwrap();
+    assert_eq!(comma.commit.as_deref(), Some("nam,"));
+    let idle = runtime.dispatch(Action::Punctuation(b',')).unwrap();
+    assert!(!idle.handled && idle.commit.is_none());
+
+    // Enter commits the word and passes through.
+    compose_vietnamese(&mut runtime, "xin");
+    let enter = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert!(!enter.handled);
+    assert_eq!(enter.commit.as_deref(), Some("xin"));
+}
+
+/// While a VNI word composes, a digit is a tone or vowel key and composes rather than picking a candidate; with nothing composing, a digit is the host's to type.
+#[test]
+fn vni_digits_compose_while_a_word_is_open() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = vietnamese_runtime(directory.path(), 1);
+
+    let idle = character(&mut runtime, b'1');
+    assert!(!idle.handled && idle.commit.is_none());
+    assert_eq!(idle.view.editing_text, "");
+
+    compose_vietnamese(&mut runtime, "a");
+    assert_eq!(runtime.view().spelling_symbols, "0123456789");
+    let digit = character(&mut runtime, b'1');
+    assert!(digit.handled && digit.commit.is_none());
+    assert_eq!(digit.view.editing_text, "á");
+
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(!space.handled);
+    assert_eq!(space.commit.as_deref(), Some("á"));
+
+    let word = compose_vietnamese(&mut runtime, "vie65t");
+    assert_eq!(word.view.editing_text, "việt");
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(space.commit.as_deref(), Some("việt"));
+    assert_eq!(runtime.view().spelling_symbols, "");
+}
+
+/// Leaving the client commits the word as shown. The first Escape shows the raw keys again and keeps composing; the second drops the composition and commits nothing.
+#[test]
+fn vietnamese_blur_commits_and_escape_restores_then_cancels() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = vietnamese_runtime(directory.path(), 0);
+
+    compose_vietnamese(&mut runtime, "vieejt");
+    let left = runtime.focus(false).unwrap();
+    assert_eq!(left.commit.as_deref(), Some("việt"));
+    assert_eq!(left.view.editing_text, "");
+    runtime.focus(true).unwrap();
+    assert!(runtime.focus(false).unwrap().commit.is_none());
+
+    // Attaching a new client discards a word left open in the previous one.
+    runtime.focus(true).unwrap();
+    compose_vietnamese(&mut runtime, "vieejt");
+    let attached = runtime.focus(true).unwrap();
+    assert!(attached.commit.is_none());
+    assert_eq!(attached.view.editing_text, "");
+
+    let typed = compose_vietnamese(&mut runtime, "coffee");
+    assert_ne!(typed.view.editing_text, "coffee");
+    let restored = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(restored.handled && restored.commit.is_none());
+    assert_eq!(restored.view.editing_text, "coffee");
+    let cancelled = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(cancelled.handled && cancelled.commit.is_none());
+    assert_eq!(cancelled.view.editing_text, "");
+    assert_eq!(runtime.view().editing_text, "");
+}
+
+/// Caps Lock (uppercase without Shift) and Shift both reach the word as uppercase, with the tone still placed on the right vowel; there is no case folding as in Korean.
+#[test]
+fn vietnamese_uppercase_comes_through() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = vietnamese_runtime(directory.path(), 0);
+
+    for value in *b"VIEEJT" {
+        let transition = runtime
+            .dispatch(Action::Character {
+                value,
+                shift: false,
+            })
+            .unwrap();
+        assert!(transition.handled && transition.commit.is_none());
+    }
+    assert_eq!(runtime.view().editing_text, "VIỆT");
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(space.commit.as_deref(), Some("VIỆT"));
+
+    let typed = compose_vietnamese(&mut runtime, "Vieejt");
+    assert_eq!(typed.view.editing_text, "Việt");
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(space.commit.as_deref(), Some("Việt"));
+}
