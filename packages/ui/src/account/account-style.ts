@@ -74,9 +74,6 @@ export const code = "flex flex-col gap-3 pt-0.5";
 
 // ---- the signed-in settings, drawn as the platform's grouped rows ----
 
-export const rowInput =
-  "h-7 w-[220px] max-w-full min-w-0 rounded-md border border-control-border bg-[var(--dropdown-bg)] px-2 font-[inherit] text-[13px] text-body focus:border-accent max-phone:w-[140px]";
-export const rowValue = "[font-size:var(--p-row-fs)] [color:var(--p-sub)]";
 export const rowButton = "secondary m-0 whitespace-nowrap";
 /** The destructive action in a row: a bordered button in the danger colour, so it reads as a button beside its neighbours rather than as stray red text. */
 export const rowDanger =

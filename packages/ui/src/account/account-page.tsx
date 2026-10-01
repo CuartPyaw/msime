@@ -1110,7 +1110,10 @@ function AccountDetailsPage({
             if (mobile && typeof window !== "undefined") {
               pushMobileSettingsState({ page: "account", accountSubpage: "profile" });
               setMobileProfilePage(true);
-            } else setEditingProfile(true);
+            } else {
+              setName(user.displayName);
+              setEditingProfile(true);
+            }
           }}
         >
           <div className={account.avatar("medium")} aria-hidden="true">
@@ -1297,38 +1300,6 @@ function AccountDetailsPage({
           client={appIcon}
           platform={platform === "harmony" ? undefined : platform}
         />
-      )}
-      {user && !mobile && (
-        <GroupList title="个人资料">
-          <Row title="社区昵称" description="显示在社区作品中，已发布的作品也会同步更新。">
-            <input
-              className={account.rowInput}
-              aria-label="社区昵称"
-              maxLength={64}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              disabled={busy}
-            />
-            <button
-              type="button"
-              className={account.primary}
-              disabled={busy || name.trim() === user.displayName}
-              onClick={rename}
-            >
-              保存昵称
-            </button>
-          </Row>
-          <Row title="账号 ID">
-            <button type="button" className={account.copyId} onClick={copyAccountId}>
-              {copiedAccountId ? "已复制" : `#${user.id.slice(0, 6).toUpperCase()}`}
-            </button>
-          </Row>
-          <Row title="登录方式">
-            <span className={account.rowValue}>
-              {profile?.providers.map(accountProviderName).join("、") || "正在读取"}
-            </span>
-          </Row>
-        </GroupList>
       )}
       {user && !mobile && editingProfile && (
         <div
