@@ -280,7 +280,7 @@ impl Search {
         Self {
             best: (0..=length).map(|_| Vec::with_capacity(k)).collect(),
             arrival: 0,
-            sequences: HashMap::new(),
+            sequences: HashMap::with_capacity(length.saturating_mul(k)),
             k,
         }
     }
@@ -537,6 +537,7 @@ mod tests {
         let search = Search::new(4, 3);
         assert_eq!(search.best.len(), 5);
         assert!(search.best.iter().all(|slot| slot.capacity() >= 3));
+        assert!(search.sequences.capacity() >= 12);
     }
 
     fn reading(cut: &AutocorrectCut) -> String {
