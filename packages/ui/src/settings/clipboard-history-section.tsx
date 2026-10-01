@@ -53,6 +53,7 @@ export function ClipboardHistorySection({
   const [cloudNotice, setCloudNotice] = useState("");
   const [sending, setSending] = useState(false);
   const cloudRevision = useRef(0);
+  const historyGeneration = useRef(0);
   const historyShown = historyEnabled && Boolean(client?.list);
 
   // The account state and the server's enabled flag are read once each time the page is opened with the history showing; there is no polling.
@@ -103,6 +104,7 @@ export function ClipboardHistorySection({
   const cloudNote = cloudRequest ? cloudNotice || cloudClipboardAvailabilityNote(cloud) : undefined;
 
   useEffect(() => {
+    const currentGeneration = ++historyGeneration.current;
     let active = true;
     if (!ios && !persistedHistoryEnabled) {
       setEntries([]);
@@ -113,7 +115,7 @@ export function ClipboardHistorySection({
     void client
       .list()
       .then((next) => {
-        if (active) {
+        if (active && currentGeneration === historyGeneration.current) {
           setEntries(next);
           setClearArmed(false);
         }
@@ -121,16 +123,24 @@ export function ClipboardHistorySection({
       .catch(() => undefined);
     return () => {
       active = false;
+      historyGeneration.current++;
     };
   }, [client, ios, page, persistedHistoryEnabled, revision]);
 
   const mutate = async (action: () => Promise<void>, failure: string) => {
+    const currentGeneration = historyGeneration.current;
+    const currentClient = client;
     try {
       await action();
+      if (currentGeneration !== historyGeneration.current) return;
       setClearArmed(false);
-      if (client?.list) setEntries(await client.list());
+      if (currentClient?.list) {
+        const next = await currentClient.list();
+        if (currentGeneration !== historyGeneration.current) return;
+        setEntries(next);
+      }
     } catch {
-      onError(failure);
+      if (currentGeneration === historyGeneration.current) onError(failure);
     }
   };
 
@@ -163,14 +173,19 @@ export function ClipboardHistorySection({
                   type="button"
                   className="secondary"
                   disabled={!historyEnabled || !persistedHistoryEnabled}
-                  onClick={() =>
+                  onClick={() => {
+                    const currentGeneration = historyGeneration.current;
                     void client.sync!()
                       .then((next) => {
+                        if (currentGeneration !== historyGeneration.current) return;
                         setEntries(next);
                         setClearArmed(false);
                       })
-                      .catch(() => onError("无法同步剪贴板历史"))
-                  }
+                      .catch(() => {
+                        if (currentGeneration === historyGeneration.current)
+                          onError("无法同步剪贴板历史");
+                      });
+                  }}
                 >
                   从系统剪贴板同步
                 </button>
