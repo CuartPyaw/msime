@@ -790,6 +790,8 @@ function AccountDetailsPage({
   useEffect(() => {
     const generation = ++clientGeneration.current;
     mounted.current = true;
+    googleWaitingRef.current = false;
+    setGoogleWaiting(false);
     setBusy(false);
     return () => {
       mounted.current = false;
@@ -891,11 +893,12 @@ function AccountDetailsPage({
 
   const requestCode = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       if (!channel) return;
       const normalized = target.trim();
       if (!normalized) throw { code: "account_invalid" };
       const value = await client.requestCode(channel, normalized);
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       const timestamp = Date.now();
       setNow(timestamp);
       setChallenge(value);
@@ -925,8 +928,9 @@ function AccountDetailsPage({
 
   const signOut = (all: boolean) =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       await client.logout(all);
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setUser(null);
       setProfile(null);
       setName("");
@@ -936,8 +940,9 @@ function AccountDetailsPage({
 
   const deleteAccount = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       await client.deleteAccount();
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setUser(null);
       setProfile(null);
       setName("");
@@ -947,8 +952,9 @@ function AccountDetailsPage({
 
   const clearExpired = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       await client.clearExpired();
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setUser(null);
       setProfile(null);
       setName("");
@@ -957,11 +963,12 @@ function AccountDetailsPage({
 
   const rename = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       const normalized = name.trim();
       if (!normalized || [...normalized].length > 64 || /[\u0000-\u001f\u007f]/.test(normalized))
         throw { code: "account_invalid" };
       const updated = await client.rename(normalized);
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       applyProfile(updated);
       setNotice("昵称已更新。");
     });
@@ -1020,17 +1027,21 @@ function AccountDetailsPage({
 
   const signInWithApple = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       if (!client.appleLogin) throw { code: "account_unavailable" };
       const result = await client.appleLogin();
+      if (!mounted.current || generation !== clientGeneration.current) return;
       if (!result.user) throw { code: "account_unavailable" };
       setUser(result.user);
-      await loadProfile();
+      await loadProfile(generation);
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setNotice("登录成功。");
       onLoginComplete?.();
     });
 
   const signInWithGoogle = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       if (!client.googleLogin) throw { code: "account_unavailable" };
       googleWaitingRef.current = true;
       setGoogleWaiting(true);
@@ -1038,12 +1049,16 @@ function AccountDetailsPage({
       try {
         result = await client.googleLogin();
       } finally {
-        googleWaitingRef.current = false;
-        if (mounted.current) setGoogleWaiting(false);
+        if (mounted.current && generation === clientGeneration.current) {
+          googleWaitingRef.current = false;
+          setGoogleWaiting(false);
+        }
       }
+      if (!mounted.current || generation !== clientGeneration.current) return;
       if (!result.user) throw { code: "account_unavailable" };
       setUser(result.user);
-      await loadProfile();
+      await loadProfile(generation);
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setNotice("登录成功。");
       onLoginComplete?.();
     });
@@ -1429,7 +1444,14 @@ function AccountDetailsPage({
                 type="button"
                 className="secondary"
                 disabled={busy}
-                onClick={() => void perform(async () => setProviders(await client.providers()))}
+                onClick={() =>
+                  void perform(async () => {
+                    const generation = clientGeneration.current;
+                    const value = await client.providers();
+                    if (!mounted.current || generation !== clientGeneration.current) return;
+                    setProviders(value);
+                  })
+                }
               >
                 刷新登录方式
               </button>

@@ -448,6 +448,16 @@ fn register_installed_bundle(bundle: &Path) -> Result<(), InstallError> {
     }
 }
 
+/// Register and enable the input method already installed in `~/Library/Input Methods`, without copying anything.
+///
+/// The start-time refresh only registers a bundle it has just installed or updated, so a user who later removed the source from the System Settings list is left with an installed but unlisted input method; this is what the settings page's 启用 button runs for them. `InvalidBundle` means there is no usable installed bundle, which only an install can fix.
+pub(crate) fn enable_installed() -> Result<(), InstallError> {
+    let _guard = install_lock();
+    let bundle = installed_bundle_path()?;
+    validate_bundle(&bundle)?;
+    register_installed_bundle(&bundle)
+}
+
 pub(crate) fn install(resource_directory: Option<&Path>) -> Result<(), InstallError> {
     let _guard = install_lock();
     install_unlocked(resource_directory)

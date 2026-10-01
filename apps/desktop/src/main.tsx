@@ -208,6 +208,7 @@ const vocabularyReview: VocabularyReviewClient = {
 const inputSourceStartup: NonNullable<SettingsClient["inputSourceStartup"]> = {
   status: () => invoke("input_source_startup_status"),
   openSettings: () => invoke("open_input_source_settings"),
+  enable: () => invoke("enable_input_source"),
 };
 const client: SettingsClient = {
   readAppVersion: getVersion,

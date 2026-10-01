@@ -16,6 +16,7 @@ export interface SettingsPageStatusProps
   draft?: Preferences;
   inputSourceStartup?: InputSourceStartupStatus | null;
   onOpenSettings: InputSourceStartupNoticeProps["onOpenSettings"];
+  onEnable?: InputSourceStartupNoticeProps["onEnable"];
   onDismiss: InputSourceStartupNoticeProps["onDismiss"];
 }
 
@@ -25,6 +26,7 @@ export function SettingsPageStatus({
   busy,
   inputSourceStartup,
   onOpenSettings,
+  onEnable,
   onDismiss,
   onError,
   ...statusProps
@@ -39,6 +41,7 @@ export function SettingsPageStatus({
           <InputSourceStartupNotice
             status={inputSourceStartup}
             onOpenSettings={onOpenSettings}
+            onEnable={onEnable}
             onDismiss={onDismiss}
             onError={onError}
           />

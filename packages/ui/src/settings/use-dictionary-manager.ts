@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { runAsyncAction } from "../core/async-action";
 import { randomRequestId } from "../core/random-id";
 import {
   DICTIONARY_PAGE_SIZE,
@@ -57,6 +58,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
   const [dictionaryKind, setDictionaryKind] = useState<LocalDictionaryKind>("quick_phrase");
   const [dictionaryFormat, setDictionaryFormat] = useState<LocalDictionaryFormat>("standard");
   const phraseRequestGeneration = useRef(0);
+  const clientGeneration = useRef(0);
   const phraseListRef = useRef<HTMLUListElement>(null);
   const mounted = useRef(true);
 
@@ -67,6 +69,39 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
       phraseRequestGeneration.current += 1;
     };
   }, []);
+
+  useEffect(() => {
+    const generation = ++phraseRequestGeneration.current;
+    setPhraseBusy(false);
+    return () => {
+      if (phraseRequestGeneration.current === generation) phraseRequestGeneration.current++;
+    };
+  }, [client.dictionary]);
+
+  useEffect(() => {
+    const generation = ++clientGeneration.current;
+    setPhraseBusy(false);
+    return () => {
+      if (clientGeneration.current === generation) clientGeneration.current++;
+    };
+  }, [client.dictionary, client.resetLearnedData, client.saveExport]);
+
+  async function runPhraseAction(
+    operation: (isCurrent: () => boolean) => Promise<void>,
+    formatError: (error: unknown) => string,
+  ) {
+    await runAsyncAction(
+      {
+        busy: phraseBusy,
+        isCurrent: () => mounted.current,
+        setBusy: setPhraseBusy,
+        setError: setPhraseError,
+        setNotice: setPhraseNotice,
+      },
+      operation,
+      { formatError },
+    );
+  }
 
   async function loadPhrases(kind: LocalDictionaryKind = dictionaryKind, offset = 0) {
     if (!client.dictionary || !mounted.current) return;
@@ -107,18 +142,26 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
 
   async function removePhrase(entry: DictionaryEntry) {
     if (!client.dictionary || !mounted.current) return;
+    const generation = clientGeneration.current;
     const confirmed = await confirm({
       title: "删除词条",
       message: `“${entry.value}”（${entry.key}）将被删除，此操作无法撤销。`,
       confirmLabel: "删除",
       danger: true,
     });
-    if (!confirmed || !client.dictionary || !mounted.current) return;
+    if (
+      !confirmed ||
+      !client.dictionary ||
+      !mounted.current ||
+      clientGeneration.current !== generation
+    )
+      return;
     setPhraseBusy(true);
     setPhraseError("");
     setPhraseNotice("");
     try {
       await client.dictionary.edit(entry, null, randomRequestId("ui-remove"));
+      if (clientGeneration.current !== generation) return;
       const remaining = phrases.length - 1;
       const offset =
         remaining === 0 && phrasePage.offset > 0
@@ -126,7 +169,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
           : phrasePage.offset;
       await loadPhrases(dictionaryKind, offset);
     } catch (error) {
-      if (mounted.current)
+      if (mounted.current && clientGeneration.current === generation)
         setPhraseError(
           dictionaryErrorMessage(
             error,
@@ -134,12 +177,13 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
           ),
         );
     } finally {
-      if (mounted.current) setPhraseBusy(false);
+      if (mounted.current && clientGeneration.current === generation) setPhraseBusy(false);
     }
   }
 
   async function savePhrase() {
     if (!client.dictionary || !phraseForm || !mounted.current) return;
+    const generation = clientGeneration.current;
     const bundled = phraseForm.previous?.source === "bundled" ? phraseForm.previous : null;
     const replacement: DictionaryEntry = bundled
       ? { ...bundled, weight: phraseForm.weight }
@@ -162,11 +206,11 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
         replacement,
         randomRequestId(phraseForm.previous ? "ui-edit" : "ui-add"),
       );
-      if (!mounted.current) return;
+      if (!mounted.current || clientGeneration.current !== generation) return;
       setPhraseForm(null);
       await loadPhrases(dictionaryKind, phraseForm.previous ? phrasePage.offset : 0);
     } catch (error) {
-      if (mounted.current)
+      if (mounted.current && clientGeneration.current === generation)
         setPhraseError(
           dictionaryErrorMessage(
             error,
@@ -175,7 +219,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
           ),
         );
     } finally {
-      if (mounted.current) setPhraseBusy(false);
+      if (mounted.current && clientGeneration.current === generation) setPhraseBusy(false);
     }
   }
 
@@ -226,31 +270,27 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
   }
 
   async function retryDictionaryFailure(requestId: string) {
-    if (!client.dictionary?.retry || !mounted.current) return;
-    setPhraseBusy(true);
-    setPhraseError("");
-    try {
-      await client.dictionary.retry(requestId);
-      await loadPhrases(dictionaryKind, phrasePage.offset);
-    } catch {
-      if (mounted.current) setPhraseError("词条重试失败，请稍后重试。");
-    } finally {
-      if (mounted.current) setPhraseBusy(false);
-    }
+    const retry = client.dictionary?.retry;
+    if (!retry) return;
+    await runPhraseAction(
+      async () => {
+        await retry(requestId);
+        await loadPhrases(dictionaryKind, phrasePage.offset);
+      },
+      () => "词条重试失败，请稍后重试。",
+    );
   }
 
   async function dismissDictionaryFailure(requestId: string) {
-    if (!client.dictionary?.dismissFailure || !mounted.current) return;
-    setPhraseBusy(true);
-    setPhraseError("");
-    try {
-      await client.dictionary.dismissFailure(requestId);
-      await loadPhrases(dictionaryKind, phrasePage.offset);
-    } catch {
-      if (mounted.current) setPhraseError("移除失败记录失败，请稍后重试。");
-    } finally {
-      if (mounted.current) setPhraseBusy(false);
-    }
+    const dismissFailure = client.dictionary?.dismissFailure;
+    if (!dismissFailure) return;
+    await runPhraseAction(
+      async () => {
+        await dismissFailure(requestId);
+        await loadPhrases(dictionaryKind, phrasePage.offset);
+      },
+      () => "移除失败记录失败，请稍后重试。",
+    );
   }
 
   async function deliverDictionaryExport(
@@ -288,91 +328,87 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
   }
 
   async function exportPhrases() {
-    if (!client.dictionary) return;
+    const dictionary = client.dictionary;
+    if (!dictionary) return;
     if (dictionaryFormat === "hans") {
       setPhraseError("汉字自动注音格式仅支持导入。");
       return;
     }
-    setPhraseBusy(true);
-    setPhraseError("");
-    setPhraseNotice("");
-    try {
-      let text = "";
-      if (client.dictionary.export) {
-        let offset = 0;
-        let hasMore = true;
-        while (hasMore && offset <= 1000000) {
-          const page = await client.dictionary.export(
-            dictionaryKind,
-            dictionaryFormat === "rime" ? "standard" : dictionaryFormat,
-            offset,
-            1000,
-          );
-          text += page.text;
-          const count = page.text ? page.text.trimEnd().split("\n").length : 0;
-          offset += count;
-          hasMore = page.has_more && count > 0;
+    await runPhraseAction(
+      async () => {
+        let text = "";
+        if (dictionary.export) {
+          let offset = 0;
+          let hasMore = true;
+          while (hasMore && offset <= 1000000) {
+            const page = await dictionary.export(
+              dictionaryKind,
+              dictionaryFormat === "rime" ? "standard" : dictionaryFormat,
+              offset,
+              1000,
+            );
+            text += page.text;
+            const count = page.text ? page.text.trimEnd().split("\n").length : 0;
+            offset += count;
+            hasMore = page.has_more && count > 0;
+          }
+        } else {
+          text = phrases
+            .map((entry) =>
+              dictionaryFormat === "windows"
+                ? `${entry.key}\t${entry.value}\t${entry.weight}`
+                : `${entry.value}\t${entry.key}\t${entry.weight}`,
+            )
+            .join("\n");
         }
-      } else {
-        text = phrases
-          .map((entry) =>
-            dictionaryFormat === "windows"
-              ? `${entry.key}\t${entry.value}\t${entry.weight}`
-              : `${entry.value}\t${entry.key}\t${entry.weight}`,
-          )
-          .join("\n");
-      }
-      const payload = dictionaryExportPayload(dictionaryKind, dictionaryFormat, text);
-      if (!payload.rows) {
-        setPhraseError("当前没有可导出的用户新增词条。");
-        return;
-      }
-      const path = await deliverDictionaryExport(
-        dictionaryExportName(dictionaryKind),
-        payload.body,
-      );
-      if (path === undefined) return;
-      setPhraseNotice(
-        path === null
-          ? `已导出 ${payload.rows} 条用户词条。`
-          : `已导出 ${payload.rows} 条用户词条到 ${path}。`,
-      );
-    } catch (error) {
-      setPhraseError(dictionaryErrorMessage(error, "词库导出失败，请稍后重试。"));
-    } finally {
-      setPhraseBusy(false);
-    }
+        const payload = dictionaryExportPayload(dictionaryKind, dictionaryFormat, text);
+        if (!payload.rows) {
+          setPhraseError("当前没有可导出的用户新增词条。");
+          return;
+        }
+        const path = await deliverDictionaryExport(
+          dictionaryExportName(dictionaryKind),
+          payload.body,
+        );
+        if (path === undefined) return;
+        setPhraseNotice(
+          path === null
+            ? `已导出 ${payload.rows} 条用户词条。`
+            : `已导出 ${payload.rows} 条用户词条到 ${path}。`,
+        );
+      },
+      (error) => dictionaryErrorMessage(error, "词库导出失败，请稍后重试。"),
+    );
   }
 
   async function exportAllPhrases() {
-    if (!client.dictionary) return;
-    setPhraseBusy(true);
-    setPhraseError("");
-    setPhraseNotice("正在读取全部用户词库…");
-    try {
-      const payload = personalDictionaryExportPayload(
-        await loadAllPersonalDictionaryEntries(client.dictionary),
-      );
-      if (!payload.rows) {
-        setPhraseNotice("当前没有可导出的用户词条。");
-        return;
-      }
-      const path = await deliverDictionaryExport(personalDictionaryExportName(), payload.body);
-      if (path === undefined) return;
-      setPhraseNotice(
-        path === null
-          ? `已导出全部 ${payload.rows} 条用户词条。`
-          : `已导出全部 ${payload.rows} 条用户词条到 ${path}。`,
-      );
-    } catch (error) {
-      setPhraseError(dictionaryErrorMessage(error, "全部词库导出失败，请稍后重试。"));
-    } finally {
-      setPhraseBusy(false);
-    }
+    const dictionary = client.dictionary;
+    if (!dictionary) return;
+    await runPhraseAction(
+      async () => {
+        setPhraseNotice("正在读取全部用户词库…");
+        const payload = personalDictionaryExportPayload(
+          await loadAllPersonalDictionaryEntries(dictionary),
+        );
+        if (!payload.rows) {
+          setPhraseNotice("当前没有可导出的用户词条。");
+          return;
+        }
+        const path = await deliverDictionaryExport(personalDictionaryExportName(), payload.body);
+        if (path === undefined) return;
+        setPhraseNotice(
+          path === null
+            ? `已导出全部 ${payload.rows} 条用户词条。`
+            : `已导出全部 ${payload.rows} 条用户词条到 ${path}。`,
+        );
+      },
+      (error) => dictionaryErrorMessage(error, "全部词库导出失败，请稍后重试。"),
+    );
   }
 
   async function resetLearnedData() {
     if (!client.resetLearnedData || phraseBusy) return;
+    const generation = clientGeneration.current;
     const confirmed = await confirm({
       title: "清除学习数据",
       message:
@@ -386,6 +422,7 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
     setPhraseNotice("");
     try {
       await client.resetLearnedData();
+      if (clientGeneration.current !== generation) return;
       setPhrases([]);
       setPhrasePage({ offset: 0, hasMore: false, status: "已清除学习数据" });
       setDictionaryPendingCount(0);
@@ -393,11 +430,12 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
       setDictionarySnapshotError("");
       setPhraseNotice("已清除所有学习数据；输入方案和设置保持不变。");
     } catch (error) {
+      if (clientGeneration.current !== generation) return;
       setPhraseError(
         dictionaryErrorMessage(error, "清除学习数据失败，请关闭正在使用输入法的程序后重试。"),
       );
     } finally {
-      setPhraseBusy(false);
+      if (clientGeneration.current === generation) setPhraseBusy(false);
     }
   }
 

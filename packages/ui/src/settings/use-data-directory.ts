@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { errorCode } from "../core/error-code";
 
 export interface DataDirectoryClient {
@@ -32,29 +32,38 @@ export function useDataDirectory({ client, enabled, confirm }: UseDataDirectoryO
   }>();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("");
+  const generation = useRef(0);
 
   useEffect(() => {
-    if (!enabled || !client) return;
+    const current = ++generation.current;
+    setBusy(false);
+    if (!enabled || !client)
+      return () => {
+        if (generation.current === current) generation.current++;
+      };
     let active = true;
     void client
       .status()
       .then((value) => {
-        if (active) setDataDirectory(value);
+        if (active && generation.current === current) setDataDirectory(value);
       })
       .catch(() => {
-        if (active) setResult("无法读取当前数据目录。");
+        if (active && generation.current === current) setResult("无法读取当前数据目录。");
       });
     return () => {
       active = false;
+      if (generation.current === current) generation.current++;
     };
   }, [client, enabled]);
 
   async function choose() {
     if (!client || busy) return;
+    const current = generation.current;
     setBusy(true);
     setResult("");
     try {
       const target = await client.pick();
+      if (generation.current !== current) return;
       if (!target) return;
       const confirmed = await confirm({
         title: "移动输入法数据？",
@@ -63,6 +72,7 @@ export function useDataDirectory({ client, enabled, confirm }: UseDataDirectoryO
       });
       if (!confirmed) return;
       const moved = await client.move();
+      if (generation.current !== current) return;
       setDataDirectory({ path: moved.path, isDefault: moved.isDefault });
       const restartNote =
         moved.inputMethodRestarted === false
@@ -74,6 +84,7 @@ export function useDataDirectory({ client, enabled, confirm }: UseDataDirectoryO
           : `数据已移动。${restartNote}设置窗口即将关闭，请重新打开后继续使用。`,
       );
     } catch (reason) {
+      if (generation.current !== current) return;
       const code = errorCode(reason);
       setResult(
         code === "data_directory_picker_unavailable"
@@ -87,7 +98,7 @@ export function useDataDirectory({ client, enabled, confirm }: UseDataDirectoryO
                 : "移动失败，仍在使用原目录，原有数据未被删除。",
       );
     } finally {
-      setBusy(false);
+      if (generation.current === current) setBusy(false);
     }
   }
 

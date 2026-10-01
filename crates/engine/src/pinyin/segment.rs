@@ -240,7 +240,8 @@ pub fn cut_pinyin_with_corrections(pinyin: &str) -> Vec<Vec<String>> {
         let mut combined = Vec::with_capacity(capacity);
         'product: for head in &merged {
             for tail in &part_paths {
-                let mut path = head.clone();
+                let mut path = Vec::with_capacity(head.len() + tail.len());
+                path.extend_from_slice(head);
                 path.extend_from_slice(tail);
                 combined.push(path);
                 if combined.len() == CORRECTION_PATH_LIMIT {
@@ -295,10 +296,13 @@ pub fn is_complete_pinyin_input(pinyin: &str) -> bool {
 
 /// The first letter of each non-empty segment (QQ:245-256).
 pub fn segments_to_jianpin(segments: &[String]) -> String {
-    segments
-        .iter()
-        .filter_map(|segment| segment.chars().next())
-        .collect()
+    let mut result = String::with_capacity(segments.len());
+    for segment in segments {
+        if let Some(initial) = segment.chars().next() {
+            result.push(initial);
+        }
+    }
+    result
 }
 
 #[cfg(test)]
