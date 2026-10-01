@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The 统计 tab in the design's Android form: large title with the options menu, the header card (segmented 趋势/类型/模式/方案 over a hairline, then today and the total in large accent figures), and below it either the trend line with the calendar or one distribution card. -->
+<!-- The 统计 tab in the design's Android form: large title with the options menu, the header card (segmented 趋势/类型/模式/方案/按键 over a hairline, then today and the total in large accent figures), and below it the trend line with the calendar, one distribution card, or the key heatmap. -->
 <androidx.core.widget.NestedScrollView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -131,7 +131,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- 趋势页：折线加日历。其余三页共用下面那张占比卡。 -->
+        <!-- 趋势页：折线加日历。类型、模式、方案三页共用下面那张占比卡，按键页是最后那张热力图卡。 -->
         <LinearLayout
             android:id="@+id/statistics_trend_section"
             android:layout_width="match_parent"
@@ -258,13 +258,61 @@
                 android:textSize="12sp" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/statistics_keys_section"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/statistics_keys_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginTop="24dp"
+                android:accessibilityHeading="true"
+                android:text="按键热力图"
+                android:textColor="@color/forest"
+                android:textFontWeight="500"
+                android:textSize="14sp" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                app:cardBackgroundColor="@color/surface"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="0dp"
+                app:strokeWidth="0dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <app.msime.android.home.KeyHeatmapView
+                        android:id="@+id/statistics_keys"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:id="@+id/statistics_keys_note"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:layout_marginStart="4dp"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+        </LinearLayout>
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
             android:layout_marginStart="4dp"
-            android:text="仅统计水杉键盘提交的字符，含标点及表情，不含空格、换行和未上屏拼音。组合表情计为一个字符，删除文字不扣减。仅在本机保存分类计数，不保存输入内容。每日明细默认永久保留。"
+            android:text="字符数仅统计水杉键盘提交的字符，含标点及表情，不含空格和换行；组合表情计为一个字符，删除文字不扣减。按键热力图只保存每个键每天被按下的次数，不保存按键顺序和输入内容，密码框和无痕输入框中的按键不计入。所有计数仅保存在本机。每日明细默认永久保留。"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
     </LinearLayout>

@@ -63,9 +63,15 @@ public final class NativeClient {
     public static String themeCatalog() { return text(themeCatalogRaw()); }
     /** Resolves the colours of the selected global theme for one mode. Pure computation, safe on the main thread. */
     public static String resolveTheme(String request) { return text(resolveThemeRaw(request.getBytes(StandardCharsets.UTF_8))); }
-    /** Classifies committed text in native memory and persists only aggregate counts. Call on a worker. */
+    /** Classifies committed text and adds batched per-key press counts in native memory, and persists only aggregate counts. Call on a worker. */
     public static String typingStatistics(String request) {
         return text(typingStatisticsRaw(request.getBytes(StandardCharsets.UTF_8)));
+    }
+    /**
+     * Whether aggregate statistics are switched on in the store under {@code directory}. A missing or unreadable document reads as off, so a capture gate built on this never records by default. Takes the shared file lock: call on a worker, on activation, never per key.
+     */
+    public static boolean typingStatisticsEnabled(String directory) {
+        return typingStatisticsEnabledRaw(directory.getBytes(StandardCharsets.UTF_8)) == 1;
     }
     /**
      * 背单词: one review action, answered with the whole status. Takes the shared file lock and may
@@ -422,6 +428,7 @@ public final class NativeClient {
     private static native byte[] snapshotActivateRaw(long handle, byte[] expectedVersion);
     private static native byte[] loadPreferencesRaw(byte[] directory);
     private static native byte[] typingStatisticsRaw(byte[] request);
+    private static native int typingStatisticsEnabledRaw(byte[] directory);
     private static native byte[] themeCatalogRaw();
     private static native byte[] resolveThemeRaw(byte[] request);
     private static native byte[] vocabularyReviewRaw(byte[] request);

@@ -56,6 +56,7 @@ import app.msime.android.keyboard.EnglishSuggestionPolicy;
 import app.msime.android.policy.HostOptionsPolicy;
 import java.io.File;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -77,6 +78,8 @@ public final class MSIMEInputService extends InputMethodService {
     private static final long BACKSPACE_REPEAT_INTERVAL_MILLIS = 75;
     private static final long PERSONAL_DICTIONARY_SYNC_DELAY_MILLIS = 500;
     private static final long INPUT_VIEW_REFRESH_DELAY_MILLIS = 32;
+    /** How long counted key presses wait in memory before they are written anyway. */
+    private static final long KEY_PRESS_FLUSH_DELAY_MILLIS = 30_000;
     private static final String SCHEME_HOST_PREFERENCES = "android-keyboard-schemes";
     private static final String INPUT_MODE_PREFERENCES = "android-input-modes";
     private static final String SELECTED_HOST_SCHEME = "selected-scheme";
@@ -364,6 +367,17 @@ public final class MSIMEInputService extends InputMethodService {
     private AiPolishConfiguration replyRequestConfiguration;
     private boolean replySuppressed;
     private boolean statisticsFailureReported;
+    /** Key presses since the last write, per key and local day. Main thread only. */
+    private final KeyPressBatch keyPresses = new KeyPressBatch();
+    /** Each soft key's heatmap id. Weak, so the keys of a rebuilt row leave with it. */
+    private final java.util.Map<View, String> keyIds = new java.util.WeakHashMap<>();
+    /** The store's statistics switch as last read; until it has been read, nothing is counted. */
+    private boolean keyStatisticsEnabled;
+    /** A password or no-learning field, where no key press is counted. */
+    private boolean keyStatisticsExcluded = true;
+    private String keyStatisticsDirectory = "";
+    private long keyStatisticsGeneration;
+    private Runnable keyPressFlushTask;
     private long editorContextRevision;
     /** Editor-owned smart-punctuation snapshots; never persisted or sent to the UI. */
     private JSONObject smartRepeatSnapshot;
@@ -638,11 +652,23 @@ public final class MSIMEInputService extends InputMethodService {
             reportTypingStatisticsFailure();
             return;
         }
+        submitTypingStatistics(request, null);
+    }
+
+    /**
+     * Send one statistics request on the worker; {@code nothingRecorded}, when given, runs on the main thread if the store took none of a non-empty batch, which is how it answers once statistics are off.
+     */
+    private void submitTypingStatistics(String request, Runnable nothingRecorded) {
         try {
             typingStatisticsWorker.execute(() -> {
                 try {
                     JSONObject result = new JSONObject(NativeClient.typingStatistics(request));
-                    if (!result.getBoolean("ok")) reportTypingStatisticsFailure();
+                    if (!result.getBoolean("ok")) {
+                        reportTypingStatisticsFailure();
+                    } else if (nothingRecorded != null
+                        && result.getJSONObject("value").getLong("recorded") == 0) {
+                        main.post(nothingRecorded);
+                    }
                 } catch (Exception | LinkageError error) {
                     reportTypingStatisticsFailure();
                 }
@@ -650,6 +676,118 @@ public final class MSIMEInputService extends InputMethodService {
         } catch (RuntimeException error) {
             reportTypingStatisticsFailure();
         }
+    }
+
+    /**
+     * Where key counts go: the preferences directory the settings page reads them back from, or the bootstrap state root when there is none, in the order HostStore.statisticsDirectory reads them.
+     */
+    private String keyStatisticsDirectory(String preferences) {
+        if (!preferences.isEmpty() && new File(preferences).isAbsolute()) return preferences;
+        File files = getFilesDir();
+        return files == null ? "" : new File(files, "bootstrap/state").getAbsolutePath();
+    }
+
+    /**
+     * Decide whether this editor's key presses are counted, and read the statistics switch again.
+     *
+     * <p>The switch lives in the shared store, which the settings app writes from another process, so it is read on the worker when a new editor starts rather than per key. Until the answer arrives nothing is buffered: off is the store's default and the user's choice must hold before anything is kept, even in memory.
+     */
+    private void refreshKeyStatistics(EditorInfo info, boolean restarting, String directory) {
+        keyStatisticsExcluded = info == null
+            || EditorPolicy.excludesKeyStatistics(info.inputType, info.imeOptions);
+        if (restarting && directory.equals(keyStatisticsDirectory)) return;
+        // Presses already counted belong to the directory they were counted for.
+        flushKeyPresses();
+        keyStatisticsDirectory = directory;
+        long generation = ++keyStatisticsGeneration;
+        // Off until this read answers, so a switch turned off in the settings app holds from the first key of the new editor.
+        disableKeyStatistics();
+        if (directory.isEmpty()) return;
+        try {
+            typingStatisticsWorker.execute(() -> {
+                boolean read;
+                try {
+                    read = NativeClient.typingStatisticsEnabled(directory);
+                } catch (RuntimeException | LinkageError error) {
+                    read = false;
+                }
+                boolean enabled = read;
+                main.post(() -> {
+                    if (generation != keyStatisticsGeneration) return;
+                    if (enabled) keyStatisticsEnabled = true;
+                    else disableKeyStatistics();
+                });
+            });
+        } catch (RuntimeException error) {
+            // The worker is shutting down or full; the switch keeps its last known value.
+        }
+    }
+
+    private void disableKeyStatistics() {
+        keyStatisticsEnabled = false;
+        cancelKeyPressFlush();
+        keyPresses.clear();
+    }
+
+    /** Tag a soft key with its heatmap id; a key without one is never counted. */
+    private <T extends View> T keyId(T key, String id) {
+        if (id != null) keyIds.put(key, id);
+        return key;
+    }
+
+    private void countKey(View key) { countKey(keyIds.get(key)); }
+
+    /**
+     * Count one key press for the heatmap: its id and its local day, nothing else.
+     *
+     * <p>Presses are batched here and written by the worker -- on {@link KeyPressBatch#FLUSH_PRESSES} presses, at the first press of a new day (the old day first, under its own date), when the editor or the keyboard goes away, and otherwise half a minute after the batch opened. The worker's queue is short and every write rewrites the whole document under the file lock, so it never sees a single key.
+     */
+    private void countKey(String id) {
+        if (id == null || !keyStatisticsEnabled || keyStatisticsExcluded) return;
+        KeyPressBatch.Flush previous = keyPresses.add(id, LocalDate.now().toString());
+        if (previous != null) writeKeyPresses(previous);
+        if (keyPresses.full()) {
+            flushKeyPresses();
+        } else if (keyPressFlushTask == null && !keyPresses.isEmpty()) {
+            keyPressFlushTask = () -> {
+                keyPressFlushTask = null;
+                flushKeyPresses();
+            };
+            main.postDelayed(keyPressFlushTask, KEY_PRESS_FLUSH_DELAY_MILLIS);
+        }
+    }
+
+    private void cancelKeyPressFlush() {
+        if (keyPressFlushTask != null) main.removeCallbacks(keyPressFlushTask);
+        keyPressFlushTask = null;
+    }
+
+    private void flushKeyPresses() {
+        cancelKeyPressFlush();
+        KeyPressBatch.Flush flush = keyPresses.drain();
+        if (flush != null) writeKeyPresses(flush);
+    }
+
+    private void writeKeyPresses(KeyPressBatch.Flush flush) {
+        if (keyStatisticsDirectory.isEmpty()) return;
+        final String request;
+        try {
+            JSONObject keys = new JSONObject();
+            for (java.util.Map.Entry<String, Long> entry : flush.keys().entrySet())
+                keys.put(entry.getKey(), entry.getValue().longValue());
+            request = new JSONObject().put("directory", keyStatisticsDirectory).put("action",
+                new JSONObject().put("operation", "record_keys").put("day", flush.day())
+                    .put("keys", keys))
+                .toString();
+        } catch (JSONException error) {
+            reportTypingStatisticsFailure();
+            return;
+        }
+        // A batch is never empty, so nothing taken means statistics were turned off in the settings app while this editor kept focus; stop counting until the next editor reads the switch again. A newer read has the last word, so an answer about an earlier editor is ignored.
+        long generation = keyStatisticsGeneration;
+        submitTypingStatistics(request, () -> {
+            if (generation == keyStatisticsGeneration) disableKeyStatistics();
+        });
     }
 
     private void reportTypingStatisticsFailure() {
@@ -721,9 +859,11 @@ public final class MSIMEInputService extends InputMethodService {
         // 普通输入框到了才跳成用户自己的皮肤——那一跳看起来就像换了个输入法。
         boolean engineWanted = info != null && connection != null
             && EditorPolicy.useEngine(info.inputType);
+        String statisticsPreferences = "";
         try {
             File file = new File(getFilesDir(), "runtime-options.json");
             JSONObject options = new JSONObject(HostOptionsPolicy.read(file));
+            statisticsPreferences = options.optString("preferences_directory", "");
             JSONObject preferences = options.optJSONObject("preferences");
             applyEditorPreferences(preferences);
             if (newDocument) {
@@ -752,6 +892,7 @@ public final class MSIMEInputService extends InputMethodService {
             // 会把一个不存在的故障摆到用户面前。
             if (engineWanted) message = "共享运行时未就绪：仅直接输入";
         }
+        refreshKeyStatistics(info, restarting, keyStatisticsDirectory(statisticsPreferences));
         updateAutomaticCapitalization();
         rebuildKeyRows();
         render();
@@ -776,6 +917,8 @@ public final class MSIMEInputService extends InputMethodService {
             if (effectiveInfo != null) {
                 editorInputType = effectiveInfo.inputType;
                 allowLearning = EditorPolicy.allowLearning(effectiveInfo.imeOptions);
+                keyStatisticsExcluded = EditorPolicy.excludesKeyStatistics(
+                    effectiveInfo.inputType, effectiveInfo.imeOptions);
             }
             loadFeedbackPreferences();
             refreshPreferencesOnInputView();
@@ -786,6 +929,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     @Override public void onFinishInput() {
+        flushKeyPresses();
         cancelBackspaceRepeat();
         cancelInputViewRefresh();
         engineStartGeneration++;
@@ -799,6 +943,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     @Override public void onFinishInputView(boolean finishingInput) {
+        flushKeyPresses();
         cancelInputViewRefresh();
         if (!finishingInput) finishInputViewPresentation();
         super.onFinishInputView(finishingInput);
@@ -862,6 +1007,8 @@ public final class MSIMEInputService extends InputMethodService {
         stop(false);
         schedulePersonalDictionarySynchronization(true);
         preferencesWorker.shutdown();
+        // Queued before the shutdown, so the worker still writes it.
+        flushKeyPresses();
         typingStatisticsWorker.shutdown();
         emojiWorker.shutdown();
         candidateGlossWorker.shutdownNow();
@@ -2613,8 +2760,11 @@ public final class MSIMEInputService extends InputMethodService {
                 case MotionEvent.ACTION_UP -> {
                     button.getParent().requestDisallowInterceptTouchEvent(false);
                     button.setPressed(false);
-                    if (dragging[0] || cancelled[0]) resetSpaceCursor();
-                    else button.performClick();
+                    if (dragging[0] || cancelled[0]) {
+                        // The thumb still pressed the space bar; dragging it moved the cursor instead of typing.
+                        countKey(button);
+                        resetSpaceCursor();
+                    } else button.performClick();
                     return true;
                 }
                 case MotionEvent.ACTION_CANCEL -> {
@@ -2630,6 +2780,8 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
+        // Every physical press counts once, whoever ends up handling it; the OS's auto-repeat does not.
+        if (event.getRepeatCount() == 0) countKey(KeyPressIds.forKeyCode(keyCode));
         if (keyCode == KeyEvent.KEYCODE_BACK && emojiPickerVisible()) {
             closeEmojiPicker();
             return true;
@@ -2811,6 +2963,7 @@ public final class MSIMEInputService extends InputMethodService {
         styleButton(button, true);
         button.setOnClickListener(ignored -> {
             playFeedback(button);
+            countKey(button);
             action.run();
         });
         row.addView(button, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
@@ -2831,6 +2984,7 @@ public final class MSIMEInputService extends InputMethodService {
         styleButton(button, true);
         button.setOnClickListener(ignored -> {
             playFeedback(button);
+            countKey(button);
             action.run();
         });
         row.addView(button, new LinearLayout.LayoutParams(0,
@@ -2892,6 +3046,7 @@ public final class MSIMEInputService extends InputMethodService {
         styleButton(button, false);
         button.setOnClickListener(ignored -> {
             playFeedback(button);
+            countKey(button);
             action.run();
         });
         return button;
@@ -2931,6 +3086,7 @@ public final class MSIMEInputService extends InputMethodService {
         styleButton(button, false);
         button.setOnClickListener(ignored -> {
             playFeedback(button);
+            countKey(button);
             action.run();
         });
         return button;
@@ -2944,6 +3100,7 @@ public final class MSIMEInputService extends InputMethodService {
         styleButton(button, false);
         button.setOnClickListener(ignored -> {
             playFeedback(button);
+            countKey(button);
             action.run();
         });
         return button;
@@ -2962,6 +3119,8 @@ public final class MSIMEInputService extends InputMethodService {
                     backspaceRepeatTask = new Runnable() {
                         @Override public void run() {
                             if (backspaceRepeatButton != button || !button.isPressed()) return;
+                            // A held delete is one press however often it repeats; a short tap counts through performClick instead.
+                            if (!backspaceRepeated) countKey(button);
                             backspaceRepeated = true;
                             if (hasEngineComposition()) {
                                 playFeedback(button);
@@ -6499,7 +6658,7 @@ public final class MSIMEInputService extends InputMethodService {
             if (handwritingCanvas != null) handwritingCanvas.undo();
         }));
         addNineKey(tools, keyboardKey("清空", "清空手写", this::clearHandwriting));
-        addNineKey(tools, keyboardKey("⌫", "删除", this::deleteFromHandwriting));
+        addNineKey(tools, keyId(keyboardKey("⌫", "删除", this::deleteFromHandwriting), "Backspace"));
         row.addView(tools, new FrameLayout.LayoutParams(pixels(64),
             FrameLayout.LayoutParams.MATCH_PARENT, Gravity.END));
         adjustFixedHeight(row, KeyboardGeometry.HANDWRITING_BODY_HEIGHT_DP);
@@ -6591,6 +6750,7 @@ public final class MSIMEInputService extends InputMethodService {
                 } else {
                     keyButton = keyboardKey(face, face, () -> type(input.charAt(0)));
                 }
+                keyId(keyButton, KeyPressIds.forCharacter(input.charAt(0)));
                 if (keyboardLayer == KeyboardLayout.Layer.LETTERS && !koreanKeycaps) {
                     keyButton.setContentDescription(LetterKeyFacePolicy.accessibilityLabel(
                         input, chineseMode, localMode, shifted));
@@ -6607,7 +6767,8 @@ public final class MSIMEInputService extends InputMethodService {
                     LinearLayout.LayoutParams.MATCH_PARENT, 1));
             }
             if (keyboardLayer == KeyboardLayout.Layer.LETTERS && rowIndex == 1) {
-                microsoftFinalKey = shuangpinKeyboardKey(";", "微软双拼 ing", () -> type(';'));
+                microsoftFinalKey = keyId(shuangpinKeyboardKey(";", "微软双拼 ing", () -> type(';')),
+                    "Semicolon");
                 shuangpinKeyButtons.add((ShuangpinHintButton) microsoftFinalKey);
                 shuangpinKeyInputs.add(";");
                 row.addView(microsoftFinalKey, new LinearLayout.LayoutParams(0,
@@ -6667,7 +6828,8 @@ public final class MSIMEInputService extends InputMethodService {
         LinearLayout punctuation = new LinearLayout(this);
         punctuation.setOrientation(LinearLayout.VERTICAL);
         for (String symbol : NineKeyLayout.punctuation()) {
-            Button key = keyboardKey(symbol, "符号 " + symbol, () -> commitNineKeyLiteral(symbol));
+            Button key = keyId(keyboardKey(symbol, "符号 " + symbol,
+                () -> commitNineKeyLiteral(symbol)), "SoftPunctuation");
             // The four punctuation keys share one rail rather than wearing four caps of their own.
             if (key instanceof KeyboardPressButton press)
                 press.setKeyboardRole(KeyboardKeyRole.PLAIN);
@@ -6699,6 +6861,7 @@ public final class MSIMEInputService extends InputMethodService {
                     NineKeyLayout.face(key, digits), description,
                     digits ? () -> commitNineKeyLiteral(NineKeyLayout.digitInput(key))
                         : () -> character(key.input()));
+                keyId(keyButton, KeyPressIds.forNineKeyDigit(key.digit()));
                 // 字母键面上印着它送进引擎的数字；数字键面本身就是那个数字，不必再印一次。
                 // 分词键送的是拼音分隔符而不是 1，所以它没有可印的数字。
                 keyButton.setDigitText(digits || !Character.isDigit(key.input())
@@ -6706,6 +6869,8 @@ public final class MSIMEInputService extends InputMethodService {
                 if (!digits && Character.isDigit(key.input()) && key.label().length() > 1) {
                     keyButton.setContentDescription("按键 " + description + "；长按输入数字或字母");
                     keyButton.setOnLongClickListener(ignored -> {
+                        // The hold is this cell's press; picking from the popup is not another key.
+                        countKey(keyButton);
                         showNineKeyHoldOptions(keyButton, key);
                         return true;
                     });
@@ -6723,11 +6888,12 @@ public final class MSIMEInputService extends InputMethodService {
         Runnable deleteAction = () -> {
             if (connection != null && !command(0)) connection.deleteSurroundingTextInCodePoints(1, 0);
         };
-        Button delete = keyboardKey("⌫", "删除", deleteAction);
+        Button delete = keyId(keyboardKey("⌫", "删除", deleteAction), "Backspace");
         bindBackspaceRepeat(delete, deleteAction);
         addNineKey(actions, delete);
-        addNineKey(actions, keyboardKey(".", "句点", this::commitNineKeyPeriod));
-        addNineKey(actions, keyboardKey("0", "数字 0", () -> commitNineKeyLiteral("0")));
+        addNineKey(actions, keyId(keyboardKey(".", "句点", this::commitNineKeyPeriod), "Period"));
+        addNineKey(actions, keyId(keyboardKey("0", "数字 0", () -> commitNineKeyLiteral("0")),
+            "Nine0"));
         container.addView(actions, new LinearLayout.LayoutParams(0,
             LinearLayout.LayoutParams.MATCH_PARENT, 0.8f));
     }
@@ -6848,6 +7014,7 @@ public final class MSIMEInputService extends InputMethodService {
                     if (direction[0] == 0) button.performClick();
                     else {
                         playFeedback(button);
+                        countKey(button);
                         selectJapaneseKey(key, direction[0]);
                     }
                     return true;
@@ -6914,20 +7081,22 @@ public final class MSIMEInputService extends InputMethodService {
 
         LinearLayout modeColumn = new LinearLayout(this);
         modeColumn.setOrientation(LinearLayout.VERTICAL);
-        japaneseSymbolsKey = keyboardKey("123", "切换到数字和符号", () -> {
+        japaneseSymbolsKey = keyId(keyboardKey("123", "切换到数字和符号", () -> {
             keyboardLayer = keyboardLayer == KeyboardLayout.Layer.SYMBOLS
                 ? KeyboardLayout.Layer.LETTERS : KeyboardLayout.Layer.SYMBOLS;
             rebuildKeyRows();
             render();
-        });
+        }), "SoftLayer");
         addJapaneseSideKey(modeColumn, japaneseSymbolsKey, 1);
-        addJapaneseSideKey(modeColumn, keyboardKey("☺", "打开表情浏览", this::showEmojiPicker), 1);
-        Button language = keyboardKey("英", "切换到英文输入", this::toggleInputLanguage);
+        addJapaneseSideKey(modeColumn, keyId(keyboardKey("☺", "打开表情浏览", this::showEmojiPicker),
+            "SoftEmoji"), 1);
+        Button language = keyId(keyboardKey("英", "切换到英文输入", this::toggleInputLanguage),
+            "SoftLanguage");
         addJapaneseSideKey(modeColumn, language,
             shouldOfferSwitchingToNextInputMethod() ? 1 : 2);
         if (shouldOfferSwitchingToNextInputMethod()) {
-            addJapaneseSideKey(modeColumn, keyboardKey("切换", "切换到下一个输入法",
-                this::switchToNextInputMethodAfterCommit), 1);
+            addJapaneseSideKey(modeColumn, keyId(keyboardKey("切换", "切换到下一个输入法",
+                this::switchToNextInputMethodAfterCommit), "SoftGlobe"), 1);
         }
         container.addView(modeColumn, new LinearLayout.LayoutParams(0,
             LinearLayout.LayoutParams.MATCH_PARENT, 0.17f));
@@ -6940,12 +7109,14 @@ public final class MSIMEInputService extends InputMethodService {
             LinearLayout row = new LinearLayout(this);
             if (rowIndex < 3) {
                 for (int column = 0; column < 3; column++) {
-                    addNineKey(row, japaneseKey(keys.get(rowIndex * 3 + column)));
+                    int index = rowIndex * 3 + column;
+                    addNineKey(row, keyId(japaneseKey(keys.get(index)),
+                        KeyPressIds.forJapaneseKeyIndex(index)));
                 }
             } else {
                 addNineKey(row, japaneseVariantsKey());
-                addNineKey(row, japaneseKey(keys.get(9)));
-                addNineKey(row, japaneseKey(keys.get(10)));
+                addNineKey(row, keyId(japaneseKey(keys.get(9)), KeyPressIds.forJapaneseKeyIndex(9)));
+                addNineKey(row, keyId(japaneseKey(keys.get(10)), KeyPressIds.forJapaneseKeyIndex(10)));
             }
             grid.addView(row, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
@@ -6958,13 +7129,13 @@ public final class MSIMEInputService extends InputMethodService {
         Runnable deleteAction = () -> {
             if (connection != null && !command(0)) connection.deleteSurroundingTextInCodePoints(1, 0);
         };
-        Button delete = keyboardKey("⌫", "删除", deleteAction);
+        Button delete = keyId(keyboardKey("⌫", "删除", deleteAction), "Backspace");
         bindBackspaceRepeat(delete, deleteAction);
         addJapaneseSideKey(side, delete, 1);
-        japaneseSpaceKey = keyboardKey("空白", "空白；左右滑动移动光标", this::space);
+        japaneseSpaceKey = keyId(keyboardKey("空白", "空白；左右滑动移动光标", this::space), "Space");
         bindSpaceCursor(japaneseSpaceKey);
         addJapaneseSideKey(side, japaneseSpaceKey, 1);
-        japaneseReturnKey = keyboardKey("改行", "改行", this::enter);
+        japaneseReturnKey = keyId(keyboardKey("改行", "改行", this::enter), "Enter");
         addJapaneseSideKey(side, japaneseReturnKey, 2);
         container.addView(side, new LinearLayout.LayoutParams(0,
             LinearLayout.LayoutParams.MATCH_PARENT, 0.19f));
@@ -7197,9 +7368,11 @@ public final class MSIMEInputService extends InputMethodService {
         emojiShortcutButton = shortcutButton(shortcutBar, "☺",
             KeyboardShortcutIconPolicy.Icon.EMOJI, this::showEmojiPicker);
         emojiShortcutButton.setContentDescription("打开表情浏览");
+        keyId(emojiShortcutButton, "SoftEmoji");
         voiceShortcutButton = shortcutButton(shortcutBar, "语音",
             KeyboardShortcutIconPolicy.Icon.VOICE, this::showVoiceResult);
         voiceShortcutButton.setContentDescription("打开语音结果");
+        keyId(voiceShortcutButton, "SoftVoice");
         aiPolishShortcutButton = button(shortcutBar, "AI", this::showAiPolish);
         aiPolishShortcutButton.setContentDescription("打开 AI 润色");
         replyShortcutButton = shortcutButton(shortcutBar, "回复",
@@ -7307,7 +7480,8 @@ public final class MSIMEInputService extends InputMethodService {
             render();
         });
         shiftButton.setContentDescription("切换到英文大写");
-        languageButton = button(controls, "中/英", this::toggleInputLanguage);
+        keyId(shiftButton, "ShiftLeft");
+        languageButton = keyId(button(controls, "中/英", this::toggleInputLanguage), "SoftLanguage");
         languageButton.setContentDescription("切换中英文");
         layerButton = button(controls, "123", () -> {
             keyboardLayer = keyboardLayer == KeyboardLayout.Layer.LETTERS
@@ -7316,26 +7490,28 @@ public final class MSIMEInputService extends InputMethodService {
             render();
         });
         layerButton.setContentDescription("切换到数字和符号");
-        symbolPanelButton = button(controls, "符", this::showSymbolPanel);
+        keyId(layerButton, "SoftLayer");
+        symbolPanelButton = keyId(button(controls, "符", this::showSymbolPanel), "SoftSymbol");
         symbolPanelButton.setContentDescription("打开符号面板");
-        quickPunctuationButton = button(controls, ",", this::insertQuickPunctuation);
+        quickPunctuationButton = keyId(button(controls, ",", this::insertQuickPunctuation), "Comma");
         quickPunctuationButton.setOnLongClickListener(ignored -> {
             showQuickPunctuationMenu();
             return true;
         });
-        deleteButton = button(controls, "⌫", this::deleteFromHandwriting);
+        deleteButton = keyId(button(controls, "⌫", this::deleteFromHandwriting), "Backspace");
         // The same 按键 form the nine-key and kana grids give their own delete: the bare 删除 is the
         // emoji panel's, and two nodes answering to it would make either one ambiguous.
         deleteButton.setContentDescription("按键 删除");
         bindBackspaceRepeat(deleteButton, this::deleteFromHandwriting);
-        spaceButton = button(controls, "空格", this::space);
+        spaceButton = keyId(button(controls, "空格", this::space), "Space");
         spaceButton.setContentDescription(SPACE_CURSOR_DESCRIPTION);
         bindSpaceCursor(spaceButton);
-        enterButton = button(controls, "换行", this::enter);
+        enterButton = keyId(button(controls, "换行", this::enter), "Enter");
         enterButton.setContentDescription("换行");
         globeButton = shortcutButton(controls, "切换",
             KeyboardShortcutIconPolicy.Icon.GLOBE, this::switchToNextInputMethodAfterCommit);
         globeButton.setContentDescription("切换到下一个输入法");
+        keyId(globeButton, "SoftGlobe");
         schemeButton = pillButton(controls, "方案", this::showSchemePicker);
         schemeButton.setContentDescription("选择输入方案");
         skinButton = shortcutButton(controls, "皮肤",

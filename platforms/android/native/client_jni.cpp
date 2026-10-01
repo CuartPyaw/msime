@@ -112,6 +112,17 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_typingStatistic
     env->ReleaseByteArrayElements(request, bytes, JNI_ABORT);
     return response(env, result);
 }
+// 1 enabled, 0 disabled or missing, -1 invalid directory or unreadable document; the Java side treats anything but 1 as off.
+JNIEXPORT jint JNICALL Java_app_msime_android_NativeClient_typingStatisticsEnabledRaw(JNIEnv *env, jclass, jbyteArray directory) {
+    if (!directory) return -1;
+    jsize length = env->GetArrayLength(directory);
+    jbyte *bytes = env->GetByteArrayElements(directory, nullptr);
+    if (!bytes) return -1;
+    int32_t result = msime_client_typing_statistics_enabled(
+        reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
+    env->ReleaseByteArrayElements(directory, bytes, JNI_ABORT);
+    return static_cast<jint>(result);
+}
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_vocabularyReviewRaw(JNIEnv *env, jclass, jbyteArray request) {
     if (!request) return response(env, msime_client_vocabulary_review(nullptr, 0));
     jsize length = env->GetArrayLength(request);
