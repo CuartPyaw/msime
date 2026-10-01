@@ -40,13 +40,6 @@ impl AutocorrectCut {
         self.edge_count == other.edge_count && self.weight == other.weight
     }
 
-    pub fn syllables(&self) -> Vec<String> {
-        self.segments
-            .iter()
-            .map(|segment| segment.syllable.clone())
-            .collect()
-    }
-
     pub fn into_syllables(self) -> Vec<String> {
         self.segments
             .into_iter()
@@ -541,7 +534,11 @@ mod tests {
     }
 
     fn reading(cut: &AutocorrectCut) -> String {
-        cut.syllables().join("'")
+        cut.segments
+            .iter()
+            .map(|segment| segment.syllable.as_str())
+            .collect::<Vec<_>>()
+            .join("'")
     }
 
     #[test]

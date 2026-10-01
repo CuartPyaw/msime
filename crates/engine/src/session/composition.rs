@@ -8,7 +8,9 @@ use crate::japanese::romaji::convert_romaji;
 use crate::pinyin::active_helpcode::{
     detect_active_helpcode_length, strip_active_helpcodes, strip_active_helpcodes_with_cases,
 };
-use crate::pinyin::autocorrect::{autocorrect_cut_detail, looks_like_syllable_with_jianpin_tail};
+use crate::pinyin::autocorrect::{
+    autocorrect_cut_detail, looks_like_syllable_with_jianpin_tail, AutocorrectCutSegment,
+};
 use crate::pinyin::segment::{is_complete_pinyin_input, join_segments, split_segments};
 use crate::shuangpin::query::{
     detect_active_double_helpcode_length, effective_input_length, is_complete_input,
@@ -190,10 +192,10 @@ fn folded_letters_equal(left: &str, right: &str) -> bool {
         .eq(right.bytes().filter_map(folded_autocorrect_byte))
 }
 
-fn folded_segments_equal(segments: &[String], text: &str) -> bool {
+fn folded_segments_equal(segments: &[AutocorrectCutSegment], text: &str) -> bool {
     segments
         .iter()
-        .flat_map(|segment| segment.bytes().filter_map(folded_autocorrect_byte))
+        .flat_map(|segment| segment.syllable.bytes().filter_map(folded_autocorrect_byte))
         .eq(text.bytes().filter_map(folded_autocorrect_byte))
 }
 
@@ -229,8 +231,7 @@ pub(super) fn build_quanpin_autocorrect_display(request: &QueryRequest) -> Strin
     let cut = autocorrect_cut_detail(&folded_input, types).filter(|cut| !cut.is_empty());
     if let Some(cut) = cut {
         // When the scheme rewrote the letters, the query went through the alias reading, so separators may only come from the cut when both layers read the letters the same way (sahnghao -> shang'hao).
-        let cut_syllables = cut.syllables();
-        if !letters_rewritten || folded_segments_equal(&cut_syllables, base) {
+        if !letters_rewritten || folded_segments_equal(&cut.segments, base) {
             let boundary_count = cut.segments.len() - 1;
             let mut display = String::with_capacity(cased.len() + cut.segments.len());
             let mut letter_index = 0;
@@ -696,6 +697,15 @@ mod tests {
                 "owned {left}/{right}"
             );
         }
+    }
+
+    #[test]
+    fn folded_cut_comparison_reads_segment_syllables_directly() {
+        let segments = vec![crate::pinyin::autocorrect::AutocorrectCutSegment {
+            syllable: "NvE".to_owned(),
+            ..Default::default()
+        }];
+        assert!(folded_segments_equal(&segments, "nue"));
     }
 
     /// The request a quanpin session builds for `typed` under the two user switches (test_pinyin.cpp P38).
