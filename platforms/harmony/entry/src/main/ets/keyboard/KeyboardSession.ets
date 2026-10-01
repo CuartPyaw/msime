@@ -3206,6 +3206,17 @@ export class KeyboardSession implements HardwareKeyTarget {
   }
 
   /**
+   * Throw the whole composition away, for a gesture that means to clear it rather than step back. With a Korean Hanja list open the first MSIME_CANCEL only closes the list and keeps the syllable (msime_client.h), so a second drops the syllable too; anywhere else this is cancel.
+   */
+  discardComposition(): void {
+    const closesHanjaList: boolean = this.translationPage === null && this.koreanHanjaListOpen();
+    this.cancel();
+    if (closesHanjaList) {
+      this.cancel();
+    }
+  }
+
+  /**
    * MSIME_CONVERT_HANJA: list the Hanja of the composing Korean syllable, or close the open list and keep the syllable composing. False when the Engine declined, which it does for a lone jamo and with nothing composing.
    */
   convertHanja(): boolean {

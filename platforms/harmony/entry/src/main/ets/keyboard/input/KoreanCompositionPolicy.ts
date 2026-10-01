@@ -31,6 +31,15 @@ export class KoreanCompositionPolicy {
   }
 
   /**
+   * Whether MSIME_CONVERT_HANJA applies, which is also when the candidate bar shows its 漢 button: while a syllable composes, its list open or not, since the command closes an open list.
+   *
+   * A lone jamo composes too and has no Hanja. The Engine answers the command unhandled then and nothing changes; the host does not tell the two apart, because that would take a jamo table of its own.
+   */
+  static convertsHanja(korean: boolean, editing: string): boolean {
+    return korean && editing.length > 0;
+  }
+
+  /**
    * Whether a touch key the automaton leaves unhandled is typed by the keyboard after the commit: a space or a digit, the keys a phone has no application behind to type them.
    */
   static typesAfterCommit(character: number): boolean {

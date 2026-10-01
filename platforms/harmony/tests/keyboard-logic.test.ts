@@ -10824,6 +10824,21 @@ group("a Korean syllable lists its Hanja and the open list takes the candidate k
     !KoreanCompositionPolicy.hanjaListOpen(false, 3),
     "candidates outside the Korean rules (English, a local mode) are no Hanja list",
   );
+  check(
+    KoreanCompositionPolicy.convertsHanja(true, "한") &&
+      !KoreanCompositionPolicy.convertsHanja(true, "") &&
+      !KoreanCompositionPolicy.convertsHanja(false, "nihao"),
+    "the command and the 漢 button apply only while a Korean syllable composes",
+  );
+  check(
+    ReturnKeyAction.dispatch(false, true, 5, false, true) === ReturnDispatch.COMMIT_HIGHLIGHTED,
+    "touch Return chooses the highlighted Hanja while the list is open",
+  );
+  check(
+    KeyAccessibilityPolicy.hanja(false) === "转换为汉字" &&
+      KeyAccessibilityPolicy.hanja(true) === "关闭汉字列表",
+    "漢 is read as what the next tap does",
+  );
 
   const key = (over: Record<string, unknown> = {}): HardwareKey => ({
     keyCode: 2017,
