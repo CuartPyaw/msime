@@ -1075,10 +1075,26 @@ fn reject_symlinked_options_parent(path: &Path) -> std::io::Result<()> {
 
 /// Bring a published HostOptions file up to the installed dictionary generation.
 ///
-/// A package upgrade replaces the resource bundle in place but leaves each user's options pointing at working dictionaries copied from the previous bundle, so the new dictionary never reaches the Engine and the user-dictionary replay the Windows installer runs after an upgrade never happens. When the recorded dictionaries directory is not the generation the installed lock describes, this prepares that generation (the Engine copies the new dictionaries and replays the user journal into them) and rewrites only `resources` and `dictionaries`, keeping every other key a setup or the settings app wrote. `language_dictionaries` is also brought up to the Cantonese and Zhuyin dictionaries installed beside the resources, whatever the generation. A current file is only read.
+/// A package upgrade replaces the resource bundle in place but leaves each user's options pointing at working dictionaries copied from the previous bundle, so the new dictionary never reaches the Engine and the user-dictionary replay the Windows installer runs after an upgrade never happens. When the recorded dictionaries directory is not the generation the installed lock describes, this prepares that generation (the Engine copies the new dictionaries and replays the user journal into them) and rewrites only `resources` and `dictionaries`, keeping every other key a setup or the settings app wrote. A current file is only read.
 ///
 /// Returns whether the file was rewritten. Run it before the caller's own sessions exist. The previous generation is never modified, so a host still using it keeps working until it restarts. A symlink, or a document whose paths do not follow the layout `prepare_host_configuration` produces, is left alone rather than guessed at. When the recorded resources do not match the compiled lock the error is [`DictionaryOutdated`] and the file is left as it was.
 pub fn refresh_host_options(path: &std::path::Path) -> Result<bool, Box<dyn std::error::Error>> {
+    refresh_options_file(path, false)
+}
+
+/// [`refresh_host_options`], and also keep `language_dictionaries` in step with the Cantonese and Zhuyin dictionaries installed beside the resources, whatever the generation; otherwise a current file is only read.
+///
+/// Only the input method process itself calls this, at its start, before any session reads the file. Every input method session re-reads the document and `HostOptions` rejects unknown keys, so a key added to a document that an older running input method still reads would stop it from opening sessions. The settings app can be upgraded while the previous input method keeps running, which is why its own refresh is [`refresh_host_options`]; an input method running this code understands the key it writes.
+pub fn refresh_host_options_with_language_dictionaries(
+    path: &std::path::Path,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    refresh_options_file(path, true)
+}
+
+fn refresh_options_file(
+    path: &std::path::Path,
+    language_dictionaries: bool,
+) -> Result<bool, Box<dyn std::error::Error>> {
     use std::io::Write as _;
     reject_symlinked_options_parent(path)?;
     let metadata = std::fs::symlink_metadata(path)?;
@@ -1102,7 +1118,7 @@ pub fn refresh_host_options(path: &std::path::Path) -> Result<bool, Box<dyn std:
     let specification: ResourceSet = serde_json::from_str(include_str!(
         "../../../resources/desktop-dictionary.lock.json"
     ))?;
-    let Some(refreshed) = refreshed_host_options(
+    let prepared = refreshed_host_options(
         &document,
         &specification.generation()?,
         |resources, state| {
@@ -1110,8 +1126,13 @@ pub fn refresh_host_options(path: &std::path::Path) -> Result<bool, Box<dyn std:
                 &prepare_host_configuration(resources, state).map_err(outdated_resources)?,
             )?)
         },
-    )?
-    else {
+    )?;
+    let languages = if language_dictionaries {
+        with_installed_language_dictionaries(prepared.as_ref().unwrap_or(&document))?
+    } else {
+        None
+    };
+    let Some(refreshed) = languages.or(prepared) else {
         return Ok(false);
     };
     let parent = path.parent().ok_or("runtime options have no directory")?;
@@ -1127,12 +1148,8 @@ pub fn refresh_host_options(path: &std::path::Path) -> Result<bool, Box<dyn std:
     Ok(true)
 }
 
-/// The options `refresh_host_options` would publish, or `None` when the document is current or not in the prepared layout.
-fn refreshed_host_options(
-    document: &Value,
-    generation: &str,
-    prepare: impl FnOnce(&Path, &Path) -> Result<Value, Box<dyn std::error::Error>>,
-) -> Result<Option<Value>, Box<dyn std::error::Error>> {
+/// The `resources`, `dictionaries` and state directory of a document in the layout `prepare_host_configuration` produces, or `None` for any other document.
+fn prepared_layout(document: &Value) -> Option<(&Path, &Path, &Path)> {
     let path = |key: &str| {
         document
             .get(key)
@@ -1140,56 +1157,75 @@ fn refreshed_host_options(
             .map(Path::new)
             .filter(|path| path.is_absolute())
     };
-    let (Some(resources), Some(user_data), Some(dictionaries), Some(state)) = (
-        path("resources"),
-        path("user_data"),
-        path("dictionaries"),
-        path("preferences_directory"),
-    ) else {
+    let (resources, user_data, dictionaries, state) = (
+        path("resources")?,
+        path("user_data")?,
+        path("dictionaries")?,
+        path("preferences_directory")?,
+    );
+    (user_data == state.join("user")
+        && dictionaries.parent() == Some(user_data.join("dictionaries").as_path()))
+    .then_some((resources, dictionaries, state))
+}
+
+/// The options `refresh_host_options` would publish, or `None` when the document is current or not in the prepared layout.
+fn refreshed_host_options(
+    document: &Value,
+    generation: &str,
+    prepare: impl FnOnce(&Path, &Path) -> Result<Value, Box<dyn std::error::Error>>,
+) -> Result<Option<Value>, Box<dyn std::error::Error>> {
+    let Some((resources, dictionaries, state)) = prepared_layout(document) else {
         return Ok(None);
     };
-    if user_data != state.join("user")
-        || dictionaries.parent() != Some(user_data.join("dictionaries").as_path())
-    {
+    if dictionaries.file_name().and_then(|name| name.to_str()) == Some(generation) {
         return Ok(None);
     }
+    let prepared = prepare(resources, state)?;
     let mut refreshed = document.clone();
-    let mut changed = false;
-    if dictionaries.file_name().and_then(|name| name.to_str()) != Some(generation) {
-        let prepared = prepare(resources, state)?;
-        for key in ["resources", "dictionaries"] {
-            refreshed[key] = prepared
-                .get(key)
-                .filter(|value| value.is_string())
-                .cloned()
-                .ok_or("prepared options are incomplete")?;
-        }
-        changed = true;
+    for key in ["resources", "dictionaries"] {
+        refreshed[key] = prepared
+            .get(key)
+            .filter(|value| value.is_string())
+            .cloned()
+            .ok_or("prepared options are incomplete")?;
     }
-    // The Cantonese and Zhuyin dictionaries arrive with a package, not with a dictionary generation, so options published by an older package are brought up to what is installed beside the resources even when the generation is current. Only the directory `prepare_host_configuration` records is kept in step; a document naming another one keeps it.
+    Ok(Some(refreshed))
+}
+
+/// `document` with `language_dictionaries` naming what is installed beside its resources, or `None` when it already does or is not in the prepared layout.
+///
+/// The Cantonese and Zhuyin dictionaries arrive with a package, not with a dictionary generation, so options published by an older package are brought up to what is installed even when the generation is current, and lose the key once the dictionaries are gone. Only the directory `prepare_host_configuration` records is kept in step; a document naming another one keeps it.
+fn with_installed_language_dictionaries(
+    document: &Value,
+) -> Result<Option<Value>, Box<dyn std::error::Error>> {
+    let Some((resources, _, _)) = prepared_layout(document) else {
+        return Ok(None);
+    };
     let beside = language_dictionaries_directory(resources)
         .and_then(|directory| directory.to_str().map(str::to_owned));
     let recorded = document
         .get("language_dictionaries")
         .and_then(Value::as_str);
-    if recorded.is_none() || recorded == beside.as_deref() {
-        let installed = installed_language_dictionaries(resources);
-        if recorded != installed.as_deref() {
-            let object = refreshed
-                .as_object_mut()
-                .ok_or("runtime options are not an object")?;
-            match installed {
-                Some(directory) => {
-                    object.insert("language_dictionaries".to_owned(), Value::String(directory));
-                }
-                None => {
-                    object.remove("language_dictionaries");
-                }
-            }
-            changed = true;
+    if recorded.is_some() && recorded != beside.as_deref() {
+        return Ok(None);
+    }
+    let installed = installed_language_dictionaries(resources);
+    if recorded == installed.as_deref() {
+        return Ok(None);
+    }
+    let mut refreshed = document.clone();
+    let object = refreshed
+        .as_object_mut()
+        .ok_or("runtime options are not an object")?;
+    match installed {
+        Some(directory) => {
+            object.insert("language_dictionaries".to_owned(), Value::String(directory));
+        }
+        None => {
+            object.remove("language_dictionaries");
         }
     }
-    Ok(changed.then_some(refreshed))
+    Ok(Some(refreshed))
 }
 
 /// Import the mixed-input controls from the Windows installer's legacy TOML

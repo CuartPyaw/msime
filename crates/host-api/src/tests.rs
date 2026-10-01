@@ -7062,12 +7062,7 @@ fn refresh_keeps_the_language_dictionaries_in_step_with_the_installed_package() 
         "dictionaries": "/s/user/dictionaries/new",
         "preferences_directory": "/s",
     });
-    let refresh = |document: &Value| {
-        super::refreshed_host_options(document, "new", |_, _| {
-            panic!("a current generation is not prepared")
-        })
-        .unwrap()
-    };
+    let refresh = |document: &Value| super::with_installed_language_dictionaries(document).unwrap();
     assert_eq!(refresh(&current), None);
 
     // An empty directory installs nothing.
@@ -7084,18 +7079,82 @@ fn refresh_keeps_the_language_dictionaries_in_step_with_the_installed_package() 
     elsewhere["language_dictionaries"] = json!("/opt/language-dictionaries");
     assert_eq!(refresh(&elsewhere), None);
 
+    // A document outside the prepared layout is not guessed at.
+    let mut moved = current.clone();
+    moved["user_data"] = json!("/t/user");
+    assert_eq!(refresh(&moved), None);
+
     std::fs::remove_file(beside.join("zhuyin.db")).expect("uninstall");
     assert_eq!(refresh(&installed), Some(current.clone()));
+}
 
-    // A stale generation is prepared and picks up the dictionaries in the same rewrite.
+/// The language directory follows the resources a stale generation was prepared from, not the ones the old document recorded.
+#[test]
+fn a_prepared_generation_records_the_language_dictionaries_beside_its_new_resources() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let old = root.path().join("old").join("resources");
+    let new = root.path().join("new").join("resources");
+    std::fs::create_dir_all(&old).expect("old");
+    std::fs::create_dir_all(&new).expect("new");
+    let beside = root.path().join("new").join("language-dictionaries");
+    std::fs::create_dir_all(&beside).expect("beside");
     std::fs::write(beside.join("cantonese.db"), b"sqlite").expect("cantonese");
-    let mut stale = current.clone();
-    stale["dictionaries"] = json!("/s/user/dictionaries/old");
-    let refreshed = super::refreshed_host_options(&stale, "new", |_, _| {
-        Ok(json!({ "resources": resources, "dictionaries": "/s/user/dictionaries/new" }))
+    let stale = json!({
+        "resources": old,
+        "user_data": "/s/user",
+        "dictionaries": "/s/user/dictionaries/old",
+        "preferences_directory": "/s",
+    });
+    let prepared = super::refreshed_host_options(&stale, "new", |_, _| {
+        Ok(json!({ "resources": new, "dictionaries": "/s/user/dictionaries/new" }))
     })
+    .unwrap()
     .unwrap();
-    assert_eq!(refreshed, Some(installed));
+    assert_eq!(prepared.get("language_dictionaries"), None);
+    let refreshed = super::with_installed_language_dictionaries(&prepared)
+        .unwrap()
+        .unwrap();
+    assert_eq!(refreshed["language_dictionaries"], json!(beside));
+}
+
+/// The settings app's refresh never adds `language_dictionaries`: an input method that predates the key may still be running and re-reads the file for every session, and it rejects unknown keys. Only the input method's own refresh records the key.
+#[test]
+fn only_the_input_method_refresh_records_the_language_dictionaries() {
+    let directory = tempfile::tempdir().unwrap();
+    let resources = directory.path().join("resources");
+    std::fs::create_dir(&resources).unwrap();
+    let beside = directory.path().join("language-dictionaries");
+    std::fs::create_dir(&beside).unwrap();
+    std::fs::write(beside.join("zhuyin.db"), b"sqlite").unwrap();
+    let state = directory.path().join("state");
+    std::fs::create_dir(&state).unwrap();
+    let generation = serde_json::from_str::<ResourceSet>(include_str!(
+        "../../../resources/desktop-dictionary.lock.json"
+    ))
+    .unwrap()
+    .generation()
+    .unwrap();
+    let document = json!({
+        "api_version": 1,
+        "resources": resources,
+        "user_data": state.join("user"),
+        "cache": state.join("cache"),
+        "dictionaries": state.join("user").join("dictionaries").join(generation),
+        "preferences_directory": state,
+        "preferences": {},
+    });
+    let options = state.join("runtime-options.json");
+    std::fs::write(&options, serde_json::to_vec(&document).unwrap()).unwrap();
+
+    assert!(!super::refresh_host_options(&options).unwrap());
+    let read = || serde_json::from_slice::<Value>(&std::fs::read(&options).unwrap()).unwrap();
+    assert_eq!(read(), document);
+
+    assert!(super::refresh_host_options_with_language_dictionaries(&options).unwrap());
+    let mut expected = document.clone();
+    expected["language_dictionaries"] = json!(beside);
+    assert_eq!(read(), expected);
+    assert!(!super::refresh_host_options_with_language_dictionaries(&options).unwrap());
 }
 
 #[test]

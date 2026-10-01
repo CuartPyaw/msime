@@ -144,7 +144,7 @@ pub unsafe extern "C" fn msime_client_prepare_host(
     })
 }
 
-/// Re-prepare a published runtime options file whose working dictionaries belong to an older resource generation, as after a package upgrade. Returns whether the file was rewritten. Call before creating any session from that file.
+/// Re-prepare a published runtime options file whose working dictionaries belong to an older resource generation, as after a package upgrade, and record the language dictionaries installed beside the resources (see [`refresh_host_options_with_language_dictionaries`]). Returns whether the file was rewritten. Only the input method host calls this, before creating any session from that file.
 /// # Safety
 /// `path` points to `length` readable UTF-8 bytes naming an absolute file. Null is rejected.
 #[no_mangle]
@@ -161,7 +161,7 @@ pub unsafe extern "C" fn msime_client_refresh_host(path: *const u8, length: usiz
         if !path.is_absolute() {
             return Err("options path must be absolute".into());
         }
-        refresh_host_options(path)
+        refresh_host_options_with_language_dictionaries(path)
             .map(Value::Bool)
             .map_err(|e| e.to_string())
     })
