@@ -919,6 +919,7 @@ enum InputCommand {
   MOVE_LEFT_SEGMENT = 13,
   MOVE_RIGHT_SEGMENT = 14,
   COMMIT_RAW_WITHOUT_LEARNING = 15,
+  CONVERT_HANJA = 16,
   NEXT_PAGE = 100,
   PREVIOUS_PAGE = 101,
   NEXT_CANDIDATE = 102,
@@ -2031,6 +2032,14 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** Whether letters go to the Korean Hangul automaton: the Korean scheme with neither English nor a local utility mode taking the keys. */
   isKorean(): boolean {
     return KoreanCompositionPolicy.selected(this.schemeName, this.englishMode, this.localMode);
+  }
+
+  /** Whether the Hanja list of the composing Korean syllable is on the strip, read from what the Engine last reported. */
+  koreanHanjaListOpen(): boolean {
+    const view: EngineView | undefined = this.lastView;
+    return view !== undefined && KoreanCompositionPolicy.hanjaListOpen(
+      KoreanCompositionPolicy.active(view.scheme, view.dedicated_english, view.local_mode),
+      view.candidates.length);
   }
 
   /** Which mode-switch gestures the user left bound, as the shared document has them. */
@@ -3194,6 +3203,13 @@ export class KeyboardSession implements HardwareKeyTarget {
       return;
     }
     this.command(InputCommand.CANCEL);
+  }
+
+  /**
+   * MSIME_CONVERT_HANJA: list the Hanja of the composing Korean syllable, or close the open list and keep the syllable composing. False when the Engine declined, which it does for a lone jamo and with nothing composing.
+   */
+  convertHanja(): boolean {
+    return this.command(InputCommand.CONVERT_HANJA);
   }
 
   /** Commit the spelling as typed rather than any candidate. */
