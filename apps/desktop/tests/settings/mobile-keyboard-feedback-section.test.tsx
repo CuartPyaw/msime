@@ -129,6 +129,32 @@ test("a save response from a replaced mobile feedback client is ignored", async 
   expect(result.current.value).toEqual(nextValue);
 });
 
+test("ignores a same-tick duplicate mobile feedback save", async () => {
+  const pendingSave = deferred<MobileKeyboardFeedback>();
+  const save = vi.fn().mockReturnValue(pendingSave.promise);
+  const client = {
+    load: vi.fn().mockResolvedValue(value),
+    save,
+  };
+  const { result } = renderHook(() =>
+    useMobileKeyboardFeedback({ mobile: true, client, onError: vi.fn() }),
+  );
+  await waitFor(() => expect(result.current.value).toEqual(value));
+
+  let first!: Promise<void>;
+  let second!: Promise<void>;
+  act(() => {
+    first = result.current.save({ ...value, hapticsEnabled: false });
+    second = result.current.save({ ...value, hapticsEnabled: false });
+  });
+  expect(save).toHaveBeenCalledOnce();
+  pendingSave.resolve({ ...value, hapticsEnabled: false });
+  await act(async () => {
+    await first;
+    await second;
+  });
+});
+
 test("only mounts the host binding when mobile feedback is available", () => {
   const value: MobileKeyboardFeedback = {
     soundEnabled: true,
