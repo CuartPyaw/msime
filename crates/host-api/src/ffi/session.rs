@@ -75,6 +75,10 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
                 .set_nine_key_enabled(true)
                 .map_err(|e| e.to_string())?;
         }
+        // Places in `@` mode start off in every engine, so the session carries the preference over itself, as `apply_pending` does on a rebuild.
+        engine
+            .set_mention_places(applied.local_modes.mention_places)
+            .map_err(|e| e.to_string())?;
         // 默认输入状态 says which state a new focus session starts in, and the
         // host applies it as its own English passthrough - letters go straight
         // to the document, with no session involved. It is not the Engine's

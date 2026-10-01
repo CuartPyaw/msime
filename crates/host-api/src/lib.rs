@@ -439,6 +439,10 @@ impl HostSession {
         engine
             .set_dedicated_english(self.english_mode)
             .map_err(|e| e.to_string())?;
+        // The places of `@` mode are not an engine option: every new engine starts with them off, so the switch is carried over on each rebuild.
+        engine
+            .set_mention_places(snapshot.preferences.local_modes.mention_places)
+            .map_err(|e| e.to_string())?;
         self.runtime
             .replace_engine_with_touch_layout(
                 engine,

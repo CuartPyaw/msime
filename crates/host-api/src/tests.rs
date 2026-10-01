@@ -7031,6 +7031,83 @@ fn preference_updates_load_the_enabled_command_tables() {
     assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }
 
+/// The `@ 地名` switch reaches the Engine both when a session is created with it on and when a preference update turns it on or off, since every engine starts with the places off.
+#[test]
+fn mention_places_preference_reaches_the_engine() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut preferences = chinese_preferences();
+    preferences.local_modes.mention = true;
+    preferences.local_modes.mention_places = true;
+    let handle = plugin_host(dir.path(), preferences.clone());
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    assert!(local_mode_candidates(handle, b"@shenzhen").contains(&"深圳市".to_owned()));
+    preferences.local_modes.mention_places = false;
+    assert_eq!(update(handle, 1, &preferences)["value"]["deferred"], false);
+    assert!(!local_mode_candidates(handle, b"@shenzhen").contains(&"深圳市".to_owned()));
+    preferences.local_modes.mention_places = true;
+    assert_eq!(update(handle, 2, &preferences)["value"]["deferred"], false);
+    assert!(local_mode_candidates(handle, b"@shenzhen").contains(&"深圳市".to_owned()));
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+/// `/fy` gets a query of its own: one English text, a sentence translated into Chinese by the selected service, asked whatever the gloss switches say and carrying nothing for an offline dictionary or the gloss cache. Its answer becomes the first row, and no service selected means no query.
+#[test]
+fn command_translation_has_its_own_chinese_sentence_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut preferences = chinese_preferences();
+    preferences.local_modes.command = true;
+    preferences.candidate_translations = false;
+    preferences.candidate_english_gloss = false;
+    preferences.tencent_tmt.enabled = false;
+    preferences.niutrans.enabled = true;
+    let handle = plugin_host(dir.path(), preferences.clone());
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    let mut view = Value::Null;
+    for key in b"/fyhello" {
+        view = read(msime_client_character(handle, *key, false))["value"]["view"].clone();
+    }
+    let query = read(msime_client_translation_query(handle))["value"].clone();
+    assert_eq!(query["sentence"], true, "{query}");
+    assert_eq!(query["target_language"], "zh");
+    assert_eq!(query["provider"], "niutrans");
+    assert_eq!(
+        query["candidates"],
+        json!([{"text": "hello", "online_gloss": false}])
+    );
+    assert!(query["resources"].is_null() && query["user_data"].is_null());
+    assert!(query.get("offline_gloss_languages").is_none());
+    assert_eq!(query["generation"], view["generation"]);
+
+    let encoded = serde_json::to_vec(&json!([{"text": "hello", "translation": "你好"}])).unwrap();
+    let applied = read(unsafe {
+        msime_client_apply_translations(
+            handle,
+            query["generation"].as_u64().unwrap(),
+            encoded.as_ptr(),
+            encoded.len(),
+        )
+    });
+    assert_eq!(applied["value"]["applied"], true, "{applied}");
+    assert_eq!(applied["value"]["view"]["candidates"][0]["text"], "你好");
+    read(msime_client_command(handle, 3));
+
+    // With no service selected `/fy` asks nothing, and the other local modes stay off the network while the gloss switches are off.
+    preferences.niutrans.enabled = false;
+    assert_eq!(update(handle, 1, &preferences)["value"]["deferred"], false);
+    for key in b"/fyhello" {
+        read(msime_client_character(handle, *key, false));
+    }
+    assert!(read(msime_client_translation_query(handle))["value"].is_null());
+    read(msime_client_command(handle, 3));
+    preferences.niutrans.enabled = true;
+    assert_eq!(update(handle, 2, &preferences)["value"]["deferred"], false);
+    for key in b"/sig" {
+        read(msime_client_character(handle, *key, false));
+    }
+    assert!(read(msime_client_translation_query(handle))["value"].is_null());
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
 /// The sound calls sit on the key path: with every sound off (the default) they queue nothing and start nothing, and a bad handle or class is refused the same way.
 #[test]
 fn sound_calls_queue_nothing_while_sounds_are_off() {
