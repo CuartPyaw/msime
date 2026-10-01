@@ -488,6 +488,7 @@ export function CommunityPluginPublishDialog({
   useEffect(() => {
     const generation = ++clientGeneration.current;
     let active = true;
+    setBusy(false);
     setOptionsLoading(true);
     void localPlugins()
       .then((catalog) => {

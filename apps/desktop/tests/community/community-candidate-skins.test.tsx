@@ -521,6 +521,43 @@ test("publish dialog: 公开发布 waits for the rights box and a valid name", a
   );
 });
 
+test("replacing the publish client releases a pending dialog action", async () => {
+  const pending = deferred<CommunityCandidateSkin>();
+  const localSkins = vi.fn().mockResolvedValue(catalog(["ink-wash"]));
+  const initial = client({ publish: vi.fn().mockReturnValue(pending.promise) });
+  const replacement = client();
+  const view = render(
+    <CandidateSkinPublishDialog
+      client={initial}
+      localSkins={localSkins}
+      initialSkinId="ink-wash"
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  await screen.findByRole("textbox", { name: "发布皮肤名称" });
+  fireEvent.click(screen.getByRole("checkbox", { name: "确认拥有发布素材权利" }));
+  const publish = screen.getByRole("button", { name: "公开发布" }) as HTMLButtonElement;
+  fireEvent.click(publish);
+  await waitFor(() => expect(publish.disabled).toBe(true));
+
+  view.rerender(
+    <CandidateSkinPublishDialog
+      client={replacement}
+      localSkins={localSkins}
+      initialSkinId="ink-wash"
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("checkbox", { name: "确认拥有发布素材权利" }) as HTMLInputElement).disabled,
+    ).toBe(false),
+  );
+  pending.resolve(first);
+});
+
 test("publish dialog keeps the publication id on retry and renews it on edit", async () => {
   const publish = vi
     .fn()
