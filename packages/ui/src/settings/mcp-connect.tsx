@@ -202,11 +202,13 @@ export function McpConnectSection({
 
   function copy(key: string, text: string) {
     if (!copyText) return;
+    const generation = clientGeneration.current;
     void copyText(text).then(() => {
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setCopied(key);
       window.setTimeout(() => {
-        if (mounted.current) setCopied((current) => (current === key ? undefined : current));
+        if (mounted.current && generation === clientGeneration.current)
+          setCopied((current) => (current === key ? undefined : current));
       }, 1600);
     });
   }
