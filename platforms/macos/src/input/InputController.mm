@@ -5573,11 +5573,12 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     // The page arrows sit in the card's top row beside the reading, so they take no width from the candidate line.
     CGFloat width = MAX(20, natural + 2 * inset);
     width = MAX(width, preeditWidth);
-    // Half the screen caps the card, except that a horizontal page grows past it as far as its candidates' own lines need (their glosses wrap underneath) so the page stays on one line, up to the screen less a margin on each side.
+    // Half the screen caps the card, except that a horizontal page whose candidate lines fit on one screen-wide line grows past it as far as its candidates need with nothing wrapped, glosses included, up to the screen less a margin on each side. Only a page wider than that squeezes its glosses to wrap under their text (SingleLineColumns). A page whose candidate lines alone do not fit breaks onto more lines anyway, so it keeps the half-screen card rather than a screen-wide one.
     CGFloat widthCap = MAX(80, floor(visible.size.width * 0.5));
     if (!vertical) {
         const CGFloat screenCap = MAX(widthCap, floor(visible.size.width - 2 * MSIMECandidateScreenMargin));
-        widthCap = MAX(widthCap, MIN(screenCap, ceil(msime::mac::SingleLineMinimumWidth(items, metrics)) + 2 * inset));
+        if (ceil(msime::mac::SingleLineMinimumWidth(items, metrics)) + 2 * inset <= screenCap)
+            widthCap = MAX(widthCap, MIN(screenCap, natural + 2 * inset));
     }
     width = MIN(width, widthCap);
     if (paging) width = MAX(width, 76);
