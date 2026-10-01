@@ -49,6 +49,33 @@ test("an update check already in progress ignores a second trigger", async () =>
   expect(result.current.status).toBe("检查失败，请稍后重试");
 });
 
+test("ignores a same-tick duplicate update check", async () => {
+  const request = deferred<Response>();
+  const fetch = vi.fn().mockReturnValue(request.promise);
+  vi.stubGlobal("fetch", fetch);
+  const { result } = renderHook(() =>
+    useUpdateCheck({
+      clientHostedPlatform: false,
+      releasePlatform: null,
+      releasePageUrl: "https://updates.example.test/releases",
+      currentAppVersion: "1.0.0",
+    }),
+  );
+
+  let first!: Promise<void>;
+  let second!: Promise<void>;
+  act(() => {
+    first = result.current.checkForUpdate();
+    second = result.current.checkForUpdate();
+  });
+  expect(fetch).toHaveBeenCalledOnce();
+  request.resolve({ ok: false, status: 503 } as Response);
+  await act(async () => {
+    await first;
+    await second;
+  });
+});
+
 test("a check started for an older app version is ignored after the version changes", async () => {
   const request = deferred<Response>();
   vi.stubGlobal("fetch", vi.fn().mockReturnValue(request.promise));
