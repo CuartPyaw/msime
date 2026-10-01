@@ -62,13 +62,22 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
   const [providerCredentialMessages, setProviderCredentialMessages] = useState<
     Partial<Record<ProviderCredentialBusy, ProviderCredentialMessage>>
   >({});
+  const clientGeneration = useRef(0);
 
   const updateTencentCredentialInput = (patch: Partial<TencentCredentialInput>) =>
     setTencentCredentialInput((current) => ({ ...current, ...patch }));
 
   useEffect(() => {
+    const generation = ++clientGeneration.current;
+    credentialTestGeneration.current = {};
+    setCredentialTests((current) => (Object.keys(current).length ? {} : current));
+    setProviderCredentialBusy(undefined);
+    setProviderCredentialMessages((current) => (Object.keys(current).length ? {} : current));
     const credentials = client.providerCredentials;
-    if (!credentials) return;
+    if (!credentials)
+      return () => {
+        if (clientGeneration.current === generation) clientGeneration.current++;
+      };
     let active = true;
     void credentials
       .status()
@@ -78,8 +87,9 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
       .catch(() => undefined);
     return () => {
       active = false;
+      if (clientGeneration.current === generation) clientGeneration.current++;
     };
-  }, [client]);
+  }, [client.providerCredentials, client.testApiCredential]);
 
   const runCredentialTest = async (
     service: ApiCredentialTestService,
@@ -87,6 +97,7 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
   ) => {
     if (!client.testApiCredential) return;
     if (credentialTests[service]?.busy) return;
+    const clientVersion = clientGeneration.current;
     const signature = JSON.stringify(config);
     const generation = (credentialTestGeneration.current[service] ?? 0) + 1;
     credentialTestGeneration.current[service] = generation;
@@ -98,7 +109,9 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
     await runAsyncAction(
       {
         busy: false,
-        isCurrent: () => credentialTestGeneration.current[service] === generation,
+        isCurrent: () =>
+          clientGeneration.current === clientVersion &&
+          credentialTestGeneration.current[service] === generation,
         setBusy: (busy) =>
           setCredentialTests((current) => ({
             ...current,
@@ -127,10 +140,13 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
   ) => {
     const credentials = client.providerCredentials;
     if (!credentials) return;
+    const clientVersion = clientGeneration.current;
     setProviderCredentialBusy(kind);
     setProviderCredentialMessages((current) => ({ ...current, [kind]: undefined }));
     try {
-      setProviderCredentials(await operation(credentials));
+      const result = await operation(credentials);
+      if (clientGeneration.current !== clientVersion) return;
+      setProviderCredentials(result);
       if (kind === "ai") setAiCredentialInput("");
       else setTencentCredentialInput({ secretId: "", secretKey: "", region: undefined });
       setProviderCredentialMessages((current) => ({
@@ -138,12 +154,13 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
         [kind]: { ok: true, text: success },
       }));
     } catch (error) {
+      if (clientGeneration.current !== clientVersion) return;
       setProviderCredentialMessages((current) => ({
         ...current,
         [kind]: { ok: false, text: providerCredentialErrorMessage(error) },
       }));
     } finally {
-      setProviderCredentialBusy(undefined);
+      if (clientGeneration.current === clientVersion) setProviderCredentialBusy(undefined);
     }
   };
 
@@ -154,10 +171,12 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
   ) => {
     const credentials = client.providerCredentials;
     if (!credentials) return;
+    const clientVersion = clientGeneration.current;
     setProviderCredentialBusy(kind);
     setProviderCredentialMessages((current) => ({ ...current, [kind]: undefined }));
     try {
       const result = await operation(credentials);
+      if (clientGeneration.current !== clientVersion) return;
       setProviderCredentials(result.status);
       setVoiceCredentialInput((current) => ({ ...current, [kind]: { token: "", appKey: "" } }));
       setProviderCredentialMessages((current) => ({
@@ -170,12 +189,13 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
             },
       }));
     } catch (error) {
+      if (clientGeneration.current !== clientVersion) return;
       setProviderCredentialMessages((current) => ({
         ...current,
         [kind]: { ok: false, text: providerCredentialErrorMessage(error) },
       }));
     } finally {
-      setProviderCredentialBusy(undefined);
+      if (clientGeneration.current === clientVersion) setProviderCredentialBusy(undefined);
     }
   };
 
