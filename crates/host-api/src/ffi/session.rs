@@ -68,7 +68,8 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
         .map_err(|_| "dictionary access unavailable".to_owned())?
         .ok_or_else(|| "dictionary maintenance busy".to_owned())?;
         let mut engine = Session::new(&options).map_err(|e| e.to_string())?;
-        let default_nine_key = matches!(applied.scheme, InputScheme::Quanpin)
+        // Gate on the scheme actually run, as `apply_pending` does, so a preferred scheme that fell back to Quanpin starts in the same mode a rebuild would give it.
+        let default_nine_key = options.scheme == 0
             && matches!(applied.touch_keyboard_layout, TouchKeyboardLayout::NineKey);
         if default_nine_key {
             engine

@@ -1297,6 +1297,26 @@ fn nine_key_mode_and_spelling_identity_cross_the_host_boundary() {
 }
 
 #[test]
+fn a_fallen_back_scheme_starts_in_the_nine_key_mode_a_rebuild_gives_it() {
+    // Cantonese without its dictionary runs as Quanpin, so a nine-key layout starts nine-key at creation exactly as the next preferences rebuild would leave it.
+    let dir = tempfile::tempdir().unwrap();
+    let preferences = Preferences {
+        scheme: InputScheme::Cantonese,
+        last_chinese_scheme: None,
+        touch_keyboard_layout: TouchKeyboardLayout::NineKey,
+        ..chinese_preferences()
+    };
+    let handle = test_host_preferences(dir.path(), preferences.clone());
+    let view = read(msime_client_view(handle));
+    assert_eq!(view["value"]["scheme"], 0);
+    assert_eq!(view["value"]["nine_key"], true);
+    let rebuilt = update(handle, 1, &preferences);
+    assert_eq!(rebuilt["value"]["view"]["scheme"], 0);
+    assert_eq!(rebuilt["value"]["view"]["nine_key"], true);
+    read(msime_client_destroy(handle));
+}
+
+#[test]
 fn nine_key_digits_offer_ranked_english_across_the_host_boundary() {
     use msime_client_core::preferences::MixedInputPreferences;
 
