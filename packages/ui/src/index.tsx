@@ -1791,8 +1791,6 @@ export interface SettingsClient {
     status(): Promise<InputSourceStartupStatus | null>;
     /** Opens the System Settings page where input sources are added and enabled. */
     openSettings(): Promise<void>;
-    /** Adds the installed input method to the input source list without installing it again; rejects with `{ code }`, `not_installed` when there is no installed copy to add. */
-    enable?(): Promise<void>;
   };
   /**
    * macOS translates the Chinese candidates no offline dictionary answers, whole sentences included, with Apple's on-device models, but only for a language pair already downloaded in System Settings.
@@ -3023,7 +3021,6 @@ export function SettingsPage(props: SettingsPageProps) {
               draft={draft}
               inputSourceStartup={inputSourceStartup}
               onOpenSettings={statusActions.onOpenSettings}
-              onEnable={statusActions.onEnable}
               onDismiss={statusActions.onDismiss}
             />
             {client.home && draft && page === "home" && (

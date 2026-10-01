@@ -2785,25 +2785,6 @@ async fn input_source_startup_status(
     })
 }
 
-/// Adds the installed input method to the user's input sources, for the settings page's start-time notice. `not_installed` asks for an install instead; `registration_failed` means the system did not accept it, and the user can still add it by hand in System Settings.
-#[cfg(target_os = "macos")]
-#[tauri::command]
-async fn enable_input_source() -> Result<(), HostActionError> {
-    tauri::async_runtime::spawn_blocking(|| {
-        macos_input_source::enable_installed().map_err(|error| HostActionError {
-            code: match error {
-                macos_input_source::InstallError::InvalidBundle => "not_installed",
-                macos_input_source::InstallError::Registration => "registration_failed",
-                _ => "unavailable",
-            },
-        })
-    })
-    .await
-    .map_err(|_| HostActionError {
-        code: "unavailable",
-    })?
-}
-
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn open_input_source_settings() -> Result<(), HostActionError> {
@@ -5037,8 +5018,6 @@ pub fn run() {
             install_input_source,
             #[cfg(target_os = "macos")]
             input_source_startup_status,
-            #[cfg(target_os = "macos")]
-            enable_input_source,
             #[cfg(target_os = "macos")]
             open_input_source_settings,
             #[cfg(target_os = "macos")]
