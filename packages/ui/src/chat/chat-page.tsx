@@ -51,11 +51,13 @@ export function ChatPage({
   const modelGeneration = useRef(0);
   const mounted = useRef(true);
   const sendingRef = useRef(false);
+  const modelsRunning = useRef(false);
   const nextMessageId = useRef(1);
   const composer = useRef<HTMLTextAreaElement>(null);
 
   const loadModels = async () => {
-    if (!mounted.current) return;
+    if (!mounted.current || modelsRunning.current) return;
+    modelsRunning.current = true;
     const current = ++modelGeneration.current;
     setLoadingModels(true);
     setError("");
@@ -73,6 +75,7 @@ export function ChatPage({
       setLoginNeeded(unauthorized);
       setError(chatError(cause));
     } finally {
+      if (modelGeneration.current === current) modelsRunning.current = false;
       if (mounted.current && modelGeneration.current === current) setLoadingModels(false);
     }
   };
@@ -85,6 +88,7 @@ export function ChatPage({
       modelGeneration.current += 1;
       generation.current += 1;
       sendingRef.current = false;
+      modelsRunning.current = false;
     };
   }, [client]);
 

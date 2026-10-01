@@ -89,6 +89,24 @@ test("sending ignores a same-tick duplicate submission", async () => {
   await screen.findByText("fixture reply");
 });
 
+test("model refresh ignores a same-tick duplicate submission", async () => {
+  const pending = deferred<{ data: { id: string }[]; defaultModel: string }>();
+  const models = vi
+    .fn()
+    .mockResolvedValueOnce({ data: [{ id: "fixture-chat" }], defaultModel: "fixture-chat" })
+    .mockReturnValue(pending.promise);
+  render(<ChatPage client={client({ models })} />);
+  await screen.findByRole("combobox", { name: "聊天模型" });
+  const refresh = screen.getByRole("button", { name: "刷新模型" });
+  act(() => {
+    fireEvent.click(refresh);
+    fireEvent.click(refresh);
+  });
+  expect(models).toHaveBeenCalledTimes(2);
+  pending.resolve({ data: [{ id: "fixture-chat" }], defaultModel: "fixture-chat" });
+  await screen.findByRole("combobox", { name: "聊天模型" });
+});
+
 test("shows an actionable error and retries the latest user message", async () => {
   const complete = vi.fn<(messages: ChatMessage[], model: string) => Promise<string>>();
   complete
