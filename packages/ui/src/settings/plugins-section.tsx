@@ -11,7 +11,7 @@ import {
 } from "./plugin-preferences";
 
 /** Mirrors `client-core::plugins::PluginKind`. */
-export type PluginKind = "sound" | "music" | "command_table";
+export type PluginKind = "sound" | "music" | "command_table" | "effect";
 
 export type PluginCommand = { trigger: string; title: string; template: string };
 
@@ -32,6 +32,12 @@ export type PluginPackage = {
   tracks?: string[];
   /** Command tables. */
   commands?: PluginCommand[];
+  /** Effect packs: `client-core::plugins::effect_pack::EffectPack`, never `off`. */
+  style?: EffectStyle;
+  intensity?: number;
+  colors?: string[];
+  duration_ms?: number | null;
+  particles?: number | null;
 };
 
 /** A folder under the plugins directory that is not a loadable pack, and why. */
@@ -66,6 +72,7 @@ const kindLabels: Record<PluginKind, string> = {
   sound: "音效包",
   music: "音乐包",
   command_table: "指令表",
+  effect: "特效包",
 };
 
 const keySoundModes: readonly { value: KeySoundMode; label: string }[] = [

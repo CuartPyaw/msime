@@ -21,7 +21,7 @@ pub(crate) const FLAG_MUTED: u32 = 1 << 9;
 pub(crate) const ANSWER_COUNT: u32 = 0xFFFF;
 /// Answer bit 16: this key moved the combo up a tier.
 pub(crate) const ANSWER_TIER_UP: u32 = 1 << 16;
-/// Answer bits 17-19: `EffectStyle::code`.
+/// Answer bits 17-19: `EffectStyle::code` of the resolved effect, the selected effect pack's style when there is one.
 pub(crate) const ANSWER_STYLE_SHIFT: u32 = 17;
 /// Answer bit 20: the tier-up sound is due. The macOS, Windows and Linux player has already queued it; a host that plays packs itself plays the key pack's commit sample raised by `TIER_SEMITONES` per tier.
 pub(crate) const ANSWER_TIER_SOUND: u32 = 1 << 20;
@@ -79,7 +79,7 @@ fn advance(settings: &SoundSettings, combo: &Cell<Combo>, event: u32, now: Insta
     if code > EVENT_BACKSPACE {
         return 0;
     }
-    if settings.effect_style == EffectStyle::Off && !settings.combo_counter {
+    if settings.effect.style == EffectStyle::Off && !settings.combo_counter {
         combo.set(Combo::default());
         return 0;
     }
@@ -93,7 +93,7 @@ fn advance(settings: &SoundSettings, combo: &Cell<Combo>, event: u32, now: Insta
     }
     combo.set(current);
     let mut answer =
-        current.count.min(ANSWER_COUNT) | settings.effect_style.code() << ANSWER_STYLE_SHIFT;
+        current.count.min(ANSWER_COUNT) | settings.effect.style.code() << ANSWER_STYLE_SHIFT;
     if reached {
         answer |= ANSWER_TIER_UP;
         if settings.tier_sound() && event & FLAG_MUTED == 0 {
@@ -106,6 +106,7 @@ fn advance(settings: &SoundSettings, combo: &Cell<Combo>, event: u32, now: Insta
 #[cfg(test)]
 mod tests {
     use super::*;
+    use msime_client_core::plugins::effect_pack::TypingEffect;
 
     /// Settings and a combo, standing in for a session: a real `SessionSound` publishes process-wide settings and a due tier-up sound would start the process's player under the other tests.
     struct Session {
@@ -116,7 +117,7 @@ mod tests {
     fn session(style: EffectStyle, counter: bool, tier_sound: bool) -> Session {
         Session {
             settings: SoundSettings {
-                effect_style: style,
+                effect: TypingEffect::from_preferences(style, 50),
                 combo_counter: counter,
                 combo_tier_sound: tier_sound,
                 ..SoundSettings::default()
@@ -239,7 +240,7 @@ mod tests {
     #[test]
     fn a_settings_change_keeps_the_combo() {
         let mut sound = SessionSound::new(SoundSettings {
-            effect_style: EffectStyle::Flash,
+            effect: TypingEffect::from_preferences(EffectStyle::Flash, 50),
             combo_counter: true,
             ..SoundSettings::default()
         });
@@ -247,7 +248,7 @@ mod tests {
         super::typing_effect(&sound, 0, now);
         super::typing_effect(&sound, 0, now);
         sound.update(SoundSettings {
-            effect_style: EffectStyle::Sparks,
+            effect: TypingEffect::from_preferences(EffectStyle::Sparks, 50),
             combo_counter: true,
             ..SoundSettings::default()
         });

@@ -1,12 +1,13 @@
-//! Plugin packs: sound packs, background music and command tables, as validated data.
+//! Plugin packs: sound packs, background music, command tables and typing-effect parameters, as validated data.
 //!
-//! Nothing in a pack runs. The kinds are a closed set, each with a fixed manifest shape that this module parses in full, and a pack that asks for any permission is refused, so a third party can supply samples, tracks and text templates and nothing else. Hosts play the audio and hand the command rows to the Engine; both only ever see a pack this module has accepted.
+//! Nothing in a pack runs. The kinds are a closed set, each with a fixed manifest shape that this module parses in full, and a pack that asks for any permission is refused, so a third party can supply samples, tracks and text templates and nothing else. Hosts play the audio, hand the command rows to the Engine and draw their own built-in effects with an effect pack's parameters; all of them only ever see a pack this module has accepted.
 //!
-//! A pack lives in `<root>/<kind>/<id>/`, where `root` is the `plugins` directory under the host's state root and `kind` is `sound`, `music` or `command_table`. The directory holds `plugin.toml` and the flat files it names, plus optional text notices, and nothing else: no subdirectories, no symbolic links, no file the manifest does not account for. Built-in sound packs ship inside each platform's bundle rather than under `root`, in a directory the host names (`resources/sound-packs` in the repository), and are listed beside the installed ones.
+//! A pack lives in `<root>/<kind>/<id>/`, where `root` is the `plugins` directory under the host's state root and `kind` is `sound`, `music`, `command_table` or `effect`. The directory holds `plugin.toml` and the flat files it names, plus optional text notices, and nothing else: no subdirectories, no symbolic links, no file the manifest does not account for. Built-in sound packs ship inside each platform's bundle rather than under `root`, in a directory the host names (`resources/sound-packs` in the repository), and are listed beside the installed ones.
 //!
 //! `mentions.json` beside the kind directories is the @ mode's name list, kept by `mentions`. It lives here rather than in the preferences document because that document is the one hosts copy and account sync reads from, and a contact list belongs to neither.
 
 pub mod command_table;
+pub mod effect_pack;
 mod failure;
 mod import;
 pub mod mentions;
@@ -14,7 +15,7 @@ pub mod music_pack;
 pub mod sound_pack;
 
 pub use failure::{remove_named, PluginFailure};
-pub use import::import;
+pub use import::{import, validate};
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -77,10 +78,12 @@ pub enum PluginKind {
     Music,
     /// `/` commands: a trigger, a title and a template of literal text and clock placeholders.
     CommandTable,
+    /// Parameters for one of the hosts' built-in typing effects: a style and a few bounded hints, no files.
+    Effect,
 }
 
 impl PluginKind {
-    pub const ALL: [Self; 3] = [Self::Sound, Self::Music, Self::CommandTable];
+    pub const ALL: [Self; 4] = [Self::Sound, Self::Music, Self::CommandTable, Self::Effect];
 
     /// The manifest's `kind` and the directory under the plugins root.
     pub fn as_str(self) -> &'static str {
@@ -88,6 +91,7 @@ impl PluginKind {
             Self::Sound => "sound",
             Self::Music => "music",
             Self::CommandTable => "command_table",
+            Self::Effect => "effect",
         }
     }
 
@@ -96,16 +100,16 @@ impl PluginKind {
     }
 }
 
-/// Whether `id` of `kind` names a pack the bundle ships. Only sound and music packs are built in.
+/// Whether `id` of `kind` names a pack the bundle ships. Only sound and music packs are built in: an effect has nothing to ship, since the styles themselves are in the hosts and `effect_style` already selects one without a pack.
 pub fn is_builtin(kind: PluginKind, id: &str) -> bool {
     match kind {
         PluginKind::Sound => BUILTIN_SOUND_PACKS.contains(&id),
         PluginKind::Music => BUILTIN_MUSIC_PACKS.contains(&id),
-        PluginKind::CommandTable => false,
+        PluginKind::CommandTable | PluginKind::Effect => false,
     }
 }
 
-/// The typing effect a host draws on keys and commits. Closed, and deliberately not a `PluginKind`: every style is built into the hosts and tuned only through the preferences, so no pack can supply one.
+/// The typing effect a host draws on keys and commits. Closed: every style is built into the hosts, and an effect pack (`PluginKind::Effect`) only selects one of them and tunes it within `effect_pack`'s bounds, so no pack can supply a style of its own.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectStyle {
@@ -162,6 +166,7 @@ impl PluginSummary {
             PluginContent::Sound(_) => PluginKind::Sound,
             PluginContent::Music(_) => PluginKind::Music,
             PluginContent::CommandTable(_) => PluginKind::CommandTable,
+            PluginContent::Effect(_) => PluginKind::Effect,
         }
     }
 }
@@ -172,6 +177,7 @@ pub enum PluginContent {
     Sound(sound_pack::SoundPack),
     Music(music_pack::MusicPack),
     CommandTable(command_table::CommandTable),
+    Effect(effect_pack::EffectPack),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -407,6 +413,7 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
         PluginKind::Sound => &sound_pack::MANIFEST_KEYS,
         PluginKind::Music => &music_pack::MANIFEST_KEYS,
         PluginKind::CommandTable => &command_table::MANIFEST_KEYS,
+        PluginKind::Effect => &effect_pack::MANIFEST_KEYS,
     };
     if let Some(key) = table
         .keys()
@@ -427,6 +434,11 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
         }
         PluginKind::CommandTable => (
             PluginContent::CommandTable(command_table::parse(table)?),
+            Vec::new(),
+            AudioLimits::NONE,
+        ),
+        PluginKind::Effect => (
+            PluginContent::Effect(effect_pack::parse(table)?),
             Vec::new(),
             AudioLimits::NONE,
         ),
@@ -515,9 +527,14 @@ fn extension(name: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Whether `name` is an audio file a pack may name: WAV or Ogg.
+/// Whether `name` is an audio file a music pack may name: WAV or Ogg.
 pub(crate) fn is_audio(name: &str) -> bool {
     matches!(extension(name).as_str(), "wav" | "ogg")
+}
+
+/// Whether `name` is a sample a sound pack may name: WAV only. Hosts decode a key sample whole before they play it, and only a WAV's length can be checked up front, from the frame count its header declares (`sound_pack::sample_frames_allowed`); an Ogg stream has to be decoded to learn how long it runs. HarmonyOS's player already refuses anything else (`KeySoundPolicy.isWav`), so an Ogg sample was silent there while it played on the desktop.
+pub(crate) fn is_wav(name: &str) -> bool {
+    extension(name) == "wav"
 }
 
 fn is_notice(name: &str) -> bool {

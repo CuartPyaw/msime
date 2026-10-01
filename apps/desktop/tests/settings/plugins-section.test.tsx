@@ -483,9 +483,16 @@ test("fills the defaults the document leaves out and forgets removed packs", () 
   expect(defaultPluginPreferences).toMatchObject({
     effect_style: "off",
     effect_intensity: 50,
+    effect_pack: "",
     combo_counter: false,
     combo_tier_sound: false,
   });
+  // The selected effect pack survives a save, which rebuilds the section field by field.
+  expect(
+    pluginPreferences({
+      plugins: { effect_pack: "neon" } as unknown as Preferences["plugins"],
+    }).effect_pack,
+  ).toBe("neon");
   // A document written before the effect fields reads them as their defaults, and one that has them keeps them.
   expect(
     pluginPreferences({
@@ -504,6 +511,7 @@ test("fills the defaults the document leaves out and forgets removed packs", () 
     melody: { pack: "custom" },
     music: { enabled: true, pack: "rain", volume: 40 },
     command_tables: ["a", "b"],
+    effect_pack: "neon",
   };
   expect(withoutRemovedPack(selected, "sound", "custom")).toEqual({
     ...selected,
@@ -517,6 +525,10 @@ test("fills the defaults the document leaves out and forgets removed packs", () 
   });
   expect(withoutRemovedPack(selected, "music", "other")).toBe(selected);
   expect(withoutRemovedPack(selected, "command_table", "a").command_tables).toEqual(["b"]);
+  expect(withoutRemovedPack(selected, "effect", "neon")).toEqual({ ...selected, effect_pack: "" });
+  expect(withoutRemovedPack(selected, "effect", "other")).toBe(selected);
+  // A removed sound pack of the same id leaves the effect selection alone.
+  expect(withoutRemovedPack(selected, "sound", "neon").effect_pack).toBe("neon");
 });
 
 test("shows the V, / and @ switches only where the host routes them", () => {

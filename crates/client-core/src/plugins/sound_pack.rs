@@ -14,11 +14,13 @@
 //! semitones = [0, 2, 4, 5, 7]
 //! advance = "key"             # "key" | "commit"
 //! ```
+//!
+//! Every sample is a `.wav` file (RIFF/WAVE); see `super::is_wav` for why a sound pack takes no Ogg.
 
 use serde::Serialize;
 use toml::Value;
 
-use super::{is_audio, only_keys, valid_file_name, AudioLimits};
+use super::{is_wav, only_keys, valid_file_name, AudioLimits};
 
 pub(crate) const MANIFEST_KEYS: [&str; 3] = ["mode", "sounds", "sequence"];
 
@@ -222,11 +224,11 @@ fn parse_sequence(table: &toml::map::Map<String, Value>) -> Result<Sequence, Str
     })
 }
 
-/// A manifest value naming an audio file in the pack directory.
-pub(crate) fn audio_file(value: &Value) -> Result<String, String> {
+/// A manifest value naming a sample in the pack directory: a `.wav` file, never Ogg (`super::is_wav`).
+fn audio_file(value: &Value) -> Result<String, String> {
     let name = value.as_str().ok_or("音频文件名必须是字符串")?;
-    if !valid_file_name(name) || !is_audio(name) {
-        return Err(format!("{name} 不是 .wav 或 .ogg 文件名"));
+    if !valid_file_name(name) || !is_wav(name) {
+        return Err(format!("{name} 不是 .wav 文件名，音效包只接受 WAV 音频"));
     }
     Ok(name.to_owned())
 }

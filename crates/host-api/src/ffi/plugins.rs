@@ -47,6 +47,17 @@ pub extern "C" fn msime_client_typing_effect(handle: u64, event: u32) -> u32 {
     .unwrap_or(0)
 }
 
+/// The session's resolved typing effect: the selected effect pack, or the preferences' style and intensity without one, as `{pack, issue, style, intensity, colors, duration_ms, particles, combo_counter}`. Read it when the preferences change or a field gains focus, not per key: `msime_client_typing_effect` stays the key-path call.
+/// The returned response must be released with `msime_client_string_free`.
+#[no_mangle]
+pub extern "C" fn msime_client_typing_effect_settings(handle: u64) -> *mut c_char {
+    response(|| {
+        with_session(handle, |session| {
+            Ok(key_sound::effect_settings(&session.sound))
+        })
+    })
+}
+
 /// Queue the sound of a commit: the key pack's commit sample, the melody's next note when it advances on commits, or both.
 #[no_mangle]
 pub extern "C" fn msime_client_commit_sound(handle: u64) -> bool {

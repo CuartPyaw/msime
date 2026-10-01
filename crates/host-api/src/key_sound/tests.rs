@@ -203,6 +203,63 @@ fn pack_files_reads_installed_packs_from_the_state_root() {
     assert_eq!(files["sounds"]["space"], Value::Null);
 }
 
+fn install_effect(state: &Path, style: &str) {
+    let pack = state.join("plugins/effect/neon");
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        format!("schema_version = 1\nkind = \"effect\"\nid = \"neon\"\nname = \"Neon\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n[effect]\nstyle = \"{style}\"\nintensity = 80\ncolors = [\"#00FFCC\"]\nparticles = 12\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn the_selected_effect_pack_replaces_the_preferences_style_and_follows_a_reimport() {
+    use msime_client_core::plugins::EffectStyle;
+
+    let state = tempfile::tempdir().unwrap();
+    let roots = PluginRoots::new(state.path().to_str(), None, "");
+    let mut preferences = PluginPreferences {
+        effect_style: EffectStyle::Flash,
+        effect_intensity: 30,
+        combo_counter: true,
+        ..PluginPreferences::default()
+    };
+
+    // No pack: the preferences' own style and intensity, and the host's defaults for the rest.
+    let settings = SoundSettings::new(&preferences, &roots);
+    assert!(settings.stamps.effect_pack.is_none());
+    let value = effect_settings(&SessionSound::new(settings));
+    assert_eq!(
+        value,
+        serde_json::json!({"pack": null, "issue": null, "style": "flash", "intensity": 30, "colors": [], "duration_ms": null, "particles": null, "combo_counter": true})
+    );
+
+    // A pack that is not installed draws nothing and says why.
+    preferences.effect_pack = "neon".into();
+    let mut sound = SessionSound::new(SoundSettings::new(&preferences, &roots));
+    let value = effect_settings(&sound);
+    assert_eq!(value["pack"], "neon");
+    assert_eq!(value["style"], "off");
+    assert!(value["issue"].is_string());
+
+    // Installed after the session started: the next focus-in picks it up, and its parameters replace the preferences'.
+    install_effect(state.path(), "sparks");
+    sound.restamp();
+    let value = effect_settings(&sound);
+    assert_eq!(value["issue"], Value::Null);
+    assert_eq!(value["style"], "sparks");
+    assert_eq!(value["intensity"], 80);
+    assert_eq!(value["colors"], serde_json::json!(["#00FFCC"]));
+    assert_eq!(value["particles"], 12);
+    assert_eq!(value["duration_ms"], Value::Null);
+
+    // Imported again with another style (a manifest of another length, so the stamp moves without waiting on the clock): the style follows.
+    install_effect(state.path(), "power_mode");
+    sound.restamp();
+    assert_eq!(effect_settings(&sound)["style"], "power_mode");
+}
+
 #[cfg(not(any(target_os = "ios", target_os = "android", target_env = "ohos")))]
 mod playback {
     use super::super::player::{load, Request, Selection, Worker};

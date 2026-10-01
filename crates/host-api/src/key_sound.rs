@@ -14,6 +14,7 @@
     allow(dead_code)
 )]
 
+use msime_client_core::plugins::effect_pack::TypingEffect;
 use msime_client_core::plugins::{
     self, music_pack, sound_pack, EffectStyle, PluginContent, PluginKind, PluginSummary,
     MANIFEST_FILE,
@@ -148,6 +149,7 @@ pub(crate) struct PackStamps {
     pub pack: PackStamp,
     pub melody_pack: PackStamp,
     pub music_pack: PackStamp,
+    pub effect_pack: PackStamp,
 }
 
 /// The effect and music settings of one preference document, with where their packs are.
@@ -166,8 +168,12 @@ pub(crate) struct SoundSettings {
     pub music: bool,
     pub music_pack: String,
     pub music_volume: u8,
-    /// The typing effect; `Off` with `combo_counter` off answers every typing-effect call with 0.
+    /// The preferences' `effect_style`, `effect_intensity` and `effect_pack`, kept so that a restamp can resolve the pack again.
     pub effect_style: EffectStyle,
+    pub effect_intensity: u8,
+    pub effect_pack: String,
+    /// The typing effect once `effect_pack` is resolved, which is what the session draws: `Off` with `combo_counter` off answers every typing-effect call with 0.
+    pub effect: TypingEffect,
     pub combo_counter: bool,
     pub combo_tier_sound: bool,
     pub stamps: PackStamps,
@@ -188,12 +194,27 @@ impl SoundSettings {
             music_pack: preferences.music.pack.clone(),
             music_volume: preferences.music.volume,
             effect_style: preferences.effect_style,
+            effect_intensity: preferences.effect_intensity,
+            effect_pack: preferences.effect_pack.clone(),
+            effect: TypingEffect::default(),
             combo_counter: preferences.combo_counter,
             combo_tier_sound: preferences.combo_tier_sound,
             stamps: PackStamps::default(),
         };
+        // Stamped before the effect pack is read, so a pack replaced in between is read again on the next restamp rather than never.
         settings.stamps = settings.stamp_packs();
+        settings.effect = settings.resolve_effect();
         settings
+    }
+
+    /// Load the selected effect pack, or take the preferences' style without one. Reads one small manifest; never called on the key path.
+    pub(crate) fn resolve_effect(&self) -> TypingEffect {
+        TypingEffect::resolve(
+            self.roots.installed.as_deref(),
+            &self.effect_pack,
+            self.effect_style,
+            self.effect_intensity,
+        )
     }
 
     /// Stamp the manifests of the packs in use. A few `stat`s; never called on the key path.
@@ -209,6 +230,11 @@ impl SoundSettings {
                 &self.melody_pack,
             ),
             music_pack: manifest(self.music, PluginKind::Music, &self.music_pack),
+            effect_pack: manifest(
+                !self.effect_pack.is_empty(),
+                PluginKind::Effect,
+                &self.effect_pack,
+            ),
         }
     }
 
@@ -273,10 +299,12 @@ impl SessionSound {
     pub(crate) fn restamp(&mut self) {
         let stamps = self.settings.stamp_packs();
         if stamps != self.settings.stamps {
-            self.update(SoundSettings {
+            let mut settings = SoundSettings {
                 stamps,
                 ..(*self.settings).clone()
-            });
+            };
+            settings.effect = settings.resolve_effect();
+            self.update(settings);
             sync(self);
         }
     }
@@ -286,6 +314,16 @@ impl SessionSound {
         *LATEST.lock().unwrap_or_else(PoisonError::into_inner) =
             Some((Arc::clone(&self.settings), self.generation));
     }
+}
+
+/// The session's resolved typing effect for `msime_client_typing_effect_settings`: the style and parameters the host draws with, and whether it shows the combo count. Not for the key path: the host reads it when the preferences change or a field gains focus, and draws each key from `msime_client_typing_effect`'s answer.
+pub(crate) fn effect_settings(sound: &SessionSound) -> Value {
+    let settings = &sound.settings;
+    let mut value = serde_json::to_value(&settings.effect).unwrap_or(Value::Null);
+    if let Some(fields) = value.as_object_mut() {
+        fields.insert("combo_counter".into(), settings.combo_counter.into());
+    }
+    value
 }
 
 /// Queue the sound of one key. False when nothing was queued: the key sound is off, this platform does not play, sound failed earlier in this process, or the queue is full.

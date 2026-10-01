@@ -1197,6 +1197,9 @@ pub struct PluginPreferences {
     pub effect_style: crate::plugins::EffectStyle,
     /// 0-100: how large and how long the effect is drawn. Only the host reads it.
     pub effect_intensity: u8,
+    /// An installed effect pack whose style and parameters replace `effect_style` and `effect_intensity`; empty for none, which leaves those two in force. A selected pack that cannot be loaded draws no effect rather than falling back (`plugins::effect_pack::TypingEffect::resolve`). Left out of the document while empty, so a build from before effect packs still reads a document that never selected one.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub effect_pack: String,
     /// Count consecutive keys and show the count; a pause of `plugins::COMBO_IDLE_RESET_MILLIS` or a backspace starts it again.
     pub combo_counter: bool,
     /// Play the key sound pack's commit sample, pitched up, when the count reaches one of `plugins::COMBO_MILESTONES`.
@@ -1214,6 +1217,7 @@ impl Default for PluginPreferences {
             command_tables: Vec::new(),
             effect_style: crate::plugins::EffectStyle::Off,
             effect_intensity: 50,
+            effect_pack: String::new(),
             combo_counter: false,
             combo_tier_sound: false,
         }
@@ -1233,6 +1237,7 @@ impl PluginPreferences {
         pack(&self.key_sound.pack)
             && pack(&self.melody.pack)
             && pack(&self.music.pack)
+            && pack(&self.effect_pack)
             && self.key_sound.volume <= 100
             && self.music.volume <= 100
             && self.effect_intensity <= 100

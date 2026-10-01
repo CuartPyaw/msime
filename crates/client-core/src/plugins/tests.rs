@@ -247,22 +247,28 @@ fn manifests_are_refused_for_every_rule_they_break() {
         (
             "space = 'space.wav'",
             "space = '../space.wav'",
-            "不是 .wav 或 .ogg 文件名",
+            "不是 .wav 文件名",
         ),
         (
             "space = 'space.wav'",
             "space = '/etc/space.wav'",
-            "不是 .wav 或 .ogg 文件名",
+            "不是 .wav 文件名",
         ),
         (
             "space = 'space.wav'",
             "space = 'sub/space.wav'",
-            "不是 .wav 或 .ogg 文件名",
+            "不是 .wav 文件名",
         ),
         (
             "space = 'space.wav'",
             "space = 'space.mp3'",
-            "不是 .wav 或 .ogg 文件名",
+            "不是 .wav 文件名",
+        ),
+        // Samples are WAV only: an Ogg sample is refused by name, whatever its contents, while a music pack still takes Ogg tracks.
+        (
+            "space = 'space.wav'",
+            "space = 'space.ogg'",
+            "音效包只接受 WAV 音频",
         ),
         (
             "space = 'space.wav'",
@@ -1221,4 +1227,230 @@ fn remove_named_refuses_unknown_kinds_and_built_in_sound_packs() {
     );
     remove_named(&root, "sound", "typewriter").unwrap();
     assert!(scan(&root, None).packages.is_empty());
+}
+
+fn effect_manifest(id: &str, effect: &str) -> String {
+    format!("schema_version = 1\nkind = 'effect'\nid = '{id}'\nname = '霓虹'\nversion = '1'\nlicense = 'CC0-1.0'\n[effect]\n{effect}")
+}
+
+fn installed_effect(root: &Path, id: &str, effect: &str) -> PathBuf {
+    let pack = kind_directory(root, PluginKind::Effect).join(id);
+    fs::create_dir_all(&pack).unwrap();
+    fs::write(pack.join(MANIFEST_FILE), effect_manifest(id, effect)).unwrap();
+    pack
+}
+
+#[test]
+fn effect_packs_carry_only_bounded_parameters() {
+    let root = tempdir().unwrap();
+    let pack = installed_effect(
+        root.path(),
+        "neon",
+        "style = 'power_mode'\nintensity = 100\ncolors = ['#FFB000', '#ff4060', '#00C2FF', '#7a5cff']\nduration_ms = 1500\nparticles = 64\n",
+    );
+    fs::write(pack.join("LICENSE.txt"), b"CC0").unwrap();
+    let loaded = load_package(root.path(), None, PluginKind::Effect, "neon").unwrap();
+    assert_eq!(loaded.kind(), PluginKind::Effect);
+    assert!(!is_builtin(PluginKind::Effect, "neon"));
+    let PluginContent::Effect(effect) = &loaded.content else {
+        panic!("an effect pack");
+    };
+    assert_eq!(effect.style, EffectStyle::PowerMode);
+    assert_eq!(effect.intensity, 100);
+    assert_eq!(effect.colors, ["#FFB000", "#ff4060", "#00C2FF", "#7a5cff"]);
+    assert_eq!(effect.duration_ms, Some(1500));
+    assert_eq!(effect.particles, Some(64));
+    // The catalog flattens the parameters beside the kind, as it does a sound pack's mode.
+    let listed = serde_json::to_value(&loaded).unwrap();
+    assert_eq!(listed["kind"], "effect");
+    assert_eq!(listed["style"], "power_mode");
+    assert_eq!(listed["particles"], 64);
+
+    // Only the style is required; the rest are the host's own.
+    installed_effect(root.path(), "plain", "style = 'flash'\n");
+    let PluginContent::Effect(plain) = load_package(root.path(), None, PluginKind::Effect, "plain")
+        .unwrap()
+        .content
+    else {
+        panic!("an effect pack");
+    };
+    assert_eq!(
+        plain,
+        effect_pack::EffectPack {
+            style: EffectStyle::Flash,
+            intensity: effect_pack::DEFAULT_INTENSITY,
+            colors: Vec::new(),
+            duration_ms: None,
+            particles: None,
+        }
+    );
+
+    for (effect, expected) in [
+        ("", "effect.style 只能是"),
+        ("style = 'off'\n", "effect.style 只能是"),
+        ("style = 'confetti'\n", "effect.style 只能是"),
+        ("style = 'flash'\nintensity = 101\n", "effect.intensity"),
+        ("style = 'flash'\nintensity = -1\n", "effect.intensity"),
+        ("style = 'flash'\nintensity = 50.5\n", "effect.intensity"),
+        ("style = 'flash'\nduration_ms = 59\n", "effect.duration_ms"),
+        (
+            "style = 'flash'\nduration_ms = 1501\n",
+            "effect.duration_ms",
+        ),
+        (
+            "style = 'flash'\nduration_ms = 70000\n",
+            "effect.duration_ms",
+        ),
+        ("style = 'flash'\nparticles = 65\n", "effect.particles"),
+        ("style = 'flash'\ncolors = []\n", "1 到 4 个颜色"),
+        (
+            "style = 'flash'\ncolors = ['#000000', '#000000', '#000000', '#000000', '#000000']\n",
+            "1 到 4 个颜色",
+        ),
+        ("style = 'flash'\ncolors = '#FFFFFF'\n", "colors 必须是数组"),
+        ("style = 'flash'\ncolors = ['#FFF']\n", "#RRGGBB"),
+        ("style = 'flash'\ncolors = ['#FFFFFF80']\n", "#RRGGBB"),
+        ("style = 'flash'\ncolors = ['red']\n", "#RRGGBB"),
+        ("style = 'flash'\ncolors = ['#GGGGGG']\n", "#RRGGBB"),
+        ("style = 'flash'\ncolors = [16777215]\n", "#RRGGBB"),
+        (
+            "style = 'flash'\nshader = 'x.glsl'\n",
+            "effect 里有未知的键 shader",
+        ),
+    ] {
+        installed_effect(root.path(), "bad", effect);
+        let error = reason(root.path(), PluginKind::Effect, "bad");
+        assert!(error.contains(expected), "{effect}: {error}");
+    }
+    // No `[effect]` table, a key beside it, or a file of any other kind.
+    let bad = kind_directory(root.path(), PluginKind::Effect).join("bad");
+    fs::write(
+        bad.join(MANIFEST_FILE),
+        "schema_version = 1\nkind = 'effect'\nid = 'bad'\nname = 'x'\nversion = '1'\nlicense = 'MIT'\n",
+    )
+    .unwrap();
+    assert!(reason(root.path(), PluginKind::Effect, "bad").contains("缺少 effect 表"));
+    fs::write(
+        bad.join(MANIFEST_FILE),
+        format!(
+            "{}[sounds]\ndefault = 'key.wav'\n",
+            effect_manifest("bad", "style = 'flash'\n")
+        ),
+    )
+    .unwrap();
+    assert!(reason(root.path(), PluginKind::Effect, "bad").contains("未知的键 sounds"));
+    fs::write(
+        bad.join(MANIFEST_FILE),
+        effect_manifest("bad", "style = 'flash'\n"),
+    )
+    .unwrap();
+    fs::write(bad.join("spark.wav"), wav()).unwrap();
+    assert!(reason(root.path(), PluginKind::Effect, "bad")
+        .contains("spark.wav 没有在 plugin.toml 里用到"));
+
+    assert_eq!(scan(root.path(), None).packages.len(), 2);
+}
+
+#[test]
+fn a_typing_effect_resolves_the_selected_pack_or_draws_nothing() {
+    let root = tempdir().unwrap();
+    installed_effect(
+        root.path(),
+        "neon",
+        "style = 'sparks'\nintensity = 80\ncolors = ['#FFB000']\nparticles = 12\n",
+    );
+    use effect_pack::TypingEffect;
+    // No pack: the preferences' own style and intensity.
+    let unselected = TypingEffect::resolve(Some(root.path()), "", EffectStyle::Flash, 30);
+    assert_eq!(
+        unselected,
+        TypingEffect::from_preferences(EffectStyle::Flash, 30)
+    );
+    assert_eq!(unselected.pack, None);
+    // A pack replaces both, whatever the preferences say.
+    let selected = TypingEffect::resolve(Some(root.path()), "neon", EffectStyle::Off, 30);
+    assert_eq!(selected.pack.as_deref(), Some("neon"));
+    assert_eq!(selected.issue, None);
+    assert_eq!(selected.style, EffectStyle::Sparks);
+    assert_eq!(selected.intensity, 80);
+    assert_eq!(selected.colors, ["#FFB000"]);
+    assert_eq!((selected.duration_ms, selected.particles), (None, Some(12)));
+    // A pack that is gone or broken draws nothing rather than another style.
+    for (root, id) in [(Some(root.path()), "missing"), (None, "neon")] {
+        let unavailable = TypingEffect::resolve(root, id, EffectStyle::PowerMode, 30);
+        assert_eq!(unavailable.style, EffectStyle::Off, "{id}");
+        assert_eq!(unavailable.pack.as_deref(), Some(id));
+        assert!(unavailable.issue.is_some(), "{id}");
+    }
+    let json = serde_json::to_value(&selected).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({"pack": "neon", "issue": null, "style": "sparks", "intensity": 80, "colors": ["#FFB000"], "duration_ms": null, "particles": 12})
+    );
+}
+
+#[test]
+fn validate_applies_the_import_rules_without_installing() {
+    let files = tempdir().unwrap();
+    let folder = picked_folder(files.path(), SOUND);
+    let checked = validate(&folder).unwrap();
+    assert_eq!(
+        (
+            checked.id.as_str(),
+            checked.kind(),
+            checked.version.as_str()
+        ),
+        ("typewriter", PluginKind::Sound, "1.0.0")
+    );
+    assert_eq!(checked.directory, folder);
+
+    // The archive rules too: a pack zipped inside one folder is valid, a nested folder is not.
+    let wav = wav();
+    let wrapped = files.path().join("wrapped.zip");
+    zip_file(
+        &wrapped,
+        &[
+            ("typewriter/plugin.toml", Some(SOUND.as_bytes())),
+            ("typewriter/key.wav", Some(&wav)),
+            ("typewriter/space.wav", Some(&wav)),
+        ],
+    );
+    assert_eq!(validate(&wrapped).unwrap().id, "typewriter");
+    let nested = files.path().join("nested.zip");
+    zip_file(
+        &nested,
+        &[
+            (MANIFEST_FILE, Some(SOUND.as_bytes())),
+            ("key.wav", Some(&wav)),
+            ("space.wav", Some(&wav)),
+            ("sub/key.wav", Some(&wav)),
+        ],
+    );
+    assert!(
+        matches!(validate(&nested), Err(PluginError::Invalid(reason)) if reason.contains("子文件夹"))
+    );
+
+    // A built-in id, a source that is not a pack, and a pack that breaks a manifest rule.
+    let reserved = tempdir().unwrap();
+    let folder = sound_pack(reserved.path(), &SOUND.replace("typewriter", "default"));
+    assert!(matches!(validate(&folder), Err(PluginError::Reserved)));
+    let text = files.path().join("pack.txt");
+    fs::write(&text, b"x").unwrap();
+    assert!(matches!(
+        validate(&text),
+        Err(PluginError::UnsupportedSource)
+    ));
+    let ogg = tempdir().unwrap();
+    let folder = sound_pack(ogg.path(), &SOUND.replace("space.wav", "space.ogg"));
+    fs::rename(folder.join("space.wav"), folder.join("space.ogg")).unwrap();
+    assert!(
+        matches!(validate(&folder), Err(PluginError::Invalid(reason)) if reason.contains("只接受 WAV"))
+    );
+    // Nothing was left beside the source.
+    let mut left: Vec<_> = fs::read_dir(ogg.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    left.sort();
+    assert_eq!(left, ["typewriter"]);
 }

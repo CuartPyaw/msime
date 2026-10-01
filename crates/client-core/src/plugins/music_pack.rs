@@ -5,12 +5,12 @@
 //! tracks = ["rain.ogg", "piano.ogg"]
 //! ```
 //!
-//! Tracks are longer than samples by design, so a host streams them from disk instead of decoding them whole, and only while music is switched on; it pauses them whenever the input method is not active or the focused field is a secure one.
+//! Tracks may be WAV or Ogg, unlike a sound pack's samples: they are streamed rather than decoded up front, so their length is checked as they play. Tracks are longer than samples by design, so a host streams them from disk instead of decoding them whole, and only while music is switched on; it pauses them whenever the input method is not active or the focused field is a secure one.
 
 use serde::Serialize;
 use toml::Value;
 
-use super::{only_keys, sound_pack::audio_file, AudioLimits};
+use super::{is_audio, only_keys, valid_file_name, AudioLimits};
 
 pub(crate) const MANIFEST_KEYS: [&str; 1] = ["music"];
 
@@ -64,4 +64,13 @@ pub(crate) fn parse(table: &toml::map::Map<String, Value>) -> Result<MusicPack, 
         tracks.push(track);
     }
     Ok(MusicPack { tracks })
+}
+
+/// A manifest value naming a track in the pack directory: WAV or Ogg.
+fn audio_file(value: &Value) -> Result<String, String> {
+    let name = value.as_str().ok_or("音频文件名必须是字符串")?;
+    if !valid_file_name(name) || !is_audio(name) {
+        return Err(format!("{name} 不是 .wav 或 .ogg 文件名"));
+    }
+    Ok(name.to_owned())
 }

@@ -41,6 +41,8 @@ export type PluginPreferences = {
   effect_style: EffectStyle;
   /** 0-100: how large and how long the effect is drawn. */
   effect_intensity: number;
+  /** An installed effect pack whose style and parameters replace `effect_style` and `effect_intensity`; empty for none. */
+  effect_pack: string;
   /** Count consecutive keys and show the count; a pause of 3 seconds or a backspace starts it again. */
   combo_counter: boolean;
   /** Play the key sound pack's commit sample, pitched up, when the count reaches 10, 25, 50 and 100. */
@@ -63,6 +65,7 @@ export const defaultPluginPreferences: PluginPreferences = {
   command_tables: [],
   effect_style: "off",
   effect_intensity: 50,
+  effect_pack: "",
   combo_counter: false,
   combo_tier_sound: false,
 };
@@ -79,19 +82,23 @@ export function pluginPreferences(draft?: Pick<Preferences, "plugins">): PluginP
     command_tables: value?.command_tables ?? defaultPluginPreferences.command_tables,
     effect_style: value?.effect_style ?? defaultPluginPreferences.effect_style,
     effect_intensity: value?.effect_intensity ?? defaultPluginPreferences.effect_intensity,
+    effect_pack: value?.effect_pack ?? defaultPluginPreferences.effect_pack,
     combo_counter: value?.combo_counter ?? defaultPluginPreferences.combo_counter,
     combo_tier_sound: value?.combo_tier_sound ?? defaultPluginPreferences.combo_tier_sound,
   };
 }
 
 /**
- * The section after a pack was removed from disk: a selection naming it falls back to what a fresh profile selects, and an enabled command table naming it is dropped, so the document never points at a pack that is gone.
+ * The section after a pack was removed from disk: a selection naming it falls back to what a fresh profile selects (no effect pack, for an effect pack), and an enabled command table naming it is dropped, so the document never points at a pack that is gone.
  */
 export function withoutRemovedPack(
   preferences: PluginPreferences,
-  kind: "sound" | "music" | "command_table",
+  kind: "sound" | "music" | "command_table" | "effect",
   id: string,
 ): PluginPreferences {
+  if (kind === "effect") {
+    return preferences.effect_pack === id ? { ...preferences, effect_pack: "" } : preferences;
+  }
   if (kind === "command_table") {
     return {
       ...preferences,

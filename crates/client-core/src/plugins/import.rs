@@ -1,5 +1,7 @@
 //! Installing a pack the user picked: a folder, or a `.zip` archive of one.
 //!
+//! `validate` runs the same steps without installing anything, for the `msime-pack` tool an author checks a pack with before publishing it: both go through `stage` and `check_staged`, so a pack the tool accepts is a pack import accepts.
+//!
 //! The pack is copied or extracted into a staging directory beside the kind directories, checked there by the same rules `scan` lists packs by, and only then renamed into `<root>/<kind>/<id>`, replacing an installed pack of that id whole (`skin::folder_import::replace_directory`). A failed or interrupted import therefore never leaves a directory that looks installed, and never a pack that is half one version and half another.
 
 use std::fs::{self, File, OpenOptions};
@@ -55,19 +57,7 @@ const MAX_TOTAL_BYTES: u64 = super::music_pack::MAX_PACK_BYTES + 2 * 1024 * 1024
 ///
 /// Names starting with a dot (`.DS_Store`, `.git`) and a zip's `__MACOSX` folder are left behind, as the file managers that add them intend; anything else the pack may not contain - a subdirectory, a symbolic link, a file its manifest does not account for - refuses the whole import.
 pub fn import(source: &Path, root: &Path) -> Result<PluginSummary, PluginError> {
-    let metadata = fs::symlink_metadata(source).map_err(|_| PluginError::UnsupportedSource)?;
-    let archive = if metadata.is_dir() {
-        false
-    } else if metadata.is_file()
-        && source
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
-    {
-        true
-    } else {
-        return Err(PluginError::UnsupportedSource);
-    };
+    let archive = is_archive(source)?;
     if !crate::storage::create_directory_and_check(root).map_err(|_| PluginError::Storage)? {
         return Err(PluginError::Storage);
     }
@@ -75,16 +65,9 @@ pub fn import(source: &Path, root: &Path) -> Result<PluginSummary, PluginError> 
     sweep_leftovers(root, SystemTime::now());
     let staging = Staging(root.join(format!(".staging-{}", uuid::Uuid::new_v4().simple())));
     fs::create_dir(&staging.0)?;
-    if archive {
-        extract(source, &staging.0)?;
-    } else {
-        copy_folder(source, &staging.0)?;
-    }
-    let mut summary = load_directory(&staging.0).map_err(PluginError::Invalid)?;
+    stage(source, archive, &staging.0)?;
+    let mut summary = check_staged(&staging.0)?;
     let kind = summary.kind();
-    if is_builtin(kind, &summary.id) {
-        return Err(PluginError::Reserved);
-    }
     let directory = kind_directory(root, kind);
     if !crate::storage::create_directory_and_check(&directory).map_err(|_| PluginError::Storage)? {
         return Err(PluginError::Storage);
@@ -103,6 +86,51 @@ pub fn import(source: &Path, root: &Path) -> Result<PluginSummary, PluginError> 
     crate::skin::folder_import::replace_directory(&staging.0, &target, &backup)
         .map_err(|_| PluginError::Storage)?;
     summary.directory = target;
+    Ok(summary)
+}
+
+/// Check the pack at `source` - a folder or a `.zip` file, as `import` takes them - by exactly the rules `import` installs it by, without a plugins root and without installing anything. The files are copied or extracted into a temporary directory first, as `import` stages them, so an archive is held to the same member, size and layout rules. The summary's `directory` is `source`.
+pub fn validate(source: &Path) -> Result<PluginSummary, PluginError> {
+    let archive = is_archive(source)?;
+    let staging = tempfile::Builder::new().prefix("msime-pack-").tempdir()?;
+    stage(source, archive, staging.path())?;
+    let mut summary = check_staged(staging.path())?;
+    summary.directory = source.to_path_buf();
+    Ok(summary)
+}
+
+/// Whether `source` is a `.zip` file (true) or a folder (false); anything else is not a pack source.
+fn is_archive(source: &Path) -> Result<bool, PluginError> {
+    let metadata = fs::symlink_metadata(source).map_err(|_| PluginError::UnsupportedSource)?;
+    if metadata.is_dir() {
+        Ok(false)
+    } else if metadata.is_file()
+        && source
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+    {
+        Ok(true)
+    } else {
+        Err(PluginError::UnsupportedSource)
+    }
+}
+
+/// Copy or extract the pack's files from `source` into the empty directory `staging`.
+fn stage(source: &Path, archive: bool, staging: &Path) -> Result<(), PluginError> {
+    if archive {
+        extract(source, staging)
+    } else {
+        copy_folder(source, staging)
+    }
+}
+
+/// The staged pack, checked by the rules `scan` lists packs by, and refused when its id is one the bundle ships.
+fn check_staged(staging: &Path) -> Result<PluginSummary, PluginError> {
+    let summary = load_directory(staging).map_err(PluginError::Invalid)?;
+    if is_builtin(summary.kind(), &summary.id) {
+        return Err(PluginError::Reserved);
+    }
     Ok(summary)
 }
 

@@ -867,6 +867,7 @@ fn plugin_preferences_are_off_by_default_and_absent_from_older_documents() {
     assert!(defaults.music.pack.is_empty() && defaults.command_tables.is_empty());
     assert_eq!(defaults.effect_style, crate::plugins::EffectStyle::Off);
     assert_eq!(defaults.effect_intensity, 50);
+    assert!(defaults.effect_pack.is_empty());
     assert!(!defaults.combo_counter && !defaults.combo_tier_sound);
 
     // Untouched, the section is not written, so a build from before plugins reads the document; a document from before plugins loads with them off and is not rewritten.
@@ -911,6 +912,7 @@ fn plugin_preferences_are_off_by_default_and_absent_from_older_documents() {
             command_tables: vec!["sig".into(), "work.notes".into()],
             effect_style: crate::plugins::EffectStyle::PowerMode,
             effect_intensity: 100,
+            effect_pack: "neon".into(),
             combo_counter: true,
             combo_tier_sound: true,
         },
@@ -928,6 +930,12 @@ fn plugin_preferences_are_off_by_default_and_absent_from_older_documents() {
     let plugins = &written["preferences"]["plugins"];
     assert_eq!(plugins["effect_style"], "power_mode");
     assert_eq!(plugins["effect_intensity"], 100);
+    assert_eq!(plugins["effect_pack"], "neon");
+    // No pack selected: the key is left out, so a build from before effect packs reads the section.
+    let mut unselected = chosen.clone();
+    unselected.plugins.effect_pack.clear();
+    let unselected = serde_json::to_value(&unselected).unwrap();
+    assert!(unselected["plugins"].get("effect_pack").is_none());
     assert_eq!(plugins["combo_counter"], true);
     assert_eq!(plugins["combo_tier_sound"], true);
     // Restoring defaults turns them all off again.
@@ -960,13 +968,14 @@ fn plugin_preferences_are_off_by_default_and_absent_from_older_documents() {
 
 #[test]
 fn plugin_preferences_are_validated() {
-    let invalid: [fn(&mut PluginPreferences); 9] = [
+    let invalid: [fn(&mut PluginPreferences); 10] = [
         |plugins| plugins.key_sound.volume = 101,
         |plugins| plugins.effect_intensity = 101,
         |plugins| plugins.music.volume = 255,
         |plugins| plugins.key_sound.pack = "../default".into(),
         |plugins| plugins.melody.pack = "Twinkle".into(),
         |plugins| plugins.music.pack = "rain/..".into(),
+        |plugins| plugins.effect_pack = "../neon".into(),
         |plugins| plugins.command_tables = vec!["sig".into(), "sig".into()],
         |plugins| plugins.command_tables = vec![String::new()],
         |plugins| {
