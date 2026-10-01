@@ -317,11 +317,7 @@ impl ZhuyinScheme {
     }
 
     fn key(&self, start: usize, end: usize) -> String {
-        self.syllables[start..end]
-            .iter()
-            .map(|syllable| syllable.toned.as_str())
-            .collect::<Vec<_>>()
-            .join(" ")
+        build_zhuyin_key(&self.syllables[start..end])
     }
 
     fn reconvert(&mut self) -> Result<()> {
@@ -359,6 +355,22 @@ fn build_editing_keys(syllables: &[Syllable], pending: &PendingSyllable) -> Stri
     }
     pending.append_keys(&mut keys);
     keys
+}
+
+fn build_zhuyin_key(syllables: &[Syllable]) -> String {
+    let capacity = syllables
+        .iter()
+        .map(|syllable| syllable.toned.len())
+        .sum::<usize>()
+        .saturating_add(syllables.len().saturating_sub(1));
+    let mut key = String::with_capacity(capacity);
+    for (index, syllable) in syllables.iter().enumerate() {
+        if index > 0 {
+            key.push(' ');
+        }
+        key.push_str(&syllable.toned);
+    }
+    key
 }
 
 #[cfg(test)]
@@ -407,6 +419,22 @@ mod tests {
         };
 
         assert_eq!(build_editing_keys(&syllables, &pending), "su3lc3a8");
+    }
+
+    #[test]
+    fn dictionary_key_joins_toned_syllables_in_order() {
+        let syllables = vec![
+            Syllable {
+                toned: "ㄋㄧˇ".to_owned(),
+                keys: "su3".to_owned(),
+            },
+            Syllable {
+                toned: "ㄏㄠˇ".to_owned(),
+                keys: "lc3".to_owned(),
+            },
+        ];
+
+        assert_eq!(build_zhuyin_key(&syllables), "ㄋㄧˇ ㄏㄠˇ");
     }
 
     fn scheme() -> (tempfile::TempDir, ZhuyinScheme) {
