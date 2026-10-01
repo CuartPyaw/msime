@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import {
   TypingStatisticsPage,
   type TypingStatistics,
@@ -123,4 +123,90 @@ test("the phone layout leaves the per-day detail table out", async () => {
   expect(await screen.findByLabelText("今日输入速度")).toBeTruthy();
   expect(screen.queryByRole("heading", { name: /按日明细/ })).toBeNull();
   expect(screen.queryByRole("table")).toBeNull();
+});
+
+test("today's hours are set against the usual day once earlier days recorded hours", async () => {
+  const key = today();
+  const [year, month, day] = key.split("-").map(Number);
+  const earlier = new Date(year, month - 1, day - 1);
+  const yesterday = `${earlier.getFullYear()}-${String(earlier.getMonth() + 1).padStart(2, "0")}-${String(earlier.getDate()).padStart(2, "0")}`;
+  const hours = (hour: number, count: number) =>
+    Array.from({ length: 24 }, (_, index) => (index === hour ? count : 0));
+  render(
+    <TypingStatisticsPage
+      client={client({
+        enabled: true,
+        total: 460,
+        days: { [key]: 360, [yesterday]: 100 },
+        dailyDetails: {
+          [key]: { characters: { han: 360 } },
+          [yesterday]: { characters: { han: 100 } },
+        },
+        dailyActiveMs: { [key]: 120_000, [yesterday]: 100_000 },
+        dailyHours: { [key]: hours(9, 360), [yesterday]: hours(21, 100) },
+      })}
+    />,
+  );
+  expect(await screen.findByRole("img", { name: "今日各时段输入分布，与平时对比" })).toBeTruthy();
+  expect(screen.getByText("平时（前 1 天平均）")).toBeTruthy();
+  expect(screen.getByLabelText("21 时，0 字符").getAttribute("title")).toBe(
+    "21 时：今日 0 字符，平时 100 字符",
+  );
+  // Both days held a minute of typing, so the speed trend draws them and their average.
+  expect(
+    screen.getByRole("img", { name: "每日输入速度折线图，2 天有测量，平均 125 字每分钟" }),
+  ).toBeTruthy();
+});
+
+test("the speed trend explains itself until a day holds a minute of typing", async () => {
+  const key = today();
+  render(
+    <TypingStatisticsPage
+      client={client({
+        enabled: true,
+        total: 10,
+        days: { [key]: 10 },
+        dailyDetails: { [key]: { characters: { han: 10 } } },
+        dailyActiveMs: { [key]: 5_000 },
+      })}
+    />,
+  );
+  expect(await screen.findByRole("heading", { name: "速度趋势" })).toBeTruthy();
+  expect(screen.queryByRole("img", { name: /每日输入速度折线图/ })).toBeNull();
+  expect(screen.getByText(/还没有测量到足够的活跃时长/)).toBeTruthy();
+});
+
+test("desktop shares are donuts beside their legend and schemes are a ranking", async () => {
+  const key = today();
+  render(
+    <TypingStatisticsPage
+      client={client({
+        enabled: true,
+        total: 100,
+        days: { [key]: 100 },
+        detail: {
+          characters: { han: 70, latin: 30 },
+          sources: { quanpin: 60, wubi: 30, english: 10 },
+        },
+        dailyDetails: {
+          [key]: {
+            characters: { han: 70, latin: 30 },
+            sources: { quanpin: 60, wubi: 30, english: 10 },
+          },
+        },
+      })}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: "类型" }));
+  expect(screen.getByRole("img", { name: "字符类型环形图" })).toBeTruthy();
+  expect(screen.getByLabelText("汉字 70 字符，70.0%")).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "方案" }));
+  const ranking = screen.getByRole("img", { name: "输入方案排行" });
+  // Largest first, and only schemes that were used: the ranking is the legend.
+  expect(Array.from(ranking.children).map((row) => row.getAttribute("aria-label"))).toEqual([
+    "全拼 26 键 60 字符，60.0%",
+    "86 五笔 30 字符，30.0%",
+    "英文键盘 10 字符，10.0%",
+  ]);
+  expect(screen.getAllByLabelText(/^全拼 26 键 /)).toHaveLength(1);
 });

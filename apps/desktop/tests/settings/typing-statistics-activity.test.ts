@@ -4,8 +4,10 @@ import {
   addDays,
   currentStreak,
   dailyDetailRows,
+  dailySpeeds,
   formatActiveTime,
   longestStreak,
+  usualHours,
   type TypingStatistics,
 } from "@msime/ui";
 
@@ -259,4 +261,48 @@ test("a day that predates active-time measurement has unknown activity and speed
   expect(unmeasured.speed).toBeNull();
   // With no breakdown at all, the whole day is unclassified and lands in 其他.
   expect(unmeasured.other).toBe(5);
+});
+
+test("the usual hourly profile averages earlier whole days only", () => {
+  const morning = Array.from({ length: 24 }, (_, hour) => (hour === 9 ? 40 : 0));
+  const evening = Array.from({ length: 24 }, (_, hour) => (hour === 21 ? 20 : 0));
+  const usual = usualHours(
+    {
+      "2026-09-19": morning,
+      "2026-09-20": evening,
+      // Today is what the profile is compared against, so it stays out of it.
+      "2026-09-21": morning,
+      // A truncated day is unknown, and a day with every bucket empty recorded no hours at all.
+      "2026-09-18": [5, 5],
+      "2026-09-17": Array.from({ length: 24 }, () => 0),
+    },
+    "2026-09-21",
+  );
+  expect(usual?.days).toBe(2);
+  expect(usual?.hours[9]).toBe(20);
+  expect(usual?.hours[21]).toBe(10);
+  expect(usual?.hours[0]).toBe(0);
+  expect(usualHours({ "2026-09-21": morning }, "2026-09-21")).toBeNull();
+  expect(usualHours(undefined, "2026-09-21")).toBeNull();
+});
+
+test("a day's speed is unknown until it holds a minute of active time", () => {
+  const value = statistics({
+    total: 330,
+    days: { "2026-09-19": 120, "2026-09-20": 10, "2026-09-21": 200 },
+    dailyDetails: {
+      "2026-09-19": { characters: { han: 120 } },
+      "2026-09-20": { characters: { han: 10 } },
+      "2026-09-21": { characters: { han: 150, number: 50 } },
+    },
+    // 2026-09-20 typed ten characters in two seconds: a spike, not a speed.
+    dailyActiveMs: { "2026-09-19": 120_000, "2026-09-20": 2_000, "2026-09-21": 60_000 },
+  });
+  expect(dailySpeeds(value, ["2026-09-18", "2026-09-19", "2026-09-20", "2026-09-21"])).toEqual([
+    null,
+    60,
+    null,
+    // Digits stay out of speed, as everywhere else.
+    150,
+  ]);
 });

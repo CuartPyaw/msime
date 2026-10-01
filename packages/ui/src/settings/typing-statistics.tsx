@@ -59,16 +59,14 @@ const menuItem =
 const page = "flex flex-col gap-3.5 max-phone:gap-2.5";
 const empty = "mt-0.5 mb-3.5 text-center text-muted";
 const rankChart = "mt-4 mb-[18px] flex flex-col gap-[11px]";
-// The first column has to hold the longest label without the row's ellipsis cutting it, so the two
-// charts size it differently: 候选命中位置 carries a share column the scheme ranking does not.
-const rankRow = (withShare: boolean) =>
-  `grid items-center gap-[9px] text-xs ${withShare ? "grid-cols-[minmax(88px,1fr)_minmax(80px,2fr)_auto_auto]" : "grid-cols-[minmax(80px,1fr)_minmax(90px,2fr)_auto]"} [&>span]:overflow-hidden [&>span]:text-ellipsis [&>span]:whitespace-nowrap [&>strong]:min-w-9 [&>strong]:text-right [&>strong]:tabular-nums [&>strong]:text-secondary [&>small]:min-w-11 [&>small]:text-right [&>small]:tabular-nums [&>small]:text-muted`;
+// The first column has to hold the longest label without the row's ellipsis cutting it. The count and share columns are fixed rather than auto because every row is its own grid: sized to their own content, a seven-digit count beside a two-digit one would start each track at a different x.
+const rankRow =
+  "grid grid-cols-[minmax(88px,1fr)_minmax(80px,2fr)_72px_48px] items-center gap-[9px] text-xs [&>span]:overflow-hidden [&>span]:text-ellipsis [&>span]:whitespace-nowrap [&>strong]:text-right [&>strong]:tabular-nums [&>strong]:text-secondary [&>small]:text-right [&>small]:tabular-nums [&>small]:text-muted";
 const rankTrack = "h-[11px] overflow-hidden rounded-full bg-subtle";
 const legendRow =
   "grid animate-row-reveal grid-cols-[22px_minmax(0,1fr)_auto_58px] items-center gap-[9px] motion-reduce:animate-none max-phone:grid-cols-[22px_minmax(0,1fr)_auto_50px] max-phone:gap-[7px] [&>strong]:font-medium [&>strong]:tabular-nums [&>small]:m-0 [&>small]:text-right [&>small]:tabular-nums";
 const legendDot =
   "grid size-[22px] place-items-center rounded-[7px] text-xs font-[650] leading-none";
-const shapeGraphic = "size-full rounded-full";
 
 // The heatmap's five shades are one accent at five opacities, indexed by level, so the level a day
 // falls into picks its class directly. Level 0 is the empty track rather than a faint accent.
@@ -327,6 +325,42 @@ export function activityMetrics(statistics: TypingStatistics, todayKey: string):
     todayHours: Array.isArray(todayHours) && todayHours.length === HOURS ? todayHours : null,
     hasActivity: totalActiveMs > 0,
   };
+}
+
+/**
+ * The average hour-by-hour profile of the days before today, the baseline the hourly chart sets today against.
+ *
+ * Only days with a full 24-bucket record and at least one character take part: a day the host recorded no hours for is unknown, and averaging it in as zeros would flatten the profile. Null when no such day exists.
+ */
+export function usualHours(
+  dailyHours: TypingStatistics["dailyHours"],
+  todayKey: string,
+): { hours: number[]; days: number } | null {
+  const sums = Array.from({ length: HOURS }, () => 0);
+  let days = 0;
+  for (const [key, hours] of Object.entries(dailyHours ?? {})) {
+    if (key >= todayKey || !Array.isArray(hours) || hours.length !== HOURS) continue;
+    if (!hours.some((count) => count > 0)) continue;
+    hours.forEach((count, hour) => (sums[hour] += count));
+    days += 1;
+  }
+  return days === 0 ? null : { hours: sums.map((sum) => sum / days), days };
+}
+
+/**
+ * Characters per active minute for each of `keys`, or null for a day whose speed is unknown.
+ *
+ * A day needs the same minimum active time as "fastest day" before it gets a point, so a few characters typed in two seconds do not draw a spike that flattens every real day beside it.
+ */
+export function dailySpeeds(
+  statistics: TypingStatistics,
+  keys: readonly string[],
+): (number | null)[] {
+  return keys.map((key) => {
+    const activeMs = statistics.dailyActiveMs?.[key] ?? 0;
+    if (activeMs < fastestDayMinimumActiveMs) return null;
+    return charactersPerMinute(readableCharacters(statistics.dailyDetails?.[key]), activeMs);
+  });
 }
 
 /**
@@ -688,14 +722,156 @@ function KeyboardHeatmap({
   );
 }
 
+/** Horizontal position, in viewBox units, of the middle of column `index` of `count`, so a line drawn over a row of bars passes through each bar's centre. */
+const columnCenter = (index: number, count: number) => ((index + 0.5) / Math.max(1, count)) * 100;
+
+/** An SVG path through the known values, lifting the pen over every null so an unknown day reads as a gap rather than a dip to zero. */
+function linePath(values: readonly (number | null)[], y: (value: number) => number): string {
+  let path = "";
+  let drawing = false;
+  values.forEach((value, index) => {
+    if (value === null) {
+      drawing = false;
+      return;
+    }
+    path += `${drawing ? "L" : "M"}${columnCenter(index, values.length)},${y(value)} `;
+    drawing = true;
+  });
+  return path.trim();
+}
+
+/**
+ * A dashed reference line across a plot. Dashed on purpose: it marks a threshold, not a grid. Its value is named in the caption above the plot rather than on the line, where a label would sit on top of the data.
+ */
+function ReferenceLine({ bottom }: { bottom: number }) {
+  return (
+    <i
+      className="pointer-events-none absolute inset-x-0 block h-px bg-[repeating-linear-gradient(90deg,var(--text-muted)_0_4px,transparent_4px_8px)] opacity-70"
+      style={{ bottom: `${bottom}%` }}
+      aria-hidden="true"
+    />
+  );
+}
+
+/**
+ * Characters per active minute for each day of the trend window.
+ *
+ * Speed is a rate, so it gets a line rather than bars, and the scale starts near the slowest day instead of at zero: a typist moving between 60 and 75 characters a minute would otherwise see a flat line at the top of the plot. The axis labels name both ends so the cropped scale is never hidden. Days without enough measured time are gaps.
+ */
+function SpeedTrend({
+  days,
+  speeds,
+  averageSpeed,
+  selectedDay,
+}: {
+  days: { key: string; label: string }[];
+  speeds: (number | null)[];
+  averageSpeed: number;
+  selectedDay: string | null;
+}) {
+  const known = speeds.filter((speed): speed is number => speed !== null);
+  const count = (value: number) => Math.round(value).toLocaleString("zh-CN");
+  if (known.length === 0)
+    return (
+      <p className={`${empty} mt-3.5`}>
+        这段时间还没有测量到足够的活跃时长。每天连续打字满 1 分钟后，这里会画出当天的速度。
+      </p>
+    );
+  const high = Math.max(...known, averageSpeed);
+  const low = Math.min(...known, averageSpeed);
+  const spread = Math.max(high - low, high * 0.2, 1);
+  const top = Math.ceil(high + spread * 0.15);
+  const bottom = Math.max(0, Math.floor(low - spread * 0.25));
+  const height = (value: number) => ((value - bottom) / Math.max(1, top - bottom)) * 100;
+  const y = (value: number) => 100 - height(value);
+  // Every point gets a dot while they are far enough apart to read; past that only a point with no neighbour does, since a lone day draws no line at all.
+  const dotted = (index: number) =>
+    speeds[index] !== null &&
+    (days.length <= 45 || (speeds[index - 1] == null && speeds[index + 1] == null));
+  return (
+    <>
+      <p className="mt-[7px] mb-0 text-xs text-muted">
+        最快 {count(Math.max(...known))} · 最慢 {count(Math.min(...known))} · 虚线为平均{" "}
+        {count(averageSpeed)} 字 / 分钟 · {known.length} 天有测量
+      </p>
+      <div
+        className="relative mt-3 h-[120px] border-b border-edge text-accent"
+        role="img"
+        aria-label={`每日输入速度折线图，${known.length} 天有测量，平均 ${count(averageSpeed)} 字每分钟`}
+      >
+        {/* The scale does not start at zero, so both ends are labelled inside the plot, where they keep its columns aligned with the daily bars above. */}
+        <span
+          className="pointer-events-none absolute top-0 left-0 text-[10px] leading-none text-muted tabular-nums"
+          aria-hidden="true"
+        >
+          {top}
+        </span>
+        <span
+          className="pointer-events-none absolute bottom-1 left-0 text-[10px] leading-none text-muted tabular-nums"
+          aria-hidden="true"
+        >
+          {bottom}
+        </span>
+        <ReferenceLine bottom={height(averageSpeed)} />
+        <svg
+          className="absolute inset-0 block size-full overflow-visible"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          <path
+            d={linePath(speeds, y)}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+        {/* Dots and hover columns are HTML rather than SVG: the plot stretches to its box, which would squash an SVG circle into an ellipse. */}
+        {days.map((day, index) => {
+          const speed = speeds[index];
+          const chosen = selectedDay === day.key;
+          return (
+            <span
+              className="absolute inset-y-0"
+              style={{
+                left: `${(index / days.length) * 100}%`,
+                width: `${100 / days.length}%`,
+              }}
+              key={day.key}
+              title={`${day.label}：${speed === null ? "活跃不足 1 分钟，未计算" : `${count(speed)} 字 / 分钟`}`}
+              aria-hidden="true"
+            >
+              {speed !== null && (dotted(index) || chosen) && (
+                <i
+                  className={`absolute left-1/2 block -translate-x-1/2 translate-y-1/2 rounded-full ring-2 ring-card-solid ${chosen ? "size-2.5 bg-[#e59b43]" : "size-[7px] bg-accent"}`}
+                  style={{ bottom: `${height(speed)}%` }}
+                />
+              )}
+            </span>
+          );
+        })}
+      </div>
+      <div className={axis}>
+        <span>{days[0]?.label}</span>
+        <span>{days.at(-1)?.label}</span>
+      </div>
+    </>
+  );
+}
+
 function StatisticsTrendLine({
   days,
   counts,
   selectedDay,
+  average,
 }: {
   days: { key: string; label: string }[];
   counts: Record<string, number>;
   selectedDay: string | null;
+  average: number;
 }) {
   const values = days.map((day) => counts[day.key] ?? 0);
   const lineValues =
@@ -715,10 +891,11 @@ function StatisticsTrendLine({
   const selectedValue = selectedIndex >= 0 ? values[selectedIndex] : 0;
   return (
     <div
-      className="mt-3 h-[170px] w-full text-accent"
+      className="relative mt-3 h-[170px] w-full text-accent"
       role="img"
       aria-label={days.length > 120 ? "每日输入趋势折线图，显示七日均线" : "每日输入趋势折线图"}
     >
+      {average > 0 && <ReferenceLine bottom={4 + (average / maximum) * 88} />}
       <svg
         className="block size-full overflow-visible"
         viewBox="0 0 100 100"
@@ -753,63 +930,65 @@ function StatisticsTrendLine({
   );
 }
 
-type DistributionVariant = "bar" | "pie" | "donut" | "rank";
+/**
+ * How a distribution is drawn. A donut is part-to-whole at a glance, which suits character types and language modes: a handful of classes with one usually dominant. Input schemes can number sixteen, past what hue can tell apart, so they are a ranking in one colour where the label carries identity.
+ */
+type DistributionVariant = "donut" | "rank";
+
+const shareText = (count: number, total: number) =>
+  total === 0 ? "—" : `${((count / total) * 100).toFixed(1)}%`;
 
 function ShapeChart({
+  title,
   slices,
   variant,
   total,
 }: {
+  title: string;
   slices: Slice[];
-  variant: Exclude<DistributionVariant, "bar">;
+  variant: DistributionVariant;
   total: number;
 }) {
   if (variant === "rank") {
     const ranked = slices.filter((slice) => slice.count > 0).sort((a, b) => b.count - a.count);
     const peak = Math.max(1, ...ranked.map((slice) => slice.count));
     return (
-      <div className={rankChart} role="img" aria-label="输入方案排行">
-        {ranked.length === 0 && <p className={empty}>暂无输入记录</p>}
-        {ranked.map((slice) => (
-          <div className={rankRow(false)} key={slice.id}>
+      <div className={rankChart} role="img" aria-label={`${title}排行`}>
+        {ranked.map((slice, index) => (
+          <div
+            className={`${rankRow} animate-row-reveal motion-reduce:animate-none`}
+            style={{ animationDelay: `${Math.min(index, 8) * 0.03}s` }}
+            key={slice.id}
+            aria-label={`${slice.title} ${slice.count} 字符，${shareText(slice.count, total)}`}
+          >
             <span>{slice.title}</span>
             <div className={rankTrack}>
               <i
-                className="block h-full rounded-[inherit]"
-                style={{ width: `${(slice.count / peak) * 100}%`, backgroundColor: slice.color }}
+                className="block h-full origin-left animate-bar-reveal rounded-[inherit] bg-accent motion-reduce:animate-none"
+                style={{ width: `${(slice.count / peak) * 100}%` }}
               />
             </div>
             <strong>{slice.count.toLocaleString("zh-CN")}</strong>
+            <small>{shareText(slice.count, total)}</small>
           </div>
         ))}
       </div>
     );
   }
-  const label = variant === "pie" ? "字符类型饼图" : "语言模式环形图";
   return (
     <div
       className="relative mx-auto mt-4 mb-[18px] grid size-[190px] place-items-center"
       role="img"
-      aria-label={label}
+      aria-label={`${title}环形图`}
     >
       <div
-        // The donut is the pie with its middle masked out, so both variants share one gradient and
-        // differ only by that mask.
-        className={
-          variant === "donut"
-            ? `${shapeGraphic} [mask:radial-gradient(circle,transparent_0_61%,#000_62%)]`
-            : shapeGraphic
-        }
+        className="size-full rounded-full [mask:radial-gradient(circle,transparent_0_61%,#000_62%)]"
         style={{ background: chartGradient(slices, Math.max(1, total)) }}
       />
-      {variant === "donut" && (
-        <div className="absolute flex size-[106px] flex-col items-center justify-center rounded-full bg-card">
-          <strong className="text-[25px] tabular-nums text-body">
-            {total.toLocaleString("zh-CN")}
-          </strong>
-          <span className="text-[11px] text-muted">字符</span>
-        </div>
-      )}
+      <div className="absolute flex size-[106px] flex-col items-center justify-center rounded-full bg-card">
+        <strong className="text-[25px] text-body">{total.toLocaleString("zh-CN")}</strong>
+        <span className="text-[11px] text-muted">字符</span>
+      </div>
     </div>
   );
 }
@@ -818,12 +997,15 @@ function Distribution({
   title,
   slices,
   footer,
-  variant = "bar",
+  variant,
+  wide = false,
 }: {
   title: string;
   slices: Slice[];
   footer?: string;
-  variant?: DistributionVariant;
+  variant: DistributionVariant;
+  /** Sets a donut beside its legend instead of above it, where the page is wide enough. */
+  wide?: boolean;
 }) {
   const total = slices.reduce((value, slice) => value + slice.count, 0);
   const visible = slices.filter((slice) => slice.count > 0 || slice.id !== "unknown");
@@ -832,51 +1014,45 @@ function Distribution({
       <h2 className={heading} id={`statistics-${title}`}>
         {title}
       </h2>
-      {variant === "bar" ? (
-        <div
-          className="mt-4 mb-3.5 flex h-[18px] w-full overflow-hidden rounded-full bg-subtle"
-          aria-hidden="true"
-        >
-          {slices
-            .filter((slice) => slice.count > 0)
-            .map((slice) => (
-              <span
-                className="h-full origin-left animate-bar-reveal motion-reduce:animate-none"
-                key={slice.id}
-                style={{
-                  backgroundColor: slice.color,
-                  width: `${(slice.count / Math.max(1, total)) * 100}%`,
-                }}
-              />
-            ))}
-        </div>
+      {total === 0 ? (
+        <p className={`${empty} mt-3.5`}>暂无输入记录</p>
       ) : (
-        <ShapeChart slices={slices} variant={variant} total={total} />
+        <div
+          className={
+            wide && variant === "donut"
+              ? "grid grid-cols-[190px_minmax(0,1fr)] items-center gap-8"
+              : undefined
+          }
+        >
+          <ShapeChart title={title} slices={slices} variant={variant} total={total} />
+          {/* A ranking already names, counts and shares every row, so it needs no legend. */}
+          {variant === "donut" && (
+            <div className="flex flex-col gap-[11px]">
+              {visible.map((slice, index) => (
+                <div
+                  // The rows reveal in sequence. The stylesheet staggered them with eight :nth-child rules;
+                  // the index is already here, so the delay comes from it and any row count works.
+                  className={legendRow}
+                  style={{ animationDelay: `${Math.min(index, 8) * 0.03}s` }}
+                  key={slice.id}
+                  aria-label={`${slice.title} ${slice.count} 字符，${shareText(slice.count, total)}`}
+                >
+                  <span
+                    className={legendDot}
+                    style={{ color: slice.color, backgroundColor: `${slice.color}1a` }}
+                    aria-hidden="true"
+                  >
+                    {slice.symbol}
+                  </span>
+                  <span>{slice.title}</span>
+                  <strong>{slice.count.toLocaleString("zh-CN")}</strong>
+                  <small>{shareText(slice.count, total)}</small>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
-      {total === 0 && <p className={empty}>暂无输入记录</p>}
-      <div className="flex flex-col gap-[11px]">
-        {visible.map((slice, index) => (
-          <div
-            // The rows reveal in sequence. The stylesheet staggered them with eight :nth-child rules;
-            // the index is already here, so the delay comes from it and any row count works.
-            className={legendRow}
-            style={{ animationDelay: `${Math.min(index, 8) * 0.03}s` }}
-            key={slice.id}
-            aria-label={`${slice.title} ${slice.count} 字符，${total === 0 ? "无占比" : `${((slice.count / total) * 100).toFixed(1)}%`}`}
-          >
-            <span
-              className={legendDot}
-              style={{ color: slice.color, backgroundColor: `${slice.color}1a` }}
-              aria-hidden="true"
-            >
-              {slice.symbol}
-            </span>
-            <span>{slice.title}</span>
-            <strong>{slice.count.toLocaleString("zh-CN")}</strong>
-            <small>{total === 0 ? "—" : `${((slice.count / total) * 100).toFixed(1)}%`}</small>
-          </div>
-        ))}
-      </div>
       {footer && <p className={footerNote}>{footer}</p>}
     </section>
   );
@@ -930,7 +1106,7 @@ function CandidateRanks({ selections }: { selections: SelectionCounts | undefine
         <div className={rankChart} role="img" aria-label="候选命中位置分布">
           {rows.map((row) => (
             <div
-              className={rankRow(true)}
+              className={rankRow}
               key={row.id}
               aria-label={`${row.label}：${row.count} 次，${share(row.count)}`}
             >
@@ -955,37 +1131,72 @@ function CandidateRanks({ selections }: { selections: SelectionCounts | undefine
 }
 
 /**
- * Today's characters by local hour.
+ * Today's characters by local hour, set against the average of earlier days.
  *
- * Every hour gets a column, including the empty ones: a chart that only drew the hours with input
- * would put 9am next to 3pm and read as continuous typing.
+ * Every hour gets a column, including the empty ones: a chart that only drew the hours with input would put 9am next to 3pm and read as continuous typing. Today is the point, so it is the accent bars; the usual day is context, so it is a thin neutral line over them, on the same scale.
  */
-function StatisticsHourlyBars({ hours }: { hours: readonly number[] }) {
-  const peak = Math.max(1, ...hours);
+function StatisticsHourlyBars({
+  hours,
+  usual,
+}: {
+  hours: readonly number[];
+  usual: { hours: number[]; days: number } | null;
+}) {
+  const peak = Math.max(1, ...hours, ...(usual?.hours ?? []));
   const total = hours.reduce((sum, count) => sum + count, 0);
+  const count = (value: number) => Math.round(value).toLocaleString("zh-CN");
   return (
     <>
       <p className="mt-[7px] mb-0 text-xs text-muted">
-        最高 {peak.toLocaleString("zh-CN")} 字符 / 小时 · 共 {total.toLocaleString("zh-CN")} 字符
+        最高 {count(Math.max(0, ...hours))} 字符 / 小时 · 共 {count(total)} 字符
       </p>
+      {usual && (
+        <div className="mt-2 flex items-center gap-4 text-[11px] text-secondary" aria-hidden="true">
+          <span className="flex items-center gap-1.5">
+            <i className="block size-2.5 rounded-[2px] bg-accent" />
+            今日
+          </span>
+          <span className="flex items-center gap-1.5">
+            <i className="block h-0.5 w-3.5 rounded-full bg-[var(--text-secondary)]" />
+            平时（前 {usual.days.toLocaleString("zh-CN")} 天平均）
+          </span>
+        </div>
+      )}
       <div
-        className="mt-3 flex h-[110px] items-end gap-[3px]"
+        className="relative mt-3 flex h-[110px] items-end gap-[3px]"
         role="img"
-        aria-label="今日各时段输入分布"
+        aria-label={usual ? "今日各时段输入分布，与平时对比" : "今日各时段输入分布"}
       >
-        {hours.map((count, hour) => (
+        {hours.map((value, hour) => (
           <div
             key={hour}
             className="flex h-full min-w-0 flex-1 flex-col justify-end"
-            title={`${hour} 时：${count} 字符`}
-            aria-label={`${hour} 时，${count} 字符`}
+            title={`${hour} 时：今日 ${value} 字符${usual ? `，平时 ${count(usual.hours[hour])} 字符` : ""}`}
+            aria-label={`${hour} 时，${value} 字符`}
           >
             <i
-              className={`${bar} bg-accent ${count === 0 ? "opacity-25" : "opacity-85"}`}
-              style={{ height: `${Math.max(2, (count / peak) * 100)}%` }}
+              className={`${bar} bg-accent ${value === 0 ? "opacity-25" : "opacity-85"}`}
+              style={{ height: `${Math.max(2, (value / peak) * 100)}%` }}
             />
           </div>
         ))}
+        {usual && (
+          <svg
+            className="pointer-events-none absolute inset-0 block size-full overflow-visible text-[var(--text-secondary)]"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <path
+              d={linePath(usual.hours, (value) => 100 - (value / peak) * 100)}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+        )}
       </div>
       <div className={axis}>
         <span>0 时</span>
@@ -1191,6 +1402,14 @@ export function TypingStatisticsPage({
   const keyScopeLabel = selectedLabel ?? "累计";
   const maximum = Math.max(1, ...trendDays.map((day) => statistics.days[day.key] ?? 0));
   const activity = activityMetrics(statistics, today.key);
+  // The reference line is the average of the window's recorded days, the same "日均" the rhythm card uses, so empty days do not drag it down.
+  const trendRecorded = trendDays
+    .map((day) => statistics.days[day.key] ?? 0)
+    .filter((count) => count > 0);
+  const trendAverage =
+    trendRecorded.length === 0
+      ? 0
+      : trendRecorded.reduce((sum, count) => sum + count, 0) / trendRecorded.length;
   const characterSlices = characterKinds.map(([id, title], index) => ({
     id,
     title,
@@ -1464,7 +1683,10 @@ export function TypingStatisticsPage({
           <h2 className={heading} id="statistics-hours-title">
             今日时段
           </h2>
-          <StatisticsHourlyBars hours={activity.todayHours} />
+          <StatisticsHourlyBars
+            hours={activity.todayHours}
+            usual={usualHours(statistics.dailyHours, today.key)}
+          />
         </section>
       )}
       {contentTab === "trend" && (
@@ -1478,16 +1700,19 @@ export function TypingStatisticsPage({
               ? 0
               : maximum.toLocaleString("zh-CN")}{" "}
             字符 / 天
+            {trendAverage > 0 &&
+              ` · 虚线为日均 ${Math.round(trendAverage).toLocaleString("zh-CN")} 字符`}
           </p>
           {mobile ? (
             <StatisticsTrendLine
               days={trendDays}
               counts={statistics.days}
               selectedDay={selectedDay}
+              average={trendAverage}
             />
           ) : (
             <div
-              className={`mt-3 flex h-[145px] items-end ${trendDays.length === 7 ? "gap-2.5" : "gap-[3px]"} max-phone:gap-0.5`}
+              className={`relative mt-3 flex h-[145px] items-end ${trendDays.length === 7 ? "gap-2.5" : "gap-[3px]"} max-phone:gap-0.5`}
             >
               {trendDays.map((day) => {
                 const count = statistics.days[day.key] ?? 0;
@@ -1516,6 +1741,7 @@ export function TypingStatisticsPage({
                   </button>
                 );
               })}
+              {trendAverage > 0 && <ReferenceLine bottom={(trendAverage / maximum) * 100} />}
             </div>
           )}
           <div className={axis}>
@@ -1542,6 +1768,22 @@ export function TypingStatisticsPage({
           )}
         </section>
       )}
+      {contentTab === "trend" && (
+        <section className="section m-0" aria-labelledby="statistics-speed-title">
+          <h2 className={heading} id="statistics-speed-title">
+            速度趋势
+          </h2>
+          <SpeedTrend
+            days={trendDays}
+            speeds={dailySpeeds(
+              statistics,
+              trendDays.map((day) => day.key),
+            )}
+            averageSpeed={activity.averageSpeed}
+            selectedDay={selectedDay}
+          />
+        </section>
+      )}
       {!mobile && contentTab === "trend" && (
         <section className="section m-0" aria-labelledby="statistics-calendar-title">
           <h2 className={heading} id="statistics-calendar-title">
@@ -1565,13 +1807,14 @@ export function TypingStatisticsPage({
         />
       )}
       {contentTab === "kind" && (
-        <Distribution title="字符类型" slices={characterSlices} variant={mobile ? "pie" : "bar"} />
+        <Distribution title="字符类型" slices={characterSlices} variant="donut" wide={!mobile} />
       )}
       {contentTab === "mode" && (
         <Distribution
           title="语言模式"
           slices={languageSlices}
-          variant={mobile ? "donut" : "bar"}
+          variant="donut"
+          wide={!mobile}
           footer="按提交时使用的键盘模式统计，不推测文本语言；中文模式下输入的数字仍计入中文模式。AI 润色和语音输入单独按来源统计。"
         />
       )}
@@ -1579,7 +1822,7 @@ export function TypingStatisticsPage({
         <Distribution
           title="输入方案"
           slices={sourceSlices}
-          variant={mobile ? "rank" : "bar"}
+          variant="rank"
           footer="输入方案统计其上屏字符数；拼音等按键另由按键热力图计数，只记每个键每天的按下次数。旧版本总数保留为历史未分类，新输入开始记录细分。"
         />
       )}
