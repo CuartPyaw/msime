@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 export interface UseInputSourceUninstallOptions {
   uninstallInputSource?: (removeUserData: boolean) => Promise<void>;
@@ -10,9 +10,11 @@ export function useInputSourceUninstall({ uninstallInputSource }: UseInputSource
   const [confirmation, setConfirmation] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<"success" | "error" | null>(null);
+  const actionRunning = useRef(false);
 
   async function confirmUninstall() {
-    if (!uninstallInputSource || busy) return;
+    if (!uninstallInputSource || busy || actionRunning.current) return;
+    actionRunning.current = true;
     setBusy(true);
     setResult(null);
     try {
@@ -22,6 +24,7 @@ export function useInputSourceUninstall({ uninstallInputSource }: UseInputSource
     } catch {
       setResult("error");
     } finally {
+      actionRunning.current = false;
       setBusy(false);
     }
   }
