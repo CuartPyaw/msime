@@ -196,10 +196,7 @@ impl ZhuyinScheme {
     }
 
     pub fn converted_text(&self) -> String {
-        self.conversion
-            .iter()
-            .map(|span| span.text.as_str())
-            .collect()
+        build_converted_text(&self.conversion)
     }
 
     pub fn list_open(&self) -> bool {
@@ -357,6 +354,15 @@ fn build_editing_keys(syllables: &[Syllable], pending: &PendingSyllable) -> Stri
     keys
 }
 
+fn build_converted_text(spans: &[Span]) -> String {
+    let capacity = spans.iter().map(|span| span.text.len()).sum();
+    let mut text = String::with_capacity(capacity);
+    for span in spans {
+        text.push_str(&span.text);
+    }
+    text
+}
+
 fn build_zhuyin_key(syllables: &[Syllable]) -> String {
     let capacity = syllables
         .iter()
@@ -435,6 +441,24 @@ mod tests {
         ];
 
         assert_eq!(build_zhuyin_key(&syllables), "ㄋㄧˇ ㄏㄠˇ");
+    }
+
+    #[test]
+    fn converted_text_appends_spans_in_order() {
+        let spans = vec![
+            Span {
+                start: 0,
+                end: 2,
+                text: "你好".to_owned(),
+            },
+            Span {
+                start: 2,
+                end: 3,
+                text: "嗎".to_owned(),
+            },
+        ];
+
+        assert_eq!(build_converted_text(&spans), "你好嗎");
     }
 
     fn scheme() -> (tempfile::TempDir, ZhuyinScheme) {
