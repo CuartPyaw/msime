@@ -11,6 +11,14 @@
     "msime-dictionary": {
       "repository": "https://github.com/metasequoiaime/msime-dictionary.git",
       "commit": "62b26f1d8c2c3e86540d1cc78bce110ec93e59e7"
+    },
+    "rime-cantonese": {
+      "repository": "https://github.com/rime/rime-cantonese.git",
+      "commit": "259f0e48bba840c3a2e0d117539e96937f3d89bc"
+    },
+    "libchewing-data": {
+      "repository": "https://github.com/chewing/libchewing-data.git",
+      "commit": "c44e81aef24b06f1509f19e1be54c99812d0c43f"
     }
   },
   "mozc": {
@@ -215,6 +223,36 @@
       "url": "https://raw.githubusercontent.com/libhangul/libhangul/717409ce61524bb3d8426060a384822f21354c62/data/hanja/hanja.txt",
       "sha256": "b1004034589f1357daaea3534a6136f6b5ef825afa8779886b20f0b7908bbe3b",
       "size": 6452537
+    },
+    {
+      "path": "cantonese/jyut6ping3.chars.dict.yaml",
+      "url": "https://raw.githubusercontent.com/rime/rime-cantonese/259f0e48bba840c3a2e0d117539e96937f3d89bc/jyut6ping3.chars.dict.yaml",
+      "sha256": "9b053a594c80eae76545bcdd83239884a49b1ba48b89ca0ab9e8daac79f33013",
+      "size": 345329
+    },
+    {
+      "path": "cantonese/jyut6ping3.words.dict.yaml",
+      "url": "https://raw.githubusercontent.com/rime/rime-cantonese/259f0e48bba840c3a2e0d117539e96937f3d89bc/jyut6ping3.words.dict.yaml",
+      "sha256": "54d174ad2bb997e4a678b7b076b84e4dc5914481b32467cdea3b43e88b7d5474",
+      "size": 2630257
+    },
+    {
+      "path": "cantonese/essay-cantonese.txt",
+      "url": "https://raw.githubusercontent.com/rime/rime-cantonese/259f0e48bba840c3a2e0d117539e96937f3d89bc/essay-cantonese.txt",
+      "sha256": "d08836175f598219f43c2f2f9e12e12711212dbefe08d57b2eddb7a9d9f22a5d",
+      "size": 3416812
+    },
+    {
+      "path": "zhuyin/tsi.csv",
+      "url": "https://raw.githubusercontent.com/chewing/libchewing-data/c44e81aef24b06f1509f19e1be54c99812d0c43f/dict/chewing/tsi.csv",
+      "sha256": "c889a1ac3ae1901b3f8f62748bc41b958f010bf995f7f88dbaf9e3494f341428",
+      "size": 5244487
+    },
+    {
+      "path": "zhuyin/word.csv",
+      "url": "https://raw.githubusercontent.com/chewing/libchewing-data/c44e81aef24b06f1509f19e1be54c99812d0c43f/dict/chewing/word.csv",
+      "sha256": "da55b8e599c1389bc486453554f3410cf9c621d0ffff0ce38855698d26b3892a",
+      "size": 399905
     }
   ]
 }
