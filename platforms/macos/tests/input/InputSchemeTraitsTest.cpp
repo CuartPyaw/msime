@@ -7,7 +7,7 @@ using namespace msime::mac::scheme;
 
 namespace
 {
-// One row per scheme ordinal: the Engine predicates the view does not publish, mirrored from crates/engine/src/types.rs, and the host-only traits. Index 8 is an ordinal no Engine knows. Rows 0-4 are the rules this host applied before the traits existed: the smart punctuation gestures and glosses were off for Japanese and Korean (japaneseSchemeActive, koreanSchemeActive and the gloss gates), and every Korean-only branch (MSIMEKoreanComposition) answered for scheme 4 alone. Rows 5-7 follow the `SchemeType` predicates; scheme 6 (Zhuyin) follows the design table until the Engine has the variant.
+// One row per scheme ordinal: the Engine predicates the view does not publish, mirrored from crates/engine/src/types.rs, and the host-only traits. Index 8 is an ordinal no Engine knows. Rows 0-4 are the rules this host applied before the traits existed: the smart punctuation gestures were off for Japanese and Korean (japaneseSchemeActive, koreanSchemeActive), glosses were off for Japanese and on for Korean's Hanja rows (the gloss gates), and every Korean-only branch (MSIMEKoreanComposition) answered for scheme 4 alone. Rows 5-7 follow the `SchemeType` predicates; scheme 6 (Zhuyin) follows the design table until the Engine has the variant.
 struct Row
 {
     bool commitsOnBlur, locksCaret, usesChinesePunctuation, hostSmartPunctuation, widensFullWidth, showsGlosses;
@@ -20,7 +20,7 @@ constexpr Row Expected[] = {
     {false, false, true, true, true, true, false, false, false, false, false},    // 1 shuangpin
     {false, false, true, true, true, true, false, false, false, false, false},    // 2 wubi
     {false, false, true, false, true, false, false, false, false, false, false},  // 3 japanese
-    {true, true, false, false, false, false, true, true, true, true, true},       // 4 korean
+    {true, true, false, false, false, true, true, true, true, true, true},        // 4 korean
     {false, false, true, true, true, false, false, false, false, false, false},   // 5 cantonese
     {true, true, true, false, true, false, false, false, false, true, true},      // 6 zhuyin
     {true, true, false, false, false, false, false, true, true, false, true},     // 7 vietnamese

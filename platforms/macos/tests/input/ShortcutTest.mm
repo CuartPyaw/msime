@@ -2407,8 +2407,8 @@ static void TestSchemeTraitsFromView(MSIMEAppearancePreferences *appearance) {
     assert(!MSIMECandidateListOpen(@{@"scheme": @4, @"candidates": @[@{@"text": @"韓"}]}));
     assert(!MSIMECandidateListOpen(@{@"scheme": @0, @"candidate_list_open": @NO, @"candidates": @[@{@"text": @"中"}]}));
     // Glosses: the three Chinese schemes that always had them, not temporary Japanese inside them, and none of the schemes after them. A view without a scheme is quanpin.
-    for (NSNumber *scheme in @[@0, @1, @2]) assert(MSIMEViewShowsGlosses(@{@"scheme": scheme}));
-    for (NSNumber *scheme in @[@3, @4, @5, @6, @7, @99]) assert(!MSIMEViewShowsGlosses(@{@"scheme": scheme}));
+    for (NSNumber *scheme in @[@0, @1, @2, @4]) assert(MSIMEViewShowsGlosses(@{@"scheme": scheme}));
+    for (NSNumber *scheme in @[@3, @5, @6, @7, @99]) assert(!MSIMEViewShowsGlosses(@{@"scheme": scheme}));
     assert(!MSIMEViewShowsGlosses(@{@"scheme": @0, @"local_mode": @"temporary_japanese"}));
     assert(MSIMEViewShowsGlosses(@{}));
     // Scheme traits hold only while the scheme's own rules do: dedicated English and the local modes keep theirs.

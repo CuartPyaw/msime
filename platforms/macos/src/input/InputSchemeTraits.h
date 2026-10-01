@@ -59,5 +59,5 @@ constexpr bool WidensFullWidth(int scheme)
 }
 
 // `shows_glosses`: candidates may carry translation glosses.
-constexpr bool ShowsGlosses(int scheme) { return scheme == Quanpin || scheme == Shuangpin || scheme == Wubi; }
+constexpr bool ShowsGlosses(int scheme) { return scheme == Quanpin || scheme == Shuangpin || scheme == Wubi || scheme == Korean; }
 } // namespace msime::mac::scheme

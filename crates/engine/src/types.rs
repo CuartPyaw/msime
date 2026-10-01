@@ -244,15 +244,11 @@ impl SchemeType {
         }
     }
 
-    /// Candidates may carry translation glosses.
+    /// Candidates may carry translation glosses. Korean's are the Hanja rows, glossed and translated like Chinese ones under their 훈음.
     pub const fn shows_glosses(self) -> bool {
         match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
-            Self::JapaneseRomaji
-            | Self::Korean
-            | Self::Vietnamese
-            | Self::Cantonese
-            | Self::Zhuyin => false,
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::Korean => true,
+            Self::JapaneseRomaji | Self::Vietnamese | Self::Cantonese | Self::Zhuyin => false,
         }
     }
 
@@ -1108,7 +1104,7 @@ mod tests {
             (
                 "shows_glosses",
                 SchemeType::shows_glosses,
-                [true, true, true, false, false],
+                [true, true, true, false, true],
             ),
             (
                 "commits_on_blur",
