@@ -602,10 +602,11 @@ CandidateWindow::wrap_measure(const CandidatePresentation &value) {
   };
 }
 void CandidateWindow::take_typing_effect() {
-  const uint32_t packed = TypingEffectSignal::instance().take();
+  const std::optional<uint32_t> packed = TypingEffectSignal::instance().take();
   if (!packed)
     return;
-  effect_ = decode_typing_effect(packed);
+  // A 0 decodes to no combo and no flash, which kills both timers below and clears a count still on the card.
+  effect_ = decode_typing_effect(*packed);
   effect_started_ = GetTickCount64();
   // Windows' "Show animations" switch is its reduced motion setting: with it off the card does not flash, and the combo count still shows.
   BOOL animations = TRUE;

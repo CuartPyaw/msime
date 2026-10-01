@@ -36,6 +36,8 @@ int main() {
     REQUIRE(key_sound_class(key('V', 1)) == 0u);
     // The pipe's own flags are not modifiers.
     REQUIRE(key_sound_class(key(0x20, FanyImePipeFlags::UiLess | PipeMetadata::CandidateActive)) == 1u);
+    REQUIRE(key_sound_class(key('A', PipeMetadata::AutoRepeat)) == 0u);
+    REQUIRE(PipeMetadata::key_modifiers(1u | PipeMetadata::AutoRepeat) == 1u);
     // Chords with Ctrl or Alt are shortcuts, and a bare modifier the TIP forwards to cancel a composition is no key at all.
     REQUIRE(!key_sound_class(key('F', 3)));
     REQUIRE(!key_sound_class(key(0x08, 2)));
@@ -47,9 +49,11 @@ int main() {
     activated.event_type = FanyImePipeEventType::ClientActivated;
     REQUIRE(!key_sound_class(activated));
 
-    // The typing effect takes the same classes, muted (0x200) in a full-screen application, and 4 for a commit.
-    REQUIRE(typing_effect_key_event(2u, true) == 2u);
-    REQUIRE(typing_effect_key_event(0u, false) == 0x200u);
+    // The typing effect takes the same classes, flagged 0x100 for an auto-repeat, muted (0x200) in a full-screen application, and 4 for a commit.
+    REQUIRE(typing_effect_key_event(2u, true, false) == 2u);
+    REQUIRE(typing_effect_key_event(0u, false, false) == 0x200u);
+    REQUIRE(typing_effect_key_event(0u, true, true) == 0x100u);
+    REQUIRE(typing_effect_key_event(3u, false, true) == 0x303u);
     REQUIRE(typing_effect_commit(true) == 4u);
     REQUIRE(typing_effect_commit(false) == 0x204u);
     // Its packed answer: bits 0-15 the combo, bit 16 a new tier, bits 17-19 the style.

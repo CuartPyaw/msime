@@ -3,8 +3,9 @@
 #include <cstdint>
 
 namespace msime::windows {
-// The events msime_client_typing_effect takes beyond the key_sound classes 0-3, and the flag that keeps its tier-up sound quiet.
+// The events msime_client_typing_effect takes beyond the key_sound classes 0-3, the flag for an auto-repeated key (drawn but not counted toward the combo), and the flag that keeps its tier-up sound quiet.
 constexpr uint32_t typing_effect_commit_event = 4u;
+constexpr uint32_t typing_effect_repeat_flag = 0x100u;
 constexpr uint32_t typing_effect_muted_flag = 0x200u;
 // How long one flash takes to fade out, and how long a combo count stays on the card after the last key: the library ends a combo after 3000 ms without a counted key, so the count it last reported is stale from then on.
 constexpr uint32_t typing_effect_flash_millis = 150u;
@@ -18,12 +19,12 @@ struct TypingEffect {
   TypingEffectStyle style = TypingEffectStyle::off;
 };
 
-// The event for a key the Server handled, from its key_sound class. Muted while sounds must stay quiet, so the library neither queues nor reports the tier-up sound.
-inline uint32_t typing_effect_key_event(uint32_t key_class, bool sound_allowed) {
-  return key_class | (sound_allowed ? 0u : typing_effect_muted_flag);
+// The event for a key the Server handled, from its key_sound class. An auto-repeat of a held key is flagged so it does not count toward the combo or reach a new tier. Muted while sounds must stay quiet, so the library neither queues nor reports the tier-up sound.
+inline uint32_t typing_effect_key_event(uint32_t key_class, bool sound_allowed, bool auto_repeat) {
+  return key_class | (auto_repeat ? typing_effect_repeat_flag : 0u) | (sound_allowed ? 0u : typing_effect_muted_flag);
 }
 inline uint32_t typing_effect_commit(bool sound_allowed) {
-  return typing_effect_key_event(typing_effect_commit_event, sound_allowed);
+  return typing_effect_key_event(typing_effect_commit_event, sound_allowed, false);
 }
 
 // Unpacks msime_client_typing_effect's return value: bits 0-15 the combo count, bit 16 a new tier, bits 17-19 the style. A style number this host does not know is drawn as the strongest one it does.

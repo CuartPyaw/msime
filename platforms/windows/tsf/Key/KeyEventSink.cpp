@@ -785,7 +785,7 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
     if (isOpen) // Chinese mode
     {
         // AltGr reads as Ctrl+Alt; a character it types is input, not a shortcut (AltGr+0 is '@' on AZERTY).
-        const UINT shortcutModifiers = Global::CharacterModifiers(CaptureIpcModifiers(), wch);
+        const UINT shortcutModifiers = Global::CharacterModifiers(CaptureIpcModifiers(), wch, *pCodeOut);
         if (!_serverUnavailableFallbackActive && IsCharacterSetInputModeToggle(*pCodeOut, shortcutModifiers))
         {
             if (pKeyState)
@@ -1359,7 +1359,8 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
 
     // AltGr reads as Ctrl+Alt; a character it types is input, not a shortcut (AltGr+0 is '@' on AZERTY).
     const UINT capturedModifiers =
-        Global::CharacterModifiers(modifiersDown ? *modifiersDown : CaptureIpcModifiers(), *classifiedWch);
+        Global::CharacterModifiers(modifiersDown ? *modifiersDown : CaptureIpcModifiers(), *classifiedWch,
+                                   *classifiedCode);
     const bool projectedImeOpen = _deferredKeyProjectionValid
                                       ? _deferredProjectedImeOpen
                                       : _pCompositionProcessorEngine->GetIMEMode(_pThreadMgr, _tfClientId) != FALSE;
@@ -2530,7 +2531,7 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
         Global::Keycode = code;
         Global::wch = wch;
         // The modifiers the key was classified with: an AltGr character goes without Ctrl+Alt, or the Server would cancel it as a shortcut.
-        Global::ModifiersDown = Global::CharacterModifiers(capturedModifiers, wch);
+        Global::ModifiersDown = Global::CharacterModifiers(capturedModifiers, wch, code);
 
         PerfTimer writeShmTimer;
         // Enter is finalized by the in-process TSF path. Reuse the legacy
@@ -2560,7 +2561,8 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
             Global::ModifiersDown |
             (_candidateMode == CANDIDATE_ORIGINAL
                  ? msime::windows::PipeMetadata::CandidateActive
-                 : 0u);
+                 : 0u) |
+            (IsAutoRepeat(lParam) ? msime::windows::PipeMetadata::AutoRepeat : 0u);
         WriteDataToSharedMemory(Global::Keycode, wch, ipcModifiers, nullptr, 0,
                                 localCommitObservation,
                                 hasLocalCommitObservation && !localCommitObservation.empty()

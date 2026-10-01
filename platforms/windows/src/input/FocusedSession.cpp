@@ -547,8 +547,9 @@ std::optional<PendingReply> FocusedSession::configured_key(
         if (allowed)
           (void)session_.key_sound(*key_class);
         // The same keys drive the typing effect and its combo, which keep counting in a full-screen application but stay silent there. The candidate window draws it on the UI thread; this only posts the packed value.
+        const bool auto_repeat = (packet.modifiers_down & PipeMetadata::AutoRepeat) != 0;
         TypingEffectSignal::instance().publish(
-            session_.typing_effect(typing_effect_key_event(*key_class, allowed)));
+            session_.typing_effect(typing_effect_key_event(*key_class, allowed, auto_repeat)));
       }
     }
     attach_online_query(lease, result);
