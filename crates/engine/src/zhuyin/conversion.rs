@@ -66,8 +66,9 @@ pub fn convert(
             continue;
         };
         let score = *score;
-        let mut arrivals = Vec::new();
-        if let Some(pin) = pins.iter().find(|pin| pin.start == start) {
+        let pin = pins.iter().find(|pin| pin.start == start);
+        let mut arrivals = Vec::with_capacity(arrival_capacity(count, start, pin.is_some()));
+        if let Some(pin) = pin {
             arrivals.push((score.add(pin.len(), 0), pin.clone()));
         } else {
             for end in start + 1..=count {
@@ -121,6 +122,14 @@ pub fn convert(
     Ok(spans)
 }
 
+fn arrival_capacity(count: usize, start: usize, pinned: bool) -> usize {
+    if pinned {
+        1
+    } else {
+        count.saturating_sub(start)
+    }
+}
+
 fn build_dictionary_key(syllables: &[&str]) -> String {
     let capacity = syllables
         .iter()
@@ -172,6 +181,13 @@ mod tests {
     #[test]
     fn dictionary_key_joins_syllables_in_order() {
         assert_eq!(build_dictionary_key(&["ㄋㄧˇ", "ㄏㄠˇ"]), "ㄋㄧˇ ㄏㄠˇ");
+    }
+
+    #[test]
+    fn arrivals_capacity_matches_possible_dictionary_ends() {
+        assert_eq!(arrival_capacity(4, 0, false), 4);
+        assert_eq!(arrival_capacity(4, 2, false), 2);
+        assert_eq!(arrival_capacity(4, 2, true), 1);
     }
 
     const ENTRIES: [(&str, &str, i64); 7] = [
