@@ -566,6 +566,11 @@ export {
   type LinuxSetupLine,
   type LinuxSetupStatus,
 } from "./account/linux-setup-page";
+export {
+  MacosInstallPage,
+  nextSimulatedProgress,
+  type MacosInstallClient,
+} from "./account/macos-install-page";
 export { SettingsStartupPage } from "./settings/settings-startup-page";
 export {
   HelpcodeSettingsPage,

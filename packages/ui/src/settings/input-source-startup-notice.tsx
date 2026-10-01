@@ -1,6 +1,6 @@
 export type InputSourceStartupStatus = {
-  /** `login_required`: the input method is installed, but this login session's input source list only picks it up after the user logs in again. */
-  action: "installed" | "updated" | "up_to_date" | "login_required" | "failed";
+  /** `login_required`: the input method is installed, but this login session's input source list only picks it up after the user logs in again. `not_installed`: a first install, left for the user to start from the install window. */
+  action: "installed" | "updated" | "up_to_date" | "not_installed" | "login_required" | "failed";
   /** Whether the input source is in the System Settings list; `null` when that list could not be read. */
   enabled: boolean | null;
   bundled_version: string | null;
@@ -41,27 +41,32 @@ export function InputSourceStartupNotice({
           系统设置 &gt; 键盘 &gt; 文字输入 &gt; 输入法 中点「编辑…」添加水杉输入法。
         </p>
       )}
+      {status.action === "not_installed" && (
+        <p>水杉输入法还没有安装到本机。请在「快捷键」页的「输入法服务」中点「安装 / 更新」。</p>
+      )}
       {status.action === "failed" && (
         <p>
           水杉输入法未能自动安装或更新。请在「快捷键」页的「输入法服务」中点「安装 / 更新」重试。
         </p>
       )}
-      {status.enabled === false && status.action !== "login_required" && (
-        <p>
-          请在 系统设置 &gt; 键盘 &gt; 文字输入 &gt; 输入法 中点「编辑…」添加水杉输入法。
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => {
-              void Promise.resolve(onOpenSettings()).catch(() =>
-                onError("无法打开系统设置，请手动前往 系统设置 > 键盘 > 文字输入 > 输入法。"),
-              );
-            }}
-          >
-            打开键盘设置
-          </button>
-        </p>
-      )}
+      {status.enabled === false &&
+        status.action !== "login_required" &&
+        status.action !== "not_installed" && (
+          <p>
+            请在 系统设置 &gt; 键盘 &gt; 文字输入 &gt; 输入法 中点「编辑…」添加水杉输入法。
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                void Promise.resolve(onOpenSettings()).catch(() =>
+                  onError("无法打开系统设置，请手动前往 系统设置 > 键盘 > 文字输入 > 输入法。"),
+                );
+              }}
+            >
+              打开键盘设置
+            </button>
+          </p>
+        )}
       {status.system_bundles?.length ? (
         <p>
           「/Library/Input
