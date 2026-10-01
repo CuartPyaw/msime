@@ -33,10 +33,29 @@ protocol BackendSessionStorage: Sendable {
   func clear() throws
 }
 struct BackendKeychain: BackendSessionStorage {
-  private var query: [String: Any] {
+  /// On iOS the session lives in the App Group's keychain access group, which the app and the keyboard extension both already hold as an entitlement, so the keyboard can reach the signed-in account (cloud clipboard) without the token ever being written to a file. Other platforms keep the item in the process's default access group, exactly as before.
+  #if os(iOS)
+  static let defaultAccessGroup: String? = "group.app.msime.ios"
+  #else
+  static let defaultAccessGroup: String? = nil
+  #endif
+  private let accessGroup: String?
+  private let service: String
+
+  init(accessGroup: String? = BackendKeychain.defaultAccessGroup, service: String = "app.msime.backend.account") {
+    self.accessGroup = accessGroup
+    self.service = service
+  }
+  /// Matches the item in every access group the process holds, which is what clearing and the pre-group lookup need.
+  private var anyGroupQuery: [String: Any] {
     [kSecClass as String: kSecClassGenericPassword,
-     kSecAttrService as String: "app.msime.backend.account",
+     kSecAttrService as String: service,
      kSecAttrAccount as String: "https://api.msime.app"]
+  }
+  private var query: [String: Any] {
+    var query = anyGroupQuery
+    if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
+    return query
   }
   func load() throws -> BackendSavedSession? {
     var query = query
@@ -44,7 +63,10 @@ struct BackendKeychain: BackendSessionStorage {
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
     let status = SecItemCopyMatching(query as CFDictionary, &result)
-    if status == errSecItemNotFound { return try migrateCommunitySession() }
+    if status == errSecItemNotFound {
+      if let moved = try migrateDefaultGroupSession() { return moved }
+      return try migrateCommunitySession()
+    }
     // A keychain we cannot read is not a session we have. An unsigned simulator build answers
     // -34018 (errSecMissingEntitlement) here, and a device can answer errSecInteractionNotAllowed
     // while locked; treating either as a hard failure took every screen that asks "am I signed in"
@@ -54,6 +76,29 @@ struct BackendKeychain: BackendSessionStorage {
     guard status == errSecSuccess, let data = result as? Data else { return nil }
     do { return try BackendSavedSession.validated(JSONDecoder().decode(BackendSavedSession.self, from: data)) }
     catch { throw BackendAccountClient.Failure(status: 0) }
+  }
+  /// Sessions saved before the App Group access group was used sit in the app's default access group, where the keyboard cannot see them. The app moves such an item into the shared group the first time it reads it; the keyboard finds nothing here and reports signed out until then.
+  private func migrateDefaultGroupSession() throws -> BackendSavedSession? {
+    guard accessGroup != nil else { return nil }
+    var lookup = anyGroupQuery
+    lookup[kSecReturnData as String] = true
+    lookup[kSecReturnAttributes as String] = true
+    lookup[kSecMatchLimit as String] = kSecMatchLimitOne
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(lookup as CFDictionary, &result)
+    // Absent or unreadable: nothing to move, for the same reason `load` treats both as signed out.
+    guard status == errSecSuccess, let found = result as? [String: Any],
+          let data = found[kSecValueData as String] as? Data,
+          let group = found[kSecAttrAccessGroup as String] as? String else { return nil }
+    let session: BackendSavedSession
+    do { session = try BackendSavedSession.validated(JSONDecoder().decode(BackendSavedSession.self, from: data)) }
+    catch { throw BackendAccountClient.Failure(status: 0) }
+    try save(session)
+    // Delete by the old item's own group: a query without one would take the copy just saved with it.
+    var old = anyGroupQuery
+    old[kSecAttrAccessGroup as String] = group
+    if group != accessGroup { SecItemDelete(old as CFDictionary) }
+    return session
   }
   private func migrateCommunitySession() throws -> BackendSavedSession? {
     let legacy: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
@@ -100,7 +145,8 @@ struct BackendKeychain: BackendSessionStorage {
   }
   func clear() throws {
     try clearLegacy()
-    let status = SecItemDelete(query as CFDictionary)
+    // Every group: a sign-out must also remove a copy that predates the shared access group, or the next read would move it back.
+    let status = SecItemDelete(anyGroupQuery as CFDictionary)
     guard status == errSecSuccess || status == errSecItemNotFound else { throw BackendAccountClient.Failure(status: 0) }
   }
 }
