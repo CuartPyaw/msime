@@ -1679,6 +1679,68 @@ const FIXTURE_REFUSALS: &[(&str, &str)] = &[
         "phrase_table-uppercase-key",
         "短语编码 Dh 必须是 1 到 32 个小写字母",
     ),
+    (
+        "wordbook-control-in-meaning",
+        "words.tsv 第 1 行的单词或释义为空，或者某一列太长、含有控制字符",
+    ),
+    (
+        "wordbook-duplicate-word",
+        "words.tsv 里「cache」出现了不止一次",
+    ),
+    ("wordbook-empty-file", "words.tsv 为空或太大"),
+    (
+        "wordbook-empty-meaning",
+        "words.tsv 第 1 行的单词或释义为空，或者某一列太长、含有控制字符",
+    ),
+    (
+        "wordbook-empty-meaning-three-columns",
+        "words.tsv 第 1 行的单词或释义为空，或者某一列太长、含有控制字符",
+    ),
+    (
+        "wordbook-empty-word",
+        "words.tsv 第 1 行的单词或释义为空，或者某一列太长、含有控制字符",
+    ),
+    ("wordbook-four-columns", "words.tsv 第 1 行必须是「单词"),
+    (
+        "wordbook-id-too-long",
+        "单词本的 id 只能由小写字母、数字和 - 组成，首尾不能是 -，且不超过 59 个字符",
+    ),
+    (
+        "wordbook-id-trailing-dash",
+        "单词本的 id 只能由小写字母、数字和 - 组成，首尾不能是 -，且不超过 59 个字符",
+    ),
+    (
+        "wordbook-id-with-dot",
+        "单词本的 id 只能由小写字母、数字和 - 组成，首尾不能是 -，且不超过 59 个字符",
+    ),
+    (
+        "wordbook-id-with-underscore",
+        "单词本的 id 只能由小写字母、数字和 - 组成，首尾不能是 -，且不超过 59 个字符",
+    ),
+    ("wordbook-invalid-utf8", "words.tsv 不是 UTF-8 编码"),
+    (
+        "wordbook-lone-cr",
+        "words.tsv 第 1 行的单词或释义为空，或者某一列太长、含有控制字符",
+    ),
+    (
+        "wordbook-long-meaning",
+        "words.tsv 第 1 行的单词或释义为空，或者某一列太长、含有控制字符",
+    ),
+    (
+        "wordbook-long-phonetic",
+        "words.tsv 第 1 行的单词或释义为空，或者某一列太长、含有控制字符",
+    ),
+    (
+        "wordbook-long-word",
+        "words.tsv 第 1 行的单词或释义为空，或者某一列太长、含有控制字符",
+    ),
+    ("wordbook-missing-file", "缺少数据文件 words.tsv"),
+    ("wordbook-name-too-long", "单词本的 name 不能超过 64 个字符"),
+    ("wordbook-one-column", "words.tsv 第 1 行必须是「单词"),
+    ("wordbook-only-comments", "words.tsv 里没有任何单词"),
+    ("wordbook-txt-extension", "words.txt 的扩展名必须是 .tsv"),
+    ("wordbook-unknown-key", "wordbook 里有未知的键 format"),
+    ("wordbook-wrong-extension", "words.csv 的扩展名必须是 .tsv"),
 ];
 
 /// `group` 下的 fixture，按名字排序；类型前缀还不是已知插件类型的跳过（实现那种类型之前）。
@@ -1862,4 +1924,60 @@ fn helpcode_tables_are_bounded_and_load_as_codes() {
     assert_eq!(codes["你"], "ni");
     assert_eq!(codes["好"], "h");
     assert!(helpcode_pack::load_codes(root.path(), "missing").is_err());
+}
+
+fn installed_wordbook(root: &Path, id: &str, words: &[u8]) {
+    let pack = kind_directory(root, PluginKind::Wordbook).join(id);
+    fs::create_dir_all(&pack).unwrap();
+    fs::write(
+        pack.join(MANIFEST_FILE),
+        format!("schema_version = 1\nkind = 'wordbook'\nid = '{id}'\nname = '词汇'\nversion = '1'\nlicense = 'CC0-1.0'\n[wordbook]\nfile = 'words.tsv'\n"),
+    )
+    .unwrap();
+    fs::write(pack.join("words.tsv"), words).unwrap();
+}
+
+#[test]
+fn wordbooks_are_bounded_and_load_as_books() {
+    let root = tempdir().unwrap();
+    let words = |count: usize| {
+        (0..count)
+            .map(|index| format!("w{index}\tn. 词{index}\n"))
+            .collect::<String>()
+            .into_bytes()
+    };
+    installed_wordbook(root.path(), "full", &words(20_000));
+    installed_wordbook(root.path(), "over", &words(20_001));
+    let full = load_package(root.path(), None, PluginKind::Wordbook, "full").unwrap();
+    let json = serde_json::to_value(&full).unwrap();
+    assert_eq!(json["kind"], "wordbook");
+    assert_eq!(json["word_count"], 20_000);
+    assert_eq!(
+        json["first_words"],
+        serde_json::json!(["w0", "w1", "w2", "w3", "w4"])
+    );
+    assert_eq!(
+        reason(root.path(), PluginKind::Wordbook, "over"),
+        "words.tsv 的单词数超过 20000"
+    );
+
+    // 4 MiB 以内可以，多一个字节就不行。
+    let mut large = b"#".to_vec();
+    large.resize(wordbook_pack::MAX_FILE_BYTES as usize - 8, b'x');
+    large.extend_from_slice(b"\nab\tn. c");
+    assert_eq!(large.len() as u64, wordbook_pack::MAX_FILE_BYTES);
+    installed_wordbook(root.path(), "large", &large);
+    assert!(load_package(root.path(), None, PluginKind::Wordbook, "large").is_ok());
+    large.push(b'\n');
+    installed_wordbook(root.path(), "larger", &large);
+    assert_eq!(
+        reason(root.path(), PluginKind::Wordbook, "larger"),
+        "words.tsv 为空或太大"
+    );
+
+    let book = wordbook_pack::load_book(root.path(), "pack-full").unwrap();
+    assert_eq!(book.id, "pack-full");
+    assert!(book.is_valid());
+    assert!(wordbook_pack::load_book(root.path(), "pack-missing").is_none());
+    assert!(wordbook_pack::load_book(root.path(), "full").is_none());
 }

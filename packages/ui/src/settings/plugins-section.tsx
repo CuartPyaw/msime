@@ -52,6 +52,10 @@ export interface PluginsSectionProps {
   quickPhraseMode?: boolean;
   /** 宿主使用辅助码（设置里显示辅助码这一组）；辅助码表包只在这时标记和报告缺失。 */
   helpcode?: boolean;
+  /** 宿主的背单词书目列出单词本插件（`HostCapabilities.wordbook_packs`）。 */
+  wordbookPacks?: boolean;
+  /** 在背单词里选中一本书并打开背单词；没有背单词的宿主为空。 */
+  onOpenWordbook?: (book: string) => void;
   /** 打开设置里的另一页（输入、背单词）；没有时详情里不显示这些链接。 */
   onOpenPage?: (page: PluginSettingsPage) => void;
   /** Loads the catalog and the name list each time this turns true, so a pack copied in by hand shows up on the next visit. Turning false also closes any open view, so the next visit starts at the list. */
@@ -88,6 +92,8 @@ export function PluginsSection({
   effectPacks = false,
   quickPhraseMode = true,
   helpcode = false,
+  wordbookPacks = false,
+  onOpenWordbook,
   onOpenPage,
   active,
   onChange,
@@ -324,6 +330,8 @@ export function PluginsSection({
             effectPacks={effectPacksDrawn}
             quickPhraseMode={quickPhraseMode}
             helpcode={helpcode}
+            wordbookPacks={wordbookPacks}
+            onOpenWordbook={onOpenWordbook}
             working={working}
             onChange={onChange}
             onCommandTable={setCommandTable}

@@ -7362,6 +7362,44 @@ fn only_a_resource_mismatch_counts_as_outdated() {
         assert_eq!(mapped.to_string(), text);
     }
 }
+/// 带 `plugins` 的背单词请求把单词本插件列成 `pack-<插件 id>` 词书；相对路径被拒绝；不带时看不到它。
+#[test]
+fn vocabulary_boundary_lists_wordbook_packs_from_the_plugins_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let pack = directory.path().join("plugins/wordbook/cs-words");
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        "schema_version = 1\nkind = \"wordbook\"\nid = \"cs-words\"\nname = \"计算机词汇\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n[wordbook]\nfile = \"words.tsv\"\n",
+    )
+    .unwrap();
+    std::fs::write(pack.join("words.tsv"), "cache\tn. 缓存\n").unwrap();
+    let call = |plugins: Option<Value>| {
+        let mut request = json!({
+            "directory": directory.path(),
+            "resources": directory.path(),
+            "day": "2026-09-23",
+            "action": {"operation": "load"},
+        });
+        if let Some(plugins) = plugins {
+            request["plugins"] = plugins;
+        }
+        let request = serde_json::to_vec(&request).unwrap();
+        read(unsafe { msime_client_vocabulary_review(request.as_ptr(), request.len()) })
+    };
+    let listed = call(Some(json!(directory.path().join("plugins"))));
+    assert_eq!(listed["ok"], true, "{listed}");
+    let books = listed["value"]["wordbooks"].as_array().unwrap();
+    assert_eq!(books.len(), 1);
+    assert_eq!(books[0]["id"], "pack-cs-words");
+    assert_eq!(books[0]["pack"], true);
+    assert_eq!(call(Some(json!("plugins")))["ok"], false);
+    assert_eq!(
+        call(None)["value"]["wordbooks"].as_array().unwrap().len(),
+        0
+    );
+}
+
 #[test]
 fn vocabulary_boundary_imports_reviews_and_reports_one_whole_status() {
     let directory = tempfile::tempdir().unwrap();

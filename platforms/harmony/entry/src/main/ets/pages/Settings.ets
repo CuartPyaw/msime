@@ -258,6 +258,8 @@ interface VocabularyRequest {
   directory: string;
   day: string;
   action: VocabularyAction;
+  /** 插件目录：其中的单词本插件列进书目。 */
+  plugins: string;
 }
 
 interface VocabularyAction {
@@ -1427,6 +1429,7 @@ class SettingsBridge {
       value['music'] = projection.music;
       value['plugin_triggers'] = projection.pluginTriggers;
       value['typing_effects'] = projection.typingEffects;
+      value['wordbook_packs'] = projection.wordbookPacks;
       if (release !== null) {
         value['os_version'] = release;
       }
@@ -1556,6 +1559,7 @@ class SettingsBridge {
         directory: this.stateDirectory,
         day: `${now.getFullYear()}-${month}-${date}`,
         action: action,
+        plugins: `${this.stateDirectory}/plugins`,
       };
       return client.vocabularyReview(JSON.stringify(request));
     } catch (error) {

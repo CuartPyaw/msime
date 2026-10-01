@@ -479,8 +479,12 @@ struct DiagnosticLogState(PathBuf);
 ///
 /// The directory rather than the stores themselves: an imported book is written through one and
 /// read back through the other, and holding the path means both are constructed from the same
-/// place every time instead of two handles that could be pointed at different roots.
-struct VocabularyState(std::path::PathBuf, std::path::PathBuf);
+/// place every time instead of two handles that could be pointed at different roots. 第三项是插件目录：桌面宿主把其中的单词本插件列进书目，没有插件目录的平台为 `None`。
+struct VocabularyState(
+    std::path::PathBuf,
+    std::path::PathBuf,
+    Option<std::path::PathBuf>,
+);
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -4740,6 +4744,9 @@ pub fn run() {
                 app.path()
                     .resource_dir()
                     .unwrap_or_else(|_| directory.clone()),
+                // 与 `desktop_plugins::PluginsState` 同一个插件目录。
+                cfg!(any(target_os = "linux", target_os = "windows", target_os = "macos"))
+                    .then(|| directory.join("plugins")),
             ));
             app.manage(SkinDirectoryState(directory.join("skins")));
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]

@@ -21,8 +21,19 @@ export function PluginsSettingsPage({ hidden = false }: { hidden?: boolean }) {
     showTypingEffectStyles,
     showTypingEffectPacks,
     showHelpcode,
+    showWordbookPacks,
     selectPage,
   } = useSettingsForm();
+  const vocabulary = client.vocabularyReview;
+  // 「去背单词」：先在背单词里选中这本书，再打开背单词页。
+  const openWordbook = vocabulary
+    ? (book: string) =>
+        void vocabulary
+          .load()
+          .then((status) => vocabulary.setSettings({ ...status.settings, wordbook: book }))
+          .then(() => selectPage("vocabulary"))
+          .catch(() => setError("没能打开背单词，请重试。"))
+    : undefined;
   const { onPreferencesChange } = createSettingsDraftActions({ setDraft });
   return (
     <fieldset disabled={busy} hidden={page !== "plugins" || hidden} aria-label="插件">
@@ -38,6 +49,8 @@ export function PluginsSettingsPage({ hidden = false }: { hidden?: boolean }) {
           effectPacks={showTypingEffectPacks}
           quickPhraseMode={draft.local_modes?.quick_phrase ?? true}
           helpcode={showHelpcode}
+          wordbookPacks={showWordbookPacks}
+          onOpenWordbook={openWordbook}
           onOpenPage={selectPage}
           active={page === "plugins" && !hidden}
           onChange={(plugins) => onPreferencesChange({ plugins })}

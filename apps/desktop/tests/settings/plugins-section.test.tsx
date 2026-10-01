@@ -1394,3 +1394,33 @@ test("a helpcode pack shows its preview and is used per scheme", async () => {
     ),
   ).toEqual({ ...defaultPluginPreferences, helpcode_pack_shuangpin: "b" });
 });
+
+test("a wordbook pack previews its words and opens 背单词 on its book", async () => {
+  const client = fakeClient({
+    catalog: vi.fn(async () => ({
+      packages: [
+        ...catalog.packages,
+        pack({
+          id: "cs-words",
+          kind: "wordbook",
+          name: "计算机词汇",
+          file: "words.tsv",
+          word_count: 300,
+          first_words: ["algorithm", "cache", "compiler", "kernel", "thread"],
+        }),
+      ],
+      issues: [],
+    })),
+  });
+  const onOpenWordbook = vi.fn();
+  renderSection({ client, wordbookPacks: true, onOpenWordbook });
+  await openPack("计算机词汇");
+  expect(screen.getByText("单词本")).toBeTruthy();
+  expect(screen.getByText("单词（300）")).toBeTruthy();
+  expect(screen.getByText("thread")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "去背单词" }));
+  expect(onOpenWordbook).toHaveBeenCalledWith("pack-cs-words");
+  expect(withoutRemovedPack(defaultPluginPreferences, "wordbook", "cs-words")).toBe(
+    defaultPluginPreferences,
+  );
+});

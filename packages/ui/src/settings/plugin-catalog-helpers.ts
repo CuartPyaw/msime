@@ -9,6 +9,7 @@ export const kindLabels: Record<PluginKind, string> = {
   effect: "特效包",
   phrase_table: "短语表",
   helpcode: "辅助码表",
+  wordbook: "单词本",
 };
 
 /** 按键旋律（`mode = "sequence"` 的音效包）的类型显示名。 */
@@ -29,6 +30,7 @@ export const kindOrder: readonly PluginKind[] = [
   "command_table",
   "phrase_table",
   "helpcode",
+  "wordbook",
 ];
 
 export const effectStyleOptions: readonly { value: EffectStyle; label: string }[] = [
@@ -139,8 +141,19 @@ export function packMarker(
     }
     case "helpcode":
       return helpcodePackUses(preferences, pack.id);
+    // 单词本没有偏好：选中哪本书在背单词里。
+    case "wordbook":
+      return null;
   }
 }
+
+/** 单词本插件在背单词里的词书 id：`client-core::plugins::wordbook_pack::book_id`。 */
+export function wordbookPackBookId(id: string): string {
+  return `pack-${id}`;
+}
+
+/** 单词本详情预览的单词数。 */
+export const WORDBOOK_PREVIEW_WORDS = 5;
 
 /** 辅助码表包用在哪个方案上：「用于全拼」「用于双拼」「用于全拼和双拼」，都没用时为 null。 */
 export function helpcodePackUses(preferences: PluginPreferences, id: string): string | null {

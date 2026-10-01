@@ -7,7 +7,8 @@ export type PluginKind =
   | "command_table"
   | "effect"
   | "phrase_table"
-  | "helpcode";
+  | "helpcode"
+  | "wordbook";
 
 export type PluginCommand = { trigger: string; title: string; template: string };
 
@@ -40,6 +41,10 @@ export type PluginPackage = {
   table?: string;
   entries?: number;
   preview?: PluginHelpcodeEntry[];
+  /** 单词本：词表文件名、单词数和前几个单词。 */
+  file?: string;
+  word_count?: number;
+  first_words?: string[];
   /** Effect packs: `client-core::plugins::effect_pack::EffectPack`, never `off`. */
   style?: EffectStyle;
   intensity?: number;

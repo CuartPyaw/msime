@@ -1471,6 +1471,8 @@ export interface HostCapabilities {
   music?: boolean;
   /** The host draws the typing effects and the combo count `msime_client_typing_effect` answers with. Absent on a host older than the field. */
   typing_effects?: boolean;
+  /** 背单词书目列出单词本插件（`pack-<插件 id>` 词书）。旧宿主没有这个字段。 */
+  wordbook_packs?: boolean;
   /** The input schemes this host offers; the others are shown disabled. Absent on a host older than the field, which offers 全拼, 双拼, 五笔, 日文 and 韩文. */
   input_schemes?: InputScheme[];
 }
@@ -2089,6 +2091,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showTypingEffects,
     showTypingEffectStyles,
     showTypingEffectPacks,
+    showWordbookPacks,
   } = capabilities;
   const {
     fullwidthChord,
@@ -2638,6 +2641,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showTypingEffects,
     showTypingEffectStyles,
     showTypingEffectPacks,
+    showWordbookPacks,
     snapshot,
     draft,
     setDraft,

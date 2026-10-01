@@ -79,6 +79,8 @@ export function settingsCapabilities({
   const showTypingEffectStyles = showTypingEffects && !linux;
   // An effect pack only sets a drawn style's parameters, so it is offered wherever a style is.
   const showTypingEffectPacks = showTypingEffectStyles;
+  // 背单词书目列出单词本插件的宿主；旧宿主不发这个字段。
+  const showWordbookPacks = host?.wordbook_packs === true;
   return {
     nativeVoicePlatform,
     showModeScope,
@@ -121,5 +123,6 @@ export function settingsCapabilities({
     showTypingEffects,
     showTypingEffectStyles,
     showTypingEffectPacks,
+    showWordbookPacks,
   } as const;
 }

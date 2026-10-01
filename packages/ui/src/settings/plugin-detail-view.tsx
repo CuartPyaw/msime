@@ -18,6 +18,8 @@ import {
   missingTitle,
   packKindLabel,
   PHRASE_PREVIEW_ROWS,
+  WORDBOOK_PREVIEW_WORDS,
+  wordbookPackBookId,
   type MissingSelection,
 } from "./plugin-catalog-helpers";
 import { PluginViewHeader } from "./plugin-view-header";
@@ -53,6 +55,10 @@ export interface PluginDetailViewProps {
   quickPhraseMode: boolean;
   /** 宿主使用辅助码（设置里有辅助码这一组）。 */
   helpcode: boolean;
+  /** 宿主的背单词书目列出单词本插件。 */
+  wordbookPacks: boolean;
+  /** 在背单词里选中这本书并打开背单词；没有背单词的宿主为空。 */
+  onOpenWordbook?: (book: string) => void;
   working: boolean;
   onChange: (preferences: PluginPreferences) => void;
   onCommandTable: (id: string, enabled: boolean) => void;
@@ -73,6 +79,8 @@ export function PluginDetailView({
   effectPacks,
   quickPhraseMode,
   helpcode,
+  wordbookPacks,
+  onOpenWordbook,
   working,
   onChange,
   onCommandTable,
@@ -104,6 +112,8 @@ export function PluginDetailView({
           effectPacks={effectPacks}
           quickPhraseMode={quickPhraseMode}
           helpcode={helpcode}
+          wordbookPacks={wordbookPacks}
+          onOpenWordbook={onOpenWordbook}
           onSelect={select}
           onChange={onChange}
           onCommandTable={onCommandTable}
@@ -132,6 +142,19 @@ export function PluginDetailView({
 
 /** 各类型自己的内容：音乐包的曲目、指令表的指令、特效包的样式和参数、短语表的行数与前几行、辅助码表的条数与前几条。 */
 function PackContent({ pack }: { pack: PluginPackage }) {
+  if (pack.kind === "wordbook") {
+    const words = (pack.first_words ?? []).slice(0, WORDBOOK_PREVIEW_WORDS);
+    return (
+      <GroupList title={`单词（${pack.word_count ?? words.length}）`}>
+        {words.map((word) => (
+          <Row key={word} title={word} />
+        ))}
+        {(pack.word_count ?? 0) > words.length && (
+          <p className={settings.groupNote}>只显示前 {words.length} 个单词。</p>
+        )}
+      </GroupList>
+    );
+  }
   if (pack.kind === "helpcode") {
     const preview = pack.preview ?? [];
     return (
@@ -223,6 +246,8 @@ function PackActions({
   effectPacks,
   quickPhraseMode,
   helpcode,
+  wordbookPacks,
+  onOpenWordbook,
   onSelect,
   onChange,
   onCommandTable,
@@ -237,6 +262,8 @@ function PackActions({
   effectPacks: boolean;
   quickPhraseMode: boolean;
   helpcode: boolean;
+  wordbookPacks: boolean;
+  onOpenWordbook?: (book: string) => void;
   onSelect: () => void;
   onChange: (preferences: PluginPreferences) => void;
   onCommandTable: (id: string, enabled: boolean) => void;
@@ -341,6 +368,21 @@ function PackActions({
             onChange={(enabled) => onCommandTable(pack.id, enabled)}
           />
         </Row>
+      );
+    }
+    case "wordbook": {
+      if (!wordbookPacks || !onOpenWordbook)
+        return <ActionBlock note="这台设备的背单词不列出单词本插件。" />;
+      return (
+        <ActionBlock note="这本书出现在背单词的词书里。卸载插件后复习进度仍会保留，重新安装后可以接着复习。">
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => onOpenWordbook(wordbookPackBookId(pack.id))}
+          >
+            去背单词
+          </button>
+        </ActionBlock>
       );
     }
     case "helpcode": {

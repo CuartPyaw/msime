@@ -677,9 +677,9 @@ group("bounds and deduplicates asynchronous online AI candidates", () => {
     "a failed current online request can be retried",
   );
   check(
-    !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, "new", 4, 4, 7, 7)
-      && !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, signature, 3, 4, 7, 7)
-      && !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 8, 7),
+    !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, "new", 4, 4, 7, 7) &&
+      !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, signature, 3, 4, 7, 7) &&
+      !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 8, 7),
     "a stale online failure cannot clear a newer request",
   );
   const response = JSON.stringify({
@@ -755,9 +755,9 @@ group("keeps translation provider policy bounded and credential-free in signatur
     "a failed current translation request can be retried",
   );
   check(
-    !TranslationPolicy.shouldReleaseAfterFailure(signature, "new", 4, 4, 7, 7)
-      && !TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 3, 4, 7, 7)
-      && !TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 8, 7),
+    !TranslationPolicy.shouldReleaseAfterFailure(signature, "new", 4, 4, 7, 7) &&
+      !TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 3, 4, 7, 7) &&
+      !TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 8, 7),
     "a stale translation failure cannot clear a newer request",
   );
   check(
@@ -765,8 +765,8 @@ group("keeps translation provider policy bounded and credential-free in signatur
     "offline rows do not hide a failed online provider",
   );
   check(
-    !TranslationPolicy.shouldReleaseAfterProviderFailure("tencent", true, true)
-      && !TranslationPolicy.shouldReleaseAfterProviderFailure("", false, true),
+    !TranslationPolicy.shouldReleaseAfterProviderFailure("tencent", true, true) &&
+      !TranslationPolicy.shouldReleaseAfterProviderFailure("", false, true),
     "complete or disabled providers keep a usable translation signature",
   );
 });
@@ -944,6 +944,10 @@ group("projects the same form factor into every settings capability", () => {
   check(
     desktop.keySound && desktop.music && desktop.pluginTriggers && desktop.typingEffects,
     "2-in-1 settings offer key sounds, background music, the V, / and @ modes and the typing effects",
+  );
+  check(
+    desktop.wordbookPacks && !phone.wordbookPacks,
+    "only the 2-in-1, where packs are installed, lists wordbook packs in 背单词",
   );
   check(
     !phone.keySound && !phone.music && !phone.pluginTriggers && !phone.typingEffects,

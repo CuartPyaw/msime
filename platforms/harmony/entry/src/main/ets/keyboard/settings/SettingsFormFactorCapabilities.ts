@@ -30,6 +30,8 @@ export interface SettingsFormFactorProjection {
   pluginTriggers: boolean;
   /** The typing effect and the combo counter: a 2in1 flashes its candidate card, shows the combo and plays the tier-up sound for a hardware keyboard; a phone draws none. */
   typingEffects: boolean;
+  /** 背单词书目列出单词本插件：设置页把插件目录交给背单词入口；插件只能在 2in1 的插件页安装，所以只在 2in1 声明。 */
+  wordbookPacks: boolean;
 }
 
 /** Keep the shared settings page aligned with the keyboard's actual device form factor. */
@@ -57,6 +59,7 @@ export class SettingsFormFactorCapabilities {
       music: desktop,
       pluginTriggers: desktop,
       typingEffects: desktop,
+      wordbookPacks: desktop,
     };
   }
 }

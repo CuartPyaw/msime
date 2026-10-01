@@ -16,6 +16,7 @@ pub mod mentions;
 pub mod music_pack;
 pub mod phrase_table;
 pub mod sound_pack;
+pub mod wordbook_pack;
 
 pub use failure::{remove_named, PluginFailure};
 pub use import::{import, validate};
@@ -87,16 +88,19 @@ pub enum PluginKind {
     PhraseTable,
     /// 辅助码表：一个 `.txt` 数据文件，替换全拼或双拼方案的辅助码。
     Helpcode,
+    /// 单词本：一个 `.tsv` 数据文件，作为一本词书出现在背单词里。
+    Wordbook,
 }
 
 impl PluginKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Sound,
         Self::Music,
         Self::CommandTable,
         Self::Effect,
         Self::PhraseTable,
         Self::Helpcode,
+        Self::Wordbook,
     ];
 
     /// The manifest's `kind` and the directory under the plugins root.
@@ -108,6 +112,7 @@ impl PluginKind {
             Self::Effect => "effect",
             Self::PhraseTable => "phrase_table",
             Self::Helpcode => "helpcode",
+            Self::Wordbook => "wordbook",
         }
     }
 
@@ -124,7 +129,8 @@ pub fn is_builtin(kind: PluginKind, id: &str) -> bool {
         PluginKind::CommandTable
         | PluginKind::Effect
         | PluginKind::PhraseTable
-        | PluginKind::Helpcode => false,
+        | PluginKind::Helpcode
+        | PluginKind::Wordbook => false,
     }
 }
 
@@ -188,6 +194,7 @@ impl PluginSummary {
             PluginContent::Effect(_) => PluginKind::Effect,
             PluginContent::PhraseTable(_) => PluginKind::PhraseTable,
             PluginContent::Helpcode(_) => PluginKind::Helpcode,
+            PluginContent::Wordbook(_) => PluginKind::Wordbook,
         }
     }
 }
@@ -201,6 +208,7 @@ pub enum PluginContent {
     Effect(effect_pack::EffectPack),
     PhraseTable(phrase_table::PhraseTable),
     Helpcode(helpcode_pack::HelpcodePack),
+    Wordbook(wordbook_pack::WordbookPack),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -298,6 +306,17 @@ fn scan_builtin(directory: &Path, catalog: &mut PluginCatalog) {
             }),
         }
     }
+}
+
+/// `root` 下某一类型能载入的已安装包，载不入的略过：只要一种类型时不必读整个插件目录。
+pub(crate) fn scan_kind_packages(root: &Path, kind: PluginKind) -> Vec<PluginSummary> {
+    let directory = kind_directory(root, kind);
+    if !fs::symlink_metadata(&directory).is_ok_and(|metadata| metadata.is_dir()) {
+        return Vec::new();
+    }
+    let mut catalog = PluginCatalog::default();
+    scan_kind(&directory, kind, false, &mut catalog);
+    catalog.packages
 }
 
 fn scan_kind(directory: &Path, kind: PluginKind, builtin: bool, catalog: &mut PluginCatalog) {
@@ -440,6 +459,7 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
         PluginKind::Effect => &effect_pack::MANIFEST_KEYS,
         PluginKind::PhraseTable => &phrase_table::MANIFEST_KEYS,
         PluginKind::Helpcode => &helpcode_pack::MANIFEST_KEYS,
+        PluginKind::Wordbook => &wordbook_pack::MANIFEST_KEYS,
     };
     if let Some(key) = table
         .keys()
@@ -492,11 +512,32 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
                 AudioLimits::NONE,
             )
         }
+        PluginKind::Wordbook => {
+            wordbook_pack::check_identity(&id, &name)?;
+            let file = wordbook_pack::parse(table)?;
+            data.push(DataFile {
+                name: file.clone(),
+                max_bytes: wordbook_pack::MAX_FILE_BYTES,
+                extension: wordbook_pack::FILE_EXTENSION,
+            });
+            (
+                PluginContent::Wordbook(wordbook_pack::WordbookPack {
+                    file,
+                    word_count: 0,
+                    first_words: Vec::new(),
+                }),
+                Vec::new(),
+                AudioLimits::NONE,
+            )
+        }
     };
     check_files(directory, &files, &audio, limits, &data)?;
     let content = match content {
         PluginContent::Helpcode(pack) => {
             PluginContent::Helpcode(helpcode_pack::read(directory, &pack.table)?)
+        }
+        PluginContent::Wordbook(pack) => {
+            PluginContent::Wordbook(wordbook_pack::read(directory, &pack.file)?)
         }
         other => other,
     };

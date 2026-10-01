@@ -295,6 +295,9 @@ pub struct HostCapabilities {
     /// every press fails. The same rule the other optional capabilities follow.
     #[serde(default)]
     pub vocabulary_review: bool,
+    /// 背单词书目里列出单词本插件（`pack-<插件 id>` 词书）：宿主把插件目录交给背单词的入口。缺省 false，旧宿主不会让插件详情里的「去背单词」指向一本它列不出来的书。
+    #[serde(default)]
+    pub wordbook_packs: bool,
     /// The host plays the sound packs in `plugins`: a sample per key class, the melody, the commit sound and the achievement jingle. Only an input process that sees the keys can, and only where it has somewhere to play them; a host without the player keeps the settings but offers no switches for them.
     #[serde(default)]
     pub key_sound: bool,
@@ -598,6 +601,8 @@ impl HostCapabilities {
             // no platform here that can and one that cannot. The flag exists for the version
             // skew: a host binary older than the entry point sends no field and gets `false`.
             vocabulary_review: true,
+            // 桌面宿主的背单词由 Tauri 层传入插件目录；HarmonyOS 在自己的设置投影里按形态打开；Android 和 iOS 不传插件目录。
+            wordbook_packs: platform.is_desktop(),
             // The three desktop hosts play the packs, route V, / and @ by the Engine's spelling symbols and stream music while they are the active input method. HarmonyOS claims key sounds, music and the triggers per form factor in its own settings projection (2in1 only); the phone and tablet hosts wire none of them. A switch with nothing behind it reads as a setting being ignored, so each host flips here only in the change that wires it.
             key_sound: platform.is_desktop(),
             plugin_triggers: platform.is_desktop(),
