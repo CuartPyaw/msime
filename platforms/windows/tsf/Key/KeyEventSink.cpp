@@ -14,6 +14,7 @@
 #include "PassthroughStatistics.h"
 #include "PassthroughStatisticsQueue.h"
 #include "FanyDefines.h"
+#include "AltGrKeyPolicy.h"
 #include "FanyUtils.h"
 #include "FanyLog.h"
 #include "../Utils/PerfTimer.h"
@@ -783,7 +784,8 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
 
     if (isOpen) // Chinese mode
     {
-        const UINT shortcutModifiers = CaptureIpcModifiers();
+        // AltGr reads as Ctrl+Alt; a character it types is input, not a shortcut (AltGr+0 is '@' on AZERTY).
+        const UINT shortcutModifiers = Global::CharacterModifiers(CaptureIpcModifiers(), wch);
         if (!_serverUnavailableFallbackActive && IsCharacterSetInputModeToggle(*pCodeOut, shortcutModifiers))
         {
             if (pKeyState)
@@ -1355,7 +1357,9 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
     keyState->Category = CATEGORY_NONE;
     keyState->Function = FUNCTION_NONE;
 
-    const UINT capturedModifiers = modifiersDown ? *modifiersDown : CaptureIpcModifiers();
+    // AltGr reads as Ctrl+Alt; a character it types is input, not a shortcut (AltGr+0 is '@' on AZERTY).
+    const UINT capturedModifiers =
+        Global::CharacterModifiers(modifiersDown ? *modifiersDown : CaptureIpcModifiers(), *classifiedWch);
     const bool projectedImeOpen = _deferredKeyProjectionValid
                                       ? _deferredProjectedImeOpen
                                       : _pCompositionProcessorEngine->GetIMEMode(_pThreadMgr, _tfClientId) != FALSE;
@@ -2525,7 +2529,8 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
 
         Global::Keycode = code;
         Global::wch = wch;
-        Global::ModifiersDown = capturedModifiers;
+        // The modifiers the key was classified with: an AltGr character goes without Ctrl+Alt, or the Server would cancel it as a shortcut.
+        Global::ModifiersDown = Global::CharacterModifiers(capturedModifiers, wch);
 
         PerfTimer writeShmTimer;
         // Enter is finalized by the in-process TSF path. Reuse the legacy
