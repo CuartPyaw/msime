@@ -296,10 +296,13 @@ pub fn is_complete_pinyin_input(pinyin: &str) -> bool {
 
 /// The first letter of each non-empty segment (QQ:245-256).
 pub fn segments_to_jianpin(segments: &[String]) -> String {
-    segments
-        .iter()
-        .filter_map(|segment| segment.chars().next())
-        .collect()
+    let mut result = String::with_capacity(segments.len());
+    for segment in segments {
+        if let Some(initial) = segment.chars().next() {
+            result.push(initial);
+        }
+    }
+    result
 }
 
 #[cfg(test)]
