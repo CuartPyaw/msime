@@ -3537,6 +3537,48 @@ fn a_digit_that_already_committed_is_not_also_a_selection() {
     assert!(digit.view.candidates.is_empty());
 }
 
+/// A digit the scheme spells with is never a page selection, even when the Engine lets it go with candidates showing; outside a local mode the spelling symbols are the scheme's own keys (a Zhuyin tone or phonetic key, a VNI mark).
+#[test]
+fn a_spelling_digit_the_engine_let_go_is_not_a_selection() {
+    let mut runtime = runtime();
+    runtime.focus(true).unwrap();
+    runtime.engine.spelling_symbols = "0123456789".into();
+    for value in *b"ab" {
+        runtime
+            .dispatch(Action::Character {
+                value,
+                shift: false,
+            })
+            .unwrap();
+    }
+    assert!(!runtime.view().candidates.is_empty());
+    let digit = runtime
+        .dispatch(Action::Character {
+            value: b'2',
+            shift: false,
+        })
+        .unwrap();
+    assert!(!digit.handled);
+    assert!(digit.commit.is_none());
+    assert_eq!(digit.view.editing_text, "ab");
+
+    // The same digit picks the row once the scheme no longer spells with it; the next key's snapshot is where the runtime learns that.
+    runtime.engine.spelling_symbols.clear();
+    runtime
+        .dispatch(Action::Character {
+            value: b'c',
+            shift: false,
+        })
+        .unwrap();
+    let picked = runtime
+        .dispatch(Action::Character {
+            value: b'2',
+            shift: false,
+        })
+        .unwrap();
+    assert_eq!(picked.commit.as_deref(), Some("candidate-1"));
+}
+
 fn generated_mode_runtime(directory: &std::path::Path) -> Runtime {
     let mut options = real_engine_options(directory);
     options.local_expression = true;
@@ -5461,7 +5503,7 @@ fn zhuyin_enter_commits_the_conversion() {
     assert_eq!(enter.view.spelling_symbols, "125890,./;-");
 }
 
-/// Space is a spelling key while the Engine lists it: with a syllable pending it is the first tone, and with none pending it opens the list, whether the host sends it as a character or as its Space command. It never takes a candidate on its own.
+/// Space is a spelling key while the Engine lists it: with a syllable pending it is the first tone, and with none pending it opens the list, whether the host sends it as a character or as its Space command. Once the list is open it takes the highlighted row on either route, and it never commits on its own.
 #[test]
 fn zhuyin_space_is_the_first_tone_and_opens_the_list() {
     let directory = tempfile::tempdir().unwrap();
@@ -5493,7 +5535,7 @@ fn zhuyin_space_is_the_first_tone_and_opens_the_list() {
 
         // With the list open Space takes the highlighted row into the conversion and commits nothing.
         runtime.dispatch(Action::NextCandidate).unwrap();
-        let picked = runtime.dispatch(Action::SelectHighlighted).unwrap();
+        let picked = runtime.dispatch(space()).unwrap();
         assert!(picked.handled && picked.commit.is_none(), "{route}");
         assert!(!picked.view.candidate_list_open, "{route}");
         assert!(picked.view.candidates.is_empty(), "{route}");
@@ -5535,15 +5577,21 @@ fn zhuyin_list_digits_select_without_commit_and_escape_steps_back() {
     assert!(zero.view.candidates.is_empty());
     assert_eq!(zero.view.preedit, "臺ㄢ");
 
-    // A digit past the end of the open page is swallowed and leaves the list as it was.
+    // Space on a lone ㄢ is not a syllable: it is consumed and changes nothing.
     let toned = runtime.dispatch(Action::SelectHighlighted).unwrap();
     assert!(toned.handled && toned.commit.is_none());
-    runtime
+    assert_eq!(toned.view.preedit, "臺ㄢ");
+
+    // A digit past the end of the open page is swallowed and leaves the list as it was.
+    let reopened = runtime
         .dispatch(Action::Command(Command::ConvertHanja))
         .unwrap();
-    assert!(runtime.view().candidate_list_open);
+    assert!(reopened.view.candidate_list_open);
     let beyond = character(&mut runtime, b'9');
     assert!(beyond.handled && beyond.commit.is_none());
+    assert!(beyond.view.candidate_list_open);
+    assert_eq!(texts(&beyond.view), texts(&reopened.view));
+    assert_eq!(beyond.view.preedit, reopened.view.preedit);
 
     let closed = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
     assert!(closed.handled && closed.commit.is_none());
