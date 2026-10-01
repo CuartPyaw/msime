@@ -96,8 +96,7 @@ OSStatus MSIMERegisterAndEnableInputSources(NSURL *bundleURL, NSString *bundleId
             TISInputSourceRef source = (TISInputSourceRef)CFArrayGetValueAtIndex(sources, i);
             void *property = propertyGetter(source, kTISPropertyInputSourceID);
             if (!property || CFGetTypeID(property) != CFStringGetTypeID() ||
-                ![(__bridge NSString *)property hasPrefix:modePrefix] ||
-                MSIMEIsOptInInputModeID((__bridge NSString *)property)) continue;
+                ![(__bridge NSString *)property hasPrefix:modePrefix]) continue;
             status = enabler(source); if (status != noErr) { CFRelease(sources); return status; }
             primary = source;
             enabled = true;
@@ -109,14 +108,41 @@ OSStatus MSIMERegisterAndEnableInputSources(NSURL *bundleURL, NSString *bundleId
         TISInputSourceRef source = (TISInputSourceRef)CFArrayGetValueAtIndex(sources, i);
         if (source == primary) continue;
         void *property = propertyGetter(source, kTISPropertyInputSourceID);
-        // Shuangpin and Wubi stay off until the user adds them; enabling every mode here would override the plist's default state on each install.
-        if (property && CFGetTypeID(property) == CFStringGetTypeID() && MSIMEIsOptInInputModeID((__bridge NSString *)property)) continue;
         if (!property || CFGetTypeID(property) != CFStringGetTypeID() ||
             ![(__bridge NSString *)property isEqualToString:bundleIdentifier]) {
             status = enabler(source); if (status != noErr) { CFRelease(sources); return status; }
         }
     }
     CFRelease(sources); return noErr;
+}
+
+NSArray<NSString *> *MSIMEEnableNewInputModes(NSString *bundleIdentifier, NSArray<NSString *> *offered,
+                                              MSIMEInputSourceLister lister,
+                                              MSIMEInputSourcePropertyGetter propertyGetter,
+                                              MSIMEInputSourceEnabler enabler) {
+    // Without a record this is the first launch that keeps one. The modes every install before it registered and enabled count as offered, so a user who removed one of those keeps it removed; the modes added since are the ones an update that did not re-register left off.
+    NSMutableOrderedSet<NSString *> *record = [NSMutableOrderedSet orderedSetWithArray:offered ?: @[
+        MSIMEChineseInputModeID, MSIMEEnglishInputModeID, MSIMEJapaneseInputModeID
+    ]];
+    if (!bundleIdentifier.length || !lister || !propertyGetter || !enabler) return record.array;
+    NSDictionary *filter = @{(__bridge NSString *)kTISPropertyBundleID: bundleIdentifier,
+                             (__bridge NSString *)kTISPropertyInputSourceIsEnableCapable: @YES};
+    CFArrayRef sources = lister((__bridge CFDictionaryRef)filter, true);
+    if (!sources) return record.array;
+    NSString *modePrefix = [bundleIdentifier stringByAppendingString:@"."];
+    for (CFIndex i = 0; i < CFArrayGetCount(sources); ++i) {
+        TISInputSourceRef source = (TISInputSourceRef)CFArrayGetValueAtIndex(sources, i);
+        void *property = propertyGetter(source, kTISPropertyInputSourceID);
+        if (!property || CFGetTypeID(property) != CFStringGetTypeID()) continue;
+        NSString *identifier = (__bridge NSString *)property;
+        if (![identifier hasPrefix:modePrefix] || [record containsObject:identifier]) continue;
+        void *enabled = propertyGetter(source, kTISPropertyInputSourceIsEnabled);
+        const BOOL alreadyEnabled = enabled && CFGetTypeID(enabled) == CFBooleanGetTypeID() && CFBooleanGetValue((CFBooleanRef)enabled);
+        // A mode that could not be enabled stays unrecorded, so the next launch tries again.
+        if (alreadyEnabled || enabler(source) == noErr) [record addObject:identifier];
+    }
+    CFRelease(sources);
+    return record.array;
 }
 
 BOOL MSIMEInputSourceIsEnabled(NSString *identifier) {

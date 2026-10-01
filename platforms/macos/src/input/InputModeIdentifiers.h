@@ -41,11 +41,6 @@ static inline BOOL MSIMEIsInputModeID(id value) {
             [value isEqualToString:MSIMEJapaneseInputModeID] || [value isEqualToString:MSIMEKoreanInputModeID]);
 }
 
-// The Shuangpin and Wubi modes are off until the user adds them in System Settings, the way the system's own Chinese input method offers its Shuangpin and Wubi sources: most people type one Chinese scheme and would only find two more stops on the Ctrl+Space cycle. Info.plist.in declares them with tsInputModeDefaultStateKey false, and registration leaves them for the user to enable.
-static inline BOOL MSIMEIsOptInInputModeID(NSString *identifier) {
-    return [identifier isEqualToString:MSIMEShuangpinInputModeID] || [identifier isEqualToString:MSIMEWubiInputModeID];
-}
-
 // The mode an identifier names. Anything that is not one of this bundle's modes reads as Chinese; callers check MSIMEIsInputModeID first when that matters.
 static inline MSIMEInputMode MSIMEInputModeForID(NSString *identifier) {
     if ([identifier isEqualToString:MSIMEShuangpinInputModeID]) return MSIMEInputMode::Shuangpin;
@@ -93,7 +88,7 @@ static inline BOOL MSIMEAdoptReportedInputMode(MSIMESystemInputModeState &state,
     return changed && !state.selecting;
 }
 
-// Whether the system offers a mode for selection. A mode the user removed in System Settings, one they never added (Shuangpin and Wubi start that way), or one an install from before the mode existed has not registered yet, cannot be selected, and asking for it would leave `current` naming a mode the menu bar does not show - the next report of the real one would then flip the controller's state back.
+// Whether the system offers a mode for selection. A mode the user removed in System Settings, or one an install from before the mode existed has not registered yet, cannot be selected, and asking for it would leave `current` naming a mode the menu bar does not show - the next report of the real one would then flip the controller's state back.
 using MSIMEInputModeAvailability = BOOL (*)(NSString *identifier);
 
 // The scheme a mode the user picked moves to, or nil to leave the scheme alone. 中 goes back to the Chinese scheme japanese or korean was entered from, or keeps the Chinese scheme already there - unless that scheme has a mode of its own the system offers: then 中 was picked over 双 or 五 and means quanpin, and keeping the scheme would select 双 or 五 straight back.
