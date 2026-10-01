@@ -272,6 +272,14 @@ pub struct TranslationQuery {
     pub niutrans: Option<NiuTransProviderConfig>,
 }
 
+/// The `/fy` request: English the user typed after the translate command, for the selected translation service to translate into Chinese. A host sends it as a one-item sentence `TranslationQuery` only when a service is selected, and hands the answer back with this value through `Runtime::apply_command_translation`, which puts it first as a row that commits the translation. It is the only request a local mode makes; `Runtime::online_query` stays `None` there.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CommandTranslation {
+    pub generation: u64,
+    pub session_id: u64,
+    pub text: String,
+}
+
 fn default_translation_target_language() -> String {
     "en".into()
 }

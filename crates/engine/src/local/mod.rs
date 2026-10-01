@@ -8,8 +8,10 @@ pub mod emoji;
 pub mod expression;
 pub mod jianpin;
 pub mod mention;
+pub mod places;
 pub mod quick_phrase;
 pub mod unicode;
+pub mod units;
 
 use crate::types::WordItem;
 

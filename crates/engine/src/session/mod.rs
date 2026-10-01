@@ -19,8 +19,8 @@ use crate::diagnostics;
 use crate::error::{EngineError, Result};
 use crate::nine_key::NineKeySession;
 use crate::types::{
-    CandidateEdge, CandidateSource, Command, CommandTableEntry, KeyResult, LocalInputMode,
-    MentionEntry, OnlineQuery, SchemeType,
+    CandidateEdge, CandidateSource, Command, CommandTableEntry, CommandTranslationQuery, KeyResult,
+    LocalInputMode, MentionEntry, OnlineQuery, SchemeType,
 };
 
 pub use clock::Clock;
@@ -259,6 +259,11 @@ impl Session {
         self.input.set_mention_entries(entries)
     }
 
+    /// Turn the embedded places of `@` mode on or off.
+    pub fn set_mention_places(&mut self, enabled: bool) -> Option<String> {
+        self.input.set_mention_places(enabled)
+    }
+
     /// Forget the committed-word context (focus or application change, host-inserted text).
     pub fn reset_context(&mut self) {
         self.input.reset_commit_context();
@@ -361,6 +366,31 @@ impl Session {
             return None;
         }
         self.input.online_query()
+    }
+
+    /// Whether an apostrophe now separates a unit from its target or one `/fy` word from the next, so a host or runtime that would finish the composition on punctuation hands it over as a character instead.
+    pub fn takes_local_separator(&self) -> bool {
+        !self.nine_key.active() && self.input.takes_local_separator()
+    }
+
+    /// The `/fy` translation request; see `InputSession::command_translation_query`.
+    pub fn command_translation_query(&self) -> Option<CommandTranslationQuery> {
+        if self.nine_key.active() {
+            return None;
+        }
+        self.input.command_translation_query()
+    }
+
+    /// Whether the translation now shows first; false (not an error) for a stale query.
+    pub fn apply_command_translation(
+        &mut self,
+        query: &CommandTranslationQuery,
+        translation: &str,
+    ) -> bool {
+        if self.nine_key.active() {
+            return false;
+        }
+        self.input.apply_command_translation(query, translation)
     }
 
     /// Whether the rows now show; false (not an error) for a stale query.

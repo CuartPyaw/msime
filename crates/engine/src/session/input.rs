@@ -307,18 +307,26 @@ impl InputSession {
                 value.is_ascii_hexdigit() || (value == b'+' && self.local_preedit == "U")
             }
             LocalInputMode::Expression => {
+                // A unit (`3jin'g`) follows a number, so letters are taken only once a digit is in, and one apostrophe only right after a letter; the spelling symbols, which tell a host what to send as a character, stay digits and operators.
+                let unit_letter = value.is_ascii_lowercase()
+                    && self.local_preedit.bytes().any(|byte| byte.is_ascii_digit());
+                let unit_separator = value == b'\'' && self.expression_takes_unit_separator();
                 self.local_preedit.len() < GENERATED_MODE_INPUT_LIMIT
-                    && self
-                        .local_mode
-                        .spelling_symbols()
-                        .as_bytes()
-                        .contains(&value)
+                    && (unit_letter
+                        || unit_separator
+                        || self
+                            .local_mode
+                            .spelling_symbols()
+                            .as_bytes()
+                            .contains(&value))
             }
             LocalInputMode::Command | LocalInputMode::Mention => {
                 if self.local_preedit.len() == 1 && value.is_ascii_punctuation() {
                     return self.commit_bare_prefix(value);
                 }
-                self.local_preedit.len() < GENERATED_MODE_INPUT_LIMIT && value.is_ascii_lowercase()
+                self.local_preedit.len() < GENERATED_MODE_INPUT_LIMIT
+                    && (value.is_ascii_lowercase()
+                        || (value == b'\'' && self.command_takes_word_separator()))
             }
             LocalInputMode::None => return KeyResult::unhandled(),
         };
@@ -448,6 +456,10 @@ impl InputSession {
         {
             return self.commit_bare_prefix(value);
         }
+        // A host that reports the apostrophe as punctuation still separates a unit from its target (`3jin'g`), or the words of `/fy`, instead of ending the mode.
+        if value == b'\'' && self.takes_local_separator() {
+            return self.handle_character(value, false);
+        }
         // A spelling symbol of the active mode is part of the input, not a mark that ends it.
         if self
             .local_mode
@@ -491,6 +503,30 @@ impl InputSession {
         text.push_str(mark);
         result.commit = Some(text);
         result
+    }
+
+    /// One apostrophe, right after a unit letter, splits `3jin'g` into the unit and its target.
+    fn expression_takes_unit_separator(&self) -> bool {
+        let preedit = self.local_preedit.as_bytes();
+        preedit.last().is_some_and(u8::is_ascii_lowercase) && !preedit.contains(&b'\'')
+    }
+
+    /// Whether an apostrophe now is a separator of the expression or command mode (`3jin'g`, `/fyhello'world`) rather than punctuation that ends it.
+    pub fn takes_local_separator(&self) -> bool {
+        match self.local_mode {
+            LocalInputMode::Expression => self.expression_takes_unit_separator(),
+            LocalInputMode::Command => self.command_takes_word_separator(),
+            _ => false,
+        }
+    }
+
+    /// One apostrophe after each word of `/fy` separates it from the next.
+    fn command_takes_word_separator(&self) -> bool {
+        self.local_mode == LocalInputMode::Command
+            && self
+                .local_preedit
+                .get(1..)
+                .is_some_and(crate::local::command::takes_word_separator)
     }
 
     /// A mark typed on a bare `/` or `@` ends the mode instead of choosing a row: both keys commit as the punctuation they are with the mode off, so `/` `,` still types /， rather than the first command followed by ，.
@@ -538,6 +574,13 @@ impl InputSession {
     /// Replaces the `@` mode's list, refreshing the list on screen when that mode is open.
     pub fn set_mention_entries(&mut self, entries: &[MentionEntry]) -> Option<String> {
         self.queries.set_mentions(entries);
+        (self.local_mode == LocalInputMode::Mention)
+            .then(|| self.update_local_candidates())
+            .flatten()
+    }
+
+    pub fn set_mention_places(&mut self, enabled: bool) -> Option<String> {
+        self.queries.set_mention_places(enabled);
         (self.local_mode == LocalInputMode::Mention)
             .then(|| self.update_local_candidates())
             .flatten()
@@ -819,6 +862,10 @@ impl InputSession {
 
     fn set_local_mode_options(&mut self, options: LocalModeOptions) {
         self.local_mode_options = options;
+        // Unit conversion loads rink's definitions once per process; doing it now, off this thread, keeps that load off the first key that needs it.
+        if options.expression {
+            crate::local::units::warm_up_in_background();
+        }
         if self.local_mode != LocalInputMode::None && !local_mode_enabled(options, self.local_mode)
         {
             self.reset_composition();

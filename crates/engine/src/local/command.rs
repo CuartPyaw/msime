@@ -1,4 +1,6 @@
-//! `/` mode: the built-in date, time and weekday commands, whose rows are the date/time mode's, and the command table the host supplies. Letters after `/` filter commands by trigger; a trigger typed out in full lists every reading of its command first. Templates are data: literal text and a closed set of clock placeholders, formatted by `time`, with nothing a table could use to reach anything else.
+//! `/` mode: the built-in date, time and weekday commands, whose rows are the date/time mode's, the translate command, and the command table the host supplies. Letters after `/` filter commands by trigger; a trigger typed out in full lists every reading of its command first. Templates are data: literal text and a closed set of clock placeholders, formatted by `time`, with nothing a table could use to reach anything else.
+//!
+//! `/fy hello'world` (typed `/fyhello'world`) is the one local input that may leave the machine: the words after the trigger are English for the user's translation service, through `translation_source`, and the answer comes back as a row of its own (`InputSession::apply_command_translation`). Until it does, and whenever no service answers, the row is the English as typed.
 
 use time::format_description::parse_strftime_borrowed;
 use time::{Date, Month, PrimitiveDateTime, Time};
@@ -17,12 +19,50 @@ pub const TEXT_UTF16_LIMIT: usize = 199;
 const DEFAULT_DATE_FORMAT: &str = "%Y-%m-%d";
 const DEFAULT_TIME_FORMAT: &str = "%H:%M";
 
-/// The built-in commands: the date/time mode's keywords, and the title shown beside their rows.
-const BUILTINS: [(&[&str], &str); 3] = [
+/// The built-in commands: the date/time mode's keywords, the translate command, and the title shown beside their rows.
+const BUILTINS: [(&[&str], &str); 4] = [
     (&["rq", "riqi", "date"], "日期"),
     (&["sj", "shijian", "time"], "时间"),
     (&["xq", "xingqi", "week"], "星期"),
+    (TRANSLATE_TRIGGERS, "翻译"),
 ];
+
+/// The translate command's triggers, longest first so `fanyi` is not read as `f` followed by text.
+const TRANSLATE_TRIGGERS: &[&str] = &["translate", "fanyi", "fy"];
+
+/// The English after a translate trigger, words split at `'` and joined by spaces, with the trigger that introduced it; `None` for any other input, for a trigger with nothing after it, and for input a table trigger begins with, which the user may still be typing as their own command. `table` must have gone through `usable_command_table`.
+pub fn translation_source(
+    code: &str,
+    table: &[CommandTableEntry],
+) -> Option<(&'static str, String)> {
+    if table.iter().any(|entry| entry.trigger.starts_with(code)) {
+        return None;
+    }
+    let trigger = TRANSLATE_TRIGGERS
+        .iter()
+        .find(|trigger| code.starts_with(**trigger))?;
+    let rest = &code[trigger.len()..];
+    if !rest
+        .bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte == b'\'')
+    {
+        return None;
+    }
+    let text = rest
+        .split('\'')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!text.is_empty()).then_some((trigger, text))
+}
+
+/// Whether a translate command is being typed, so `'` separates its words rather than ending the mode.
+pub fn takes_word_separator(code: &str) -> bool {
+    TRANSLATE_TRIGGERS
+        .iter()
+        .any(|trigger| code.len() > trigger.len() && code.starts_with(trigger))
+        && code.ends_with(|letter: char| letter.is_ascii_lowercase())
+}
 
 /// The rows that are usable of a host table: valid triggers and templates, the first command of a trigger, at most `TABLE_LIMIT`.
 pub fn usable_command_table(table: &[CommandTableEntry]) -> Vec<CommandTableEntry> {
@@ -57,6 +97,9 @@ pub fn query_command(
             rows.push((trigger.to_owned(), text));
         }
     };
+    if let Some((trigger, text)) = translation_source(code, table) {
+        push(trigger, text);
+    }
     for exact in [true, false] {
         for entry in table {
             if (entry.trigger == code) == exact && entry.trigger.starts_with(code) {
@@ -315,6 +358,51 @@ mod tests {
         let table = [entry("sig", "签名", "x")];
         assert_eq!(command_title("sig", &table), Some("签名"));
         assert_eq!(command_title("riqi", &table), Some("日期"));
+        assert_eq!(command_title("fanyi", &table), Some("翻译"));
         assert_eq!(command_title("nope", &table), None);
+    }
+
+    #[test]
+    fn the_translate_command_reads_english_after_its_trigger() {
+        let source = |code| translation_source(code, &[]);
+        assert_eq!(source("fyhello"), Some(("fy", "hello".to_owned())));
+        assert_eq!(
+            source("fy'hello''world'"),
+            Some(("fy", "hello world".to_owned()))
+        );
+        assert_eq!(source("fanyigood"), Some(("fanyi", "good".to_owned())));
+        assert_eq!(
+            source("translatecat"),
+            Some(("translate", "cat".to_owned()))
+        );
+        for code in ["", "f", "fy", "fy'", "fanyi", "translate", "rqx", "hello"] {
+            assert_eq!(source(code), None, "{code:?}");
+        }
+        // A table trigger the input begins is the user's own command, not text to send anywhere.
+        let table = usable_command_table(&[entry("fyz", "自定义", "x")]);
+        assert_eq!(translation_source("fyz", &table), None);
+        assert_eq!(translation_source("fy", &table), None);
+        assert_eq!(
+            translation_source("fyx", &table),
+            Some(("fy", "x".to_owned()))
+        );
+
+        assert!(takes_word_separator("fyhello"));
+        assert!(!takes_word_separator("fy"));
+        assert!(!takes_word_separator("fyhello'"));
+        assert!(!takes_word_separator("rqx"));
+    }
+
+    #[test]
+    fn the_translate_command_shows_the_english_until_a_translation_arrives() {
+        let rows = query_command("fyhello'world", &now(), &[]);
+        assert_eq!(words(&rows), ["hello world"]);
+        assert_eq!(rows[0].pinyin, "fy");
+        assert_eq!(rows[0].source, CandidateSource::Generated);
+        // The bare trigger and the bare `/` have no reading to show for it.
+        assert!(query_command("fy", &now(), &[]).is_empty());
+        assert!(query_command("", &now(), &[])
+            .iter()
+            .all(|row| !TRANSLATE_TRIGGERS.contains(&row.pinyin.as_str())));
     }
 }

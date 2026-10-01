@@ -493,6 +493,13 @@ impl<E: InputEngine> Runtime<E> {
         self.refresh()
     }
 
+    /// Turn the places of `@` mode on or off, refreshing the view as `set_mention_entries` does. The engine starts with them off, so a new or replaced engine needs this again.
+    pub fn set_mention_places(&mut self, enabled: bool) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_mention_places(enabled)?;
+        self.refresh()
+    }
+
     pub fn new(engine: E, page_size: u8) -> Result<Self, RuntimeError> {
         Self::new_with_touch_layout(engine, page_size, TouchKeyboardLayout::default())
     }
@@ -874,6 +881,40 @@ impl<E: InputEngine> Runtime<E> {
         self.generation
     }
 
+    /// The live `/fy` request, if the composition is one; see [`CommandTranslation`].
+    pub fn command_translation(&self) -> Option<CommandTranslation> {
+        let query = self.engine.command_translation_query()?;
+        Some(CommandTranslation {
+            generation: self.generation,
+            session_id: query.session_id,
+            text: query.text,
+        })
+    }
+
+    /// Show a translation for a `/fy` request as the first row, which commits the translation. False for an answer to an older generation, another session or text no longer typed, and for text a row cannot show.
+    pub fn apply_command_translation(
+        &mut self,
+        query: &CommandTranslation,
+        translation: &str,
+    ) -> Result<bool, RuntimeError> {
+        if query.generation != self.generation
+            || !msime_client_core::is_bounded_text(translation, 4096)
+        {
+            return Ok(false);
+        }
+        let request = CommandTranslationQuery {
+            session_id: query.session_id,
+            text: query.text.clone(),
+        };
+        if !self.engine.apply_command_translation(&request, translation) {
+            return Ok(false);
+        }
+        // The row arrives outside dispatch(), so the identity advances as it does for an online candidate and an ID from the page before cannot select the new first row.
+        self.advance()?;
+        self.refresh()?;
+        Ok(true)
+    }
+
     /// Apply translations to the current candidate generation. Stale async
     /// responses are ignored so a newer candidate window cannot be polluted.
     pub fn apply_translations(
@@ -884,7 +925,16 @@ impl<E: InputEngine> Runtime<E> {
         if generation != self.generation {
             return false;
         }
-        self.translations = translations.into_iter().collect();
+        let translations: HashMap<String, String> = translations.into_iter().collect();
+        // The answer to a `/fy` request arrives through the same host path as candidate glosses, so a host forwarding `translation_query` needs nothing else: it becomes the row that commits the translation, not a gloss under the English.
+        if let Some(query) = self.command_translation() {
+            if let Some(translation) = translations.get(&query.text) {
+                return self
+                    .apply_command_translation(&query, translation)
+                    .unwrap_or(false);
+            }
+        }
+        self.translations = translations;
         true
     }
 
@@ -1623,6 +1673,10 @@ impl<E: InputEngine> Runtime<E> {
         {
             return self.engine.character(value, false);
         }
+        // The apostrophe is not a spelling symbol, but right after a unit (`3jin'g`) or a `/fy` word it separates rather than ends.
+        if value == b'\'' && self.engine.takes_local_separator() {
+            return self.engine.character(value, false);
+        }
         // A mark on a bare `/` or `@` ends the mode as punctuation; finishing first would commit the first row.
         if self.bare_mode_prefix() {
             return self.engine.punctuation(value);
@@ -1677,6 +1731,9 @@ impl<E: InputEngine> Runtime<E> {
         if self.cached.local_mode != "none"
             && self.cached.spelling_symbols.as_bytes().contains(&value)
         {
+            return self.engine.character(value, false);
+        }
+        if value == b'\'' && self.engine.takes_local_separator() {
             return self.engine.character(value, false);
         }
         // Keep the same highlighted-candidate completion semantics as normal

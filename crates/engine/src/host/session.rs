@@ -13,8 +13,8 @@ use crate::helpcode::{compute_helpcodes, load_helpcode_keymap, SharedKeymap};
 use crate::local::database::LocalDatabaseLease;
 use crate::pinyin::segment::is_complete_pinyin_input;
 use crate::types::{
-    CandidateEdge, CandidateSource, CommandTableEntry, KeyResult, LocalInputMode, MentionEntry,
-    OnlineQuery, SchemeType, ShuangpinProfileKind,
+    CandidateEdge, CandidateSource, CommandTableEntry, CommandTranslationQuery, KeyResult,
+    LocalInputMode, MentionEntry, OnlineQuery, SchemeType, ShuangpinProfileKind,
 };
 use crate::user_dictionary::ngram_store::flush_journal;
 use crate::user_dictionary::removal::learn_entered_english_word;
@@ -281,9 +281,36 @@ impl Session {
         }
     }
 
+    /// Offer the Chinese administrative divisions in `@` mode after the user's list. Off in a new session, so a host that has the switch on sets it on every session it builds, as it does nine-key mode.
+    pub fn set_mention_places(&mut self, enabled: bool) -> Result<()> {
+        match self.inner.set_mention_places(enabled) {
+            Some(diagnostic) => Err(EngineError::failed(&diagnostic)),
+            None => Ok(()),
+        }
+    }
+
     /// Live update of the neural rescoring context without a rebuild.
     pub fn set_rescoring_context(&mut self, context: &str) {
         self.inner.set_rescoring_context(context);
+    }
+
+    /// Whether an apostrophe now is input (`3jin'g`, `/fyhello'world`) rather than punctuation that ends the composition.
+    pub fn takes_local_separator(&self) -> bool {
+        self.inner.takes_local_separator()
+    }
+
+    /// The `/fy` request for the user's translation service, the only one a local mode makes; `None` whenever nothing asks for one.
+    pub fn command_translation_query(&self) -> Option<CommandTranslationQuery> {
+        self.inner.command_translation_query()
+    }
+
+    /// Puts the translation first in the `/fy` list; false for a stale query or text a row cannot show.
+    pub fn apply_command_translation(
+        &mut self,
+        query: &CommandTranslationQuery,
+        translation: &str,
+    ) -> bool {
+        self.inner.apply_command_translation(query, translation)
     }
 
     /// False for an unavailable query or a source other than 0 (cloud) and 1 (AI).

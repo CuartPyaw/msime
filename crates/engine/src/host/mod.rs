@@ -13,7 +13,8 @@ pub mod text;
 pub use crate::local::catalog::{EmojiCatalogItem, EmojiCatalogSlice, EmojiSymbolGroup};
 pub use crate::shuangpin::hints::ShuangpinKeyHint;
 pub use crate::types::{
-    CandidateEdge, CommandTableEntry, MentionEntry, SentenceAssociationOptions,
+    CandidateEdge, CommandTableEntry, CommandTranslationQuery, MentionEntry,
+    SentenceAssociationOptions,
 };
 // Hosts call one of these at shutdown (or before replacing a data directory) so the delayed personal-context writes reach the journal; the bridge had no counterpart because the C++ flushed from `atexit`.
 pub use crate::{close_cached_databases, flush_personal_learning};

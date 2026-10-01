@@ -38,10 +38,10 @@ pub use paths::RuntimePaths;
 pub use session::{Clock, Session, SessionOptions, SessionSnapshot};
 pub use types::{
     autocorrect_type, fuzzy_rule, request_autocorrect_mask, CandidateEdge, CandidateSource,
-    Command, EnglishInputOptions, FrequencyAdjustmentMode, FrequencyAdjustmentOptions,
-    FuzzyPinyinOptions, KeyResult, LocalInputMode, LocalModeOptions, MixedExpressiveOptions,
-    OnlineQuery, PersonalDictionaryEntry, PersonalDictionaryKind, SchemeType,
-    SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
+    Command, CommandTranslationQuery, EnglishInputOptions, FrequencyAdjustmentMode,
+    FrequencyAdjustmentOptions, FuzzyPinyinOptions, KeyResult, LocalInputMode, LocalModeOptions,
+    MixedExpressiveOptions, OnlineQuery, PersonalDictionaryEntry, PersonalDictionaryKind,
+    SchemeType, SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
 };
 pub use user_dictionary::bundled::{
     dictionary_table_entries, edit_bundled_dictionary_entry, DictionaryTableEntry,

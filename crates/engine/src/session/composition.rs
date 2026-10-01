@@ -511,7 +511,7 @@ impl InputSession {
 
     /// input_session.cpp:775-793.
     pub(super) fn candidate_annotations(&self) -> Vec<String> {
-        // Rows the engine generated are not spelled by pinyin, so a helpcode would say nothing about them; a command row shows its command's title instead.
+        // Rows the engine generated are not spelled by pinyin, so a helpcode would say nothing about them; a command row shows its command's title instead, and a place offered in `@` mode the division it belongs to.
         if self.local_mode.generates_text() {
             return self
                 .candidates()
@@ -522,6 +522,9 @@ impl InputSession {
                         .command_title(&item.pinyin)
                         .unwrap_or_default()
                         .to_owned(),
+                    LocalInputMode::Mention => {
+                        self.queries.mention_annotation(&item.word).to_owned()
+                    }
                     _ => String::new(),
                 })
                 .collect();

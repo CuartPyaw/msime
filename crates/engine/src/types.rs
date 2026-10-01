@@ -628,6 +628,13 @@ pub struct OnlineQuery {
     pub session_id: u64,
 }
 
+/// What `/fy` asks the user's translation service: the English typed after the trigger, to be translated into Chinese. Unlike `OnlineQuery` it is never raised by spelling; only this command in the `/` mode produces one, and the answer is refused unless the session and the text are still the ones that asked.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CommandTranslationQuery {
+    pub session_id: u64,
+    pub text: String,
+}
+
 /// Which dictionary a personal entry or journal row belongs to. The ordinal is the host ABI value.
 ///
 /// `non_exhaustive` because the host facade re-exports this as the bridge's `DictionaryKind`, a cxx shared enum that callers had to match with a wildcard arm (host-api `dictionary.rs`); a closed enum would turn those arms into `unreachable_patterns` warnings. Matches inside this crate stay exhaustive.

@@ -4,12 +4,14 @@ use std::collections::HashSet;
 
 use crate::assets;
 use crate::dictionary::english::EnglishDictionary;
-use crate::local::command::{command_title, query_command, usable_command_table};
+use crate::local::command::{
+    command_title, query_command, translation_source, usable_command_table,
+};
 use crate::local::date_time::{query_date_time, LocalDateTime};
 use crate::local::emoji::{query_emoji, query_kaomoji, MIXED_RESULT_LIMIT, MODE_RESULT_LIMIT};
 use crate::local::expression::query_expression;
 use crate::local::jianpin::{query_jianpin, result_limit};
-use crate::local::mention::{query_mentions, usable_mentions};
+use crate::local::mention::{mention_annotation, query_mentions, usable_mentions};
 use crate::local::quick_phrase::query_quick_phrases;
 use crate::local::unicode::query_unicode;
 use crate::local::LocalQueryResult;
@@ -31,6 +33,8 @@ pub struct CandidateQueries {
     command_table: Vec<CommandTableEntry>,
     /// The host's mention list, usable entries only.
     mentions: Vec<MentionEntry>,
+    /// Whether `@` mode offers the embedded places after the list.
+    mention_places: bool,
 }
 
 impl CandidateQueries {
@@ -41,6 +45,7 @@ impl CandidateQueries {
             english: None,
             command_table: Vec::new(),
             mentions: Vec::new(),
+            mention_places: false,
         }
     }
 
@@ -52,6 +57,24 @@ impl CandidateQueries {
     /// Keeps the entries `@` mode can use and drops the rest.
     pub fn set_mentions(&mut self, entries: &[MentionEntry]) {
         self.mentions = usable_mentions(entries);
+    }
+
+    /// Turns the embedded places of `@` mode on or off.
+    pub fn set_mention_places(&mut self, enabled: bool) {
+        self.mention_places = enabled;
+    }
+
+    /// The annotation of an `@` row: a place's parent division, empty for the user's own entries.
+    pub fn mention_annotation(&self, text: &str) -> &'static str {
+        if !self.mention_places {
+            return "";
+        }
+        mention_annotation(text, &self.mentions)
+    }
+
+    /// The translate command's trigger and English for the letters after `/`, against the live command table.
+    pub fn translation_source(&self, code: &str) -> Option<(&'static str, String)> {
+        translation_source(code, &self.command_table)
     }
 
     /// The title of a `/` mode row, by the trigger its `pinyin` holds.
@@ -119,7 +142,9 @@ impl CandidateQueries {
             LocalInputMode::TemporaryJapanese => rows(engine_candidates.to_vec()),
             LocalInputMode::Expression => rows(query_expression(code)),
             LocalInputMode::Command => rows(query_command(code, now, &self.command_table)),
-            LocalInputMode::Mention => rows(query_mentions(code, &self.mentions)),
+            LocalInputMode::Mention => {
+                rows(query_mentions(code, &self.mentions, self.mention_places))
+            }
         }
     }
 

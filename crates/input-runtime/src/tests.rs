@@ -3175,6 +3175,32 @@ fn character(runtime: &mut Runtime, value: u8) -> Transition {
         .unwrap()
 }
 
+#[test]
+fn mention_places_switch_on_live_and_carry_their_parent() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = generated_mode_runtime(directory.path());
+    character(&mut runtime, b'@');
+    for value in *b"shenzhen" {
+        character(&mut runtime, value);
+    }
+    assert!(runtime
+        .view()
+        .candidates
+        .iter()
+        .all(|candidate| candidate.text != "深圳市"));
+    runtime.set_mention_places(true).unwrap();
+    let view = runtime.view();
+    assert_eq!(view.candidates[0].text, "深圳市");
+    assert_eq!(view.candidates[0].annotation, "广东省");
+    assert_eq!(view.candidates[0].code, "shen'zhen'shi");
+    runtime.set_mention_places(false).unwrap();
+    assert!(runtime
+        .view()
+        .candidates
+        .iter()
+        .all(|candidate| candidate.text != "深圳市"));
+}
+
 // The operators of the expression mode arrive as punctuation on hosts that classify Shift+= and Shift+8 that way. The runtime finishes a composition before it translates punctuation, which here would commit the half-typed expression; the Engine's `spelling_symbols` is what routes them back to the Engine as characters.
 #[test]
 fn expression_operators_sent_as_punctuation_extend_the_expression() {
@@ -3213,6 +3239,108 @@ fn expression_operators_sent_as_punctuation_extend_the_expression() {
     assert_eq!(context.local_mode, "expression");
     assert!(!context.typing_statistics);
     assert_eq!(committed.view.local_mode, "none");
+}
+
+// The apostrophe is no spelling symbol, so a host may send it as punctuation; after a unit it separates the target instead of finishing the expression.
+#[test]
+fn an_apostrophe_after_a_unit_separates_the_target_on_every_route() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = generated_mode_runtime(directory.path());
+    for action in [
+        Action::Punctuation(b'\''),
+        Action::PunctuationAscii(b'\''),
+        Action::Character {
+            value: b'\'',
+            shift: false,
+        },
+    ] {
+        character(&mut runtime, b'V');
+        for value in *b"3jin" {
+            character(&mut runtime, value);
+        }
+        let separated = runtime.dispatch(action).unwrap();
+        assert!(separated.handled && separated.commit.is_none());
+        character(&mut runtime, b'g');
+        assert_eq!(runtime.view().editing_text, "V3jin'g");
+        assert_eq!(runtime.view().candidates[0].text, "1500克");
+        assert!(runtime.online_query().unwrap().is_none());
+        assert!(runtime.command_translation().is_none());
+        runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    }
+    // Before any unit the apostrophe is still the mark that ends the expression.
+    character(&mut runtime, b'V');
+    character(&mut runtime, b'3');
+    let highlighted = runtime.view().candidates[0].text.clone();
+    let committed = runtime.dispatch(Action::PunctuationAscii(b'\'')).unwrap();
+    assert_eq!(committed.commit, Some(format!("{highlighted}'")));
+    assert_eq!(committed.view.local_mode, "none");
+}
+
+// `/fy` hands its English to the host as a request of its own and takes the answer back as a row that commits it, under the runtime's generation guard.
+#[test]
+fn the_translate_command_round_trips_through_the_runtime() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = generated_mode_runtime(directory.path());
+    character(&mut runtime, b'/');
+    assert!(runtime.command_translation().is_none());
+    for value in *b"fyhello" {
+        character(&mut runtime, value);
+    }
+    runtime.dispatch(Action::Punctuation(b'\'')).unwrap();
+    for value in *b"world" {
+        character(&mut runtime, value);
+    }
+    assert!(runtime.online_query().unwrap().is_none());
+    let query = runtime
+        .command_translation()
+        .expect("a translation request");
+    assert_eq!(query.text, "hello world");
+    assert_eq!(query.generation, runtime.generation());
+
+    let mut stale = query.clone();
+    stale.generation -= 1;
+    assert!(!runtime
+        .apply_command_translation(&stale, "你好世界")
+        .unwrap());
+    assert!(!runtime.apply_command_translation(&query, "").unwrap());
+    let before = runtime.view().candidates[0].id;
+    assert!(runtime
+        .apply_command_translation(&query, "你好世界")
+        .unwrap());
+    let view = runtime.view();
+    assert_eq!(view.candidates[0].text, "你好世界");
+    assert_eq!(view.candidates[0].annotation, "翻译");
+    assert_eq!(view.candidates[1].text, "hello world");
+    assert!(view.candidates[0].translation.is_none());
+    // The identity moved on, so the old page's first ID cannot pick the new first row.
+    assert_ne!(view.candidates[0].id, before);
+    // A second answer for the same request is stale.
+    assert!(!runtime.apply_command_translation(&query, "你好").unwrap());
+    // Answered, the text is not asked for again when the host plans requests for the new view.
+    assert!(runtime.command_translation().is_none());
+    let picked = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(picked.commit.as_deref(), Some("你好世界"));
+    assert_eq!(picked.view.local_mode, "none");
+
+    // A host that forwards the request through its candidate translation path hands the answer back the same way, and it still becomes the row rather than a gloss.
+    character(&mut runtime, b'/');
+    for value in *b"fycat" {
+        character(&mut runtime, value);
+    }
+    let query = runtime
+        .command_translation()
+        .expect("a translation request");
+    assert!(runtime.apply_translations(query.generation, [("cat".to_owned(), "猫".to_owned())]));
+    let view = runtime.view();
+    assert_eq!(view.candidates[0].text, "猫");
+    assert!(view.candidates.iter().all(|row| row.translation.is_none()));
+    // Glosses for other text stay glosses.
+    let generation = runtime.generation();
+    assert!(runtime.apply_translations(generation, [("猫".to_owned(), "cat".to_owned())]));
+    assert_eq!(
+        runtime.view().candidates[0].translation.as_deref(),
+        Some("cat")
+    );
 }
 
 // A mark on a bare `/` or `@` is punctuation on every route: the mode ends and nothing from its list is committed.

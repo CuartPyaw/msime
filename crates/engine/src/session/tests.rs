@@ -2225,14 +2225,15 @@ fn expression_mode_evaluates_what_follows_shift_v() {
     assert_eq!(snapshot.local_mode, LocalInputMode::Expression);
     assert_eq!(snapshot.spelling_symbols, "0123456789+-*/.()%^");
     assert_eq!(words(&session), ["V"]);
+    // Letters are not part of the spelling and, before any number, name no unit; the key is swallowed like in the other local modes.
+    assert!(session.character(b'x', false).handled);
+    assert_eq!(session.snapshot().preedit, "V");
 
     assert!(session.character(b'1', false).handled);
     // An operator reported as punctuation extends the expression instead of finishing it.
     let plus = session.punctuation(b'+');
     assert!(plus.handled && plus.commit.is_none(), "{plus:?}");
     assert!(session.character(b'2', false).handled);
-    // Letters are not part of the spelling; the key is swallowed like in the other local modes.
-    assert!(session.character(b'x', false).handled);
     let snapshot = session.snapshot();
     assert_eq!(snapshot.preedit, "V1+2");
     assert_eq!(words(&session), ["3", "1+2=3", "叁元整"]);
@@ -2242,6 +2243,39 @@ fn expression_mode_evaluates_what_follows_shift_v() {
     let result = session.select(1);
     assert_eq!(result.commit.as_deref(), Some("1+2=3"));
     assert_eq!(session.snapshot().local_mode, LocalInputMode::None);
+}
+
+#[test]
+fn expression_mode_converts_units_after_a_number() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = generated_modes_session(&fixture);
+    session.character(b'V', true);
+    // An apostrophe before any unit letter is not a separator.
+    assert!(session.character(b'\'', false).handled);
+    type_text(&mut session, "3jin");
+    // A host that reports the apostrophe as punctuation still gets the separator.
+    let apostrophe = session.punctuation(b'\'');
+    assert!(
+        apostrophe.handled && apostrophe.commit.is_none(),
+        "{apostrophe:?}"
+    );
+    // A second apostrophe is swallowed.
+    assert!(session.character(b'\'', false).handled);
+    session.character(b'g', false);
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.preedit, "V3jin'g");
+    assert_eq!(words(&session), ["1500克", "1500", "3斤=1500克"]);
+    assert!(snapshot
+        .candidates
+        .iter()
+        .all(|candidate| candidate.source == CandidateSource::Generated));
+    assert!(session.online_query().is_none());
+    assert_eq!(session.select(2).commit.as_deref(), Some("3斤=1500克"));
+
+    // Input the unit table cannot read keeps the expression path and its raw fallback.
+    session.character(b'V', true);
+    type_text(&mut session, "3xyz");
+    assert_eq!(words(&session), ["V3xyz"]);
 }
 
 #[test]
@@ -2433,6 +2467,48 @@ fn at_lists_the_mention_list_and_letters_filter_it() {
 }
 
 #[test]
+fn mention_mode_offers_places_after_the_list_when_switched_on() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = generated_modes_session(&fixture);
+    session.character(b'@', false);
+    type_text(&mut session, "chongqing");
+    assert_eq!(words(&session), ["@chongqing"]);
+
+    // Switching on while the mode is open refreshes the list.
+    assert_eq!(session.set_mention_places(true), None);
+    assert_eq!(words(&session), ["重庆市"]);
+    assert_eq!(session.snapshot().candidate_annotations, [""]);
+    session.command(Command::Cancel);
+
+    session.character(b'@', false);
+    type_text(&mut session, "sz");
+    let snapshot = session.snapshot();
+    let candidates: Vec<&str> = snapshot
+        .candidates
+        .iter()
+        .map(|candidate| candidate.word.as_str())
+        .collect();
+    // The user's own 深圳市 leads and is not repeated by the place of the same name.
+    assert_eq!(candidates[0], "深圳市");
+    assert_eq!(
+        candidates.iter().filter(|text| **text == "深圳市").count(),
+        1
+    );
+    assert_eq!(snapshot.candidate_annotations[0], "");
+    let suzhou = candidates
+        .iter()
+        .position(|text| *text == "苏州市")
+        .unwrap();
+    assert_eq!(snapshot.candidate_annotations[suzhou], "江苏省");
+    assert_eq!(session.select(suzhou).commit.as_deref(), Some("苏州市"));
+
+    session.set_mention_places(false);
+    session.character(b'@', false);
+    type_text(&mut session, "sz");
+    assert_eq!(words(&session), ["深圳市"]);
+}
+
+#[test]
 fn generated_mode_commits_are_never_learned() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = fixture.session_with(|options| {
@@ -2489,17 +2565,94 @@ fn local_modes_never_ask_for_online_candidates() {
         (b'J', true, "nh"),
         (b'Y', true, "hello"),
         (b'V', true, "1+2"),
+        (b'V', true, "3jin'g"),
         (b'/', false, "si"),
         (b'@', false, "zs"),
+        // The translate trigger means nothing outside `/`.
+        (b'@', false, "fyhello"),
+        (b'Y', true, "fyhello"),
+        (b'E', true, "fyhello"),
+        (b'/', false, "fyhello'world"),
     ] {
         assert!(session.character(entry, shift).handled, "{}", entry as char);
         let mode = session.snapshot().local_mode;
         assert_ne!(mode, LocalInputMode::None, "{}", entry as char);
         assert!(session.online_query().is_none(), "{mode:?} on entry");
+        assert!(
+            session.command_translation_query().is_none(),
+            "{mode:?} on entry"
+        );
         for byte in input.bytes() {
             session.character(byte, false);
             assert!(session.online_query().is_none(), "{mode:?} after {input:?}");
+            // `/fy` is the one local input with a request of its own: a translation, never cloud or AI candidates.
+            let translation = session.command_translation_query();
+            let typed = session.snapshot().preedit;
+            assert_eq!(
+                translation.is_some(),
+                mode == LocalInputMode::Command && typed.len() > "/fy".len(),
+                "{mode:?} at {typed:?}"
+            );
         }
         session.command(Command::Cancel);
     }
+}
+
+#[test]
+fn the_translate_command_asks_for_its_english_and_commits_the_answer() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = generated_modes_session(&fixture);
+    session.character(b'/', false);
+    type_text(&mut session, "fyhello");
+    // A host reporting the apostrophe as punctuation still separates the words; a second one in a row is swallowed.
+    let apostrophe = session.punctuation(b'\'');
+    assert!(
+        apostrophe.handled && apostrophe.commit.is_none(),
+        "{apostrophe:?}"
+    );
+    assert!(session.character(b'\'', false).handled);
+    type_text(&mut session, "world");
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.preedit, "/fyhello'world");
+    assert_eq!(words(&session), ["hello world"]);
+    assert_eq!(snapshot.candidate_annotations, ["翻译"]);
+    let query = session
+        .command_translation_query()
+        .expect("a translation request");
+    assert_eq!(query.text, "hello world");
+
+    // Answers that do not fit a row, or that belong to another session or another text, are refused.
+    for translation in ["", "  ", "你好\n世界", &"字".repeat(200)] {
+        assert!(
+            !session.apply_command_translation(&query, translation),
+            "{translation:?}"
+        );
+    }
+    let mut other_session = query.clone();
+    other_session.session_id += 1;
+    assert!(!session.apply_command_translation(&other_session, "你好世界"));
+    let mut other_text = query.clone();
+    other_text.text = "hello".to_owned();
+    assert!(!session.apply_command_translation(&other_text, "你好"));
+    assert_eq!(words(&session), ["hello world"]);
+
+    assert!(session.apply_command_translation(&query, "你好世界"));
+    assert_eq!(words(&session), ["你好世界", "hello world"]);
+    assert_eq!(session.snapshot().candidate_annotations, ["翻译", "翻译"]);
+    // The same answer twice adds nothing.
+    assert!(!session.apply_command_translation(&query, "你好世界"));
+    assert_eq!(session.select(0).commit.as_deref(), Some("你好世界"));
+    assert_eq!(session.snapshot().local_mode, LocalInputMode::None);
+    // The mode is gone, and with it the request.
+    assert!(!session.apply_command_translation(&query, "你好世界"));
+
+    // A late answer for text since edited is refused.
+    session.character(b'/', false);
+    type_text(&mut session, "fyhello");
+    let query = session
+        .command_translation_query()
+        .expect("a translation request");
+    session.character(b'x', false);
+    assert!(!session.apply_command_translation(&query, "你好"));
+    assert_eq!(words(&session), ["hellox"]);
 }

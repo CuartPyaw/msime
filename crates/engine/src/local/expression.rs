@@ -1,4 +1,4 @@
-//! `V` mode: an arithmetic expression evaluated by `exmex`, a number written out in Chinese numerals by `chinese-number`, or a `YYYY.M.D` date. Rows are computed on the key that changed the input and read nothing from disk; an input that is none of these (an operator still waiting for its operand) has no rows, so the session shows the raw text instead.
+//! `V` mode: an arithmetic expression evaluated by `exmex`, a number written out in Chinese numerals by `chinese-number`, a `YYYY.M.D` date, or a measurement converted to another unit (`3jin'g`, see `units`). Rows are computed on the key that changed the input and read nothing from disk; an input that is none of these (an operator still waiting for its operand) has no rows, so the session shows the raw text instead.
 //!
 //! Arithmetic follows the usual precedence: `^` first, then `*`, `/` and `%` left to right, then `+` and `-` left to right. exmex only has left-associative binary operators and signs that bind tighter than any of them, so the two inputs where that disagrees with written mathematics, a chained power (`2^3^2`) and a sign in front of a power (`-2^2`), get no rows rather than a disputed number; brackets make either one unambiguous.
 
@@ -7,9 +7,10 @@ use exmex::{ops_factory, BinOp, Express, FlatEx, MakeOperators, Operator};
 use time::{Date, Month};
 
 use super::date_time::{chinese_number, lunar_date, year_digits, LocalDateTime, WEEKDAYS};
+use super::units::query_units;
 use crate::types::{CandidateSource, WordItem};
 
-/// Digits and the arithmetic the mode spells with; letters are not part of it.
+/// Digits and the arithmetic the mode spells with; letters are not part of it. A unit's letters are taken by the session only once a digit is in the input, and never change what a host sends as a character.
 pub const SPELLING_SYMBOLS: &str = "0123456789+-*/.()%^";
 /// No input produces more rows than one page of the nine-row Windows candidate window.
 pub const RESULT_LIMIT: usize = 9;
@@ -78,6 +79,9 @@ ops_factory!(
 
 /// Generated rows for the input after `V`, weight `count - index`, at most `RESULT_LIMIT`.
 pub fn query_expression(code: &str) -> Vec<WordItem> {
+    if let Some(texts) = query_units(code) {
+        return generated_rows(texts);
+    }
     if code.is_empty()
         || !code
             .chars()
@@ -95,6 +99,11 @@ pub fn query_expression(code: &str) -> Vec<WordItem> {
     } else {
         expression_rows(code)
     };
+    generated_rows(texts)
+}
+
+/// At most `RESULT_LIMIT` Generated rows, weight `count - index`.
+fn generated_rows(texts: Vec<String>) -> Vec<WordItem> {
     let count = texts.len().min(RESULT_LIMIT);
     texts
         .into_iter()
@@ -185,7 +194,7 @@ fn evaluate(code: &str) -> Option<f64> {
 }
 
 /// An exact integer in full and anything else to `SIGNIFICANT_DIGITS` significant digits, positional between one millionth and 10^16 and in exponent form outside it; `None` for infinity and NaN.
-fn format_number(value: f64) -> Option<String> {
+pub(super) fn format_number(value: f64) -> Option<String> {
     if !value.is_finite() {
         return None;
     }

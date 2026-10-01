@@ -670,7 +670,7 @@ dependencies = [
  "anstream",
  "anstyle",
  "clap_lex",
- "strsim",
+ "strsim 0.11.1",
 ]
 
 [[package]]
@@ -975,7 +975,7 @@ dependencies = [
  "ident_case",
  "proc-macro2",
  "quote",
- "strsim",
+ "strsim 0.11.1",
  "syn 3.0.5",
 ]
 
@@ -2816,6 +2816,7 @@ dependencies = [
  "lru",
  "lunar-lite",
  "memmap2",
+ "rink-core",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2983,6 +2984,7 @@ checksum = "c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367"
 dependencies = [
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -3018,6 +3020,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "num-rational"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f83d14da390562dca69fc84082e73e548e1ad308d24accdedd2720017cb37824"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -4019,6 +4033,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rink-core"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca39f20c3d0597ae33b9f37a98cbe2f0f2dc0a3dba115570385ea6e203bea62b"
+dependencies = [
+ "indexmap 2.14.2",
+ "jiff",
+ "num-bigint",
+ "num-rational",
+ "num-traits",
+ "serde",
+ "serde_derive",
+ "strsim 0.10.0",
+]
+
+[[package]]
 name = "rmcp"
 version = "3.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4681,6 +4711,12 @@ dependencies = [
  "proc-macro2",
  "quote",
 ]
+
+[[package]]
+name = "strsim"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "strsim"
