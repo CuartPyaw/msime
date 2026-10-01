@@ -60,6 +60,7 @@ function AiSkinGeneration({
   const [publishAgreed, setPublishAgreed] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
   const publishRunning = useRef(false);
+  const generateRunning = useRef(false);
   const requestRef = useRef("");
   const mounted = useRef(true);
 
@@ -97,7 +98,8 @@ function AiSkinGeneration({
   );
 
   const generate = async () => {
-    if (busy) return;
+    if (busy || generateRunning.current) return;
+    generateRunning.current = true;
     const id = randomRequestId("ai-skin");
     requestRef.current = id;
     setRequestId(id);
@@ -125,6 +127,7 @@ function AiSkinGeneration({
       if (errorCode(error) !== "ai_skin_cancelled")
         if (mounted.current) setMessage(aiSkinMessage(error));
     } finally {
+      generateRunning.current = false;
       if (mounted.current) setBusy(false);
       if (requestRef.current === id) requestRef.current = "";
     }
