@@ -93,6 +93,8 @@ export const keySoundRenderNotes: (
   directory: string,
   maxMillis: number,
 ) => Promise<string[]>;
+/** The statistics master switch under an absolute state directory: 1 on, 0 off or never written, -1 for an invalid directory or unreadable document. */
+export const typingStatisticsEnabled: (directory: string) => number;
 export const vocabularyReview: (request: string) => string;
 /**
  * Locked mobile history operations. Harmony opts into migration of its original

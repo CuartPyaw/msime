@@ -31,6 +31,7 @@ import { AttachedInputDevice, DeviceChange, HardwareKeyboardPolicy, KeyRoutingTr
   from '../keyboard/input/HardwareKeyboardPolicy';
 import { HarmonyHardwareKeyboards } from '../keyboard/input/HarmonyHardwareKeyboards';
 import { HardwareBackspaceGuard } from '../keyboard/input/BackspaceHoldPolicy';
+import { HeldKeys, KeyIdPolicy } from '../keyboard/KeyIdPolicy';
 
 // Where the badge goes and how long it stays, from platforms/macos/src/input/InputModeHUDPanel.mm: shown long enough to read and gone before the next word. Its size is the floating toolbar's, from InputModeHudPolicy.sizeVp.
 const HUD_SCREEN_MARGIN_VP: number = 8;
@@ -74,6 +75,8 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
   private hudTimer: number = -1;
   private readonly modeKeys: InputModeRouting = new InputModeRouting();
   private readonly backspaceHold: HardwareBackspaceGuard = new HardwareBackspaceGuard();
+  // Physical keys that are down, so the key heatmap counts a held key once rather than once per repeat.
+  private readonly heldKeys: HeldKeys = new HeldKeys();
   // The bar that says what mode the keyboard is in. Another window of its own, because it outlives
   // every composition and every editor: it is on screen whenever the keyboard is running at all.
   private toolbar: inputMethodEngine.Panel | undefined = undefined;
@@ -583,6 +586,7 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     // An editor that stops while the panel is still being built must not be attached once it is.
     this.pending = undefined;
     this.backspaceHold.reset();
+    this.heldKeys.reset();
     KeyboardSession.shared.detach();
     if (this.panel !== undefined) {
       this.panel.hide();
@@ -603,6 +607,14 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
 
   private readonly typed: (event: InputKeyEvent) => boolean = (event: InputKeyEvent): boolean => {
     const session: KeyboardSession = KeyboardSession.shared;
+    // Counted for the key heatmap before anything claims or releases the key, so a key the application types counts the same as one the Engine composes, and a modifier or shortcut chord counts as the presses it is. The session declines for a password field.
+    if (event.action === KeyAction.DOWN) {
+      if (this.heldKeys.press(event.key.code)) {
+        session.recordKey(KeyIdPolicy.hardware(event.key.code));
+      }
+    } else {
+      this.heldKeys.release(event.key.code);
+    }
     // Korean reads a letter's case as the jamo (Shift+R is ㄲ), so only Shift decides it there: Caps Lock left on must not turn every ㄱ into ㄲ.
     const key: HardwareKey = HardwareKeyRouter.normalizeLetterCase({
       keyCode: event.key.code, unicodeChar: event.unicodeChar, ctrlKey: event.ctrlKey,

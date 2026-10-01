@@ -235,6 +235,13 @@ import {
   mergeAccountPreferences,
 } from "../entry/src/main/ets/account/AccountPreferencePlan";
 import { TypingStatisticsPolicy } from "../entry/src/main/ets/keyboard/TypingStatisticsPolicy";
+import {
+  HeldKeys,
+  KEY_IDS,
+  KeyIdPolicy,
+  KeyPressBatch,
+  KeyPressFlush,
+} from "../entry/src/main/ets/keyboard/KeyIdPolicy";
 import { OnlineCandidatePolicy } from "../entry/src/main/ets/keyboard/candidate/OnlineCandidatePolicy";
 import {
   TranslationPolicy,
@@ -441,6 +448,204 @@ group("maps Harmony commits to shared typing-statistics sources", () => {
       TypingStatisticsPolicy.hour(new Date(2026, 8, 19, 23, 59)) === 23,
     "hour buckets use the same local calendar as the day beside them",
   );
+});
+
+group("names keys with the shared key heatmap ids and nothing else", () => {
+  const knownKeyId = (id: string): boolean => KEY_IDS.includes(id);
+  check(KEY_IDS.length === 127, "the whitelist has the shared store's 127 ids");
+  check(new Set(KEY_IDS).size === KEY_IDS.length, "no id is listed twice");
+  for (const id of [
+    KeyIdPolicy.SPACE,
+    KeyIdPolicy.ENTER,
+    KeyIdPolicy.BACKSPACE,
+    KeyIdPolicy.SHIFT,
+    KeyIdPolicy.SOFT_PUNCTUATION,
+    KeyIdPolicy.SOFT_SYMBOL,
+    KeyIdPolicy.SOFT_LAYER,
+    KeyIdPolicy.SOFT_LANGUAGE,
+    KeyIdPolicy.SOFT_EMOJI,
+    KeyIdPolicy.SOFT_VOICE,
+  ]) {
+    check(knownKeyId(id), `${id} is a known id`);
+  }
+  check(!knownKeyId("keya") && !knownKeyId("NineComma"), "ids are exact names");
+
+  check(
+    KeyIdPolicy.character("a") === "KeyA" && KeyIdPolicy.character("Q") === "KeyQ",
+    "a letter is its key in either case",
+  );
+  check(KeyIdPolicy.character("7") === "Digit7", "a digit is its digit-row key");
+  check(
+    KeyIdPolicy.character("!") === "Digit1" &&
+      KeyIdPolicy.character("(") === "Digit9" &&
+      KeyIdPolicy.character("?") === "Slash" &&
+      KeyIdPolicy.character(":") === "Semicolon" &&
+      KeyIdPolicy.character("_") === "Minus" &&
+      KeyIdPolicy.character('"') === "Quote",
+    "a mark is the ANSI key that types it, shifted or not",
+  );
+  check(KeyIdPolicy.character(" ") === "Space", "a space is Space");
+  check(
+    KeyIdPolicy.character("，") === null &&
+      KeyIdPolicy.character("ab") === null &&
+      KeyIdPolicy.character("") === null,
+    "a CJK mark or anything not one ASCII character has no key",
+  );
+  // The symbol rows KeyboardView draws behind 123, and the letter row's extra semicolon.
+  const symbolRows: string[] = "1234567890,.?!;:'\"@/()[]<>\\-_=;".split("");
+  for (const character of symbolRows) {
+    const id: string | null = KeyIdPolicy.character(character);
+    check(id !== null && knownKeyId(id), `soft symbol ${character} is counted on a known key`);
+  }
+
+  const cells: NineKey[] = NineKeyLayout.rows()
+    .concat(NineKeyLayout.digits())
+    .reduce((all: NineKey[], row: NineKey[]) => all.concat(row), []);
+  for (const cell of cells) {
+    const id: string | null = KeyIdPolicy.nineKey(cell.input);
+    check(id !== null && knownKeyId(id), `nine-key cell ${cell.label} is counted`);
+  }
+  check(KeyIdPolicy.nineKey("'") === "Nine1", "the separator cell is the cell printed 1");
+  check(
+    KeyIdPolicy.nineKey("1") === "Nine1" && KeyIdPolicy.nineKey("0") === "Nine0",
+    "digit cells are named by their digit",
+  );
+  check(KeyIdPolicy.nineKey(",") === null, "sidebar marks are not grid cells");
+  check(
+    KeyIdPolicy.character(".") === "Period",
+    "the nine-key control column's period counts as Period, not as side punctuation",
+  );
+
+  // The same mapping iOS TypingKeyID.japaneseKana and Android KeyPressIds.forJapaneseKeyIndex use.
+  const kanaIds: (string | null)[] = [];
+  for (let index = 0; index <= 10; index++) kanaIds.push(KeyIdPolicy.japaneseKana(index));
+  check(
+    kanaIds.join(",") ===
+      "Nine1,Nine2,Nine3,Nine4,Nine5,Nine6,Nine7,Nine8,Nine9,Nine0,SoftPunctuation",
+    "あ through ら are cells 1 to 9, わ is 0 and the 、。？！ cell is side punctuation",
+  );
+  check(
+    KeyIdPolicy.japaneseKana(11) === null && KeyIdPolicy.japaneseKana(-1) === null,
+    "there is no cell outside the eleven",
+  );
+  check(
+    JapaneseNineKeyLayout.keys().length === 11 && JapaneseNineKeyLayout.digitKeys().length === 11,
+    "both kana layers have exactly the eleven cells the mapping names",
+  );
+  for (let index = 0; index < JapaneseNineKeyLayout.keys().length; index++) {
+    const id: string | null = KeyIdPolicy.japaneseKana(index);
+    check(
+      id !== null && knownKeyId(id),
+      `kana cell ${JapaneseNineKeyLayout.keys()[index].kana[0]} is counted on a known key`,
+    );
+  }
+
+  check(
+    KeyIdPolicy.hardware(2017) === "KeyA" && KeyIdPolicy.hardware(2042) === "KeyZ",
+    "KEYCODE_A..Z are the letter keys",
+  );
+  check(
+    KeyIdPolicy.hardware(2000) === "Digit0" && KeyIdPolicy.hardware(2009) === "Digit9",
+    "KEYCODE_0..9 are the digit row",
+  );
+  check(
+    KeyIdPolicy.hardware(2090) === "F1" && KeyIdPolicy.hardware(2101) === "F12",
+    "KEYCODE_F1..F12 are the function row",
+  );
+  check(
+    KeyIdPolicy.hardware(2103) === "Numpad0" &&
+      KeyIdPolicy.hardware(2112) === "Numpad9" &&
+      KeyIdPolicy.hardware(2114) === "NumpadMultiply" &&
+      KeyIdPolicy.hardware(2117) === "NumpadDecimal",
+    "the keypad follows @ohos.multimodalInput.keyCode",
+  );
+  check(
+    KeyIdPolicy.hardware(2047) === "ShiftLeft" &&
+      KeyIdPolicy.hardware(2072) === "ControlLeft" &&
+      KeyIdPolicy.hardware(2055) === "Backspace" &&
+      KeyIdPolicy.hardware(2071) === "Delete",
+    "modifiers and editing keys have their own ids",
+  );
+  check(
+    KeyIdPolicy.hardware(2613) === "Lang1" && KeyIdPolicy.hardware(2614) === "Lang2",
+    "the Korean Han/Yeong and Hanja keys map to Lang1 and Lang2",
+  );
+  check(
+    KeyIdPolicy.hardware(2085) === null &&
+      KeyIdPolicy.hardware(2010) === null &&
+      KeyIdPolicy.hardware(-1) === null,
+    "a media key, STAR or an unknown code is not counted",
+  );
+  let unknown: number = 0;
+  for (let code = -1; code < 3000; code++) {
+    const id: string | null = KeyIdPolicy.hardware(code);
+    if (id !== null && !knownKeyId(id)) unknown++;
+  }
+  check(unknown === 0, "no hardware code maps outside the whitelist");
+});
+
+group("holds key press counts until a batch, a new day or a flush", () => {
+  const batch: KeyPressBatch = new KeyPressBatch();
+  check(batch.drain() === null, "an empty batch writes nothing");
+  check(batch.add("KeyA", "2026-10-01").length === 0, "one press waits in memory");
+  batch.add("KeyA", "2026-10-01");
+  batch.add("Space", "2026-10-01");
+  check(
+    batch.add("NotAKey", "2026-10-01").length === 0 && batch.pending() === 3,
+    "an id outside the whitelist is never held",
+  );
+  const held: KeyPressFlush | null = batch.drain();
+  check(
+    held !== null &&
+      held.day === "2026-10-01" &&
+      held.keys["KeyA"] === 2 &&
+      held.keys["Space"] === 1 &&
+      Object.keys(held.keys).length === 2,
+    "a drain carries the day and a count per key",
+  );
+  check(batch.pending() === 0 && batch.drain() === null, "a drain empties the batch");
+
+  batch.add("KeyB", "2026-10-01");
+  batch.add("KeyB", "2026-10-01");
+  const midnight: KeyPressFlush[] = batch.add("KeyC", "2026-10-02");
+  check(
+    midnight.length === 1 &&
+      midnight[0].day === "2026-10-01" &&
+      midnight[0].keys["KeyB"] === 2 &&
+      midnight[0].keys["KeyC"] === undefined,
+    "presses before midnight are written under their own day",
+  );
+  const after: KeyPressFlush | null = batch.drain();
+  check(
+    after !== null && after.day === "2026-10-02" && after.keys["KeyC"] === 1,
+    "the press after midnight starts the new day",
+  );
+
+  let due: KeyPressFlush[] = [];
+  for (let press = 0; press < KeyPressBatch.FLUSH_PRESSES; press++) {
+    due = due.concat(batch.add("KeyD", "2026-10-02"));
+  }
+  check(
+    due.length === 1 &&
+      due[0].keys["KeyD"] === KeyPressBatch.FLUSH_PRESSES &&
+      batch.pending() === 0,
+    "a full batch is handed back for writing at once",
+  );
+
+  batch.add("KeyE", "2026-10-02");
+  batch.clear();
+  check(batch.drain() === null, "turning statistics off drops what was held");
+});
+
+group("counts a held physical key once", () => {
+  const held: HeldKeys = new HeldKeys();
+  check(held.press(2017), "the first key-down is a press");
+  check(!held.press(2017), "a repeated key-down while held is not");
+  check(held.press(2047), "another key down at the same time is its own press");
+  held.release(2017);
+  check(held.press(2017), "after the release the next key-down is a new press");
+  held.reset();
+  check(held.press(2047), "a reset forgets keys whose release never arrived");
 });
 
 group("bounds and deduplicates asynchronous online AI candidates", () => {
@@ -5625,6 +5830,23 @@ group("a password field never sees a composition buffer", () => {
   check(
     EditorPolicy.useEngine(URI) === true,
     "a URI still composes: it prefers Latin but is not forbidden the Engine",
+  );
+});
+
+group("the key heatmap skips only password fields", () => {
+  check(EditorPolicy.excludesKeyStatistics(PASSWORD) === true, "a password's keys are not counted");
+  check(EditorPolicy.excludesKeyStatistics(PLAIN) === false, "prose is counted");
+  check(
+    EditorPolicy.excludesKeyStatistics(NUMERIC) === false,
+    "a number, phone or date field does not compose but is still counted",
+  );
+  check(
+    EditorPolicy.excludesKeyStatistics(NO_SUGGESTIONS) === false,
+    "a field that asked for no suggestions is still counted",
+  );
+  check(
+    EditorPolicy.excludesKeyStatistics(traits(false, true, false, false, false)) === true,
+    "a numeric password is not counted",
   );
 });
 
