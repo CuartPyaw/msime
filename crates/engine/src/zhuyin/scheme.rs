@@ -165,13 +165,7 @@ impl ZhuyinScheme {
 
     /// The keys that typed the composition, in order, for the caret-locked editing text.
     pub fn editing_text(&self) -> String {
-        let mut keys: String = self
-            .syllables
-            .iter()
-            .map(|syllable| syllable.keys.as_str())
-            .collect();
-        keys.push_str(&self.pending.keys());
-        keys
+        build_editing_keys(&self.syllables, &self.pending)
     }
 
     /// The converted text followed by the pending bopomofo, e.g. `你好ㄇㄚ`.
@@ -350,6 +344,23 @@ impl ZhuyinScheme {
     }
 }
 
+fn build_editing_keys(syllables: &[Syllable], pending: &PendingSyllable) -> String {
+    let pending_capacity = usize::from(pending.initial.is_some())
+        + usize::from(pending.medial.is_some())
+        + usize::from(pending.rime.is_some());
+    let capacity = syllables
+        .iter()
+        .map(|syllable| syllable.keys.len())
+        .sum::<usize>()
+        + pending_capacity;
+    let mut keys = String::with_capacity(capacity);
+    for syllable in syllables {
+        keys.push_str(&syllable.keys);
+    }
+    pending.append_keys(&mut keys);
+    keys
+}
+
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
@@ -376,6 +387,27 @@ mod tests {
         ("ㄇㄚ", "媽", 700),
         ("ㄢ", "安", 100),
     ];
+
+    #[test]
+    fn editing_keys_append_syllables_and_pending_keys_in_order() {
+        let syllables = vec![
+            Syllable {
+                toned: "ㄋㄧˇ".to_owned(),
+                keys: "su3".to_owned(),
+            },
+            Syllable {
+                toned: "ㄏㄠˇ".to_owned(),
+                keys: "lc3".to_owned(),
+            },
+        ];
+        let pending = PendingSyllable {
+            initial: Some('ㄇ'),
+            medial: Some('ㄚ'),
+            rime: None,
+        };
+
+        assert_eq!(build_editing_keys(&syllables, &pending), "su3lc3a8");
+    }
 
     fn scheme() -> (tempfile::TempDir, ZhuyinScheme) {
         scheme_with(&ENTRIES)
