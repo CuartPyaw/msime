@@ -8,7 +8,6 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 use crate::diagnostics;
 use crate::error::{EngineError, Result};
-use crate::user_dictionary::journal::open_database;
 
 /// The schema version the engine reads. A file with any other `format_version` is refused.
 pub const FORMAT_VERSION: u32 = 1;
@@ -48,8 +47,17 @@ pub fn open_read_only(path: &Path) -> Result<LanguageDictionary> {
             diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE,
         ));
     }
-    let connection = open_database(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|_| EngineError::failed(diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE))?;
+    let unavailable =
+        |_: rusqlite::Error| EngineError::failed(diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE);
+    // A shipped resource like the offline glosses (host/glosses.rs), not user data: no symlink policy on the parent path and no busy wait, since nothing writes the file.
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
+    )
+    .map_err(unavailable)?;
+    connection
+        .busy_timeout(std::time::Duration::ZERO)
+        .map_err(unavailable)?;
     let dictionary = LanguageDictionary { connection };
     // SQLite opens lazily, so a file that is not a database first fails on this read.
     let version = dictionary
@@ -171,6 +179,20 @@ mod tests {
             Some("CC-BY-4.0")
         );
         assert_eq!(dictionary.metadata("missing").unwrap(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opens_through_a_symlinked_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        build(&real.join("zhuyin.db"), &FORMAT_VERSION.to_string());
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let dictionary = open_read_only(&link.join("zhuyin.db")).unwrap();
+        assert!(dictionary.has_syllable("nei").unwrap());
     }
 
     #[test]
