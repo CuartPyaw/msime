@@ -53,7 +53,7 @@ log show --last 5m --style compact --info --predicate 'subsystem == "app.msime.i
 MSIME_SPARKLE_ROOT=/absolute/path/to/Sparkle-2.9.6 platforms/macos/package-release.sh [版本] [输出目录]
 ```
 
-DMG 里是设置应用（`MSIME.app`）、指向 `/Applications` 的链接和一份 `安装说明.txt`（提醒拖进去之后要打开一次 MSIME）。设置应用的 `Contents/Resources` 内嵌锁定词库 `EngineResources`（经 `verify_resources` 校验）、手写模型、许可证文件，以及输入法本体 `水杉输入法.app`（Release 构建，链接 Release 版 Rust 静态库）。安装方式与 Windows 的「下载、双击、能打字」对应：把应用拖进「应用程序」并打开，设置应用在启动时把内嵌的输入法复制到 `~/Library/Input Methods`，以 `--register-input-source` 登记（见「词库准备与 Tauri 设置应用」一节的启动时安装与刷新）。macOS 27 上登记不会把输入源加进用户的输入法列表（见上文），所以输入源不在列表里时，设置应用在进入设置页之前先显示一页添加引导：按「系统设置 → 键盘 → 文字输入 → 输入法 → 编辑… → + → 简体中文 → 水杉输入法 → 添加」列出步骤，事先说明添加时系统对所有第三方输入法都会显示的隐私提示，提供「打开键盘设置」按钮，并在窗口重新获得焦点时和每 3 秒重新读取一次列表，读到后自动进入完成页。引导完成过一次后不再在启动时出现，除非启动时发现输入源又不在列表里；账户页的「重新查看新手引导」可以随时再打开它。`/Library/Input Methods` 里有这个输入法的副本（任何名字）时，引导先请用户用管理员权限把它移到废纸篓，设置应用不替用户提权。首次安装有一个例外：这个 bundle identifier 在本次登录会话开始时还不在输入源列表里（全新的机器就是这样）时，按「安装与输入源注册」一节的限制，注册在下次登录前不会生效。此时 bundle 保留在原处，设置页提示注销并重新登录，重新登录后在系统设置里添加即可，与 `scripts/install.sh` 的处理相同；「安装 / 更新」在这种情况下同样保留 bundle，但报告失败。首次启动时从内嵌词库准备用户数据。输入法 bundle 里的 Sparkle.framework 以符号链接组成、签名把链接本身封在里面，所以打包时用 `ditto` 放回签过名的副本（Tauri 的资源复制会把链接展开成文件），设置页的安装也原样重建包内的相对链接，指向 bundle 之外的链接一律拒绝。桌面的整句重排模型（`target/macos/settled-model`）目前不随包，Windows 安装包带它。
+DMG 里是设置应用（`MSIME.app`）、指向 `/Applications` 的链接和一份 `安装说明.txt`（提醒拖进去之后要打开一次 MSIME）。设置应用的 `Contents/Resources` 内嵌锁定词库 `EngineResources`（经 `verify_resources` 校验）、手写模型、许可证文件，以及输入法本体 `水杉输入法.app`（Release 构建，链接 Release 版 Rust 静态库）。安装方式与 Windows 的「下载、双击、能打字」对应：把应用拖进「应用程序」并打开。本机从未装过这个输入法（`~/Library/Input Methods` 里没有它的任何一个历史名字）时，设置应用先以一个 480×440、不可缩放的安装窗口打开，用户点「立即安装」后才把内嵌的输入法复制到 `~/Library/Input Methods`，并以 `--register-input-source` 登记；装好后点「进入设置」，窗口恢复成设置页的尺寸。复制和登记本身不报告进度，只要几秒，所以安装窗口的进度条是按时间推进的：越往后越慢，停在 93% 等待安装真正结束，最短显示 2.2 秒。已经装过（包括 pkg 时代的 `MetasequoiaIME.app` 和预览版名字）时不出现安装窗口，仍在启动时静默刷新（见「词库准备与 Tauri 设置应用」一节的启动时安装与刷新）。macOS 27 上登记不会把输入源加进用户的输入法列表（见上文），输入源不在列表里时由设置页顶部的状态提示说明添加步骤（系统设置 → 键盘 → 文字输入 → 输入法 → 编辑…），并提供「打开键盘设置」按钮。`/Library/Input Methods` 里有这个输入法的副本（任何名字）时，引导先请用户用管理员权限把它移到废纸篓，设置应用不替用户提权。首次安装有一个例外：这个 bundle identifier 在本次登录会话开始时还不在输入源列表里（全新的机器就是这样）时，按「安装与输入源注册」一节的限制，注册在下次登录前不会生效。此时 bundle 保留在原处，设置页提示注销并重新登录，重新登录后在系统设置里添加即可，与 `scripts/install.sh` 的处理相同；「安装 / 更新」在这种情况下同样保留 bundle，但报告失败。首次启动时从内嵌词库准备用户数据。输入法 bundle 里的 Sparkle.framework 以符号链接组成、签名把链接本身封在里面，所以打包时用 `ditto` 放回签过名的副本（Tauri 的资源复制会把链接展开成文件），设置页的安装也原样重建包内的相对链接，指向 bundle 之外的链接一律拒绝。桌面的整句重排模型（`target/macos/settled-model`）目前不随包，Windows 安装包带它。
 
 包里只能证明本机能构建出的东西：脚本在构建后和挂载 DMG 后各检查一遍内嵌资源、输入法的 bundle identifier 与麦克风 entitlement、两层签名的 `codesign --verify --deep --strict`，任何一项不符就失败。
 
@@ -68,7 +68,7 @@ workflow 曾经读取的是括号里的名字，而仓库的 secrets 是以前�
 
 有证书时，输入法按 `scripts/install.sh` 的方式签名（`--deep --options runtime --timestamp`，带 `resources/VoiceInput.entitlements`），设置应用与 DMG 再各签一层（外层不加 `--deep`，以免覆盖输入法的 entitlements）；三项公证凭据也齐全时 DMG 经公证并 staple。只有签名且公证过的包才能走完上面的安装流程。本机设置 `MACOS_SIGNING_IDENTITY`（钥匙串里已有的 Developer ID 身份）与三项公证凭据即可走同一条签名与公证路径，CI 另从 `MACOS_CERTIFICATE_P12_BASE64` 导入证书；目前只验证过 ad-hoc 路径。
 
-没有这些 secrets 时所有签名都是 ad-hoc、也不公证。下载的应用被 Gatekeeper 隔离，第一次要右键「打开」，或执行 `xattr -dr com.apple.quarantine "/Applications/MSIME.app"`；之后设置应用可以运行、词库可以准备，但内嵌的输入法是 ad-hoc 签名，macOS 不会把它登记为输入源（见上一节与 `scripts/install.sh` 开头的说明），启动时的自动安装与「安装 / 更新」都会在注册这一步失败：已有安装时回滚到原有安装，设置页提示安装失败；没有安装时 bundle 按上面的首次安装规则留在原处、提示重新登录，但 ad-hoc 签名的输入源重新登录后也不会出现。这种包只对有自己 Developer ID 的开发者可用：用 `scripts/install.sh` 重签并安装其中的 `水杉输入法.app`。
+没有这些 secrets 时所有签名都是 ad-hoc、也不公证。下载的应用被 Gatekeeper 隔离，第一次要右键「打开」，或执行 `xattr -dr com.apple.quarantine "/Applications/MSIME.app"`；之后设置应用可以运行、词库可以准备，但内嵌的输入法是 ad-hoc 签名，macOS 不会把它登记为输入源（见上一节与 `scripts/install.sh` 开头的说明），安装窗口、启动时的刷新与「安装 / 更新」都会在注册这一步失败：已有安装时回滚到原有安装，设置页提示安装失败；没有安装时 bundle 按上面的首次安装规则留在原处、提示重新登录，但 ad-hoc 签名的输入源重新登录后也不会出现。这种包只对有自己 Developer ID 的开发者可用：用 `scripts/install.sh` 重签并安装其中的 `水杉输入法.app`。
 
 DMG 不提供 Sparkle appcast，输入法与设置应用的「检查更新…」打开官方发布页。
 
@@ -80,7 +80,7 @@ brew install --cask metasequoiaime/tap/msime
 
 cask 放在 [metasequoiaime/homebrew-tap](https://github.com/metasequoiaime/homebrew-tap) 的 `Casks/msime.rb`，模板是本目录的 `homebrew/msime.rb.in`。改 cask 改模板，tap 里的副本每次发布都会被覆盖。`release-macos.yml` 在 `publish` 打开、`prerelease` 关闭的发布之后，用刚发布的 DMG 的版本与 SHA-256 填好模板并推到 tap；DMG 没有通过 `xcrun stapler validate`（没有公证）或仓库没有 `HOMEBREW_TAP_TOKEN`（能推送该仓库的 token）时跳过并留下警告，因为 ad-hoc 包装得上但输入法注册不了。
 
-cask 安装 `MSIME.app`，并把其中的 `msime-mcp` 链接到 `PATH`，供在终端里配置的 AI 助手使用。和拖进「应用程序」一样，装完要打开一次 MSIME，由它把输入法装进 `~/Library/Input Methods` 并登记；全新的机器还要按上面的首次安装规则注销并重新登录。`brew uninstall` 同时删除 `~/Library/Input Methods/水杉输入法.app`，`--zap` 再删除设置、词库与缓存。只提供 Apple silicon，最低 macOS 13，与 DMG 相同。
+cask 安装 `MSIME.app`，并把其中的 `msime-mcp` 链接到 `PATH`，供在终端里配置的 AI 助手使用。和拖进「应用程序」一样，装完要打开一次 MSIME，在它的安装窗口里点「立即安装」，把输入法装进 `~/Library/Input Methods` 并登记；全新的机器还要按上面的首次安装规则注销并重新登录。`brew uninstall` 同时删除 `~/Library/Input Methods/水杉输入法.app`，`--zap` 再删除设置、词库与缓存。只提供 Apple silicon，最低 macOS 13，与 DMG 相同。
 
 ## 标识与数据目录
 
