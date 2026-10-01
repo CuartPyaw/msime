@@ -64,3 +64,54 @@ test("follows the selection when it changes", () => {
   );
   expect(screen.getByText("3 / 3")).toBeTruthy();
 });
+
+const many = Array.from({ length: 46 }, (_, slide) => `皮肤 ${slide + 1}`);
+
+function renderMany(selectedIndex: number) {
+  return render(
+    <ThemeCarousel labels={many} selectedIndex={selectedIndex}>
+      {many.map((label) => (
+        <article key={label} aria-label={label} />
+      ))}
+    </ThemeCarousel>,
+  );
+}
+
+function dots() {
+  return screen
+    .getAllByRole("button")
+    .filter((button) => button.getAttribute("aria-label")?.startsWith("查看"));
+}
+
+test("with many themes the dots are a window of nine around the current one", () => {
+  renderMany(27);
+
+  expect(screen.getByText("28 / 46")).toBeTruthy();
+  expect(dots().map((dot) => dot.getAttribute("aria-label"))).toEqual(
+    Array.from({ length: 9 }, (_, offset) => `查看皮肤 ${24 + offset}`),
+  );
+  expect(current()?.getAttribute("aria-label")).toBe("查看皮肤 28");
+  for (const label of many) expect(screen.getByRole("article", { name: label })).toBeTruthy();
+});
+
+test("the window stays inside the slides at either end and follows the arrows", () => {
+  renderMany(0);
+  expect(dots()[0].getAttribute("aria-label")).toBe("查看皮肤 1");
+  expect(dots()).toHaveLength(9);
+
+  fireEvent.click(screen.getByRole("button", { name: "查看皮肤 9" }));
+  expect(screen.getByText("9 / 46")).toBeTruthy();
+  expect(dots()[0].getAttribute("aria-label")).toBe("查看皮肤 5");
+
+  fireEvent.click(screen.getByRole("button", { name: "下一个主题" }));
+  expect(current()?.getAttribute("aria-label")).toBe("查看皮肤 10");
+});
+
+test("the last themes keep a full window", () => {
+  renderMany(45);
+
+  expect(dots().map((dot) => dot.getAttribute("aria-label"))).toEqual(
+    Array.from({ length: 9 }, (_, offset) => `查看皮肤 ${38 + offset}`),
+  );
+  expect(current()?.getAttribute("aria-label")).toBe("查看皮肤 46");
+});
