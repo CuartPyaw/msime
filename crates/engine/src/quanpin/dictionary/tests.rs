@@ -82,6 +82,18 @@ fn path_cache_key_borrows_the_segmentation_when_present() {
     assert_eq!(path_cache_key("nihao", ""), "nihao");
 }
 
+#[test]
+fn fuzzy_cache_key_hash_checks_rules_and_segmentation() {
+    let cached = CachedFuzzyCandidates {
+        rules: 0x7ff,
+        segmentation: "ni'hao".to_owned(),
+        candidates: Vec::new(),
+    };
+    assert!(fuzzy_cache_key_matches(&cached, 0x7ff, "ni'hao"));
+    assert!(!fuzzy_cache_key_matches(&cached, 0x3ff, "ni'hao"));
+    assert!(!fuzzy_cache_key_matches(&cached, 0x7ff, "niha"));
+}
+
 fn contains(items: &[WordItem], word: &str) -> bool {
     items.iter().any(|item| item.word == word)
 }
@@ -910,7 +922,7 @@ fn fuzzy_fixture() -> Fixture {
     fixture
 }
 
-/// A warm fuzzy query reads the `fuzzy:<rules>:<segmentation>` slot instead of expanding the fuzzy paths again: a marker row planted there comes back.
+/// A warm fuzzy query reads its cached hash slot instead of expanding the fuzzy paths again: a marker row planted there comes back.
 #[test]
 fn warm_fuzzy_queries_reuse_the_fuzzy_slot() {
     let fixture = fuzzy_fixture();
@@ -920,12 +932,12 @@ fn warm_fuzzy_queries_reuse_the_fuzzy_slot() {
     };
     let cold = dictionary.query("zongguo", "zong'guo", NONE, all);
     assert!(contains(&cold, "中国"), "{:?}", words(&cold));
-    let slot = format!("fuzzy:{}:zong'guo", fuzzy_rule::ALL);
-    let mut cached = dictionary.series_cache.get(&slot).expect("fuzzy slot");
-    let mut marker = cached[0].clone();
+    let slot = fuzzy_cache_hash(fuzzy_rule::ALL, "zong'guo");
+    let mut cached = dictionary.fuzzy_cache.get(&slot).expect("fuzzy slot");
+    let mut marker = cached.candidates[0].clone();
     marker.word = "哨兵".to_string();
-    cached.push(marker);
-    dictionary.series_cache.insert(slot, cached);
+    cached.candidates.push(marker);
+    dictionary.fuzzy_cache.insert(slot, cached);
     let warm = dictionary.query("zongguo", "zong'guo", NONE, all);
     assert!(contains(&warm, "哨兵"), "{:?}", words(&warm));
 }
