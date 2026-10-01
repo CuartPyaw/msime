@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   MobileKeyboardFeedback,
   MobileKeyboardFeedbackClient,
@@ -18,11 +18,16 @@ export function useMobileKeyboardFeedback({
 }: UseMobileKeyboardFeedbackOptions) {
   const [value, setValue] = useState<MobileKeyboardFeedback>();
   const [busy, setBusy] = useState(false);
+  const generation = useRef(0);
 
   useEffect(() => {
+    const current = ++generation.current;
+    setBusy(false);
     if (!mobile || !client) {
       setValue(undefined);
-      return;
+      return () => {
+        if (generation.current === current) generation.current++;
+      };
     }
     let active = true;
     void client
@@ -35,22 +40,27 @@ export function useMobileKeyboardFeedback({
       });
     return () => {
       active = false;
+      if (generation.current === current) generation.current++;
     };
   }, [client, mobile, onError]);
 
   async function save(next: MobileKeyboardFeedback) {
     if (!client) return;
+    const current = generation.current;
     const previous = value;
     setValue(next);
     setBusy(true);
     onError("");
     try {
-      setValue(await client.save(next));
+      const saved = await client.save(next);
+      if (generation.current === current) setValue(saved);
     } catch {
-      if (previous) setValue(previous);
-      onError("无法保存按键反馈设置，请重试。");
+      if (generation.current === current) {
+        if (previous) setValue(previous);
+        onError("无法保存按键反馈设置，请重试。");
+      }
     } finally {
-      setBusy(false);
+      if (generation.current === current) setBusy(false);
     }
   }
 
