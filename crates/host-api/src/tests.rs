@@ -6569,6 +6569,21 @@ fn refresh_leaves_a_symlinked_options_file_alone() {
     assert!(!super::refresh_host_options(&current).unwrap());
 }
 
+#[cfg(unix)]
+#[test]
+fn refresh_rejects_a_symlinked_options_parent() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let linked = directory.path().join("state");
+    symlink(target.path(), &linked).unwrap();
+    let options = linked.join("runtime-options.json");
+    std::fs::write(target.path().join("runtime-options.json"), b"{}").unwrap();
+
+    assert!(super::refresh_host_options(&options).is_err());
+}
+
 /// Downloaded dictionaries that an upgrade left behind the compiled lock are reported as `dictionary_outdated`, the one refresh failure hosts turn into a pointer at `msime-linux-setup --update --download`, and the options file keeps pointing at the working previous generation.
 #[test]
 fn refresh_reports_outdated_resources_and_leaves_the_options_alone() {
