@@ -327,6 +327,7 @@ fn load_installed(
     kind: PluginKind,
     builtin: bool,
 ) -> Result<PluginSummary, String> {
+    crate::storage::reject_symlink(directory).map_err(|_| "扩展包所在目录是符号链接".to_owned())?;
     if !safe_id(folder) {
         return Err("扩展包 id 无效".into());
     }
