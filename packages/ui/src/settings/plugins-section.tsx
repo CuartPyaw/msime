@@ -5,6 +5,7 @@ import type { ConfirmRequest } from "../core/confirm";
 import {
   MAX_COMMAND_TABLES,
   withoutRemovedPack,
+  type EffectStyle,
   type KeySoundMode,
   type PluginPreferences,
 } from "./plugin-preferences";
@@ -72,6 +73,13 @@ const keySoundModes: readonly { value: KeySoundMode; label: string }[] = [
   { value: "melody", label: "按键旋律" },
 ];
 
+const effectStyleOptions: readonly { value: EffectStyle; label: string }[] = [
+  { value: "off", label: "关闭" },
+  { value: "flash", label: "闪光" },
+  { value: "sparks", label: "火花" },
+  { value: "power_mode", label: "Power Mode" },
+];
+
 /**
  * Why the list cannot be saved as it stands, in the words the page shows, or null when it can. The rules are `mentions::validate_entry`'s, checked here so the user sees which row to fix before anything is sent; the host checks again.
  */
@@ -117,7 +125,7 @@ export function pluginErrorMessage(error: unknown, fallback: string): string {
     case "plugin_unsupported_source":
       return "只能导入扩展包文件夹或 .zip 文件。";
     case "plugin_reserved":
-      return "这个 id 属于内置音效包，不能覆盖或删除。";
+      return "这个 id 属于内置扩展包，不能覆盖或删除。";
     case "plugin_storage":
       return "扩展目录不可用，请检查数据目录的权限。";
     case "mention_invalid":
@@ -163,6 +171,10 @@ export interface PluginsSectionProps {
   music: boolean;
   /** The host routes the / and @ modes (`HostCapabilities.plugin_triggers`). */
   triggers: boolean;
+  /** The host draws the typing effects and the combo count (`HostCapabilities.typing_effects`). */
+  typingEffects?: boolean;
+  /** The host draws the effect styles, not only the combo count; false on Linux, which shows the count as text. */
+  effectStyles?: boolean;
   /** Loads the catalog and the name list each time this turns true, so a pack copied in by hand shows up on the next visit. */
   active: boolean;
   onChange: (preferences: PluginPreferences) => void;
@@ -170,13 +182,15 @@ export interface PluginsSectionProps {
   confirm: (request: ConfirmRequest) => Promise<boolean>;
 }
 
-/** The 扩展 page: key sounds, the typing melody, background music, command tables, the installed packs and the @ name list. */
+/** The 扩展 page: key sounds, the typing melody, typing effects, background music, command tables, the installed packs and the @ name list. */
 export function PluginsSection({
   client,
   preferences,
   keySound,
   music,
   triggers,
+  typingEffects = false,
+  effectStyles = false,
   active,
   onChange,
   onError,
@@ -395,6 +409,55 @@ export function PluginsSection({
               onChange={(enabled) => onChange({ ...preferences, achievements: { enabled } })}
             />
           </Row>
+        </GroupList>
+      )}
+      {typingEffects && (
+        <GroupList title="打字效果">
+          {effectStyles && (
+            <>
+              <Row
+                title="效果样式"
+                description="闪光：按键时候选栏闪一下；火花：按键和上屏时迸出火花；Power Mode：火花随连击变大。"
+              >
+                <Segmented
+                  options={effectStyleOptions}
+                  value={preferences.effect_style}
+                  onChange={(effect_style) => onChange({ ...preferences, effect_style })}
+                />
+              </Row>
+              <Row title="效果强度" description="效果的大小和持续时间。">
+                <span className={settings.sliderControl}>
+                  <Slider
+                    value={preferences.effect_intensity}
+                    valueText={`${preferences.effect_intensity}%`}
+                    disabled={preferences.effect_style === "off"}
+                    onChange={(effect_intensity) => onChange({ ...preferences, effect_intensity })}
+                  />
+                </span>
+              </Row>
+            </>
+          )}
+          <Row
+            title="连击计数"
+            description="连续打字时在候选栏显示连击数，停顿 3 秒或按退格后重新计数。自动重复的按键不计数。"
+          >
+            <Switch
+              checked={preferences.combo_counter}
+              onChange={(combo_counter) => onChange({ ...preferences, combo_counter })}
+            />
+          </Row>
+          {effectStyles && (
+            <Row
+              title="升档音"
+              description="连击达到 10、25、50、100 时播放音效包的上屏音，每升一档音调更高，音量随音效音量。"
+            >
+              <Switch
+                checked={preferences.combo_tier_sound}
+                disabled={!preferences.combo_counter}
+                onChange={(combo_tier_sound) => onChange({ ...preferences, combo_tier_sound })}
+              />
+            </Row>
+          )}
         </GroupList>
       )}
       {music && (

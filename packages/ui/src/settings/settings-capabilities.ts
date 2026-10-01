@@ -71,6 +71,9 @@ export function settingsCapabilities({
   const showKeySound = host?.key_sound === true;
   const showMusic = host?.music === true;
   const showPluginTriggers = host?.plugin_triggers === true;
+  const showTypingEffects = host?.typing_effects === true;
+  // Linux shows the combo count as text in the candidate panel's aux line and draws no flash or sparks, so only the counter switch has an effect there.
+  const showTypingEffectStyles = showTypingEffects && !linux;
   return {
     nativeVoicePlatform,
     showModeScope,
@@ -107,5 +110,7 @@ export function settingsCapabilities({
     showKeySound,
     showMusic,
     showPluginTriggers,
+    showTypingEffects,
+    showTypingEffectStyles,
   } as const;
 }

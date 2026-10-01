@@ -25,6 +25,9 @@ export type MusicPreferences = { enabled: boolean; pack: string; volume: number 
 /** Mirrors `client-core::preferences::AchievementPreferences`. */
 export type AchievementPreferences = { enabled: boolean };
 
+/** Mirrors `client-core::plugins::EffectStyle`: what a host draws on keys and commits. */
+export type EffectStyle = "off" | "flash" | "sparks" | "power_mode";
+
 /** Mirrors `client-core::preferences::PluginPreferences`. The document leaves the whole section out while it is at these defaults, so a page reading one merges it over `defaultPluginPreferences`. */
 export type PluginPreferences = {
   key_sound: KeySoundPreferences;
@@ -34,6 +37,14 @@ export type PluginPreferences = {
   achievements: AchievementPreferences;
   /** Installed command-table packs the `/` mode reads, in priority order: the first pack that defines a trigger wins. */
   command_tables: string[];
+  /** The typing effect the host draws; `off` draws nothing. */
+  effect_style: EffectStyle;
+  /** 0-100: how large and how long the effect is drawn. */
+  effect_intensity: number;
+  /** Count consecutive keys and show the count; a pause of 3 seconds or a backspace starts it again. */
+  combo_counter: boolean;
+  /** Play the key sound pack's commit sample, pitched up, when the count reaches 10, 25, 50 and 100. */
+  combo_tier_sound: boolean;
 };
 
 /** `client-core::plugins::DEFAULT_SOUND_PACK`. */
@@ -50,6 +61,10 @@ export const defaultPluginPreferences: PluginPreferences = {
   music: { enabled: false, pack: "", volume: 30 },
   achievements: { enabled: false },
   command_tables: [],
+  effect_style: "off",
+  effect_intensity: 50,
+  combo_counter: false,
+  combo_tier_sound: false,
 };
 
 /** The plugin section a draft holds, each part filled in from the defaults where the document left it out. */
@@ -62,6 +77,10 @@ export function pluginPreferences(draft?: Pick<Preferences, "plugins">): PluginP
     music: { ...defaultPluginPreferences.music, ...value?.music },
     achievements: { ...defaultPluginPreferences.achievements, ...value?.achievements },
     command_tables: value?.command_tables ?? defaultPluginPreferences.command_tables,
+    effect_style: value?.effect_style ?? defaultPluginPreferences.effect_style,
+    effect_intensity: value?.effect_intensity ?? defaultPluginPreferences.effect_intensity,
+    combo_counter: value?.combo_counter ?? defaultPluginPreferences.combo_counter,
+    combo_tier_sound: value?.combo_tier_sound ?? defaultPluginPreferences.combo_tier_sound,
   };
 }
 

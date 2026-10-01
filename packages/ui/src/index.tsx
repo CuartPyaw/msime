@@ -633,6 +633,7 @@ export {
   withoutRemovedPack,
   type AchievementPreferences,
   type CommitSoundPreferences,
+  type EffectStyle,
   type KeySoundMode,
   type KeySoundPreferences,
   type MelodyPreferences,
@@ -1272,6 +1273,8 @@ export interface HostCapabilities {
   plugin_triggers?: boolean;
   /** The host streams the selected music pack while it is the active input method. */
   music?: boolean;
+  /** The host draws the typing effects and the combo count `msime_client_typing_effect` answers with. Absent on a host older than the field. */
+  typing_effects?: boolean;
 }
 
 export { useCandidatePreviewTheme } from "./candidate/candidate-preview-theme";
@@ -1868,6 +1871,8 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showKeySound,
     showMusic,
     showPluginTriggers,
+    showTypingEffects,
+    showTypingEffectStyles,
   } = capabilities;
   const {
     fullwidthChord,
@@ -2314,7 +2319,11 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
       // A host with a pack store, or one that plays or routes something the page switches.
       hasPlugins:
         !mobilePlatform &&
-        (Boolean(client.plugins) || showKeySound || showMusic || showPluginTriggers),
+        (Boolean(client.plugins) ||
+          showKeySound ||
+          showMusic ||
+          showPluginTriggers ||
+          showTypingEffects),
       mobileHiddenPageIds,
       mobilePageTitle,
     });
@@ -2406,6 +2415,8 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showKeySound,
     showMusic,
     showPluginTriggers,
+    showTypingEffects,
+    showTypingEffectStyles,
     snapshot,
     draft,
     setDraft,

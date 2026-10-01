@@ -12,7 +12,8 @@ export type LocalModeKey =
   | "temporary_japanese"
   | "expression"
   | "command"
-  | "mention";
+  | "mention"
+  | "mention_places";
 
 export type LocalModePreferences = {
   unicode: boolean;
@@ -27,6 +28,8 @@ export type LocalModePreferences = {
   expression?: boolean;
   command?: boolean;
   mention?: boolean;
+  /** The @ mode also offers China's provinces, cities and counties from the built-in table, after the user's own names. Absent while off, like the three above. */
+  mention_places?: boolean;
 };
 
 export const defaultLocalModes: LocalModePreferences = {
@@ -89,7 +92,7 @@ const triggerModeRows: readonly [LocalModeKey, string, string][] = [
   [
     "command",
     "指令(/ 模式)",
-    "中文标点下没有输入时按 /，再输入指令字母：rq 日期、sj 时间、xq 星期，以及「扩展」页启用的指令表。空格上屏；数字选词",
+    "中文标点下没有输入时按 /，再输入指令字母：rq 日期、sj 时间、xq 星期、fy 翻译（fy 后输入英文，' 分隔单词，首选为中文译文），以及「扩展」页启用的指令表。空格上屏；数字选词",
   ],
   [
     "mention",
@@ -97,6 +100,17 @@ const triggerModeRows: readonly [LocalModeKey, string, string][] = [
     "中文标点下没有输入时按 @，再输入拼音或首字母，从「扩展」页的 @ 名单中选择。空格上屏；数字选词",
   ],
 ];
+
+/** Shown under the @ switch wherever that is, and switchable only while it is on: the places come after the user's own names in the same mode. */
+const mentionPlacesRow: [LocalModeKey, string, string] = [
+  "mention_places",
+  "@ 地名",
+  "@ 模式在名单之后列出全国省、市、区县，候选旁注明所属省市。地名表内置在输入法中，不联网、不读取位置",
+];
+
+/** Why /fy gives nothing while no translation service is chosen: it asks the chosen service only, and never falls back to another. */
+const commandTranslationNotice =
+  "fy 翻译需要先在「表达 → 候选词翻译」选择翻译服务，目前未选择，fy 不会出结果。";
 
 const iosLocalModeDescriptions: Partial<Record<LocalModeKey, string>> = {
   quick_phrase: `${iosLocalModeEntry("快捷短语")}再输入编码即可调用快捷短语`,
@@ -116,6 +130,8 @@ export interface LocalModesSectionProps {
   triggers?: boolean;
   /** The host can also edit the @ name list (a plugin store), without which the @ mode could never produce a candidate; its switch is shown only then. */
   mentions?: boolean;
+  /** A translation service is chosen, which the / mode's fy command asks. When false, the / row says fy gives nothing; absent where the host offers no choice of service. */
+  translationService?: boolean;
   onChange: (preferences: LocalModePreferences) => void;
 }
 
@@ -125,10 +141,15 @@ export function LocalModesSection({
   ios,
   triggers = false,
   mentions = false,
+  translationService,
   onChange,
 }: LocalModesSectionProps) {
   const rows = triggers
-    ? [...localModeRows, ...triggerModeRows.filter(([key]) => key !== "mention" || mentions)]
+    ? [
+        ...localModeRows,
+        ...triggerModeRows.filter(([key]) => key !== "mention" || mentions),
+        ...(mentions ? [mentionPlacesRow] : []),
+      ]
     : localModeRows;
   return (
     <GroupList title="实用功能">
@@ -136,10 +157,17 @@ export function LocalModesSection({
         <Row
           key={key}
           title={label}
-          description={ios ? (iosLocalModeDescriptions[key] ?? description) : description}
+          description={
+            key === "command" && translationService === false
+              ? `${description}。${commandTranslationNotice}`
+              : ios
+                ? (iosLocalModeDescriptions[key] ?? description)
+                : description
+          }
         >
           <Switch
             checked={preferences[key] ?? false}
+            disabled={key === "mention_places" && !preferences.mention}
             onChange={(checked) => onChange({ ...preferences, [key]: checked })}
           />
         </Row>

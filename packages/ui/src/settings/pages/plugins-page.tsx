@@ -4,7 +4,7 @@ import { PluginsSection } from "../plugins-section";
 import { pluginPreferences } from "../plugin-preferences";
 import { createSettingsDraftActions } from "../settings-draft-actions";
 
-/** The 扩展 page of the settings form (route id `plugins`): sound packs, background music, command tables and the @ name list. */
+/** The 扩展 page of the settings form (route id `plugins`): sound packs, typing effects, background music, command tables and the @ name list. */
 export function PluginsSettingsPage() {
   const {
     client,
@@ -17,6 +17,8 @@ export function PluginsSettingsPage() {
     showKeySound,
     showMusic,
     showPluginTriggers,
+    showTypingEffects,
+    showTypingEffectStyles,
   } = useSettingsForm();
   const { onPreferencesChange } = createSettingsDraftActions({ setDraft });
   return (
@@ -28,6 +30,8 @@ export function PluginsSettingsPage() {
           keySound={showKeySound}
           music={showMusic}
           triggers={showPluginTriggers}
+          typingEffects={showTypingEffects}
+          effectStyles={showTypingEffectStyles}
           active={page === "plugins"}
           onChange={(plugins) => onPreferencesChange({ plugins })}
           onError={setError}

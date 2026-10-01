@@ -377,7 +377,7 @@ test("checks a name list the way the host does", () => {
 
 test("decodes host failures, falling back for unknown ones", () => {
   expect(pluginErrorMessage({ code: "plugin_reserved" }, "失败")).toBe(
-    "这个 id 属于内置音效包，不能覆盖或删除。",
+    "这个 id 属于内置扩展包，不能覆盖或删除。",
   );
   expect(pluginErrorMessage({ code: "plugin_archive", detail: "压缩包里的文件太多" }, "失败")).toBe(
     "压缩包无法读取（压缩包里的文件太多）。",
@@ -386,8 +386,112 @@ test("decodes host failures, falling back for unknown ones", () => {
   expect(pluginErrorMessage(new Error("boom"), "失败")).toBe("失败");
 });
 
+test("hides the typing effects where the host draws none", () => {
+  renderSection({ client: undefined });
+  expect(screen.queryByText("打字效果")).toBeNull();
+  expect(screen.queryByRole("switch", { name: "连击计数" })).toBeNull();
+});
+
+test("switches the typing effect style, intensity, combo count and tier sound", () => {
+  const { onChange } = renderSection({
+    client: undefined,
+    typingEffects: true,
+    effectStyles: true,
+  });
+  const intensity = screen.getByRole("slider", { name: "效果强度" }) as HTMLInputElement;
+  // Nothing is drawn while the style is off, so its size has nothing to act on.
+  expect(intensity.disabled).toBe(true);
+  expect(
+    within(screen.getByRole("radiogroup", { name: "效果样式" }))
+      .getAllByRole("radio")
+      .map((radio) => radio.closest("label")?.textContent),
+  ).toEqual(["关闭", "闪光", "火花", "Power Mode"]);
+
+  fireEvent.click(screen.getByRole("radio", { name: "Power Mode" }));
+  expect(onChange).toHaveBeenLastCalledWith({
+    ...defaultPluginPreferences,
+    effect_style: "power_mode",
+  });
+
+  fireEvent.click(screen.getByRole("switch", { name: "连击计数" }));
+  expect(onChange).toHaveBeenLastCalledWith({ ...defaultPluginPreferences, combo_counter: true });
+  // The tier sound marks a combo tier, so it waits for the counter.
+  expect((screen.getByRole("switch", { name: "升档音" }) as HTMLInputElement).disabled).toBe(true);
+
+  cleanup();
+  const on: PluginPreferences = {
+    ...defaultPluginPreferences,
+    effect_style: "sparks",
+    combo_counter: true,
+  };
+  const next = renderSection({ client: undefined, typingEffects: true, effectStyles: true }, on);
+  fireEvent.change(screen.getByRole("slider", { name: "效果强度" }), { target: { value: "80" } });
+  expect(next.onChange).toHaveBeenLastCalledWith({ ...on, effect_intensity: 80 });
+  fireEvent.click(screen.getByRole("switch", { name: "升档音" }));
+  expect(next.onChange).toHaveBeenLastCalledWith({ ...on, combo_tier_sound: true });
+});
+
+test("offers only the combo count where the host draws no effect styles", () => {
+  renderSection({ client: undefined, typingEffects: true, effectStyles: false });
+  expect(screen.getByRole("switch", { name: "连击计数" })).toBeTruthy();
+  expect(screen.queryByRole("radiogroup", { name: "效果样式" })).toBeNull();
+  expect(screen.queryByRole("slider", { name: "效果强度" })).toBeNull();
+  expect(screen.queryByRole("switch", { name: "升档音" })).toBeNull();
+});
+
+test("lists the built-in packs by their Chinese names, each under its own kind", async () => {
+  const builtin: PluginCatalogResult = {
+    packages: [
+      pack({ id: "default", kind: "sound", name: "清脆键盘", builtin: true, mode: "keys" }),
+      pack({ id: "msime-typewriter", kind: "sound", name: "打字机", builtin: true, mode: "keys" }),
+      pack({ id: "msime-8bit", kind: "sound", name: "8 位游戏机", builtin: true, mode: "keys" }),
+      pack({ id: "twinkle", kind: "sound", name: "小星星", builtin: true, mode: "sequence" }),
+      pack({ id: "msime-canon", kind: "sound", name: "卡农", builtin: true, mode: "sequence" }),
+      pack({
+        id: "msime-music-lofi",
+        kind: "music",
+        name: "Lo-fi 午后",
+        builtin: true,
+        tracks: ["lofi.wav"],
+      }),
+    ],
+    issues: [],
+  };
+  const client = fakeClient({ catalog: vi.fn(async () => builtin) });
+  renderSection(
+    { client },
+    {
+      ...defaultPluginPreferences,
+      key_sound: { ...defaultPluginPreferences.key_sound, mode: "melody" },
+    },
+  );
+  await screen.findByText("卡农 1.0.0");
+  const options = (name: string) =>
+    within(screen.getByRole("combobox", { name }))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+  expect(options("音效包")).toEqual(["清脆键盘（内置）", "打字机（内置）", "8 位游戏机（内置）"]);
+  expect(options("旋律")).toEqual(["小星星（内置）", "卡农（内置）"]);
+  expect(options("音乐包")).toEqual(["未选择", "Lo-fi 午后（内置）"]);
+  // Built-in music cannot be removed any more than the built-in sound packs.
+  expect(screen.queryByRole("button", { name: "删除Lo-fi 午后" })).toBeNull();
+});
+
 test("fills the defaults the document leaves out and forgets removed packs", () => {
   expect(pluginPreferences({})).toEqual(defaultPluginPreferences);
+  // `PluginPreferences::default()` in client-core: no effect, half intensity, no combo.
+  expect(defaultPluginPreferences).toMatchObject({
+    effect_style: "off",
+    effect_intensity: 50,
+    combo_counter: false,
+    combo_tier_sound: false,
+  });
+  // A document written before the effect fields reads them as their defaults, and one that has them keeps them.
+  expect(
+    pluginPreferences({
+      plugins: { combo_counter: true, effect_style: "sparks" } as unknown as Preferences["plugins"],
+    }),
+  ).toEqual({ ...defaultPluginPreferences, combo_counter: true, effect_style: "sparks" });
   expect(
     pluginPreferences({
       plugins: { music: { enabled: true } } as unknown as Preferences["plugins"],
@@ -440,6 +544,66 @@ test("shows the V, / and @ switches only where the host routes them", () => {
   expect(onChange).toHaveBeenCalledWith({ ...stored, mention: true });
 });
 
+test("offers the built-in places under the @ switch, switchable only while @ is on", () => {
+  const onChange = vi.fn();
+  render(
+    <LocalModesSection preferences={defaultLocalModes} ios={false} triggers onChange={onChange} />,
+  );
+  // No @ switch, so no places either.
+  expect(screen.queryByRole("switch", { name: "@ 地名" })).toBeNull();
+
+  cleanup();
+  render(
+    <LocalModesSection
+      preferences={defaultLocalModes}
+      ios={false}
+      triggers
+      mentions
+      onChange={onChange}
+    />,
+  );
+  const off = screen.getByRole("switch", { name: "@ 地名" }) as HTMLInputElement;
+  expect(off.checked).toBe(false);
+  expect(off.disabled).toBe(true);
+
+  cleanup();
+  const mention = { ...defaultLocalModes, mention: true };
+  render(
+    <LocalModesSection preferences={mention} ios={false} triggers mentions onChange={onChange} />,
+  );
+  const places = screen.getByRole("switch", { name: "@ 地名" }) as HTMLInputElement;
+  expect(places.disabled).toBe(false);
+  fireEvent.click(places);
+  expect(onChange).toHaveBeenLastCalledWith({ ...mention, mention_places: true });
+});
+
+test("says /fy needs a translation service only while none is chosen", () => {
+  const notice = /fy 翻译需要先在「表达 → 候选词翻译」选择翻译服务/;
+  render(
+    <LocalModesSection
+      preferences={defaultLocalModes}
+      ios={false}
+      triggers
+      translationService={false}
+      onChange={vi.fn()}
+    />,
+  );
+  expect(screen.getByText(notice)).toBeTruthy();
+
+  cleanup();
+  render(
+    <LocalModesSection
+      preferences={defaultLocalModes}
+      ios={false}
+      triggers
+      translationService
+      onChange={vi.fn()}
+    />,
+  );
+  expect(screen.getByText(/fy 翻译（fy 后输入英文/)).toBeTruthy();
+  expect(screen.queryByText(notice)).toBeNull();
+});
+
 const snapshot: Snapshot = {
   format_version: 1,
   revision: 3,
@@ -477,6 +641,48 @@ test("the 扩展 page saves plugin settings into the preferences document", asyn
   saveSettingsNow();
   await waitFor(() => expect(save).toHaveBeenCalled());
   expect(save.mock.calls.at(-1)?.[1].plugins?.key_sound.enabled).toBe(true);
+});
+
+test("the 扩展 page offers the typing effects where the host draws them, and only the combo count on Linux", async () => {
+  const save = vi.fn(async (_revision: number, preferences: Preferences) => ({
+    ...snapshot,
+    revision: 4,
+    preferences,
+  }));
+  render(
+    <SettingsPage
+      client={{
+        load: async () => snapshot,
+        save,
+        host: { platform: "macos", typing_effects: true } as never,
+      }}
+    />,
+  );
+  await settingsFormReady();
+  fireEvent.click(screen.getByRole("button", { name: "扩展" }));
+  const form = screen.getByRole("group", { name: "扩展" });
+  expect(within(form).getByRole("radiogroup", { name: "效果样式" })).toBeTruthy();
+  fireEvent.click(within(form).getByRole("radio", { name: "火花" }));
+  saveSettingsNow();
+  await waitFor(() => expect(save).toHaveBeenCalled());
+  expect(save.mock.calls.at(-1)?.[1].plugins?.effect_style).toBe("sparks");
+
+  cleanup();
+  render(
+    <SettingsPage
+      client={{
+        load: async () => snapshot,
+        save: vi.fn(),
+        host: { platform: "linux", typing_effects: true } as never,
+      }}
+    />,
+  );
+  await settingsFormReady();
+  fireEvent.click(screen.getByRole("button", { name: "扩展" }));
+  const linux = screen.getByRole("group", { name: "扩展" });
+  expect(within(linux).getByRole("switch", { name: "连击计数" })).toBeTruthy();
+  expect(within(linux).queryByRole("radiogroup", { name: "效果样式" })).toBeNull();
+  expect(within(linux).queryByRole("switch", { name: "升档音" })).toBeNull();
 });
 
 test("the @ switch is offered only where the host can edit the name list", async () => {
