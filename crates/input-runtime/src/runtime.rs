@@ -1963,9 +1963,11 @@ impl<E: InputEngine> Runtime<E> {
                     if !result.handled && value.is_ascii_punctuation() {
                         return self.punctuation(value);
                     }
-                    // Let Engine consume numeric input (Unicode mode, nine-key, etc.) first. A result that already committed (a Korean syllable the digit ended) is final: selecting now would replace that commit and lose the text.
+                    // Let Engine consume numeric input (Unicode mode, nine-key, etc.) first. A result that already committed (a Korean syllable the digit ended) is final: selecting now would replace that commit and lose the text. A digit the scheme spells with (a Zhuyin tone or phonetic key) is never a pick, even one the Engine let go: Zhuyin leaves 1-9 to selection only while its list is open, when they are not spelling symbols, so `0` there stays ㄢ.
                     if result.handled
                         || result.has_commit
+                        || (self.cached.local_mode == "none"
+                            && self.cached.spelling_symbols.as_bytes().contains(&value))
                         || self.cached.nine_key
                         || !(b'1'..=b'9').contains(&value)
                         || len == 0
@@ -2007,6 +2009,12 @@ impl<E: InputEngine> Runtime<E> {
                 .engine
                 .clear_candidate_position(self.engine_index(id.index)),
             Action::ChooseNineKeySpelling(id) => self.engine.choose_nine_key_spelling(id.index),
+            // A scheme that spells with Space lists it among its spelling symbols (Zhuyin's first tone, or opening its list with no syllable pending), and then the Space command is that key rather than a pick of the highlighted row.
+            Action::SelectHighlighted
+                if self.cached.spelling_symbols.as_bytes().contains(&b' ') =>
+            {
+                self.engine.character(b' ', false)
+            }
             Action::SelectHighlighted if len > 0 => {
                 self.engine.select(self.engine_index(self.highlighted))
             }

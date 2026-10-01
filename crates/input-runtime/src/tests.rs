@@ -5323,3 +5323,315 @@ fn cantonese_lists_are_never_reranked_or_demoted() {
         sentences[..5]
     );
 }
+
+const ZHUYIN_SCHEME: u8 = 6;
+
+/// A `zhuyin.db` with a few bopomofo rows, written with the shipped schema.
+fn zhuyin_dictionary(directory: &std::path::Path) -> String {
+    use msime_engine::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let path = directory.join("zhuyin.db");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute_batch(SCHEMA).unwrap();
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('ㄋㄧˇ'),('ㄏㄠˇ'),('ㄊㄞˊ'),('ㄨㄢ'),('ㄇㄚ˙'),('ㄇㄚ'),('ㄝ');\
+             INSERT INTO entries VALUES ('ㄋㄧˇ','你',1000),('ㄋㄧˇ','妳',300),('ㄏㄠˇ','好',2000),('ㄏㄠˇ','郝',10),('ㄋㄧˇ ㄏㄠˇ','你好',500),('ㄊㄞˊ','台',900),('ㄊㄞˊ','臺',400),('ㄨㄢ','彎',500),('ㄨㄢ','灣',300),('ㄊㄞˊ ㄨㄢ','臺灣',800),('ㄊㄞˊ ㄨㄢ','台灣',600),('ㄇㄚ˙','嗎',800),('ㄇㄚ','媽',700),('ㄝ','欸',50);",
+        )
+        .unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+/// A real Engine on the Zhuyin scheme, focused.
+fn zhuyin_runtime(directory: &std::path::Path) -> Runtime {
+    let mut options = real_engine_options(directory);
+    options.scheme = ZHUYIN_SCHEME;
+    options.zhuyin_dictionary = zhuyin_dictionary(directory);
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+/// Types `keys` as plain characters, each one composing without a commit.
+fn compose_zhuyin(runtime: &mut Runtime, keys: &str) -> Transition {
+    let mut last = None;
+    for value in keys.bytes() {
+        let transition = character(runtime, value);
+        assert!(
+            transition.handled && transition.commit.is_none(),
+            "{keys}: {}",
+            value as char
+        );
+        last = Some(transition);
+    }
+    last.unwrap()
+}
+
+/// The Dachen keys that are digits and marks spell even with nothing composed, on the character route and on both punctuation routes, while a tone key with nothing to complete is the host's to type. The scheme is Chinese but writes Traditional as stored, and the bopomofo keys overlap the host's smart punctuation, so the host has none.
+#[test]
+fn zhuyin_idle_phonetic_keys_compose_and_idle_tone_keys_type_themselves() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+    assert!(!runtime.punctuation_host_context_available(false));
+    let idle = runtime.view();
+    assert_eq!(idle.scheme, ZHUYIN_SCHEME);
+    assert_eq!(idle.spelling_symbols, "125890,./;-");
+    assert!(idle.chinese_text);
+    assert!(!idle.script_conversion);
+
+    for (route, action) in [
+        (
+            "character 1",
+            Action::Character {
+                value: b'1',
+                shift: false,
+            },
+        ),
+        (
+            "character ,",
+            Action::Character {
+                value: b',',
+                shift: false,
+            },
+        ),
+        (
+            "character -",
+            Action::Character {
+                value: b'-',
+                shift: false,
+            },
+        ),
+        ("punctuation ,", Action::Punctuation(b',')),
+        ("punctuation -", Action::Punctuation(b'-')),
+        ("ascii punctuation ,", Action::PunctuationAscii(b',')),
+        ("ascii punctuation -", Action::PunctuationAscii(b'-')),
+    ] {
+        let typed = runtime.dispatch(action).unwrap();
+        assert!(typed.handled && typed.commit.is_none(), "{route}");
+        assert_eq!(typed.view.editing_text.len(), 1, "{route}");
+        assert!(!typed.view.preedit.is_empty(), "{route}");
+        assert!(typed.view.spelling_symbols.contains(' '), "{route}");
+        let cleared = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+        assert!(cleared.handled && cleared.commit.is_none(), "{route}");
+        assert_eq!(cleared.view.editing_text, "", "{route}");
+    }
+
+    for value in *b"3467" {
+        let typed = character(&mut runtime, value);
+        assert!(
+            !typed.handled && typed.commit.is_none(),
+            "{}",
+            value as char
+        );
+        assert_eq!(typed.view.editing_text, "", "{}", value as char);
+    }
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(!space.handled && space.commit.is_none());
+}
+
+/// `su3cl3` converts to 你好 with the caret held at the end, and Enter commits the conversion and keeps the key. Nothing is script-converted on the way out.
+#[test]
+fn zhuyin_enter_commits_the_conversion() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+
+    let typed = compose_zhuyin(&mut runtime, "su3cl3");
+    assert_eq!(typed.view.editing_text, "su3cl3");
+    assert_eq!(typed.view.caret_position, "su3cl3".len());
+    assert_eq!(typed.view.preedit, "你好");
+    assert!(typed.view.candidates.is_empty());
+    assert!(!typed.view.candidate_list_open);
+    assert_eq!(typed.view.spelling_symbols, "1234567890,./;- ");
+
+    let enter = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert!(enter.handled);
+    assert_eq!(enter.commit.as_deref(), Some("你好"));
+    let context = enter.commit_context.unwrap();
+    assert_eq!(context.scheme, ZHUYIN_SCHEME);
+    assert!(!context.script_conversion);
+    assert_eq!(enter.view.editing_text, "");
+    assert_eq!(enter.view.spelling_symbols, "125890,./;-");
+}
+
+/// Space is a spelling key while the Engine lists it: with a syllable pending it is the first tone, and with none pending it opens the list, whether the host sends it as a character or as its Space command. It never takes a candidate on its own.
+#[test]
+fn zhuyin_space_is_the_first_tone_and_opens_the_list() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+
+    for (route, space) in [
+        (
+            "character",
+            (|| Action::Character {
+                value: b' ',
+                shift: false,
+            }) as fn() -> Action,
+        ),
+        ("command", || Action::SelectHighlighted),
+    ] {
+        compose_zhuyin(&mut runtime, "j0");
+        let toned = runtime.dispatch(space()).unwrap();
+        assert!(toned.handled && toned.commit.is_none(), "{route}");
+        assert_eq!(toned.view.preedit, "彎", "{route}");
+        assert!(!toned.view.candidate_list_open, "{route}");
+        assert!(toned.view.candidates.is_empty(), "{route}");
+
+        let opened = runtime.dispatch(space()).unwrap();
+        assert!(opened.handled && opened.commit.is_none(), "{route}");
+        assert!(opened.view.candidate_list_open, "{route}");
+        assert_eq!(texts(&opened.view), ["彎", "灣"], "{route}");
+        assert_eq!(opened.view.spelling_symbols, "0,./;-", "{route}");
+        assert_eq!(opened.view.preedit, "彎", "{route}");
+
+        // With the list open Space takes the highlighted row into the conversion and commits nothing.
+        runtime.dispatch(Action::NextCandidate).unwrap();
+        let picked = runtime.dispatch(Action::SelectHighlighted).unwrap();
+        assert!(picked.handled && picked.commit.is_none(), "{route}");
+        assert!(!picked.view.candidate_list_open, "{route}");
+        assert!(picked.view.candidates.is_empty(), "{route}");
+        assert_eq!(picked.view.preedit, "灣", "{route}");
+        let enter = runtime
+            .dispatch(Action::Command(Command::CommitRaw))
+            .unwrap();
+        assert_eq!(enter.commit.as_deref(), Some("灣"), "{route}");
+    }
+}
+
+/// The Down key's command opens the list over the conversion. A digit picks a row on the visible page without committing, `0` is the bopomofo ㄢ and closes the list rather than picking, and Escape closes the list before a second one clears the composition.
+#[test]
+fn zhuyin_list_digits_select_without_commit_and_escape_steps_back() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+
+    compose_zhuyin(&mut runtime, "w96");
+    let opened = runtime
+        .dispatch(Action::Command(Command::ConvertHanja))
+        .unwrap();
+    assert!(opened.handled && opened.commit.is_none());
+    assert!(opened.view.candidate_list_open);
+    assert_eq!(texts(&opened.view), ["台", "臺"]);
+
+    let picked = character(&mut runtime, b'2');
+    assert!(picked.handled && picked.commit.is_none());
+    assert!(!picked.view.candidate_list_open);
+    assert_eq!(picked.view.preedit, "臺");
+    assert_eq!(picked.view.editing_text, "w96");
+
+    // `0` with the list open spells ㄢ after the conversion instead of choosing a row.
+    runtime
+        .dispatch(Action::Command(Command::ConvertHanja))
+        .unwrap();
+    let zero = character(&mut runtime, b'0');
+    assert!(zero.handled && zero.commit.is_none());
+    assert!(!zero.view.candidate_list_open);
+    assert!(zero.view.candidates.is_empty());
+    assert_eq!(zero.view.preedit, "臺ㄢ");
+
+    // A digit past the end of the open page is swallowed and leaves the list as it was.
+    let toned = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(toned.handled && toned.commit.is_none());
+    runtime
+        .dispatch(Action::Command(Command::ConvertHanja))
+        .unwrap();
+    assert!(runtime.view().candidate_list_open);
+    let beyond = character(&mut runtime, b'9');
+    assert!(beyond.handled && beyond.commit.is_none());
+
+    let closed = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(closed.handled && closed.commit.is_none());
+    assert!(!closed.view.candidate_list_open);
+    assert!(!closed.view.editing_text.is_empty());
+    let cleared = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(cleared.handled && cleared.commit.is_none());
+    assert_eq!(cleared.view.editing_text, "");
+    assert_eq!(runtime.view().preedit, "");
+}
+
+/// A Shift punctuation key commits the conversion followed by its full-width mark, through the character route and the punctuation route alike, whatever the host's punctuation context.
+#[test]
+fn zhuyin_shift_punctuation_commits_then_inserts_the_full_width_mark() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+
+    compose_zhuyin(&mut runtime, "su3cl3");
+    let comma = runtime
+        .dispatch(Action::Character {
+            value: b'<',
+            shift: true,
+        })
+        .unwrap();
+    assert!(comma.handled);
+    assert_eq!(comma.commit.as_deref(), Some("你好，"));
+    assert_eq!(comma.view.editing_text, "");
+    assert!(!comma.commit_context.unwrap().script_conversion);
+
+    compose_zhuyin(&mut runtime, "su3");
+    let question = runtime.dispatch(Action::Punctuation(b'?')).unwrap();
+    assert!(question.handled);
+    assert_eq!(question.commit.as_deref(), Some("你？"));
+    assert_eq!(question.view.editing_text, "");
+}
+
+/// Leaving the client commits the conversion, and attaching a new one discards a conversion left open in the previous one.
+#[test]
+fn zhuyin_blur_commits_the_conversion() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+
+    compose_zhuyin(&mut runtime, "su3cl3");
+    let left = runtime.focus(false).unwrap();
+    assert_eq!(left.commit.as_deref(), Some("你好"));
+    assert_eq!(left.view.editing_text, "");
+    runtime.focus(true).unwrap();
+    assert!(runtime.focus(false).unwrap().commit.is_none());
+
+    runtime.focus(true).unwrap();
+    compose_zhuyin(&mut runtime, "su3");
+    runtime
+        .dispatch(Action::Command(Command::ConvertHanja))
+        .unwrap();
+    let attached = runtime.focus(true).unwrap();
+    assert!(attached.commit.is_none());
+    assert_eq!(attached.view.editing_text, "");
+    assert!(!attached.view.candidate_list_open);
+}
+
+/// A host that draws held phrase pieces still sees the Zhuyin spelling symbols: the View hides them only behind a held piece, and a Zhuyin pick from the open list joins the conversion rather than starting a phrase, so no piece is ever held.
+#[test]
+fn zhuyin_spelling_symbols_stay_visible_with_phrase_preedit() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+    runtime.set_phrase_preedit(true);
+    assert_eq!(runtime.view().spelling_symbols, "125890,./;-");
+
+    let typed = compose_zhuyin(&mut runtime, "su3cl3");
+    assert_eq!(typed.view.spelling_symbols, "1234567890,./;- ");
+    let opened = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(opened.view.candidate_list_open);
+    assert_eq!(opened.view.spelling_symbols, "0,./;-");
+    assert_eq!(texts(&opened.view), ["你好", "好", "郝"]);
+
+    let picked = character(&mut runtime, b'3');
+    assert!(picked.handled && picked.commit.is_none());
+    assert_eq!(picked.view.phrase_prefix, "");
+    assert_eq!(picked.view.preedit, "你郝");
+    assert_eq!(picked.view.spelling_symbols, "1234567890,./;- ");
+
+    // A phonetic mark still spells on every route, where a held piece would have turned it into punctuation.
+    let mark = runtime.dispatch(Action::Punctuation(b',')).unwrap();
+    assert!(mark.handled && mark.commit.is_none());
+    assert_eq!(mark.view.phrase_prefix, "");
+    let enter = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert_eq!(enter.commit.as_deref(), Some("你郝"));
+    assert_eq!(enter.view.phrase_prefix, "");
+}
