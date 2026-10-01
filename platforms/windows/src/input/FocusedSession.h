@@ -4,6 +4,7 @@
 #include "ReplyComposer.h"
 #include "TypingStatistics.h"
 #include <functional>
+#include <map>
 #include <string>
 
 namespace msime::windows {
@@ -16,6 +17,10 @@ using TypingStatisticsSink =
 void record_typing_statistics_async(const std::string &directory,
                                     const std::string &text,
                                     TypingSource source, bool quiet = false);
+// Hands one day's per-key press counts to the shared store on a detached thread. Same contract as above: nothing to record or a store with statistics off writes nothing.
+void record_typing_keys_async(const std::string &directory,
+                              const std::string &day,
+                              const std::map<std::string, uint64_t> &keys);
 enum class HideCandidateDisposition { Rejected, Cancelled, Suppressed };
 
 // One registered client's queue-owned adapter. No pipe I/O runs here; the

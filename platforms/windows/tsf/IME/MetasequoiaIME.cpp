@@ -17,6 +17,7 @@
 #include <vector>
 #include "FanyLog.h"
 #include "Ipc.h"
+#include "KeyPressStatisticsQueue.h"
 #include "CommonUtils.h"
 #include "Global/FanyDefines.h"
 #include "Utils/FanyUtils.h"
@@ -1508,6 +1509,8 @@ ExitError:
 
 STDAPI CMetasequoiaIME::Deactivate()
 {
+    // The flush runs on the thread pool under its own loader reference, so it survives this tip going away. It is deliberately not waited for: TSF calls Deactivate the same way for a profile switch as for a closing thread and gives no exit signal to tell them apart, so a wait would stall every ordinary deactivation. A process that exits before the drain finishes loses at most the presses since the last focus-loss flush, capped by the 256-press and 30-second triggers.
+    FlushKeyPressStatistics();
     _SyncHostContextFocus(nullptr);
     _UninitBareShiftKeyboardHook();
     Global::HostUiLessMode = false;

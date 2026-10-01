@@ -282,6 +282,10 @@ msime::linux_host::ClientInputModeMemory fcitx_app_input_modes;
 std::optional<bool> fcitx_global_input_mode;
 // Addon scope too: the statistics store is one per preferences directory, not one per input context.
 msime::linux_host::TypingStatisticsSwitch fcitx_typing_statistics{msime_client_typing_statistics_enabled};
+// Key press writes still running on their own threads, which ~FcitxEngine waits for so the addon library is not unloaded, nor the process ended, under them.
+msime::linux_host::PendingWrites fcitx_key_press_writes;
+// Set by ~FcitxEngine: Fcitx5 is unloading the addon, usually because it is exiting, so the last batches are written on the loop rather than handed to a thread that may not outlive it.
+bool fcitx_key_presses_shutting_down = false;
 
 CandidateSkinCatalog parseCandidateSkinCatalog(const Json &options) {
   return msime::linux_host::parse_configured_skins(options);
@@ -427,6 +431,7 @@ public:
           refreshCloudClipboard();
           refreshEmoji();
           refreshVoice();
+          flushKeyPresses(key_presses_.take_due(static_cast<int64_t>(fcitx::now(CLOCK_MONOTONIC))));
           timer->setNextInterval(250000);
           timer->setOneShot();
           return true;
@@ -434,6 +439,9 @@ public:
   }
   ~FcitxState() override { close(); }
   void close() {
+    // Every way out of a session passes here, focus loss, deactivation and teardown included, and options_path_ is still the batch's directory.
+    flushKeyPresses(key_presses_.take());
+    key_presses_.forget_held();
     hideVoiceOverlay();
     wave_overlay_.reset();
     if (session_) msime_linux_diagnostic_write("focus_out");
@@ -3091,11 +3099,66 @@ public:
   // The combo count the session last answered msime_client_typing_effect with, and the key held down, so an auto-repeat is drawn but not counted.
   std::uint32_t typing_combo_ = 0;
   msime::linux_host::KeyRepeat key_repeat_;
+  // Every key event MSIME receives passes through here before key() routes it, so the heatmap counts keys the IME consumes for a composition as well as keys it hands back to the application. Only key downs count, once per physical press; a raw code below 8 has no evdev key behind it (a synthetic event, such as a panel's typed key).
+  void countKeyPress(const fcitx::KeyEvent &event) {
+    const auto code = event.rawKey().code();
+    if (code < 8) return;
+    const auto evdev = static_cast<uint32_t>(code - 8);
+    // The front end's event time (X server or Wayland milliseconds) tells a synthetic repeat pair apart exactly; a front end that sends none leaves 0, and then the arrival time stands in for it.
+    const auto now = static_cast<int64_t>(fcitx::now(CLOCK_MONOTONIC));
+    const bool stamped = event.time() != 0;
+    const auto at = stamped ? static_cast<int64_t>(static_cast<uint32_t>(event.time())) * 1000 : now;
+    if (event.isRelease()) {
+      key_presses_.up(evdev, at);
+      return;
+    }
+    // With statistics off nothing is buffered; restricted (password, number) and private contexts are never counted, the same contexts commits are not recorded in.
+    if (!fcitx_typing_statistics.enabled() || !ic_.hasFocus() || restricted() || privateInput()) return;
+    const auto id = key_presses_.down(evdev, at,
+                                      stamped ? msime::linux_host::KeyPressCounter::kEventRepeatGapMicroseconds
+                                              : msime::linux_host::KeyPressCounter::kArrivalRepeatGapMicroseconds);
+    if (id.empty() || options_path_.empty() || options_path_.front() != '/') return;
+    const auto day = msime::linux_host::local_day(std::time(nullptr));
+    if (day.empty()) return;
+    flushKeyPresses(key_presses_.add(id, options_path_, day, now));
+  }
+  // Writes the pending key presses now, for FcitxEngine's teardown.
+  void flushPendingKeyPresses() { flushKeyPresses(key_presses_.take()); }
+  // Sends one batch to the store's record_keys operation on the calling thread.
+  static void writeKeyPresses(const msime::linux_host::KeyPressBatch &pending) {
+    try {
+      const auto request = Json{
+          {"directory", pending.directory},
+          {"action", Json{{"operation", "record_keys"}, {"day", pending.day}, {"keys", pending.keys}}}}
+                               .dump();
+      if (auto *raw = msime_client_typing_statistics(
+              reinterpret_cast<const uint8_t *>(request.data()), request.size()))
+        msime_client_string_free(raw);
+    } catch (...) {
+      // Statistics are best effort and must never affect typing.
+    }
+  }
+  // Writes a batch of key press counts on its own thread, as recordTypingStatistics does for commits, or on the loop once the addon is unloading (see ~FcitxEngine).
+  static void flushKeyPresses(std::optional<msime::linux_host::KeyPressBatch> batch) {
+    // Presses counted before statistics were turned off are dropped rather than sent; the store would not write them either.
+    if (!batch || !fcitx_typing_statistics.enabled()) return;
+    if (fcitx_key_presses_shutting_down) {
+      writeKeyPresses(*batch);
+      return;
+    }
+    fcitx_key_press_writes.begin();
+    std::thread([pending = std::move(*batch)] {
+      writeKeyPresses(pending);
+      fcitx_key_press_writes.end();
+    }).detach();
+  }
   uint64_t session_ = 0;
   Json view_ = Json::object();
   Json preferences_ = Json::object();
   Json navigation_ = Json::object();
   std::string options_path_;
+  // Per-key press counts for the key heatmap, written in batches; see KeyPressCounter.
+  msime::linux_host::KeyPressCounter key_presses_;
   std::string dictionary_user_data_;
   std::string resources_;
   std::optional<std::string> scheme_override_;
@@ -5073,6 +5136,8 @@ public:
     set_classicui_config(*classicui, config);
   }
   explicit FcitxEngine(fcitx::Instance *instance) : instance_(instance) {
+    // A library Fcitx5 kept loaded across an earlier engine's teardown keeps its globals; this engine writes off the loop again.
+    fcitx_key_presses_shutting_down = false;
     refreshOptions();
     refreshTypingStatistics();
     instance->inputContextManager().registerProperty("msimeState", &factory_);
@@ -5331,7 +5396,14 @@ public:
         });
   }
   // The theme worker runs addon code on a schedule rather than on user action, so it is the detached job most likely to be in flight when Fcitx5 unloads the addon. Waiting for it here (its portal call gives up after 1 s) keeps that code from running after the library is gone; the other detached jobs keep the risk their comment accepts.
+  // The key press counts get the same care: every context's pending batch is written here, synchronously, and so is any a context still flushes when the factory destroys it; batches already handed to a thread (contexts Fcitx5 destroyed before unloading the addon) are waited for. A store write takes milliseconds; the bound only keeps a wedged store from holding the exit.
   ~FcitxEngine() override {
+    fcitx_key_presses_shutting_down = true;
+    instance_->inputContextManager().foreach([this](fcitx::InputContext *ic) {
+      ic->propertyFor(&factory_)->flushPendingKeyPresses();
+      return true;
+    });
+    fcitx_key_press_writes.wait_idle(std::chrono::seconds(2));
     if (system_theme_job_.valid()) system_theme_job_.wait_for(std::chrono::seconds(2));
   }
   // The desktop appearance (the portal's color-scheme) is probed once for the whole addon, not once per input context, and never on the loop: fcitx_system_dark_theme is a synchronous portal round trip that can block for its full 1 s D-Bus timeout. One worker is in flight at a time; the loop polls it every 250 ms and starts the next one 5 s after the last answer, so a theme switch reaches every context within about 5 s, as when each context probed on its own. Returns the microseconds until the next step.
@@ -5518,6 +5590,7 @@ public:
     state->noteCapsLock(event.rawKey().states().test(fcitx::KeyState::CapsLock));
     try {
       if (state->ensure()) {
+        state->countKeyPress(event);
         if (state->key(event)) event.filterAndAccept();
         else state->countPassthroughKey(event);
         state->playKeySound(event);

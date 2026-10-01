@@ -3,6 +3,7 @@ import {
   EmojiPage, EmojiRow, ClipboardHistoryMutation
 } from './KeyboardSession';
 import { KeyboardScheme, SchemeDefinition } from './KeyboardScheme';
+import { KeyIdPolicy } from './KeyIdPolicy';
 import { VoiceHotkeyAction } from './input/VoiceHotkeyPolicy';
 import { BusinessErrorPolicy } from './BusinessErrorPolicy';
 import { VoiceRecordingBehaviourPolicy } from './input/VoiceRecordingBehaviourPolicy';
@@ -700,6 +701,8 @@ struct KeyboardView {
    * editor when there was no composition; it never crosses that boundary and eats committed text.
    */
   private startBackspace(): void {
+    // Counted once per press here, on the way down, never per repeat of a hold.
+    KeyboardSession.shared.recordKey(KeyIdPolicy.BACKSPACE);
     this.cancelBackspace();
     this.backspaceRepeated = false;
     this.backspaceTimer = setTimeout((): void => {
@@ -776,6 +779,8 @@ struct KeyboardView {
   }
 
   private tapLetter(letter: string): void {
+    // The key by its position, so Dubeolsik jamo and a shifted capital count on the same key as the plain letter.
+    KeyboardSession.shared.recordKey(KeyIdPolicy.character(letter));
     if (this.koreanFace()) {
       // The Engine reads the jamo from the letter's case, so Shift is sent as an upper-case letter rather than as helpcode.
       const shifted: boolean = this.caseMode !== LetterCaseMode.LOWERCASE;
@@ -1213,6 +1218,7 @@ struct KeyboardView {
   }
 
   private toggleSymbolLayer(): void {
+    KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_LAYER);
     const wasHandwriting: boolean = KeyboardScheme.usesHandwritingFace(
       this.scheme, this.english, this.symbols, this.localMode);
     this.symbols = !this.symbols;
@@ -1463,6 +1469,7 @@ struct KeyboardView {
   }
 
   private activateReturn(): void {
+    KeyboardSession.shared.recordKey(KeyIdPolicy.ENTER);
     const dispatch: ReturnDispatch = ReturnKeyAction.dispatch(
       this.japanese, this.editing.length > 0, this.candidates.length,
       KeyboardSession.shared.japaneseConversionActive(), this.koreanFace());
@@ -1483,6 +1490,7 @@ struct KeyboardView {
   }
 
   private activateSpace(): void {
+    KeyboardSession.shared.recordKey(KeyIdPolicy.SPACE);
     if (this.koreanFace()) {
       // Space ends the open syllable and is still a space, so the keyboard types it after the commit.
       KeyboardSession.shared.commitThenType(0x20);
@@ -1575,6 +1583,7 @@ struct KeyboardView {
    * What a symbol-layer key does. A digit ends an open Korean syllable and is then typed after it, which the punctuation route cannot do: it takes marks only.
    */
   private tapSymbol(symbol: string): void {
+    KeyboardSession.shared.recordKey(KeyIdPolicy.character(symbol));
     const character: number = symbol.charCodeAt(0);
     if (this.koreanFace() && KoreanCompositionPolicy.typesAfterCommit(character)) {
       KeyboardSession.shared.commitThenType(character);
@@ -2352,6 +2361,7 @@ struct KeyboardView {
           this.stripPill({
             face: this.english ? '英' : '中', label: KeyAccessibilityPolicy.languageState(this.english), filled: false,
             action: () => {
+              KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_LANGUAGE);
               this.toggleTouchLanguage();
             }
           });
@@ -2385,11 +2395,13 @@ struct KeyboardView {
       .align(Alignment.Start)
       this.shortcutIcon($r('app.media.tool_emoji'), KeyAccessibilityPolicy.emoji(),
         this.surface === SURFACE_EMOJI, () => {
+          KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_EMOJI);
           this.openEmojiSurface();
         });
       if (this.touchVoiceShortcut && this.voiceEnabled) {
         this.shortcutText('🎙', KeyAccessibilityPolicy.voice(),
           this.surface === SURFACE_VOICE, () => {
+            KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_VOICE);
             this.show(SURFACE_VOICE);
             if (!this.voiceBusy && this.voiceText.length === 0) {
               this.startVoice();
@@ -2503,7 +2515,10 @@ struct KeyboardView {
             .justifyContent(FlexAlign.Center)
             .width('100%')
             .accessibilityText(KeyAccessibilityPolicy.symbol(symbol))
-            .onClick(() => KeyboardSession.shared.punctuation(symbol.charCodeAt(0)))
+            .onClick(() => {
+              KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_PUNCTUATION);
+              KeyboardSession.shared.punctuation(symbol.charCodeAt(0));
+            })
           }, (symbol: string) => symbol + this.faceKey())
         } else if (this.spellings.length > 0) {
           Scroll() {
@@ -2536,7 +2551,10 @@ struct KeyboardView {
             .layoutWeight(1)
             .justifyContent(FlexAlign.Center)
             .width('100%')
-            .onClick(() => KeyboardSession.shared.punctuation(symbol.charCodeAt(0)))
+            .onClick(() => {
+              KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_PUNCTUATION);
+              KeyboardSession.shared.punctuation(symbol.charCodeAt(0));
+            })
           }, (symbol: string) => symbol + this.faceKey())
         }
       }
@@ -2572,12 +2590,22 @@ struct KeyboardView {
         .width('100%')
         // A period is punctuation while spelling and a decimal point beside the digit grid. Clear
         // is already available by holding Delete, so it no longer spends a permanent key here.
-        this.nineKeyControl('.', '句点', () => KeyboardSession.shared.punctuation(0x2e));
+        this.nineKeyControl('.', '句点', () => {
+          // The period key types '.', so it counts as Period as on iOS and Android; SoftPunctuation is for the side rail's cells.
+          KeyboardSession.shared.recordKey(KeyIdPolicy.character('.'));
+          KeyboardSession.shared.punctuation(0x2e);
+        });
         // 0 is inserted on the digit layer for the same reason the other nine are, and spelled on
         // the letter layer, where the Engine reads it as a candidate position.
         this.nineKeyControl('0', '数字 0', this.symbols
-          ? () => KeyboardSession.shared.punctuation(0x30)
-          : () => KeyboardSession.shared.press(0x30, false));
+          ? () => {
+            KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey('0'));
+            KeyboardSession.shared.punctuation(0x30);
+          }
+          : () => {
+            KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey('0'));
+            KeyboardSession.shared.press(0x30, false);
+          });
       }
       .width(`${NINE_KEY_COLUMN_PERCENT}%`)
       .height('100%')
@@ -2596,8 +2624,14 @@ struct KeyboardView {
       // A digit is inserted, not spelled: the same call the twenty-six key symbol row makes for
       // its own digit row, rather than handing it to the Engine as a candidate position.
       action: this.symbols
-        ? () => KeyboardSession.shared.punctuation(key.input.charCodeAt(0))
-        : () => KeyboardSession.shared.press(key.input.charCodeAt(0), false)
+        ? () => {
+          KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey(key.input));
+          KeyboardSession.shared.punctuation(key.input.charCodeAt(0));
+        }
+        : () => {
+          KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey(key.input));
+          KeyboardSession.shared.press(key.input.charCodeAt(0), false);
+        }
     };
   }
 
@@ -2617,8 +2651,15 @@ struct KeyboardView {
     .borderColor(this.skin.borderColor)
     .shadow({ radius: this.skin.shadowRadius, color: this.skin.shadowColor(),
       offsetX: 0, offsetY: this.skin.shadowOffset })
-    .onClick(() => KeyboardSession.shared.press(key.input.charCodeAt(0), false))
-    .gesture(LongPressGesture().onAction(() => this.openNineKeyHold(key)))
+    .onClick(() => {
+      KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey(key.input));
+      KeyboardSession.shared.press(key.input.charCodeAt(0), false);
+    })
+    .gesture(LongPressGesture().onAction(() => {
+      // A hold is still one press of the cell, whichever of its options it ends in.
+      KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey(key.input));
+      this.openNineKeyHold(key);
+    }))
   }
 
   /**
@@ -2650,7 +2691,10 @@ struct KeyboardView {
           emphasized: false,
           special: true,
           width: KeyboardMetrics.MODIFIER_WIDTH_VP,
-          action: () => this.openSymbolSurface()
+          action: () => {
+            KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_SYMBOL);
+            this.openSymbolSurface();
+          }
         });
       } else {
         Column() {
@@ -2660,7 +2704,10 @@ struct KeyboardView {
             size: KeyboardMetrics.KEY_FONT_SIZE,
             emphasized: false,
             width: KeyboardMetrics.MODIFIER_WIDTH_VP,
-            action: () => KeyboardSession.shared.punctuation(0x2c)
+            action: () => {
+              KeyboardSession.shared.recordKey(KeyIdPolicy.character(','));
+              KeyboardSession.shared.punctuation(0x2c);
+            }
           });
         }
         .width(KeyboardMetrics.MODIFIER_WIDTH_VP)
@@ -2682,7 +2729,10 @@ struct KeyboardView {
         emphasized: false,
         special: true,
         width: KeyboardMetrics.LANGUAGE_WIDTH_VP,
-        action: () => this.toggleTouchLanguage()
+        action: () => {
+          KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_LANGUAGE);
+          this.toggleTouchLanguage();
+        }
       });
       this.fixedKey({
         // A composition takes Return before any editor action does: the user is confirming what is being spelled, not submitting the field, and the key turns the platform accent to say so. Otherwise the key says what the field asked for, so it reads 搜索 in a search box rather than 换行 in a box that has no lines, and sits with the other function keys.
@@ -4165,6 +4215,10 @@ struct KeyboardView {
         const direction: number = JapaneseNineKeyLayout.direction(
           event.touches[0].windowX - this.flickX, event.touches[0].windowY - this.flickY,
           FLICK_THRESHOLD_VP);
+        // One press of the cell per tap or flick, whichever direction it lands on; a direction with no label types nothing and counts nothing, as on iOS.
+        if ($$.kana[direction].length > 0) {
+          KeyboardSession.shared.recordKey(KeyIdPolicy.japaneseKana(keyIndex));
+        }
         this.sendKana($$, direction);
         this.flickKeyIndex = -1;
         this.flickDirection = DIRECTION_CENTRE;
@@ -5518,6 +5572,7 @@ struct KeyboardView {
               special: true,
               width: KeyboardMetrics.MODIFIER_WIDTH_VP,
               action: () => {
+                KeyboardSession.shared.recordKey(KeyIdPolicy.SHIFT);
                 this.letterCase.toggle(Date.now());
                 this.caseMode = this.letterCase.mode();
               }

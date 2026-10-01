@@ -17,6 +17,25 @@ public final class EditorPolicy {
         return (options & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0;
     }
 
+    /** A text or numeric password field. */
+    public static boolean password(int type) {
+        int typeClass = type & InputType.TYPE_MASK_CLASS;
+        int variation = type & InputType.TYPE_MASK_VARIATION;
+        if (typeClass == InputType.TYPE_CLASS_NUMBER)
+            return variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD;
+        return typeClass == InputType.TYPE_CLASS_TEXT
+            && (variation == InputType.TYPE_TEXT_VARIATION_PASSWORD
+                || variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                || variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD);
+    }
+
+    /**
+     * Whether the key heatmap must not count presses in this field: a password field, or one that asked for no personalised learning (an incognito tab, a private field). The same signals that keep the Engine from learning keep the statistics from counting.
+     */
+    public static boolean excludesKeyStatistics(int type, int options) {
+        return password(type) || !allowLearning(options);
+    }
+
     public static boolean prefersLatin(int type) {
         if ((type & InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT) return false;
         int variation = type & InputType.TYPE_MASK_VARIATION;

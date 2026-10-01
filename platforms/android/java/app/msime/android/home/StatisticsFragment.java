@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The 统计 tab: today and the running total, then one of four views over the same counts.
+ * The 统计 tab: today and the running total, then one of five views: the trend, three distributions of the same character counts, and the key heatmap.
  *
  * The counts come from the shared typing-statistics store, which holds aggregate counts only --
  * never the text that produced them. Nothing here is filled in with placeholder numbers: a store
@@ -126,7 +126,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         menu.getMenu().add("清空统计").setOnMenuItemClickListener(item -> {
             new MaterialAlertDialogBuilder(requireContext())
                 .setTitle("清除全部统计")
-                .setMessage("今日、累计和全部分类计数都会归零，且无法恢复。键盘会从下一次输入重新开始记录。")
+                .setMessage("今日、累计、全部分类和按键计数都会归零，且无法恢复。键盘会从下一次输入重新开始记录。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("清除", (dialog, which) -> HostTask.run(this,
                     context -> HostStore.resetStatistics(context), this::adopt))
@@ -158,6 +158,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         TextView notice = view.findViewById(R.id.statistics_state);
         View trendSection = view.findViewById(R.id.statistics_trend_section);
         View distributionSection = view.findViewById(R.id.statistics_distribution_section);
+        View keysSection = view.findViewById(R.id.statistics_keys_section);
 
         if (statistics == null) {
             today.setText("—");
@@ -166,6 +167,7 @@ public final class StatisticsFragment extends HomeTabFragment {
             notice.setText("还没有记录。开始用键盘输入后，这里会出现每日字符数；统计只保存聚合计数，不保存输入内容。");
             trendSection.setVisibility(View.GONE);
             distributionSection.setVisibility(View.GONE);
+            keysSection.setVisibility(View.GONE);
             return;
         }
 
@@ -182,8 +184,20 @@ public final class StatisticsFragment extends HomeTabFragment {
         scope.setVisibility(scoped ? View.VISIBLE : View.GONE);
 
         boolean trend = section == Section.TREND;
+        boolean keys = section == Section.KEYS;
         trendSection.setVisibility(trend ? View.VISIBLE : View.GONE);
-        distributionSection.setVisibility(trend ? View.GONE : View.VISIBLE);
+        distributionSection.setVisibility(trend || keys ? View.GONE : View.VISIBLE);
+        keysSection.setVisibility(keys ? View.VISIBLE : View.GONE);
+        if (keys) {
+            // The same lens as the distributions: a day picked on the calendar scopes the keys too.
+            ((TextView) view.findViewById(R.id.statistics_keys_title))
+                .setText(selectedDay == null ? section.heading()
+                    : section.heading() + " · " + readableDay(selectedDay));
+            ((KeyHeatmapView) view.findViewById(R.id.statistics_keys))
+                .setKeys(statistics.slices(section, selectedDay));
+            ((TextView) view.findViewById(R.id.statistics_keys_note)).setText(note(section));
+            return;
+        }
         if (trend) {
             // 画到最早那条记录为止，上限一年：数据本来就攒着一年，固定三十天看不出月与月之间的差。
             int span = statistics.recordedSpan(day);
@@ -242,7 +256,8 @@ public final class StatisticsFragment extends HomeTabFragment {
         return switch (section) {
             case KIND -> "按上屏字符本身分类。组合表情算一个字符，历史记录里没有分类的计入「历史未分类」。";
             case MODE -> "按提交时使用的键盘模式统计，不推测文本语言；中文模式下输入的数字仍计入中文模式。AI 润色和语音输入单独按来源统计。";
-            case SCHEME -> "拼音方案统计其上屏字符数，不计未上屏的拼音按键。旧版本总数保留为历史未分类，新输入开始记录细分。";
+            case SCHEME -> "拼音方案统计其上屏字符数，按键次数见「按键」页。旧版本总数保留为历史未分类，新输入开始记录细分。";
+            case KEYS -> "按键热力图只保存每个键每天被按下的次数，不保存按键顺序和输入内容。包括组字中的拼音按键和交给应用处理的按键；长按删除算一次，密码框和无痕输入框中的按键不计入。";
             case TREND -> "";
         };
     }

@@ -194,6 +194,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   private var usesTraditionalOutput = false
   private var replyPanelSuppressed = false
   private var reportedStatisticsFailure = false
+  /// Key presses waiting for the next write. Counted only while statistics are on, which the store is asked on every appearance; with them off nothing is kept, not even in memory.
+  private var keyPresses = TypingKeyCounter()
+  private var countsKeyPresses = false
+  private var keyPressFlushTimer: Timer?
   private var visiblePreedit = ""
   /// The already-chosen half of a phrase at the front of `visiblePreedit`, which 「候选栏预编辑」 never hides.
   private var visiblePhrasePrefix = ""
@@ -402,6 +406,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     applyKeyboardSkin()
     synchronizeInputContext()
     synchronizeReplyKeyboard()
+    // The host going to the background may end the extension without a viewWillDisappear.
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(flushKeyPresses), name: .NSExtensionHostWillResignActive, object: nil)
   }
 
   override func viewDidAppear(_ animated: Bool) {
@@ -483,6 +490,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     scheduleCandidateGlosses()
     applyKeyboardSkin()
     synchronizeReplyKeyboard()
+    startCountingKeyPresses()
   }
 
   /// iOS ends a keyboard extension that keeps using too much memory, so a warning is worth a line when a report says the keyboard vanished.
@@ -563,6 +571,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     cancelBackspacePress()
     diagnosticDismissTimer?.invalidate()
     diagnosticDismissTimer = nil
+    keyPressFlushTimer?.invalidate()
+    keyPressFlushTimer = nil
+    flushKeyPresses()
+    // A reused controller must not count presses on its next appearance until that appearance's isEnabled() answer arrives.
+    countsKeyPresses = false
   }
 
   private func installKeyboard() {
@@ -591,14 +604,17 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     root.addArrangedSubview(makeNineKeyLayout())
     let japaneseSymbols = makeKey(title: "123", accessibilityLabel: "切换到数字和符号") { [weak self] in
+      self?.countKeyPress(TypingKeyID.layer)
       self?.toggleLayout()
     }
     japaneseSymbols.accessibilityIdentifier = "japaneseSymbols"
     let japaneseEmoji = makeKey(title: "^_^", accessibilityLabel: "顔文字と絵文字") { [weak self] in
+      self?.countKeyPress(TypingKeyID.emoji)
       self?.showEmojiPicker()
     }
     japaneseEmoji.accessibilityIdentifier = "japaneseEmoji"
     let japaneseLanguage = makeKey(title: "英", accessibilityLabel: "切换中英文") { [weak self] in
+      self?.countKeyPress(TypingKeyID.language)
       self?.toggleInputMode()
     }
     japaneseLanguage.accessibilityIdentifier = "japaneseLanguage"
@@ -607,10 +623,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     japaneseGlobe.addTarget(
       self, action: #selector(handleInputModeButton(_:event:)), for: .allTouchEvents)
     let japaneseSpace = makeKey(title: "空白", accessibilityLabel: "空白") { [weak self] in
+      self?.countKeyPress(TypingKeyID.space)
       self?.handleSpace()
     }
     japaneseSpace.accessibilityIdentifier = "japaneseSpace"
     let japaneseReturn = makeKey(title: "改行", accessibilityLabel: "改行", emphasized: true) { [weak self] in
+      self?.countKeyPress(TypingKeyID.enter)
       self?.handleReturn()
     }
     japaneseReturn.accessibilityIdentifier = "japaneseReturn"
@@ -622,6 +640,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
        sideKeys: [japaneseSpace, japaneseReturn],
        modeKeys: [japaneseSymbols, japaneseEmoji, japaneseLanguage, japaneseGlobe])
     japaneseGlobeButton = japaneseGlobe
+    japaneseKeys.onKeyPress = { [weak self] index in self?.countKeyPress(TypingKeyID.japaneseKana(index)) }
     japaneseKeys.onInput = { [weak self] input in
       guard let self, isChineseMode, inputScheme.isJapanese else { return }
       playInputClick()
@@ -648,7 +667,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       updateCandidateStrip(preedit: "", candidates: words)
     }
     handwriting.canDownload = { [weak self] in self?.hasFullAccess == true }
-    handwriting.onDelete = { [weak self] in self?.handleBackspace() }
+    handwriting.onDelete = { [weak self] in
+      self?.countKeyPress(TypingKeyID.backspace)
+      self?.handleBackspace()
+    }
     root.addArrangedSubview(handwriting)
     for row in symbolRows {
       let rowView = makeSymbolRow(row)
@@ -691,6 +713,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     punctuationStack.distribution = .fillEqually
     for symbol in ["，", "。", "？", "！"] {
       let button = makeKey(title: symbol, accessibilityLabel: "符号 \(symbol)") { [weak self] in
+        self?.countKeyPress(TypingKeyID.punctuation)
         self?.handleSymbol(symbol)
       }
       Self.drawBareInSidebar(button)
@@ -727,6 +750,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
           accessibilityLabel: letters.map { "\(digit) \($0)" } ?? "拼音分词"
         ) { [weak self] in
           guard let self else { return }
+          self.countKeyPress(TypingKeyID.nineKey(digit))
           if self.showsSymbols { self.handleSymbol(String(digit)) }
           else if letters == nil { self.handleCharacter("'") }
           else { self.handleCharacter(String(digit)) }
@@ -781,12 +805,14 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     delete.accessibilityIdentifier = "nineKeyDelete"
     controls.addArrangedSubview(delete)
     let period = makeKey(title: ".", accessibilityLabel: "句点") { [weak self] in
+      self?.countKeyPress(TypingKeyID.character("."))
       self?.handleSymbol(".")
     }
     period.configuration?.contentInsets = .zero
     period.accessibilityIdentifier = "nineKeyPeriod"
     controls.addArrangedSubview(period)
     let zero = makeKey(title: "0", accessibilityLabel: "数字 0") { [weak self] in
+      self?.countKeyPress(TypingKeyID.nineKey(0))
       self?.handleSymbol("0")
     }
     controls.addArrangedSubview(zero)
@@ -813,6 +839,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   @objc private func handleNineKeyHold(_ gesture: UILongPressGestureRecognizer) {
     guard gesture.state == .began, let key = gesture.view as? UIButton,
       let letters = Self.nineKeyLetters[key.tag] else { return }
+    // The hold replaces the tap, so the press is counted here and the option picked from the menu is not a second one.
+    countKeyPress(TypingKeyID.nineKey(key.tag))
     showNineKeyHoldOptions(from: key, digit: key.tag, letters: letters)
   }
 
@@ -1037,10 +1065,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     scriptShortcut.addAction(UIAction { [weak self] _ in
       guard let self else { return }
       if inputScheme == .thoughtfulReply { showKeyboardAI(); return }
+      countKeyPress(TypingKeyID.voice)
       showKeyboardVoice()
     }, for: .primaryActionTriggered)
-    emojiShortcut.addAction(UIAction { [weak self] _ in self?.showEmojiPicker() },
-                            for: .primaryActionTriggered)
+    emojiShortcut.addAction(UIAction { [weak self] _ in
+      self?.countKeyPress(TypingKeyID.emoji)
+      self?.showEmojiPicker()
+    }, for: .primaryActionTriggered)
     layoutShortcut.addAction(UIAction { [weak self] _ in self?.showLayoutPicker() }, for: .primaryActionTriggered)
     skinShortcut.addAction(UIAction { [weak self] _ in self?.showSkinPicker() }, for: .primaryActionTriggered)
     clipboardShortcut.addAction(UIAction { [weak self] _ in self?.showClipboardHistory() }, for: .primaryActionTriggered)
@@ -1329,7 +1360,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     let row = makeRow()
     for digit in "1234567890" {
       let text = String(digit)
-      let key = makeKey(title: text, accessibilityLabel: text) { [weak self] in self?.handleSymbol(text) }
+      let key = makeKey(title: text, accessibilityLabel: text) { [weak self] in
+        self?.countKeyPress(TypingKeyID.character(text))
+        self?.handleSymbol(text)
+      }
       key.accessibilityIdentifier = "numberRowKey\(text)"
       row.addArrangedSubview(key)
     }
@@ -1342,6 +1376,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     let row = makeRow()
     if includesShift {
       let button = makeSymbolKey(symbol: "shift", accessibilityLabel: "大写") { [weak self] in
+        self?.countKeyPress(TypingKeyID.shift)
         self?.toggleLetterCase()
       }
       button.accessibilityIdentifier = "shiftButton"
@@ -1351,6 +1386,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     for letter in letters {
       let text = String(letter)
       let button = makeKey(title: text, accessibilityLabel: text.uppercased()) { [weak self] in
+        self?.countKeyPress(TypingKeyID.character(text))
         self?.handleCharacter(text)
       }
       letterButtons.append((button: button, lowercase: text, hint: attachHintLabel(to: button)))
@@ -1373,6 +1409,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       for ascii in [",", "."] {
         let chinese = Self.chineseSymbolFaces[ascii] ?? ascii
         let key = makeKey(title: chinese, accessibilityLabel: "符号 \(chinese)") { [weak self] in
+          self?.countKeyPress(TypingKeyID.character(ascii))
           self?.handleSymbol(ascii)
         }
         key.accessibilityIdentifier = ascii == "," ? "letterRowCommaKey" : "letterRowPeriodKey"
@@ -1387,6 +1424,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     if letters == letterRows[0] {
       let tab = makeSymbolKey(symbol: "arrow.right.to.line", accessibilityLabel: "Tab") { [weak self] in
+        self?.countKeyPress(TypingKeyID.tab)
         self?.handleTab()
       }
       tab.accessibilityIdentifier = "tabKey"
@@ -1402,7 +1440,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       width.isActive = true
     }
     if letters == letterRows[1] {
-      let key = makeKey(title: ";", accessibilityLabel: "微软双拼 ing") { [weak self] in self?.handleCharacter(";") }
+      let key = makeKey(title: ";", accessibilityLabel: "微软双拼 ing") { [weak self] in
+        self?.countKeyPress(TypingKeyID.character(";"))
+        self?.handleCharacter(";")
+      }
       key.accessibilityIdentifier = "microsoftFinalKey"
       microsoftFinalKey = key
       letterButtons.append((button: key, lowercase: ";", hint: attachHintLabel(to: key)))
@@ -1439,6 +1480,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     let row = makeRow()
     for symbol in symbols {
       let key = makeKey(title: symbol, accessibilityLabel: "符号 \(symbol)") { [weak self] in
+          self?.countKeyPress(TypingKeyID.character(symbol))
           self?.handleSymbol(symbol)
         }
       if let chinese = Self.chineseSymbolFaces[symbol] {
@@ -1457,7 +1499,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     row.spacing = 6
 
     let layoutToggle = makeKey(title: "123", accessibilityLabel: "切换到数字和符号", function: true) {
-      [weak self] in self?.toggleLayout()
+      [weak self] in
+      self?.countKeyPress(TypingKeyID.layer)
+      self?.toggleLayout()
     }
     if var configuration = layoutToggle.configuration {
       configuration.contentInsets = NSDirectionalEdgeInsets(
@@ -1476,6 +1520,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     layoutToggle.accessibilityIdentifier = "layoutToggleButton"
     layoutToggleButton = layoutToggle
     nineKeySymbolsButton = makeKey(title: "符", accessibilityLabel: "符号", function: true) { [weak self] in
+      self?.countKeyPress(TypingKeyID.symbol)
       self?.showSymbolPanel()
     }
     nineKeySymbolsButton.configuration?.contentInsets = .zero
@@ -1495,6 +1540,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
     let punctuation = makeKey(title: ",", accessibilityLabel: "常用标点") { [weak self] in
       guard let self else { return }
+      // The key itself is counted, wherever it sits: it types the first quick mark of the mode, which is not always a comma, but the heatmap shows the key that went down, as Android and Harmony do.
+      countKeyPress(TypingKeyID.quickPunctuation)
       handleSymbol(quickPunctuationSymbols[0])
     }
     punctuation.configuration?.contentInsets = .zero
@@ -1505,6 +1552,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     row.addArrangedSubview(punctuation)
 
     let space = makeKey(title: "空格", accessibilityLabel: "空格") { [weak self] in
+      self?.countKeyPress(TypingKeyID.space)
       self?.handleSpace()
     }
     space.accessibilityIdentifier = "spaceKey"
@@ -1521,7 +1569,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     space.addGestureRecognizer(pan)
     spaceButton = space
     row.addArrangedSubview(space)
-    let language = makeKey(title: "中/英", accessibilityLabel: "切换中英文", function: true) { [weak self] in self?.toggleInputMode() }
+    let language = makeKey(title: "中/英", accessibilityLabel: "切换中英文", function: true) { [weak self] in
+      self?.countKeyPress(TypingKeyID.language)
+      self?.toggleInputMode()
+    }
     language.configuration?.contentInsets = .zero
     language.configuration?.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
       var attributes = attributes
@@ -1536,6 +1587,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     row.addArrangedSubview(language)
 
     let enter = makeKey(title: "换行", accessibilityLabel: "换行", function: true) { [weak self] in
+      self?.countKeyPress(TypingKeyID.enter)
       self?.handleReturn()
     }
     enter.accessibilityIdentifier = "returnKey"
@@ -2934,8 +2986,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       let punctuation = quickPunctuationSymbols
       quickPunctuationButton.configuration?.title = punctuation[0]
       quickPunctuationButton.accessibilityValue = punctuation[0]
+      // A long press opens this menu without firing the tap action, so the choice counts the press of the key once, never the mark it types.
       quickPunctuationButton.menu = UIMenu(children: punctuation.map { symbol in
-        UIAction(title: symbol) { [weak self] _ in self?.handleSymbol(symbol) }
+        UIAction(title: symbol) { [weak self] _ in
+          self?.countKeyPress(TypingKeyID.quickPunctuation)
+          self?.handleSymbol(symbol)
+        }
       })
       actionDeleteButton.isHidden = !showsSymbols || kana
       symbolDeleteWidth?.isActive = showsSymbols && !kana
@@ -2962,8 +3018,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     // panel, which carries no kana marks. Everywhere else the key opens the panel, so the menu has
     // to be taken back off or a stale one would keep answering the tap.
     if kana {
+      // The menu is the key's primary action here, so its tap action never runs: the choice stands for the one press of 符.
       nineKeySymbolsButton?.menu = UIMenu(children: quickPunctuationSymbols.map { symbol in
-        UIAction(title: symbol) { [weak self] _ in self?.handleSymbol(symbol) }
+        UIAction(title: symbol) { [weak self] _ in
+          self?.countKeyPress(TypingKeyID.symbol)
+          self?.handleSymbol(symbol)
+        }
       })
       nineKeySymbolsButton?.showsMenuAsPrimaryAction = true
     } else {
@@ -3017,7 +3077,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     render(snapshot)
   }
 
+  /// Touch down counts the press once; the repeat a held key starts is the same press.
   @objc private func beginBackspacePress() {
+    countKeyPress(TypingKeyID.backspace)
     cancelBackspacePress()
     didRepeatBackspace = false
 
@@ -3219,6 +3281,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
   @objc private func handleInputModeButton(_ sender: UIButton, event: UIEvent) {
     if event.allTouches?.contains(where: { touch in touch.phase == .began }) == true {
+      countKeyPress(TypingKeyID.globe)
       render(endComposition(at: .modeSwitch))
     }
     handleInputModeList(from: sender, with: event)
@@ -3309,6 +3372,62 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     statisticsQueue.async { [weak self] in
       do {
         try TypingStatisticsStore().record(text, source: source, at: date)
+      } catch {
+        let message = error.localizedDescription
+        DispatchQueue.main.async { [weak self] in
+          guard let self, !self.reportedStatisticsFailure else { return }
+          self.reportedStatisticsFailure = true
+          self.showDiagnostic("统计未能写入：\(message)")
+        }
+      }
+    }
+  }
+
+  /// Ask the store whether statistics are on, then flush every 30 seconds while the keyboard is up. Presses before the answer arrives are not counted, which keeps a keyboard whose user turned statistics off from holding a single count.
+  private func startCountingKeyPresses() {
+    keyPressFlushTimer?.invalidate()
+    keyPressFlushTimer = nil
+    countsKeyPresses = false
+    _ = keyPresses.drain()
+    guard hasFullAccess else { return }
+    statisticsQueue.async { [weak self] in
+      let enabled = (try? TypingStatisticsStore().isEnabled()) ?? false
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        countsKeyPresses = enabled
+        if !enabled { _ = keyPresses.drain() }
+      }
+    }
+    let timer = Timer(timeInterval: 30, target: self, selector: #selector(flushKeyPresses), userInfo: nil, repeats: true)
+    RunLoop.main.add(timer, forMode: .common)
+    keyPressFlushTimer = timer
+  }
+
+  /// Fields that hold a password or a one-time code, whose key presses are never counted.
+  private static let credentialContentTypes: Set<UITextContentType> = [.password, .newPassword, .oneTimeCode]
+
+  /// One press of a soft key, by its id in `TypingKeyID`; `nil` is a key with no id, which is not counted. Secure and credential fields are skipped as well: iOS normally swaps in the system keyboard for secure ones, and a host that does not, or that marks a field only by its content type, still gets nothing recorded.
+  private func countKeyPress(_ id: String?) {
+    guard let id, countsKeyPresses, hasFullAccess, textDocumentProxy.isSecureTextEntry != true else { return }
+    if let contentType = textDocumentProxy.textContentType ?? nil, Self.credentialContentTypes.contains(contentType) { return }
+    for batch in keyPresses.record(id, day: TypingStatistics.dayKey(Date())) { writeKeyPresses(batch) }
+  }
+
+  @objc private func flushKeyPresses() {
+    if let batch = keyPresses.drain() { writeKeyPresses(batch) }
+  }
+
+  private func writeKeyPresses(_ batch: TypingKeyBatch) {
+    statisticsQueue.async { [weak self] in
+      do {
+        let recorded = try TypingStatisticsStore().recordKeys(batch.keys, day: batch.day)
+        // Nothing taken means statistics were turned off since the keyboard last asked.
+        guard recorded == 0 else { return }
+        DispatchQueue.main.async { [weak self] in
+          guard let self else { return }
+          countsKeyPresses = false
+          _ = keyPresses.drain()
+        }
       } catch {
         let message = error.localizedDescription
         DispatchQueue.main.async { [weak self] in
@@ -4303,7 +4422,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     let picker = KeyboardEmojiPickerView(
       resources: resources,
       onInsert: { [weak self] emoji in self?.insertOwnText(emoji, source: .local) },
-      onDelete: { [weak self] in self?.deleteOwnBackward() },
+      onDelete: { [weak self] in
+        self?.countKeyPress(TypingKeyID.backspace)
+        self?.deleteOwnBackward()
+      },
       onClose: { [weak self] in self?.closeKeyboardPicker() })
     picker.accessibilityViewIsModal = true
     picker.overrideUserInterfaceStyle = KeyboardAppearancePreference.style(KeyboardAppearancePreference.emojiKey, in: session.sharedPreferences)
@@ -4329,10 +4451,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     // Without staged resources the phone categories still work; only the Engine catalog's categories are missing.
     let catalog = session.candidateGlossResources().flatMap { $0.isEmpty ? nil : KeyboardSymbolPanelView.Catalog.engine(resources: $0) }
     let panel = KeyboardSymbolPanelView(catalog: catalog, recents: KeyboardSymbolRecents.stored, onInsert: { [weak self] symbol in
+      self?.countKeyPress(TypingKeyID.character(symbol))
       self?.playInputClick()
       self?.insertOwnText(symbol, source: .local)
       KeyboardSymbolRecents.record(symbol)
     }, onDelete: { [weak self] in
+      self?.countKeyPress(TypingKeyID.backspace)
       self?.deleteOwnBackward()
     }, onClose: { [weak self] in self?.closeKeyboardPicker() })
     panel.accessibilityViewIsModal = true

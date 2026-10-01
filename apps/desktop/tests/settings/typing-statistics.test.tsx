@@ -138,9 +138,7 @@ test("mobile statistics follow Apple tabs and show the full retained trend", asy
   expect(screen.getByRole("heading", { name: "输入方案" })).toBeTruthy();
 });
 
-// The tab strip was laid out for the four tabs it had when it was written, and a fifth was added
-// later without widening it: 候选 wrapped onto a second row at a quarter of the width. The column
-// count now comes from the number of tabs, and this pins the two together.
+// The tab strip was laid out for the four tabs it had when it was written, and a fifth was added later without widening it: 候选 wrapped onto a second row at a quarter of the width. The column count now comes from the number of tabs, and this pins the two together.
 test("the phone tab strip has a column for every tab", async () => {
   render(
     <SettingsPage
@@ -160,7 +158,14 @@ test("the phone tab strip has a column for every tab", async () => {
 
   const strip = await screen.findByRole("tablist", { name: "统计内容" });
   const tabs = within(strip).getAllByRole("tab");
-  expect(tabs.map((tab) => tab.textContent)).toEqual(["趋势", "类型", "模式", "方案", "候选"]);
+  expect(tabs.map((tab) => tab.textContent)).toEqual([
+    "趋势",
+    "类型",
+    "模式",
+    "方案",
+    "候选",
+    "按键",
+  ]);
   expect(strip.className).toContain(`grid-cols-${tabs.length}`);
 });
 
@@ -457,4 +462,137 @@ test("Korean input has its own scheme and language slices", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "累计" }));
   expect(screen.getAllByLabelText(/^韩语 5 字符/).length).toBeGreaterThanOrEqual(1);
   expect(screen.getAllByLabelText(/^韩语模式 5 字符/).length).toBeGreaterThanOrEqual(1);
+});
+
+test("desktop statistics draw an ANSI key heatmap for the selected range", async () => {
+  const statistics: TypingStatistics = {
+    ...initialStatistics(),
+    dailyKeys: {
+      [key(0)]: { KeyA: 120, Space: 40, ArrowLeft: 3 },
+      [key(-1)]: { KeyA: 3, MetaLeft: 2 },
+      [key(-8)]: { KeyZ: 500 },
+    },
+  };
+  const typingStatistics = {
+    load: vi.fn().mockResolvedValue(status(statistics)),
+    setEnabled: vi.fn(),
+    reset: vi.fn(),
+  };
+  render(
+    <SettingsPage
+      client={{
+        ...baseClient(),
+        host: { platform: "macos" } as HostCapabilities,
+        typingStatistics,
+      }}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "统计" }));
+  expect(await screen.findByRole("heading", { name: "按键热力图 · 近 7 天" })).toBeTruthy();
+  const heatmap = screen.getByRole("group", { name: "按键热力图" });
+  expect(within(heatmap).getByRole("img", { name: "A，123 次" })).toBeTruthy();
+  expect(within(heatmap).getByRole("img", { name: "Z，0 次" })).toBeTruthy();
+  expect(within(heatmap).getByRole("img", { name: "左 Command，2 次" })).toBeTruthy();
+  expect(within(heatmap).getByRole("img", { name: "F1，0 次" })).toBeTruthy();
+  // A desktop page never draws the phone's on-screen keys.
+  expect(within(heatmap).queryByRole("img", { name: /^符号/ })).toBeNull();
+  expect(screen.getByLabelText("左箭头，3 次")).toBeTruthy();
+  const top = screen.getByRole("list", { name: "最常按的键" });
+  expect(
+    within(top)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual(["1A123 次", "2空格40 次", "3左箭头3 次", "4左 Command2 次"]);
+
+  fireEvent.click(screen.getByRole("button", { name: "累计" }));
+  expect(screen.getByRole("heading", { name: "按键热力图 · 累计" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: "Z，500 次" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "7 天" }));
+  fireEvent.click(screen.getByRole("button", { name: `${label(-1)}，6 字符` }));
+  expect(screen.getByRole("heading", { name: `按键热力图 · ${label(-1)}` })).toBeTruthy();
+  expect(screen.getByRole("img", { name: "A，3 次" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: "空格，0 次" })).toBeTruthy();
+});
+
+test("statistics written before keys were counted show an empty key heatmap", async () => {
+  const typingStatistics = {
+    load: vi.fn().mockResolvedValue(status()),
+    setEnabled: vi.fn(),
+    reset: vi.fn(),
+  };
+  render(<SettingsPage client={{ ...baseClient(), typingStatistics }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "统计" }));
+  expect(await screen.findByText("这段时间还没有按键记录")).toBeTruthy();
+  expect(screen.queryByRole("group", { name: "按键热力图" })).toBeNull();
+  expect(screen.getAllByText(/只保存每个键每天被按下的次数，不保存按键顺序和输入内容/).length).toBe(
+    2,
+  );
+  expect(screen.queryByText(/未上屏/)).toBeNull();
+});
+
+test("the phone's 按键 tab draws the soft keyboard and a nine-key grid once its cells were pressed", async () => {
+  const statistics: TypingStatistics = {
+    ...initialStatistics(),
+    dailyKeys: {
+      [key(0)]: { KeyQ: 9, Space: 4, SoftSymbol: 2, Nine2: 7, SoftEmoji: 1, Digit1: 5 },
+      [key(-40)]: { Nine2: 1 },
+    },
+  };
+  const typingStatistics = {
+    load: vi.fn().mockResolvedValue(status(statistics)),
+    setEnabled: vi.fn(),
+    reset: vi.fn(),
+  };
+  render(
+    <SettingsPage
+      client={{
+        ...baseClient(),
+        host: { platform: "android" } as HostCapabilities,
+        home: { openKeyboard: vi.fn() },
+        typingStatistics,
+      }}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "统计" }));
+  expect(screen.queryByRole("heading", { name: /按键热力图/ })).toBeNull();
+  fireEvent.click(await screen.findByRole("tab", { name: "按键" }));
+  expect(screen.getByRole("heading", { name: "按键热力图 · 累计" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: /每日趋势/ })).toBeNull();
+  const heatmap = screen.getByRole("group", { name: "按键热力图" });
+  expect(within(heatmap).getByRole("img", { name: "Q，9 次" })).toBeTruthy();
+  expect(within(heatmap).getByRole("img", { name: "空格，4 次" })).toBeTruthy();
+  expect(within(heatmap).getByRole("img", { name: "符号，2 次" })).toBeTruthy();
+  // The phone has no function row.
+  expect(within(heatmap).queryByRole("img", { name: /^F1，/ })).toBeNull();
+  const nine = screen.getByRole("group", { name: "九宫格按键" });
+  expect(within(nine).getByRole("img", { name: "九宫格 2，8 次" })).toBeTruthy();
+  expect(screen.getByLabelText("表情，1 次")).toBeTruthy();
+  expect(screen.getByLabelText("1，5 次")).toBeTruthy();
+});
+
+test("a phone with only 26-key presses has no nine-key grid", async () => {
+  const statistics: TypingStatistics = {
+    ...initialStatistics(),
+    dailyKeys: { [key(0)]: { KeyQ: 9 } },
+  };
+  const typingStatistics = {
+    load: vi.fn().mockResolvedValue(status(statistics)),
+    setEnabled: vi.fn(),
+    reset: vi.fn(),
+  };
+  render(
+    <SettingsPage
+      client={{
+        ...baseClient(),
+        host: { platform: "ios" } as HostCapabilities,
+        home: { openKeyboard: vi.fn() },
+        typingStatistics,
+      }}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "统计" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "按键" }));
+  expect(screen.getByRole("img", { name: "Q，9 次" })).toBeTruthy();
+  expect(screen.queryByRole("group", { name: "九宫格按键" })).toBeNull();
 });

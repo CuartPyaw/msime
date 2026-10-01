@@ -199,6 +199,16 @@ char *msime_client_load_preferences(const uint8_t *directory, size_t length);
  * Record answers {recorded, milestone}: milestone is the achievement count (100, 1000, ...)
  * the total just passed, or null. It is only computed while a session in this process has
  * achievement sounds on, and on the desktop hosts the jingle is then already queued.
+ * {directory,action:{operation:"record_keys",day:"YYYY-MM-DD",keys:{"KeyA":3,...}}}
+ *   adds per-key press counts to `day`, the local day the presses happened on
+ *   (flush a batch that crossed midnight under the old day first). Only each
+ *   key's daily press count is stored: no order, timing or text. Key ids are
+ *   W3C KeyboardEvent.code names plus soft-keyboard ids (Nine0-Nine9,
+ *   SoftPunctuation, SoftSymbol, SoftLayer, SoftLanguage, SoftGlobe, SoftEmoji,
+ *   SoftVoice); the full list is KEY_IDS in client-core typing_statistics.rs.
+ *   An unknown id or a zero count rejects the whole batch; never invent ids.
+ *   Returns {recorded:n}, 0 when statistics are off (nothing is written).
+ *   Hosts batch in memory and call this from a worker, never per key.
  */
 char *msime_client_typing_statistics(const uint8_t *request, size_t length);
 /* Read only the aggregate-statistics master switch from an absolute UTF-8

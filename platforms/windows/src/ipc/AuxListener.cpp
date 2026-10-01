@@ -18,7 +18,8 @@ std::unique_ptr<AuxListener> AuxListener::create(const std::wstring &name,
                                                  ActivationSink activation,
                                                  TerminalSink terminal,
                                                  MaintenanceSink maintenance,
-                                                 StatisticsSink statistics) {
+                                                 StatisticsSink statistics,
+                                                 KeysSink keys) {
   error = ERROR_SUCCESS;
   if (!sink) {
     error = ERROR_INVALID_PARAMETER;
@@ -40,6 +41,7 @@ std::unique_ptr<AuxListener> AuxListener::create(const std::wstring &name,
   aux->terminal_ = std::move(terminal);
   aux->maintenance_ = std::move(maintenance);
   aux->statistics_ = std::move(statistics);
+  aux->keys_ = std::move(keys);
   aux->worker_ = std::thread([raw = aux.get()] { raw->run(); });
   return aux;
 }
@@ -183,6 +185,18 @@ void AuxListener::run() {
     if (const auto statistics = parse_aux_typing_statistics(*text)) {
       // The batch carries typed characters, so it goes to the sink and nowhere else. The DLL backs off when no "OK" arrives, which is the right answer both when statistics are off and when nobody is listening for them.
       const bool done = statistics_ && statistics_(*statistics);
+      if (done)
+        write_ok(accepted.connection->handle());
+      std::lock_guard<std::mutex> lock(stats_mutex_);
+      if (done)
+        ++stats_.dispatched;
+      else
+        ++stats_.unknown_verb;
+      continue;
+    }
+    if (const auto keys = parse_aux_typing_keys(*text)) {
+      // Counts per key only, but still the user's typing: they go to the sink and nowhere else, and silence is the answer whenever statistics are off.
+      const bool done = keys_ && keys_(*keys);
       if (done)
         write_ok(accepted.connection->handle());
       std::lock_guard<std::mutex> lock(stats_mutex_);

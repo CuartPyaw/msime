@@ -74,6 +74,7 @@
 #include "../core/DiagnosticLog.h"
 #include "../../../../shared/input/EnglishModeOutput.h"
 #include <atomic>
+#include <memory>
 
 // Implemented by the Swift backend dylib loaded by input_method_main.mm. The account provider
 // keeps credentials and transport on the Swift side; this process receives only bounded glosses.
@@ -160,6 +161,49 @@ static void MSIMERecordTypingStatistics(NSString *directory, NSString *text, msi
                 msime_macos_diagnostic_write("stats: record_failed reason=malformed_response");
             else if (![envelope[@"ok"] isEqual:@YES])
                 msime_macos_diagnostic_write("stats: record_failed reason=store");
+        }
+        msime_client_string_free(response);
+    });
+}
+
+// The local calendar day of this moment, as the statistics store names days.
+static NSString *MSIMETypingStatisticsLocalDay(void) {
+    NSDateComponents *components = [NSCalendar.currentCalendar components:NSCalendarUnitYear | NSCalendarUnitMonth |
+        NSCalendarUnitDay fromDate:NSDate.date];
+    return [NSString stringWithFormat:@"%04ld-%02ld-%02ld", (long)components.year, (long)components.month,
+        (long)components.day];
+}
+
+// Writes one batch of key heatmap counts. The request is built and sent on the statistics worker, so the key path only hands over the batch it has already collected. A caller about to exit the process waits for the write, and with it every earlier write still queued on the serial worker, because exit does not run queued blocks.
+static void MSIMERecordKeyPresses(NSString *directory, msime::mac::KeyPressFlush flush, bool waitUntilWritten) {
+    if (!MSIMETypingStatisticsEnabled.load(std::memory_order_relaxed)) return;
+    if (![directory isKindOfClass:NSString.class] || !directory.isAbsolutePath || flush.keys.empty()) return;
+    auto batch = std::make_shared<msime::mac::KeyPressFlush>(std::move(flush));
+    NSString *path = [directory copy];
+    (waitUntilWritten ? dispatch_sync : dispatch_async)(MSIMETypingStatisticsQueue(), ^{
+        NSMutableDictionary<NSString *, NSNumber *> *keys = [NSMutableDictionary dictionaryWithCapacity:batch->keys.size()];
+        for (const auto &[key, count] : batch->keys)
+            keys[[NSString stringWithUTF8String:key.c_str()]] = @(count);
+        NSDictionary *request = @{ @"directory": path, @"action": @{
+            @"operation": @"record_keys", @"day": [NSString stringWithUTF8String:batch->day.c_str()], @"keys": keys } };
+        NSData *data = [NSJSONSerialization dataWithJSONObject:request options:0 error:nil];
+        if (!data) {
+            msime_macos_diagnostic_write("stats: record_keys_failed reason=encode");
+            return;
+        }
+        char *response = msime_client_typing_statistics(static_cast<const uint8_t *>(data.bytes), data.length);
+        // Like the text path, a failure is logged as a label only and never reaches the key path.
+        if (!response) {
+            msime_macos_diagnostic_write("stats: record_keys_failed reason=no_response");
+            return;
+        }
+        if (msime_macos_diagnostic_enabled()) {
+            NSData *body = [NSData dataWithBytesNoCopy:response length:strlen(response) freeWhenDone:NO];
+            NSDictionary *envelope = [NSJSONSerialization JSONObjectWithData:body options:0 error:nil];
+            if (![envelope isKindOfClass:NSDictionary.class])
+                msime_macos_diagnostic_write("stats: record_keys_failed reason=malformed_response");
+            else if (![envelope[@"ok"] isEqual:@YES])
+                msime_macos_diagnostic_write("stats: record_keys_failed reason=store");
         }
         msime_client_string_free(response);
     });
@@ -949,6 +993,9 @@ static NSImage *MSIMECandidateLogoImage() {
     NSTimeInterval _spaceRevertTime;
     __weak id _spaceRevertClient;
     msime::mac::PairedPunctuationTracker _pairedPunctuation;
+    // Key heatmap counts not yet written, and the timer that writes them if typing stops before a batch fills.
+    msime::mac::KeyPressBatch _keyPressBatch;
+    NSTimer *_keyPressFlushTimer;
     // The closing mark this host owes the document while a pair is open. It rides in the marked
     // text after the caret, because IMK gives an input method no way to move a client's insertion
     // point; see MSIMEApplyTransitionWithPendingClosing.
@@ -2682,6 +2729,12 @@ static const NSTimeInterval kSettledRerankDelay = 0.15;
         ? notification.userInfo[@"enabled"] : nil;
     if (enabled) MSIMETypingStatisticsEnabled.store(enabled.boolValue, std::memory_order_relaxed);
     else MSIMEReloadTypingStatisticsEnabled(_preferencesDirectory);
+    // Switching statistics off drops what was collected rather than writing it.
+    if (!MSIMETypingStatisticsEnabled.load(std::memory_order_relaxed)) {
+        _keyPressBatch.clear();
+        [_keyPressFlushTimer invalidate];
+        _keyPressFlushTimer = nil;
+    }
 }
 - (void (^)(NSEvent *))globalVoiceHotkeyHandler {
     __weak MSIMEInputController *weakSelf = self;
@@ -3346,6 +3399,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     [_doubaoPolishRequest cancel]; [_livePolishRequest cancel];
     // A client that dies without deactivateServer: leaves the repeating timer on the run loop, and its candidate window on screen.
     [_preferencesTimer invalidate];
+    [self flushKeyPresses];
     [_panel orderOut:nil];
 }
 - (MSIMEHTTPVoiceRequest *)makeDoubaoPolishRequest:(NSDictionary *)options {
@@ -4541,6 +4595,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
 - (void)deactivateServer:(id)sender {
     [[MSIMEInputModeHUDPanel sharedPanel] orderOut:nil];
     [[MSIMETypingEffectPanel sharedPanel] settle];
+    // Every focus loss writes the key heatmap counts, including a late one for a previous client: they are this controller's presses either way.
+    [self flushKeyPresses];
     [self flushPendingPairedClosing];
     _pairedPunctuation.clear();
     // A delayed callback from the previous client must not tear down the
@@ -4671,12 +4727,17 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
 - (void)restartCurrentInputMethod {
     MSIMELaunchInputSourceReregistration(NSBundle.mainBundle.bundleURL, NSWorkspace.sharedWorkspace,
         ^(BOOL launched) {
-            if (launched) [NSApp terminate:nil];
-            else NSBeep();
+            if (!launched) {
+                NSBeep();
+                return;
+            }
+            [self flushKeyPressesWaitingUntilWritten:YES];
+            [NSApp terminate:nil];
         });
 }
 
 - (void)terminateCurrentInputMethod {
+    [self flushKeyPressesWaitingUntilWritten:YES];
     [NSApp terminate:nil];
 }
 
@@ -4836,6 +4897,7 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
         }
         [self noteKeyForSmartPunctuationShadow:event eaten:handled];
     }
+    if (!selfPosted) [self recordKeyPress:event client:sender];
     if (!handled) [self recordPassthroughKey:event client:sender];
     const double elapsedMs = timed ? static_cast<double>(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - started) / 1e6 : 0;
     if (timed && elapsedMs >= 8.0) {
@@ -4847,6 +4909,8 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
 - (void)recordPassthroughKey:(NSEvent *)event client:(id)sender {
     if (!MSIMETypingStatisticsEnabled.load(std::memory_order_relaxed)) return;
     if (event.type != NSEventTypeKeyDown || !sender) return;
+    // A password field turns on secure event input; what is typed there is never counted.
+    if (IsSecureEventInputEnabled()) return;
     CGEventRef nativeEvent = event.CGEvent;
     if (nativeEvent && CGEventGetIntegerValueField(nativeEvent, kCGEventSourceUserData) == MSIMEVoiceCommitEventTag) return;
     NSString *characters = event.characters;
@@ -4854,6 +4918,56 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     if (!msime::mac::ShouldCountPassthroughCharacter([characters characterAtIndex:0], (event.modifierFlags & NSEventModifierFlagControl) != 0, (event.modifierFlags & NSEventModifierFlagCommand) != 0)) return;
     const msime::mac::TypingSource source = _appearance.englishMode ? msime::mac::TypingSource::English : MSIMEResolveTypingSource(_view, _view, MSIMEStatisticsHostOptions(_session), NO);
     MSIMERecordTypingStatistics(_preferencesDirectory ?: MSIMEStatisticsHostOptions(_session)[@"preferences_directory"], characters, source);
+}
+
+// Counts one physical key press for the key heatmap, whether the input method consumes the key or hands it to the application. Only each key's press count per local day is kept, never the order or what was typed. A held key counts once, as does a modifier, which reports both edges as FlagsChanged. Nothing is collected while statistics are off or while a password field holds secure event input.
+- (void)recordKeyPress:(NSEvent *)event client:(id)sender {
+    if (!MSIMETypingStatisticsEnabled.load(std::memory_order_relaxed)) {
+        _keyPressBatch.clear();
+        return;
+    }
+    if (!sender) return;
+    const unsigned short keyCode = event.keyCode;
+    if (event.type == NSEventTypeKeyDown) {
+        if (event.isARepeat) return;
+    } else if (event.type != NSEventTypeFlagsChanged || !msime::mac::IsModifierPress(keyCode, event.modifierFlags)) {
+        return;
+    }
+    if (IsSecureEventInputEnabled()) return;
+    const std::string_view keyId = msime::mac::KeyIdForVirtualKeyCode(keyCode);
+    if (keyId.empty()) return;
+    // The day is taken at the press, so counts collected before midnight are written under the day they belong to.
+    for (msime::mac::KeyPressFlush &flush : _keyPressBatch.record(MSIMETypingStatisticsLocalDay().UTF8String, keyId))
+        MSIMERecordKeyPresses([self keyPressStatisticsDirectory], std::move(flush), false);
+    if (_keyPressBatch.empty()) {
+        [_keyPressFlushTimer invalidate];
+        _keyPressFlushTimer = nil;
+    } else if (!_keyPressFlushTimer) {
+        __weak MSIMEInputController *weakSelf = self;
+        _keyPressFlushTimer = [NSTimer timerWithTimeInterval:30 repeats:NO block:^(NSTimer *) {
+            MSIMEInputController *controller = weakSelf;
+            if (!controller) return;
+            controller->_keyPressFlushTimer = nil;
+            [controller flushKeyPresses];
+        }];
+        [NSRunLoop.mainRunLoop addTimer:_keyPressFlushTimer forMode:NSRunLoopCommonModes];
+    }
+}
+
+- (NSString *)keyPressStatisticsDirectory {
+    return _preferencesDirectory ?: MSIMEStatisticsHostOptions(_session)[@"preferences_directory"];
+}
+
+- (void)flushKeyPresses {
+    [self flushKeyPressesWaitingUntilWritten:NO];
+}
+
+// Exit runs no queued blocks and never reaches dealloc, so the paths that terminate the process write the pending counts first and wait for them; blocking a few milliseconds is acceptable there.
+- (void)flushKeyPressesWaitingUntilWritten:(BOOL)wait {
+    [_keyPressFlushTimer invalidate];
+    _keyPressFlushTimer = nil;
+    if (std::optional<msime::mac::KeyPressFlush> flush = _keyPressBatch.drain())
+        MSIMERecordKeyPresses([self keyPressStatisticsDirectory], std::move(*flush), wait);
 }
 
 - (BOOL)handleKeyEvent:(NSEvent *)event client:(id)sender {

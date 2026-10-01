@@ -852,6 +852,20 @@ static napi_value VoiceApply(napi_env env, napi_callback_info info) {
         reinterpret_cast<const uint8_t *>(text.data()), text.size()));
 }
 
+// The statistics master switch as a number, not a JSON reply: the keyboard asks on every focus and needs only the one bit. A missing or non-text argument reads as an invalid directory, -1.
+static napi_value TypingStatisticsEnabled(napi_env env, napi_callback_info info) {
+    std::vector<napi_value> argv;
+    std::string directory;
+    int32_t enabled = -1;
+    if (arguments(env, info, 1, argv) && argumentText(env, argv[0], directory)) {
+        enabled = msime_client_typing_statistics_enabled(
+            reinterpret_cast<const uint8_t *>(directory.data()), directory.size());
+    }
+    napi_value output = nullptr;
+    if (napi_create_int32(env, enabled, &output) != napi_ok) return nullptr;
+    return output;
+}
+
 static napi_value AbiVersion(napi_env env, napi_callback_info) {
     napi_value output = nullptr;
     if (napi_create_uint32(env, msime_client_abi_version(), &output) != napi_ok) return nullptr;
@@ -1071,6 +1085,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         ENTRY("savePreferences", SavePreferences),
         ENTRY("updatePreferences", UpdatePreferences),
         ENTRY("typingStatistics", TypingStatistics),
+        ENTRY("typingStatisticsEnabled", TypingStatisticsEnabled),
         ENTRY("vocabularyReview", VocabularyReview),
         ENTRY("mobileClipboardHistory", MobileClipboardHistory),
         ENTRY("emojiCatalog", EmojiCatalog),

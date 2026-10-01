@@ -3369,7 +3369,7 @@ fn mint_morning_is_the_community_design_and_a_valid_custom_theme() {
     };
     assert!(preferences.validate().is_ok());
     // This test runs on a desktop build, where a new install still follows the system.
-    assert!(!TOUCH_KEYBOARD_BUILD);
+    const { assert!(!TOUCH_KEYBOARD_BUILD) };
     assert_eq!(
         Preferences::default().global_theme,
         crate::skin::theme::GlobalTheme::System

@@ -1,6 +1,11 @@
 #include "TypingStatistics.h"
+#include <chrono>
+#include <condition_variable>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
+#include <thread>
 
 using namespace msime::windows;
 using Json = nlohmann::json;
@@ -154,6 +159,76 @@ int main() {
                                              std::string(70'000, 'a'),
                                              TypingSource::Reply, "2026-09-21", 9)
                 .empty());
+    // Key heatmap counts: the shared record_keys shape, filed under the day they were counted on, with no hour and no order.
+    {
+      const auto keys_request = typing_statistics_record_keys_request(
+          "C:\\state", "2026-09-30", {{"KeyA", 3}, {"Space", 2}});
+      const auto keys = Json::parse(keys_request);
+      require(keys.at("directory") == "C:\\state");
+      require(keys.at("action").at("operation") == "record_keys");
+      require(keys.at("action").at("day") == "2026-09-30");
+      require(keys.at("action").at("keys") == Json{{"KeyA", 3}, {"Space", 2}});
+      require(!keys.at("action").contains("hour"));
+      require(typing_statistics_record_keys_request("C:\\state", "2026-09-30", {})
+                  .empty());
+      require(typing_statistics_record_keys_request("", "2026-09-30", {{"KeyA", 1}})
+                  .empty());
+      require(typing_statistics_record_keys_request("C:\\state", "", {{"KeyA", 1}})
+                  .empty());
+    }
+    // The Aux listener's view of the switch: answered from a cache, never by waiting on the store lock a detached write holds.
+    {
+      const TypingStatisticsSwitch fresh([] { return 1; }, std::chrono::hours(1));
+      require(fresh.enabled());
+      require(!TypingStatisticsSwitch([] { return -1; }, std::chrono::hours(1))
+                   .enabled());
+
+      // Owned by the reader so a refresh still running after this block cannot touch freed memory.
+      struct Store {
+        std::mutex mutex;
+        std::condition_variable changed;
+        bool locked = false;
+        int value = 1;
+        int reads = 0;
+      };
+      auto store = std::make_shared<Store>();
+      const TypingStatisticsSwitch stale(
+          [store] {
+            std::unique_lock lock(store->mutex);
+            ++store->reads;
+            store->changed.notify_all();
+            store->changed.wait(lock, [&] { return !store->locked; });
+            return store->value;
+          },
+          std::chrono::steady_clock::duration::zero());
+      {
+        std::lock_guard lock(store->mutex);
+        store->locked = true;
+        store->value = 0;
+      }
+      // The store is held by a writer: the stale answer comes back at once, and only one refresh waits on it.
+      require(stale.enabled());
+      {
+        std::unique_lock lock(store->mutex);
+        require(store->changed.wait_for(lock, std::chrono::seconds(5),
+                                        [&] { return store->reads == 2; }));
+      }
+      require(stale.enabled());
+      {
+        std::lock_guard lock(store->mutex);
+        require(store->reads == 2);
+        store->locked = false;
+      }
+      store->changed.notify_all();
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      bool switched_off = false;
+      while (!switched_off && std::chrono::steady_clock::now() < deadline) {
+        switched_off = !stale.enabled();
+        if (!switched_off)
+          std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+      require(switched_off);
+    }
     std::cout << "Windows typing statistics checks passed\n";
     return 0;
   } catch (const std::exception &error) {

@@ -2541,6 +2541,54 @@ fn typing_statistics_boundary_persists_only_aggregate_counts() {
         false
     );
 }
+#[test]
+fn typing_statistics_boundary_records_key_press_counts() {
+    let directory = tempfile::tempdir().unwrap();
+    let call = |action: Value| {
+        let request = serde_json::to_vec(&json!({
+            "directory": directory.path(),
+            "action": action,
+        }))
+        .unwrap();
+        read(unsafe { msime_client_typing_statistics(request.as_ptr(), request.len()) })
+    };
+    let batch = json!({
+        "operation": "record_keys",
+        "day": "2026-09-30",
+        "keys": {"KeyA": 3, "Space": 2, "Nine4": 1},
+    });
+    // Off by default: the batch is dropped and nothing is written.
+    assert_eq!(call(batch.clone())["value"]["recorded"], 0);
+    assert!(!directory.path().join("typing-statistics.json").exists());
+    call(json!({"operation": "set_enabled", "enabled": true}));
+    assert_eq!(call(batch.clone())["value"]["recorded"], 6);
+    assert_eq!(call(batch)["value"]["recorded"], 6);
+    let loaded = call(json!({"operation": "load"}));
+    assert_eq!(
+        loaded["value"]["dailyKeys"],
+        json!({"2026-09-30": {"KeyA": 6, "Nine4": 2, "Space": 4}})
+    );
+    // An unknown id rejects the whole batch, and so does a malformed request shape.
+    let rejected = call(json!({
+        "operation": "record_keys",
+        "day": "2026-09-30",
+        "keys": {"KeyA": 1, "a": 1},
+    }));
+    assert_eq!(rejected["ok"], false);
+    for malformed in [
+        json!({"operation": "record_keys", "day": "2026-09-30"}),
+        json!({"operation": "record_keys", "day": "2026-09-30", "keys": {"KeyA": -1}}),
+        json!({"operation": "record_keys", "day": "2026-09-30", "keys": {}, "hour": 9}),
+    ] {
+        assert_eq!(call(malformed.clone())["ok"], false, "{malformed}");
+    }
+    assert_eq!(
+        call(json!({"operation": "load"}))["value"]["dailyKeys"]["2026-09-30"]["KeyA"],
+        6
+    );
+    let reset = call(json!({"operation": "reset"}));
+    assert_eq!(reset["value"]["dailyKeys"], json!({}));
+}
 /// A session over the two-candidate `nihao` fixture, focused, with typing statistics switched as asked, and the store it writes to.
 fn selection_statistics_host(
     root: &std::path::Path,

@@ -212,6 +212,7 @@ int main(int argc, char **argv) {
   }, &options_watch);
   const auto theme_watch = msime_watch_system_theme();
   ibus_main();
+  msime_ibus_shutdown_key_presses();
   msime_unwatch_system_theme(theme_watch);
   g_source_remove(options_poll);
   if (options_watch.debounce) g_source_remove(options_watch.debounce);

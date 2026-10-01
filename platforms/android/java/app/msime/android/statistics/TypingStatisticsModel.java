@@ -10,10 +10,7 @@ import java.util.Map;
 /**
  * 共享打字统计文档的只读视图。
  *
- * <p>The store keeps aggregate counts and nothing else -- dates, character classes, commit sources
- * and totals, never the text that produced them -- and this reader keeps that boundary. What it adds
- * is the arithmetic the statistics page needs: a dense trend series from a sparse day map, and the
- * three distributions the page groups those counts into.
+ * <p>The store keeps aggregate counts and nothing else -- dates, character classes, commit sources, totals and each key's daily press count, never the text that produced them nor the order the keys were pressed in -- and this reader keeps that boundary. What it adds is the arithmetic the statistics page needs: a dense trend series from a sparse day map, the three distributions the page groups those counts into, and the key counts of a scope.
  *
  * <p>A document this cannot read is reported as absent rather than as zero. "Nothing recorded" and
  * "no characters typed" say different things to whoever is reading the page.
@@ -22,12 +19,13 @@ public final class TypingStatisticsModel {
     /** 趋势窗口最多画一年；这是图表的宽度上限，不是保留期限，更早的每日明细仍在存储里。 */
     public static final int MAX_TREND_DAYS = 366;
 
-    /** Which distribution the page is showing. Trend is the series rather than a distribution. */
+    /** Which distribution the page is showing. Trend is the series rather than a distribution, and keys count presses rather than characters. */
     public enum Section {
         TREND("趋势", "每日趋势"),
         KIND("类型", "字符类型"),
         MODE("模式", "语言模式"),
-        SCHEME("方案", "输入方案");
+        SCHEME("方案", "输入方案"),
+        KEYS("按键", "按键热力图");
 
         private final String tab;
         private final String heading;
@@ -59,6 +57,7 @@ public final class TypingStatisticsModel {
     private final Map<String, Long> commitSources;
     private final Map<String, Map<String, Long>> dailyCharacters;
     private final Map<String, Map<String, Long>> dailySources;
+    private final Map<String, Map<String, Long>> dailyKeys;
 
     /**
      * @param days characters per `YYYY-MM-DD` day
@@ -66,11 +65,13 @@ public final class TypingStatisticsModel {
      * @param commitSources lifetime counts per commit source
      * @param dailyCharacters per-day character classes, for the days that have them
      * @param dailySources per-day commit sources, for the days that have them
+     * @param dailyKeys per-day press counts per key id, for the days that have them
      */
     public TypingStatisticsModel(boolean enabled, long total, String retention,
             Map<String, Long> days, Map<String, Long> characters, Map<String, Long> commitSources,
             Map<String, Map<String, Long>> dailyCharacters,
-            Map<String, Map<String, Long>> dailySources) {
+            Map<String, Map<String, Long>> dailySources,
+            Map<String, Map<String, Long>> dailyKeys) {
         this.enabled = enabled;
         this.total = total;
         this.retention = retention;
@@ -79,6 +80,7 @@ public final class TypingStatisticsModel {
         this.commitSources = commitSources;
         this.dailyCharacters = dailyCharacters;
         this.dailySources = dailySources;
+        this.dailyKeys = dailyKeys;
     }
 
     public boolean enabled() { return enabled; }
@@ -155,6 +157,7 @@ public final class TypingStatisticsModel {
      */
     public List<Slice> slices(Section section, String day) {
         if (section == Section.TREND) return List.of();
+        if (section == Section.KEYS) return rankedKeys(day);
         long scope = day == null ? total : count(day);
         if (section == Section.KIND) {
             Map<String, Long> values = unclassified(
@@ -165,6 +168,44 @@ public final class TypingStatisticsModel {
             day == null ? commitSources : dailySources.getOrDefault(day, Map.of()), scope);
         if (section == Section.SCHEME) return named(SOURCES, values);
         return modes(values);
+    }
+
+    /**
+     * Press counts per key id for one day, or summed over every retained day.
+     *
+     * <p>Key days are their own axis: a day can have key presses and no committed character (all of it deleted again, or typed into a field that commits nothing), so the scope is not limited to the days the character counts know.
+     *
+     * @param day a `YYYY-MM-DD` key to scope to, or {@code null} for every retained day
+     */
+    public Map<String, Long> keys(String day) {
+        if (day != null) return dailyKeys.getOrDefault(day, Map.of());
+        Map<String, Long> result = new LinkedHashMap<>();
+        for (Map<String, Long> counts : dailyKeys.values()) {
+            for (Map.Entry<String, Long> entry : counts.entrySet()) {
+                result.merge(entry.getKey(), entry.getValue(), TypingStatisticsModel::saturatingAdd);
+            }
+        }
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    /** The pressed keys of a scope, most pressed first, titled the way the page prints them. */
+    private List<Slice> rankedKeys(String day) {
+        List<Slice> slices = new ArrayList<>();
+        for (Map.Entry<String, Long> entry : keys(day).entrySet()) {
+            if (entry.getValue() > 0) {
+                slices.add(new Slice(entry.getKey(), KeyPressIds.label(entry.getKey()),
+                    entry.getValue()));
+            }
+        }
+        // Ties fall back to the store's key order so the same counts always rank the same way.
+        slices.sort(java.util.Comparator.comparingLong(Slice::count).reversed()
+            .thenComparingInt(slice -> KeyPressIds.KEY_IDS.indexOf(slice.id())));
+        return List.copyOf(slices);
+    }
+
+    private static long saturatingAdd(long left, long right) {
+        long sum = left + right;
+        return sum < 0 ? Long.MAX_VALUE : sum;
     }
 
     /** The sum of a distribution, which is the scope's character count including the unclassified. */

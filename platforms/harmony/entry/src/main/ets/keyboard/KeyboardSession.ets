@@ -6,6 +6,9 @@ import { TextPolicy } from './TextPolicy';
 import { KeyboardLog, describeError } from './KeyboardLog';
 import { DictionaryMaintenancePolicy } from './DictionaryMaintenancePolicy';
 import { TypingStatisticsPolicy } from './TypingStatisticsPolicy';
+import { KeyPressBatch, KeyPressFlush } from './KeyIdPolicy';
+import { readTypingStatisticsEnabled, writeKeyPresses } from './TypingStatisticsWriter';
+import taskpool from '@ohos.taskpool';
 import { KeyboardSkin } from './skin/KeyboardSkin';
 import { CustomKeyboardSkin, CustomSkinDocument } from './skin/CustomKeyboardSkin';
 import {
@@ -229,6 +232,17 @@ interface TypingStatisticsRecordResponse {
   ok: boolean;
   value?: TypingStatisticsRecordValue;
   error?: string;
+}
+
+interface TypingStatisticsKeysAction {
+  operation: string;
+  day: string;
+  keys: Record<string, number>;
+}
+
+interface TypingStatisticsKeysRequest {
+  directory: string;
+  action: TypingStatisticsKeysAction;
 }
 
 interface MobileClipboardAction {
@@ -920,6 +934,11 @@ export class KeyboardSession implements HardwareKeyTarget {
   private personalDictionaryTimer: number = -1;
   private snapshotOptions: Object | undefined = undefined;
   private snapshotQueueTimer: number = -1;
+  // Key press counts for the key heatmap. Nothing is held while statistics are off, which is read from the store on every focus; until the editor's attribute has said what kind of field it is, a press could be a password's, so none is counted.
+  private keyStatisticsEnabled: boolean = false;
+  private keyStatisticsEditorKnown: boolean = false;
+  private readonly keyPresses: KeyPressBatch = new KeyPressBatch();
+  private keyFlushTimer: number = -1;
   private editorGeneration: number = 0;
   // Bumped only by attach/detach: an idle Engine restart (which bumps editorGeneration) must not
   // drop the focused editor's attribute.
@@ -2055,6 +2074,90 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.recordTypingStatistics(String.fromCodePoint(character), this.typingSource());
   }
 
+  /**
+   * Count one press of a key for the key heatmap: a soft key's tap or a physical key going down, by its id from KeyIdPolicy, null for a key without one.
+   *
+   * Every key counts while statistics are on, the ones that compose and the ones handed to the application alike, in a number, phone or date field as much as in prose, except in a password field: its keys are not the user's typing to keep a record of. Only counts are kept, per key and local day, never the order or what was typed. The press is filed under the day it happened on, and the write waits for a batch, a new day, the timer or the editor letting go.
+   */
+  recordKey(id: string | null): void {
+    if (id === null || !this.keyStatisticsEnabled || !this.keyStatisticsEditorKnown
+      || EditorPolicy.excludesKeyStatistics(this.traits) || this.stateDirectory.length === 0) {
+      return;
+    }
+    const due: KeyPressFlush[] = this.keyPresses.add(id, TypingStatisticsPolicy.day(new Date()));
+    for (const flush of due) {
+      this.sendKeyPresses(flush);
+    }
+    if (this.keyPresses.pending() === 0) {
+      this.cancelKeyFlushTimer();
+    } else if (this.keyFlushTimer < 0) {
+      this.keyFlushTimer = setTimeout((): void => {
+        this.keyFlushTimer = -1;
+        this.flushKeyPresses();
+      }, KeyPressBatch.FLUSH_INTERVAL_MS);
+    }
+  }
+
+  /** Write whatever key presses are held, now: the editor let go, or the keyboard is going away. */
+  private flushKeyPresses(): void {
+    this.cancelKeyFlushTimer();
+    const flush: KeyPressFlush | null = this.keyPresses.drain();
+    if (flush !== null) {
+      this.sendKeyPresses(flush);
+    }
+  }
+
+  private cancelKeyFlushTimer(): void {
+    if (this.keyFlushTimer >= 0) {
+      clearTimeout(this.keyFlushTimer);
+      this.keyFlushTimer = -1;
+    }
+  }
+
+  private sendKeyPresses(flush: KeyPressFlush): void {
+    if (this.stateDirectory.length === 0) return;
+    const action: TypingStatisticsKeysAction = {
+      operation: 'record_keys', day: flush.day, keys: flush.keys
+    };
+    const requestDocument: TypingStatisticsKeysRequest = {
+      directory: this.stateDirectory, action: action
+    };
+    const generation: number = this.attributeGeneration;
+    taskpool.execute(writeKeyPresses, JSON.stringify(requestDocument)).then((response: Object): void => {
+      const value: Record<string, Object> = JSON.parse(response as string) as Record<string, Object>;
+      if (value.ok !== true) {
+        KeyboardLog.error('typing statistics key counts refused');
+        return;
+      }
+      // The store drops a batch it is not counting and says so with recorded 0: statistics were turned off in settings while this editor kept focus. Stop holding presses until the next attach reads the switch again. A reply from an editor that has since let go says nothing about the one now focused, whose attach has already re-read the switch.
+      const result: Record<string, Object> = value.value as Record<string, Object>;
+      if ((result.recorded as number) === 0 && Object.keys(flush.keys).length > 0
+        && generation === this.attributeGeneration) {
+        this.keyStatisticsEnabled = false;
+        this.cancelKeyFlushTimer();
+        this.keyPresses.clear();
+      }
+    }).catch((error: Object): void => {
+      KeyboardLog.error(`typing statistics key counts unavailable: ${describeError(error)}`);
+    });
+  }
+
+  /**
+   * Read the statistics switch again, off the UI thread. Asked on every focus, which is how a switch flipped in the settings application reaches a keyboard that is already running; turning it off drops whatever was held rather than writing it.
+   */
+  private refreshKeyStatistics(): void {
+    if (this.stateDirectory.length === 0) return;
+    taskpool.execute(readTypingStatisticsEnabled, this.stateDirectory).then((value: Object): void => {
+      this.keyStatisticsEnabled = (value as number) === 1;
+      if (!this.keyStatisticsEnabled) {
+        this.cancelKeyFlushTimer();
+        this.keyPresses.clear();
+      }
+    }).catch((error: Object): void => {
+      KeyboardLog.error(`typing statistics switch unavailable: ${describeError(error)}`);
+    });
+  }
+
   /** Halfwidth ASCII or its fullwidth twin, which Ctrl+Shift+F toggles. */
   toggleCharacterWidth(): boolean {
     if (this.handle === 0) {
@@ -2472,6 +2575,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.inputClient = inputClient;
     this.editorAttributesKnown = false;
     this.updateMusic();
+    this.keyStatisticsEditorKnown = false;
+    this.refreshKeyStatistics();
     inputClient.getEditorAttribute().then((attribute: inputMethodEngine.EditorAttribute): void => {
       if (attributeGeneration !== this.attributeGeneration || this.inputClient !== inputClient) {
         return;
@@ -2484,6 +2589,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       this.soundPlayer.recheck();
       this.musicPlayer.recheck();
       this.updateMusic();
+      this.keyStatisticsEditorKnown = true;
       this.capitalization = EditorPolicy.capitalizationMode(this.traits,
         KeyboardSession.capitalizationFor(attribute.capitalizeMode));
       // Says the keyboard reached a real editor, which nothing else in the log does. Verifying that
@@ -2545,6 +2651,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.inputClient = undefined;
     this.editorAttributesKnown = false;
     this.updateMusic();
+    this.keyStatisticsEditorKnown = false;
+    this.flushKeyPresses();
   }
 
   stop(): void {
@@ -2582,6 +2690,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.inputClient = undefined;
     this.previewSupported = false;
     this.previewText = '';
+    this.keyStatisticsEditorKnown = false;
+    this.flushKeyPresses();
   }
 
   /** Invalidate host-side network work before the focused editor changes or the session dies. */

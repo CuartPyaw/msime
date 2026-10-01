@@ -35,6 +35,16 @@ public final class TypingStatisticsDocument {
         if (root == null || !root.has("days")) return null;
         JSONObject detail = root.optJSONObject("detail");
         JSONObject dailyDetails = root.optJSONObject("dailyDetails");
+        // Absent in documents written before key counts existed; the store defaults it to empty, and so does this.
+        JSONObject dailyKeyCounts = root.optJSONObject("dailyKeys");
+        Map<String, Map<String, Long>> dailyKeys = new LinkedHashMap<>();
+        if (dailyKeyCounts != null) {
+            for (Iterator<String> keys = dailyKeyCounts.keys(); keys.hasNext();) {
+                String day = keys.next();
+                Map<String, Long> counts = counts(dailyKeyCounts.optJSONObject(day));
+                if (!counts.isEmpty()) dailyKeys.put(day, counts);
+            }
+        }
         Map<String, Map<String, Long>> dailyCharacters = new LinkedHashMap<>();
         Map<String, Map<String, Long>> dailySources = new LinkedHashMap<>();
         if (dailyDetails != null) {
@@ -57,7 +67,8 @@ public final class TypingStatisticsDocument {
             detail == null ? Map.of() : counts(detail.optJSONObject("characters")),
             detail == null ? Map.of() : counts(detail.optJSONObject("sources")),
             Map.copyOf(dailyCharacters),
-            Map.copyOf(dailySources));
+            Map.copyOf(dailySources),
+            Map.copyOf(dailyKeys));
     }
 
     private static Map<String, Long> counts(JSONObject value) {
