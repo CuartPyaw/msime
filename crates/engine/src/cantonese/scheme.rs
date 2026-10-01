@@ -70,6 +70,7 @@ impl CantoneseScheme {
     /// Replaces the composition with a host edit: letters are lowercased, `'` and the spaces `editing_text` shows at syllable boundaries are both boundaries, anything else is dropped, and boundaries are normalized as typing would leave them. Reading a space as a boundary keeps the syllables the user saw when an edit changes the letters around them (`ngo oi` edited to `ngo i` stays two syllables rather than becoming `ngoi`).
     pub fn set_raw_input(&mut self, raw: &str) {
         self.input.clear();
+        self.input.reserve(raw.len());
         for character in raw.chars() {
             if character.is_ascii_alphabetic() {
                 self.input.push(character.to_ascii_lowercase());
@@ -451,6 +452,17 @@ mod tests {
         assert_eq!(scheme.editing_text(), "");
         let fixture = fixture();
         assert!(scheme.candidates(&fixture.dictionary).unwrap().is_empty());
+    }
+
+    #[test]
+    fn set_raw_input_reserves_source_capacity() {
+        let source: String = (0..100)
+            .map(|index| if index % 5 == 3 { ' ' } else { 'a' })
+            .collect();
+        let mut scheme = CantoneseScheme::new(Arc::new(inventory()));
+        scheme.set_raw_input(&source);
+        assert_eq!(scheme.input.len(), source.len());
+        assert_eq!(scheme.input.capacity(), source.len());
     }
 
     #[test]
