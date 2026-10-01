@@ -210,6 +210,9 @@ target_link_libraries(msime-linux-emoji PRIVATE msime-ibus-host)
 add_executable(ibus-engine-smoke tests/runtime/engine_smoke.cpp)
 target_compile_options(ibus-engine-smoke PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(ibus-engine-smoke PRIVATE msime-ibus-host)
+# The Zhuyin cases install this dictionary into a directory of their own; the locked resources carry none.
+target_compile_definitions(ibus-engine-smoke PRIVATE
+  MSIME_ZHUYIN_DICTIONARY_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime/zhuyin_dictionary.py")
 if(BUILD_TESTING AND MSIME_ENGINE_RESOURCES)
   add_test(NAME ibus-page-number-visibility
     COMMAND ibus-engine-smoke "${MSIME_ENGINE_RESOURCES}" --page-number)
