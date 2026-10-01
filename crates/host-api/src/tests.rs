@@ -1387,27 +1387,42 @@ fn the_repeat_gesture_arms_only_in_schemes_with_host_smart_punctuation() {
 
 #[test]
 fn japanese_candidates_ask_for_no_translation() {
-    // Only the schemes that show glosses (`SchemeType::shows_glosses`) plan a translation query; Japanese candidates never carry one.
-    let dir = tempfile::tempdir().unwrap();
-    let handle = test_host_preferences(
-        dir.path(),
-        Preferences {
-            scheme: InputScheme::Japanese,
-            candidate_translations: true,
-            ..chinese_preferences()
-        },
-    );
-    read(msime_client_focus(handle, true));
-    let typed = read(msime_client_character(handle, b'a', false));
-    assert!(!typed["value"]["view"]["candidates"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert_eq!(
-        read(msime_client_translation_query(handle))["value"],
-        Value::Null
-    );
-    read(msime_client_destroy(handle));
+    // Only the schemes that show glosses (`SchemeType::shows_glosses`) plan a translation query; Japanese candidates never carry one. Quanpin under the same preferences is the positive control, so the gate tested here is the scheme predicate and nothing earlier. Quanpin types a Unicode code point because the test host installs no dictionary.
+    let cases: [(InputScheme, &[u8], bool); 2] = [
+        (InputScheme::Quanpin, b"U4e2d", true),
+        (InputScheme::Japanese, b"a", false),
+    ];
+    for (scheme, keys, expected) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let handle = test_host_preferences(
+            dir.path(),
+            Preferences {
+                scheme,
+                candidate_translations: true,
+                ..chinese_preferences()
+            },
+        );
+        read(msime_client_focus(handle, true));
+        let mut view = Value::Null;
+        for byte in keys {
+            view = read(msime_client_character(
+                handle,
+                *byte,
+                byte.is_ascii_uppercase(),
+            ))["value"]["view"]
+                .clone();
+        }
+        assert!(
+            !view["candidates"].as_array().unwrap().is_empty(),
+            "{scheme:?} offered no candidates"
+        );
+        assert_eq!(
+            !read(msime_client_translation_query(handle))["value"].is_null(),
+            expected,
+            "{scheme:?}"
+        );
+        read(msime_client_destroy(handle));
+    }
 }
 
 #[test]
