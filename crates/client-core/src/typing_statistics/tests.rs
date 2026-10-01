@@ -665,3 +665,24 @@ fn rejects_symlinked_statistics_storage_and_record() {
         Err(TypingStatisticsError::InvalidDocument)
     ));
 }
+
+#[cfg(unix)]
+#[test]
+fn last_written_rejects_a_symlinked_statistics_parent() {
+    use std::os::unix::fs::symlink;
+
+    let target = tempfile::tempdir().unwrap();
+    fs::write(
+        target.path().join("typing-statistics.json"),
+        r#"{"enabled":true,"total":1,"days":{"2026-09-21":1}}"#,
+    )
+    .unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let linked_root = parent.path().join("user-data");
+    symlink(target.path(), &linked_root).unwrap();
+
+    assert!(matches!(
+        TypingStatisticsStore::new(linked_root).last_written(),
+        Err(TypingStatisticsError::Io(_))
+    ));
+}

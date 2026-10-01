@@ -755,6 +755,7 @@ impl TypingStatisticsStore {
     }
 
     pub fn last_written(&self) -> Result<Option<SystemTime>, TypingStatisticsError> {
+        crate::storage::reject_symlink(&self.directory)?;
         match fs::symlink_metadata(self.path()) {
             Ok(metadata) if metadata.file_type().is_file() => Ok(metadata.modified().ok()),
             Ok(_) => Err(TypingStatisticsError::InvalidDocument),
