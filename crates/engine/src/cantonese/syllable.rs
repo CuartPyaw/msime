@@ -93,10 +93,23 @@ impl Segmentation {
 
 /// Every reading of all of `input` (lowercase letters and `'`), by maximal munch with backtracking: at each position the longest piece is tried first, so the first result is the preferred one (`ngoi` before `ngo i`). Empty when no reading covers every letter. A trailing piece that no syllable equals but some syllable starts with counts as an incomplete last syllable.
 pub fn segment(input: &str, inventory: &Inventory) -> Vec<Segmentation> {
+    segment_with(input, inventory, true)
+}
+
+/// `segment`, with `allow_prefix` saying whether the last piece may be an incomplete syllable.
+fn segment_with(input: &str, inventory: &Inventory, allow_prefix: bool) -> Vec<Segmentation> {
     let mut found = Vec::new();
     let mut dead = vec![false; input.len() + 1];
     let mut path = Vec::new();
-    walk(input, inventory, 0, &mut path, &mut dead, &mut found);
+    walk(
+        input,
+        inventory,
+        allow_prefix,
+        0,
+        &mut path,
+        &mut dead,
+        &mut found,
+    );
     found
 }
 
@@ -125,7 +138,8 @@ pub fn best(input: &str, inventory: &Inventory) -> Segmentation {
             }
         }
     }
-    segment(&input[..furthest], inventory)
+    // The run ends in a complete syllable, so its letters are read without a trailing prefix: `hoex` reads `ho e` and leaves `x`, rather than heading for `hoeng` with `hoe`.
+    segment_with(&input[..furthest], inventory, false)
         .into_iter()
         .next()
         .unwrap_or_default()
@@ -142,6 +156,7 @@ fn chunk_end(input: &str, position: usize) -> usize {
 fn walk(
     input: &str,
     inventory: &Inventory,
+    allow_prefix: bool,
     mut position: usize,
     path: &mut Vec<Syllable>,
     dead: &mut [bool],
@@ -168,7 +183,7 @@ fn walk(
             complete: true,
         })
         .collect();
-    if chunk_end == input.len() && inventory.is_prefix(&input[position..]) {
+    if allow_prefix && chunk_end == input.len() && inventory.is_prefix(&input[position..]) {
         pieces.push(Syllable {
             start: position,
             end: input.len(),
@@ -180,7 +195,7 @@ fn walk(
     let mut any = false;
     for piece in pieces {
         path.push(piece);
-        any |= walk(input, inventory, piece.end, path, dead, found);
+        any |= walk(input, inventory, allow_prefix, piece.end, path, dead, found);
         path.pop();
         if found.len() >= MAX_SEGMENTATIONS {
             return true;
@@ -287,6 +302,19 @@ pub(crate) mod tests {
         assert!(best(input, &inventory()).syllables.is_empty());
         let input = "nei'qq";
         assert_eq!(read(input, &best(input, &inventory())), ["nei"]);
+    }
+
+    #[test]
+    fn the_fallback_reads_only_complete_syllables() {
+        // `hoe` is a prefix of `hoeng` and longer than `ho`, but the unread `x` after it means the run must end in complete syllables.
+        let small = Inventory::new(["ho", "e", "hoeng", "nei"]);
+        let input = "hoex";
+        let reading = best(input, &small);
+        assert_eq!(read(input, &reading), ["ho", "e"]);
+        assert_eq!(reading.end(), 3);
+        assert!(!reading.ends_in_prefix());
+        let input = "neihoex";
+        assert_eq!(read(input, &best(input, &small)), ["nei", "ho", "e"]);
     }
 
     #[test]
