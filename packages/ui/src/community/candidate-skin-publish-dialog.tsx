@@ -103,6 +103,7 @@ export function CandidateSkinPublishDialog({
   const packGeneration = useRef(0);
   const actionRunning = useRef(false);
   const drawRunning = useRef(false);
+  const licenseRunning = useRef(false);
   // The package whose name the form was filled from, so switching visibility re-checks the package without discarding a name the user typed.
   const namedSkin = useRef("");
 
@@ -221,7 +222,8 @@ export function CandidateSkinPublishDialog({
   const licenseValid =
     licenseValue.length > 0 && new TextEncoder().encode(licenseValue).length <= assetLicenseLimit;
   const writeLicense = async () => {
-    if (!licenseless || !licenseValid || writingLicense) return;
+    if (!licenseless || !licenseValid || writingLicense || licenseRunning.current) return;
+    licenseRunning.current = true;
     const clientGenerationAtStart = clientGeneration.current;
     const packGenerationAtStart = packGeneration.current;
     setWritingLicense(true);
@@ -242,6 +244,7 @@ export function CandidateSkinPublishDialog({
       )
         setLicenseFailed(true);
     } finally {
+      licenseRunning.current = false;
       if (
         packGenerationAtStart === packGeneration.current &&
         clientGenerationAtStart === clientGeneration.current

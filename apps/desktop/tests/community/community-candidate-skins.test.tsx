@@ -437,6 +437,31 @@ test("publish dialog: a license of the author's own is trimmed, bounded, and a f
   expect(screen.queryByRole("textbox", { name: "发布皮肤名称" })).toBeNull();
 });
 
+test("license writing ignores a same-tick duplicate submission", async () => {
+  const pending = deferred<SkinCatalog>();
+  const addLicense = vi.fn().mockReturnValue(pending.promise);
+  const communityClient = client({
+    packPreview: vi.fn().mockRejectedValue({ code: "candidate_skin_license_required" }),
+    addLicense,
+  });
+  render(
+    <CandidateSkinPublishDialog
+      client={communityClient}
+      initialSkinId="ink-wash"
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  const write = await screen.findByRole("button", { name: "使用此授权并继续" });
+  act(() => {
+    fireEvent.click(write);
+    fireEvent.click(write);
+  });
+  expect(addLicense).toHaveBeenCalledOnce();
+  pending.resolve(catalog(["ink-wash"]));
+  await settle();
+});
+
 test("publish dialog: a package without a preview can have one drawn and saved", async () => {
   const missing = catalog(["ink-wash"]);
   missing.packages[0].preview = null;
