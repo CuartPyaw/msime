@@ -1344,6 +1344,10 @@ export {
   type CloudDictionaryKindSelectProps,
 } from "./keyboard/cloud-dictionary-kind-select";
 export {
+  CloudDictionarySelectField,
+  type CloudDictionarySelectFieldProps,
+} from "./keyboard/cloud-dictionary-select-field";
+export {
   CloudDictionaryQueryToolbar,
   type CloudDictionaryQueryToolbarProps,
 } from "./keyboard/cloud-dictionary-query-toolbar";
