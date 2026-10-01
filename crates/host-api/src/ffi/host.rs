@@ -167,6 +167,32 @@ pub unsafe extern "C" fn msime_client_refresh_host(path: *const u8, length: usiz
     })
 }
 
+/// Register the device's anonymous MSIME account under `directory` (`anonymous-account.json` and `anonymous-session.json`) unless a session is already there. Blocks on the network for up to about a minute: call from a background thread. Value is true once a session exists.
+/// # Safety
+/// `directory` points to `length` readable UTF-8 bytes naming an absolute directory. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_ensure_anonymous_account(
+    directory: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if directory.is_null() || length > 4096 {
+            return Err("invalid account directory buffer".into());
+        }
+        // SAFETY: guaranteed by the caller contract.
+        let bytes = unsafe { std::slice::from_raw_parts(directory, length) };
+        let directory = std::path::Path::new(
+            std::str::from_utf8(bytes).map_err(|_| "invalid account directory encoding")?,
+        );
+        if !directory.is_absolute() {
+            return Err("account directory must be absolute".into());
+        }
+        msime_client_core::account::ensure_anonymous_account(directory)
+            .map(|()| Value::Bool(true))
+            .map_err(|e| e.to_string())
+    })
+}
+
 /// The shared preference defaults, as the document a host would have to produce.
 ///
 /// A host that patches one key into a nested preference object needs the rest of

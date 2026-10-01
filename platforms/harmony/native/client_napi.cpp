@@ -357,6 +357,52 @@ static napi_value VoiceHotwords(napi_env env, napi_callback_info info) {
     return promise;
 }
 
+// Registering the anonymous account waits on the network, so it runs as async work and answers through a promise; a refusal or a failed request arrives as {"ok":false}.
+struct AnonymousAccountWork {
+    napi_async_work work = nullptr;
+    napi_deferred deferred = nullptr;
+    std::string directory;
+    char *result = nullptr;
+};
+
+static void executeAnonymousAccount(napi_env, void *data) {
+    auto *work = static_cast<AnonymousAccountWork *>(data);
+    work->result = msime_client_ensure_anonymous_account(
+        reinterpret_cast<const uint8_t *>(work->directory.data()), work->directory.size());
+}
+
+static void completeAnonymousAccount(napi_env env, napi_status status, void *data) {
+    auto *work = static_cast<AnonymousAccountWork *>(data);
+    settleVoicePromise(env, status, work->deferred, work->result, "Anonymous account worker failed");
+    napi_delete_async_work(env, work->work);
+    delete work;
+}
+
+static napi_value EnsureAnonymousAccount(napi_env env, napi_callback_info info) {
+    std::vector<napi_value> argv;
+    auto *work = new AnonymousAccountWork();
+    if (!arguments(env, info, 1, argv) || !argumentText(env, argv[0], work->directory)) {
+        delete work;
+        return invalid(env, "Expected an account directory");
+    }
+    napi_value promise = nullptr;
+    napi_value resource = nullptr;
+    if (napi_create_promise(env, &work->deferred, &promise) != napi_ok
+            || napi_create_string_utf8(env, "MSIME anonymous account", NAPI_AUTO_LENGTH,
+                &resource) != napi_ok
+            || napi_create_async_work(env, nullptr, resource, executeAnonymousAccount,
+                completeAnonymousAccount, work, &work->work) != napi_ok) {
+        delete work;
+        return invalid(env, "Unable to create anonymous account worker");
+    }
+    if (napi_queue_async_work(env, work->work) != napi_ok) {
+        napi_delete_async_work(env, work->work);
+        delete work;
+        return invalid(env, "Unable to queue anonymous account worker");
+    }
+    return promise;
+}
+
 // A pack import extracts or copies up to a music pack's size and validates it before swapping it into place, which the header says belongs on a worker thread, so it runs as async work and answers through a promise. The small catalog, remove and name-list calls stay on the synchronous `plugins` entry.
 struct PluginsWork {
     napi_async_work work = nullptr;
@@ -1116,6 +1162,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         ENTRY("musicPack", MusicPack),
         ENTRY("plugins", Plugins),
         ENTRY("pluginsAsync", PluginsAsync),
+        ENTRY("ensureAnonymousAccount", EnsureAnonymousAccount),
         ENTRY("keySoundRenderNotes", KeySoundRenderNotes),
         ENTRY("aiRequestForQuery", AiRequestForQuery),
         ENTRY("aiHttpRequest", AiHttpRequest),

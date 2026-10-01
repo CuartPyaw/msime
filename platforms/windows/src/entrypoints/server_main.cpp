@@ -193,6 +193,21 @@ std::filesystem::path production_state_directory() {
   return {};
 #endif
 }
+// The anonymous account's secret and tokens belong to the Windows user running this Server, so they live in that user's %LOCALAPPDATA%\MSIME\account. The state root is no place for them: an installed Server's is the installer's DataDir, one directory for the whole machine that every user may modify.
+std::filesystem::path anonymous_account_directory() {
+#ifdef _WIN32
+  PWSTR local = nullptr;
+  if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
+    CoTaskMemFree(local);
+    return {};
+  }
+  const auto directory = std::filesystem::path(local) / L"MSIME" / L"account";
+  CoTaskMemFree(local);
+  return directory;
+#else
+  return {};
+#endif
+}
 std::string read_document(const std::filesystem::path &path) {
   std::ifstream input(path, std::ios::binary);
   if (!input)
@@ -720,6 +735,15 @@ int wmain(int argc, wchar_t **argv) {
     if (msime::windows::telemetry_consented(prepared.at("value").at("preferences"))) {
       telemetry_allowed.store(true, std::memory_order_release);
       std::thread([] { msime::telemetry::start("windows", MSIME_WINDOWS_VERSION); }).detach();
+    }
+    // The user's anonymous MSIME account is registered on the first run after install, as on every other platform; once anonymous-session.json exists this is a file read. It runs off the main thread for the same reason as the telemetry event, and a failure (offline, rate limited) is simply retried on the next start.
+    if (const auto account = anonymous_account_directory(); production && !account.empty()) {
+      std::thread([directory = account.u8string()] {
+        std::unique_ptr<char, decltype(&msime_client_string_free)> result(
+            msime_client_ensure_anonymous_account(
+                reinterpret_cast<const uint8_t *>(directory.data()), directory.size()),
+            msime_client_string_free);
+      }).detach();
     }
     diagnostic_log.server(std::string(production ? "Production" : "Preview") +
                           " Server starting");

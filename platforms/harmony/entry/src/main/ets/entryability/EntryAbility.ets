@@ -6,6 +6,7 @@ import { KeyboardLog } from '../keyboard/KeyboardLog';
 import { BusinessErrorPolicy } from '../keyboard/BusinessErrorPolicy';
 import { describeError } from '../keyboard/KeyboardLog';
 import { flushStartupTelemetry } from '../telemetry/Telemetry';
+import client from 'libmsimeclient.so';
 
 /**
  * The application the keyboard belongs to.
@@ -22,6 +23,10 @@ export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launch: AbilityConstant.LaunchParam): void {
     KeyboardLog.info('app created');
     flushStartupTelemetry();
+    // The device's anonymous MSIME account is registered on first launch rather than on the first feature that needs it; once its session is saved this only reads a file. A failure is retried on the next launch or keyboard start.
+    client.ensureAnonymousAccount(`${this.context.filesDir}/state`).catch((error: Error): void => {
+      KeyboardLog.error(`anonymous account: ${describeError(error)}`);
+    });
   }
 
   onWindowStageCreate(stage: window.WindowStage): void {

@@ -4326,6 +4326,8 @@ static NSString *MSIMESessionUnavailableReason(NSDictionary *options) {
 }
 
 - (void)prepareSession {
+    // The device's anonymous MSIME account is registered the first time the input method activates, so a new install has one before any feature asks for it. It runs once per process and returns at once when a signed-in or anonymous session is already saved; only the random identity is sent, never input.
+    if (MSIMEEnsureAnonymousAccount != nullptr) MSIMEEnsureAnonymousAccount();
     BOOL reopened = NO;
     if (!_session) {
         NSDictionary *options = MSIMESessionOptions([self runtimeOptions], MSIMEBundleSoundPacks(NSBundle.mainBundle));

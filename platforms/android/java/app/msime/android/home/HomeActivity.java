@@ -19,6 +19,7 @@ import android.view.View;
 import android.view.animation.PathInterpolator;
 import android.widget.ImageView;
 import androidx.fragment.app.FragmentTransaction;
+import app.msime.android.AccountIdentity;
 import app.msime.android.CommunityRequest;
 import app.msime.android.FirstRunPreparation;
 import app.msime.android.core.Telemetry;
@@ -67,6 +68,7 @@ public final class HomeActivity extends AppCompatActivity {
         AppMode.restore(this);
         super.onCreate(state);
         Telemetry.start(this);
+        AccountIdentity.register(this);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_home);
 

@@ -487,6 +487,11 @@ pub(super) fn validate_provider_target(provider: &str, target: &str) -> Result<(
             .then_some(())
             .ok_or(AccountError::Invalid);
     }
+    if provider == "anonymous" {
+        return super::anonymous::valid_anonymous_subject(target)
+            .then_some(())
+            .ok_or(AccountError::Invalid);
+    }
     if !matches!(provider, "email" | "phone")
         || target.is_empty()
         || !crate::text::is_bounded_text(target, 320)

@@ -8,6 +8,12 @@ struct MetasequoiaImeApp: App {
 
   init() {
     Task { await BackendTelemetryClient.shared.recordFirstLaunch() }
+    // The device's anonymous MSIME account is registered on first launch, before the keyboard needs it. The identity and session live in the app group, so the keyboard reuses them. A saved signed-in or anonymous session, even an expired one, skips the request rather than refreshing it on every launch; a failure is retried on the next launch.
+    Task.detached(priority: .utility) {
+      if (try? BackendKeychain().load()) != nil { return }
+      if (try? BackendAnonymousAccount.sessionStorage().load()) != nil { return }
+      _ = try? await BackendAnonymousAccount.ensureSignedIn(session: BackendAnonymousAccount.session, client: BackendAccountClient())
+    }
     NSSetUncaughtExceptionHandler { exception in
       BackendTelemetryClient.persistCrash(message: exception.reason ?? exception.name.rawValue,
                                           stack: exception.callStackSymbols.joined(separator: "\n"))

@@ -94,11 +94,22 @@ final class BackendAnonymousAccount {
     }
 
     /**
+     * Registers the identity with the backend unless a session is already saved, as the app does on first launch.
+     *
+     * <p>Unlike {@link #accessToken} an expired saved session is enough: registration has happened, and the first request that needs a token renews it. Without this every app start after the access token expired would sign in again.
+     */
+    void ensureRegistered() throws Exception {
+        synchronized (LOCK) {
+            if (sessions.load() == null) accessToken();
+        }
+    }
+
+    /**
      * The anonymous subject already on this device, or an empty string when there is none.
      *
      * <p>Read-only on purpose: the settings screen shows this, and merely looking at that screen
-     * must not be what creates the identity. {@link #accessToken} is where one is created, on the
-     * first request that actually needs it.
+     * must not be what creates the identity. {@link #ensureRegistered} creates it on first launch,
+     * and {@link #accessToken} on the first request that needs it if that launch did not.
      */
     String savedSubject() {
         try {
