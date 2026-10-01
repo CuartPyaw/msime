@@ -103,6 +103,8 @@ public:
   // Effect sounds, played by the shared library from this session's preferences. Each is a bounded queue post that never blocks and answers whether a sound was queued. Only the Server calls them: the TSF DLL links the same library into every process it is loaded into, and never starts its player.
   bool key_sound(uint32_t key_class);
   bool commit_sound();
+  // The typing effect of one key or commit (msime_client_typing_effect): the packed combo count, tier-up bit and effect style the candidate window draws, 0 when effects and the combo counter are both off.
+  uint32_t typing_effect(uint32_t event);
   // Whether background music may play: true while this client holds the focus. Remembered, so a preference update can repeat it and destroying the session stops music it started.
   void set_music_active(bool active);
 

@@ -486,6 +486,10 @@ bool ServerSession::commit_sound() {
   check_thread();
   return msime_client_commit_sound(session_);
 }
+uint32_t ServerSession::typing_effect(uint32_t event) {
+  check_thread();
+  return msime_client_typing_effect(session_, event);
+}
 void ServerSession::set_music_active(bool active) {
   check_thread();
   (void)msime_client_music_set_active(session_, active);

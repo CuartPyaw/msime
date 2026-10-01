@@ -1,5 +1,7 @@
 #include "FocusedSession.h"
 #include "KeySoundPolicy.h"
+#include "TypingEffectPolicy.h"
+#include "TypingEffectSignal.h"
 #include <ctime>
 #include <memory>
 #include <stdexcept>
@@ -68,6 +70,10 @@ void FocusedSession::record_commit(const std::optional<Commit> &delivered) {
   const bool allowed = sound_allowed();
   if (allowed)
     (void)session_.commit_sound();
+  // The commit flash, on the session's current combo: a commit counts nothing and only reports the state.
+  if (session_.input_enabled())
+    TypingEffectSignal::instance().publish(
+        session_.typing_effect(typing_effect_commit(allowed)));
   if (!delivered->typing)
     return;
   if (statistics_) {
@@ -536,9 +542,14 @@ std::optional<PendingReply> FocusedSession::configured_key(
                                        word_binding);
     // After the Engine, so only a key the input method took sounds (with input off, in English mode, the Server answers keys without taking them), and before the online queries are built, so they add no delay to it.
     if (result && session_.input_enabled()) {
-      if (const auto key_class = key_sound_class(packet);
-          key_class && sound_allowed())
-        (void)session_.key_sound(*key_class);
+      if (const auto key_class = key_sound_class(packet)) {
+        const bool allowed = sound_allowed();
+        if (allowed)
+          (void)session_.key_sound(*key_class);
+        // The same keys drive the typing effect and its combo, which keep counting in a full-screen application but stay silent there. The candidate window draws it on the UI thread; this only posts the packed value.
+        TypingEffectSignal::instance().publish(
+            session_.typing_effect(typing_effect_key_event(*key_class, allowed)));
+      }
     }
     attach_online_query(lease, result);
   });

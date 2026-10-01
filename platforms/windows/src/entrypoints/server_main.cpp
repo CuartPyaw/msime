@@ -622,6 +622,17 @@ void start_watchdog(const std::filesystem::path &directory) {
     CloseHandle(process.hProcess);
   }
 }
+// preferences.plugins.effect_intensity, how bright the candidate card's typing flash is. Only the hosts read it, so this is where an out-of-range or mistyped value falls back: clamped to 0-100, and anything not a number is the default 50.
+unsigned typing_effect_intensity(const nlohmann::json &preferences) {
+  const auto plugins = preferences.value("plugins", nlohmann::json::object());
+  if (!plugins.is_object())
+    return 50u;
+  const auto found = plugins.find("effect_intensity");
+  if (found == plugins.end() || !found->is_number())
+    return 50u;
+  const double value = found->get<double>();
+  return static_cast<unsigned>(value <= 0.0 ? 0.0 : (value >= 100.0 ? 100.0 : value));
+}
 } // namespace
 int wmain(int argc, wchar_t **argv) {
   // Before any thread exists: libcurl's global init is not thread-safe, and the startup event's thread, a crash report on any thread and the online workers all use it.
@@ -762,6 +773,9 @@ int wmain(int argc, wchar_t **argv) {
     auto follow_cursor = std::make_shared<std::atomic<bool>>(
         prepared.at("value").at("preferences")
             .value("candidate_follow_cursor", true));
+    // The typing flash's strength, published the same way. The effect itself comes with each key from the input thread.
+    auto effect_intensity = std::make_shared<std::atomic<unsigned>>(
+        typing_effect_intensity(prepared.at("value").at("preferences")));
     // The TSF Ctrl+Shift+F route is delivered through the same bounded worker
     // as the toolbar button. It must exist before WindowsServer construction:
     // a newly connected client may dispatch its first key immediately.
@@ -798,7 +812,7 @@ int wmain(int argc, wchar_t **argv) {
     options.preferences_directory = config.state_root.u8string();
     options.preferences_published =
         [&, voice_config, voice_config_mutex, voice_host_options, traditional_output,
-         toolbar_enabled, follow_cursor, voice_theme, candidate_fonts,
+         toolbar_enabled, follow_cursor, effect_intensity, voice_theme, candidate_fonts,
          toolbar_theme, menu_theme, mode_scope_global, tsf_config, candidate_layout,
          tsf_config_mutex, tray_preferences, tray_preferences_mutex,
          tsf_config_dirty, candidate_theme, toolbar_settings](const PreferenceSnapshot &snapshot) {
@@ -872,6 +886,8 @@ int wmain(int argc, wchar_t **argv) {
           follow_cursor->store(
               preferences.value("candidate_follow_cursor", true),
               std::memory_order_release);
+          effect_intensity->store(typing_effect_intensity(preferences),
+                                  std::memory_order_release);
           publish_switch_language_keybindings(preferences);
           const auto input = preferences.value("voice_input", nlohmann::json::object());
           VoiceInputConfig next;
@@ -1136,6 +1152,7 @@ int wmain(int argc, wchar_t **argv) {
       candidate_skin_applied = theme.candidate_skin;
     }
     candidates.set_follow_cursor(follow_cursor->load(std::memory_order_acquire));
+    candidates.set_effect_intensity(effect_intensity->load(std::memory_order_acquire));
     // The toolbar and the menus draw the card's theme in their own light/dark mode, with the card's layout deciding whether a package is drawn.
     auto surface_palette = [&](bool dark) {
       return candidate_theme_palette(
@@ -1624,6 +1641,8 @@ int wmain(int argc, wchar_t **argv) {
       }
       candidates.set_follow_cursor(
           follow_cursor->load(std::memory_order_acquire));
+      candidates.set_effect_intensity(
+          effect_intensity->load(std::memory_order_acquire));
       // The language button shows 'A' while Caps Lock is on, 日 in Japanese mode, 한 in Korean mode and an underlined "En" in the Engine's own English mode, so it has to follow all of them. Showing 中 with Caps Lock on tells the user the wrong thing about what the next letter key will do.
       {
         ToolbarLanguageState language;

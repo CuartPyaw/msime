@@ -8,6 +8,7 @@
 #include "CandidatePresentation.h"
 #include "CandidateShadow.h"
 #include "CandidateSkin.h"
+#include "TypingEffectPolicy.h"
 #include <functional>
 #include <memory>
 // windows.h first: its DrawText macro has to reach the Direct2D declarations,
@@ -72,6 +73,8 @@ public:
   }
   // The card radius a package asks for; none keeps the theme's.
   void set_skin_corner_radius(std::optional<float> radius) { skin_radius_ = radius; }
+  // preferences.plugins.effect_intensity, 0-100: how bright the typing flash is. The style and the combo come with each key from the input thread (TypingEffectSignal).
+  void set_effect_intensity(uint32_t intensity) { effect_intensity_ = (std::min)(intensity, 100u); }
   void hide();
   bool failed() const { return failed_; }
   HWND handle() const { return window_; }
@@ -86,6 +89,10 @@ private:
   std::vector<CandidateItemWidths> measure_items(const CandidatePresentation &value);
   CandidateWrapMeasure wrap_measure(const CandidatePresentation &value);
   void paint();
+  // UI thread: adopt the waiting typing effect and start its flash and combo timers.
+  void take_typing_effect();
+  // Repaint for the next flash frame, and stop the timer once the flash has faded.
+  void typing_effect_tick(UINT_PTR timer);
   // The brand mark leading the preedit row, loaded at `pixels` square. Null when the icon will not load, and the row then draws no mark.
   ID2D1Bitmap *logo_bitmap(int pixels);
   std::optional<CandidateClick> hit(int x, int y);
@@ -164,5 +171,10 @@ private:
   // than being swallowed by this NOACTIVATE window.
   bool mouse_wheel_ = false;
   int wheel_accumulator_ = 0;
+  // The typing effect last taken from the input thread, when it arrived (GetTickCount64), and whether its flash is still fading. The combo count outlives the flash: it stays on the card until the library's idle window ends it.
+  uint32_t effect_intensity_ = 50;
+  TypingEffect effect_{};
+  uint64_t effect_started_ = 0;
+  bool effect_flashing_ = false;
 };
 } // namespace msime::windows
