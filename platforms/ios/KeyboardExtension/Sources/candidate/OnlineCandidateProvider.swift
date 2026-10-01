@@ -56,12 +56,18 @@ final class OnlineCandidateProvider {
   }
 
   private func fetch(document: Data, epoch target: UInt64) async {
+    var applied = false
+    defer {
+      // 没有任何候选结果时释放签名，让同一组字可以在服务恢复后重试；旧代次不能清掉新请求的签名。
+      if !applied, target == epoch { signature = nil }
+    }
     var aiDocument = document
     if let query = Self.object(document), Self.requestsCloud(query),
        let url = MetasequoiaInputSessionBridge.cloudRequestURL(query: document),
        let body = await transport.fetch(Self.cloudRequest(url)), target == epoch,
        // Applying a cloud result advances the Engine's generation, so the AI request has to be built from the query as it stands afterwards or it arrives stale.
        let refreshed = apply({ try self.session.applyCloudResponse(query: document, body: body) }) {
+      applied = true
       aiDocument = refreshed
     }
     guard target == epoch, let query = Self.object(aiDocument), Self.requestsAI(query),
@@ -71,7 +77,9 @@ final class OnlineCandidateProvider {
           let body = await transport.fetch(request), target == epoch else { return }
     let candidates = MetasequoiaInputSessionBridge.parseAIResponse(body, limit: limit)
     guard !candidates.isEmpty else { return }
-    _ = apply { try self.session.applyOnlineCandidates(query: aiDocument, candidates: candidates, source: 1) }
+    if apply({ try self.session.applyOnlineCandidates(query: aiDocument, candidates: candidates, source: 1) }) != nil {
+      applied = true
+    }
   }
 
   /// Hand one provider's result to the session and render it. Returns the query as it stands afterwards, or nil when nothing was applied.
