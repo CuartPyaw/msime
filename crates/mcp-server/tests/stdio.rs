@@ -559,3 +559,214 @@ async fn an_agent_turns_on_and_reads_the_diagnostic_log() {
 
     client.cancel().await.unwrap();
 }
+
+/// The command line: one tool per run, under the same flags and with the same answers as the server.
+fn run_cli(options: &Path, args: &[&str], stdin: Option<&str>) -> (i32, Value, String) {
+    let (code, stdout, stderr) = run_cli_text(options, args, stdin);
+    let stdout = if stdout.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_str(&stdout).unwrap()
+    };
+    (code, stdout, stderr)
+}
+
+fn run_cli_text(options: &Path, args: &[&str], stdin: Option<&str>) -> (i32, String, String) {
+    use std::io::Write;
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_msime-mcp"));
+    command.arg("--options").arg(options).args(args);
+    for name in [
+        "MSIME_CLIENT_HOST_OPTIONS",
+        "MSIME_IBUS_OPTIONS",
+        "MSIME_CLIENT_STATE_DIR",
+    ] {
+        command.env_remove(name);
+    }
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.unwrap_or("").as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    (
+        output.status.code().unwrap(),
+        String::from_utf8(output.stdout).unwrap(),
+        String::from_utf8(output.stderr).unwrap(),
+    )
+}
+
+#[test]
+fn the_command_line_runs_the_same_tools() {
+    let directory = tempfile::tempdir().unwrap();
+    let options = fixture(directory.path());
+
+    let (code, tools, _) = run_cli(&options, &["tools"], None);
+    assert_eq!(code, 0);
+    let mut names: Vec<&str> = tools
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "get_preferences",
+            "get_typing_statistics",
+            "list_candidate_skins",
+            "list_quick_phrases",
+            "read_diagnostic_log",
+            "set_diagnostic_log"
+        ]
+    );
+    assert!(tools[0]["inputSchema"].is_object());
+
+    let edit = r#"{"edits":[{"op":"add","code":"yx","text":"someone@example.com"}]}"#;
+    let (code, _, error) = run_cli(&options, &["call", "edit_quick_phrases", edit], None);
+    assert_eq!(code, 1);
+    assert!(error.contains("--allow-write"), "{error}");
+
+    let (code, outcome, _) = run_cli(
+        &options,
+        &["--allow-write", "call", "edit-quick-phrases", "-"],
+        Some(edit),
+    );
+    assert_eq!(code, 0);
+    assert_eq!(outcome, json!({ "applied": 1 }));
+
+    let (code, page, _) = run_cli(
+        &options,
+        &["call", "list_quick_phrases", r#"{"code_prefix":"y"}"#],
+        None,
+    );
+    assert_eq!(code, 0);
+    assert_eq!(
+        page,
+        json!({ "phrases": [{ "code": "yx", "text": "someone@example.com" }], "has_more": false })
+    );
+
+    let (code, _, error) = run_cli(
+        &options,
+        &["call", "list_quick_phrases", r#"{"limit":0}"#],
+        None,
+    );
+    assert_eq!(code, 1);
+    assert!(
+        error.contains("limit must be between 1 and 1000"),
+        "{error}"
+    );
+
+    let (code, _, error) = run_cli(&options, &["call", "list_quick_phrases", "[]"], None);
+    assert_eq!(code, 2);
+    assert!(error.contains("JSON object"), "{error}");
+}
+
+#[test]
+fn writes_from_separate_runs_are_spaced_out_too() {
+    let directory = tempfile::tempdir().unwrap();
+    let options = fixture(directory.path());
+    let add = |text: &str| format!(r#"{{"edits":[{{"op":"add","code":"yx","text":"{text}"}}]}}"#);
+    let (code, _, error) = run_cli(
+        &options,
+        &[
+            "--allow-write",
+            "call",
+            "edit_quick_phrases",
+            &add("one@example.com"),
+        ],
+        None,
+    );
+    assert_eq!(code, 0, "{error}");
+    let (code, _, error) = run_cli(
+        &options,
+        &[
+            "--allow-write",
+            "call",
+            "edit_quick_phrases",
+            &add("two@example.com"),
+        ],
+        None,
+    );
+    assert_eq!(code, 1);
+    assert!(error.contains("one a second"), "{error}");
+    std::thread::sleep(Duration::from_millis(1100));
+    let (code, _, error) = run_cli(
+        &options,
+        &[
+            "--allow-write",
+            "call",
+            "edit_quick_phrases",
+            &add("two@example.com"),
+        ],
+        None,
+    );
+    assert_eq!(code, 0, "{error}");
+}
+
+#[test]
+fn the_command_line_prints_the_prompts() {
+    let directory = tempfile::tempdir().unwrap();
+    let options = fixture(directory.path());
+    let (code, prompts, _) = run_cli(&options, &["prompts"], None);
+    assert_eq!(code, 0);
+    let names: Vec<&str> = prompts
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|prompt| prompt["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["diagnose"]);
+
+    let (code, text, _) = run_cli_text(
+        &options,
+        &["prompt", "diagnose", r#"{"problem":"候选窗不见了"}"#],
+        None,
+    );
+    assert_eq!(code, 0);
+    assert!(text.contains("候选窗不见了"), "{text}");
+    assert!(text.contains("read_diagnostic_log"), "{text}");
+    assert!(text.contains("msime-mcp <the same flags> call"), "{text}");
+
+    let (code, _, error) = run_cli_text(&options, &["prompt", "make-skin"], None);
+    assert_eq!(code, 1);
+    assert!(error.contains("--allow-write"), "{error}");
+    let (code, text, _) = run_cli_text(&options, &["--allow-write", "prompt", "make-skin"], None);
+    assert_eq!(code, 0);
+    assert!(text.contains("create_candidate_skin"), "{text}");
+}
+
+#[test]
+fn arguments_can_come_from_a_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let options = fixture(directory.path());
+    let file = directory.path().join("edit.json");
+    std::fs::write(
+        &file,
+        r#"{"edits":[{"op":"add","code":"dz","text":"北京市海淀区"}]}"#,
+    )
+    .unwrap();
+    let argument = format!("@{}", file.display());
+    let (code, _, error) = run_cli(
+        &options,
+        &["--allow-write", "call", "edit_quick_phrases", &argument],
+        None,
+    );
+    assert_eq!(code, 0, "{error}");
+    let (_, page, _) = run_cli(&options, &["call", "list_quick_phrases"], None);
+    assert_eq!(page["phrases"][0]["text"], "北京市海淀区");
+    let (code, _, error) = run_cli(
+        &options,
+        &["call", "list_quick_phrases", "@/nonexistent/args.json"],
+        None,
+    );
+    assert_eq!(code, 2);
+    assert!(error.contains("cannot read the arguments"), "{error}");
+}
