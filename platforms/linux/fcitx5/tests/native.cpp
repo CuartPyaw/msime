@@ -2273,6 +2273,20 @@ int main(int argc, char **argv) {
         require(hangul() && press(FcitxKey_F9) && !press(FcitxKey_c, fcitx::KeyStates(fcitx::KeyState::Ctrl)) &&
                     ic.committed == before + "한" && preedit().empty() && candidates().empty(),
                 "a shortcut writes the Hangul, never a Hanja");
+        // Traditional output is for Chinese text, so it leaves the Hanja list alone: s2t maps 后 to 後, and a row drawn through it would show 後 while committing 后.
+        state->traditional_ = true;
+        before = ic.committed;
+        require(press(FcitxKey_g) && press(FcitxKey_n) && press(FcitxKey_F9) && preedit() == "후" &&
+                    candidates().size() > 3 && candidates().at(3).value("text", std::string()) == "后",
+                "the Hanja list of 후 holds 后 fourth");
+        const auto *panel = ic.inputPanel().candidateList().get();
+        require(panel && panel->size() == static_cast<int>(candidates().size()), "the panel shows the Hanja list");
+        for (int row = 0; row < panel->size(); ++row)
+          require(panel->candidate(row).text().toString().rfind(
+                      candidates().at(row).value("text", std::string()), 0) == 0,
+                  "with traditional output on a Hanja row shows the character it commits");
+        require(press(FcitxKey_4) && ic.committed == before + "后", "the row showing 后 commits 后");
+        state->traditional_ = false;
       }
       before = ic.committed;
       require(press(FcitxKey_r) && press(FcitxKey_k) && !press(FcitxKey_c, fcitx::KeyStates(fcitx::KeyState::Ctrl)) &&

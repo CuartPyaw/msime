@@ -2656,9 +2656,7 @@ public:
     pair_inserted_ = false;
     if (result.contains("commit") && result["commit"].is_string()) {
       auto text = result["commit"].get<std::string>();
-      // Kana and Hangul are not Chinese text.
-      if (traditional_ && view_.value("scheme", 0u) != 3 && view_.value("scheme", 0u) != 4)
-        text = msime_linux_simplified_to_traditional(text);
+      if (traditionalApplies()) text = msime_linux_simplified_to_traditional(text);
       const auto spaceConvertAscii =
           spaceConvertPreceding
               ? msime::linux_host::smart_punctuation_ascii_mark(text)
@@ -3021,6 +3019,10 @@ public:
   bool resetCache() {
     if (!ensure() || restricted() || privateInput() || !ic_.hasFocus()) return false;
     return apply(msime_client_reset_cache(session_));
+  }
+  // The traditional-output conversion is for Chinese text only: Japanese (kana and the kanji the Engine chose) and Korean (Hangul and the Hanja the user picks) pass through as they are. The candidate rows, the commit and the status action all ask this one gate, so a row never shows a character other than the one it commits (s2t would draw the Hanja 后 as 後).
+  bool traditionalApplies() const {
+    return traditional_ && view_.value("scheme", 0u) != 3 && view_.value("scheme", 0u) != 4;
   }
   bool toggleTraditional() {
     if (!session_ || view_.value("scheme", 0u) == 3 || view_.value("scheme", 0u) == 4) return false;
@@ -3396,7 +3398,7 @@ public:
     for (const auto &candidate : state.view_.at("candidates")) {
       if (candidate.value("highlighted", false)) cursor_ = words_.size();
       words_.push_back(std::make_unique<FcitxCandidate>(
-          factory, candidate, state.traditional_, annotations));
+          factory, candidate, state.traditionalApplies(), annotations));
       labels_.emplace_back(std::to_string(words_.size()) + ". ");
     }
   }
@@ -4966,8 +4968,7 @@ public:
   bool isChecked(fcitx::InputContext *ic) const override {
     if (!ic) return false;
     const auto *state = ic->propertyFor(factory_);
-    return state->session_ && state->view_.value("scheme", 0u) != 3 && state->view_.value("scheme", 0u) != 4 &&
-           state->traditional_;
+    return state->session_ && state->traditionalApplies();
   }
   void activate(fcitx::InputContext *ic) override {
     if (!ic || !ic->hasFocus()) return;
