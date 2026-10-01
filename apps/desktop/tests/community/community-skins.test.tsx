@@ -269,6 +269,35 @@ test("a download response from a replaced community client is ignored", async ()
   await waitFor(() => expect(screen.queryByText(`正在试用：${original.name}`)).toBeNull());
 });
 
+test("replacing the community client clears an active skin trial", async () => {
+  const original = skin("10000000-0000-4000-8000-000000000071", "替换客户端试用");
+  const oldFinishTrial = vi.fn().mockResolvedValue(undefined);
+  const oldClient = client({
+    list: vi.fn().mockResolvedValue({ skins: [original], has_more: false }),
+    detail: vi.fn().mockResolvedValue(original),
+    download: vi.fn().mockResolvedValue({
+      skin: original,
+      trial: { id: "stale-trial", name: original.name },
+    }),
+    finishTrial: oldFinishTrial,
+  });
+  const replacementFinishTrial = vi.fn().mockResolvedValue(undefined);
+  const replacement = client({
+    list: vi.fn().mockResolvedValue({ skins: [original], has_more: false }),
+    detail: vi.fn().mockResolvedValue(original),
+    finishTrial: replacementFinishTrial,
+  });
+  const view = render(<CommunitySkinsPage client={oldClient} theme="dark" />);
+  fireEvent.click(await screen.findByRole("button", { name: `查看皮肤 ${original.name}` }));
+  fireEvent.click(await screen.findByRole("button", { name: "下载并试用" }));
+  await screen.findByText(`正在试用：${original.name}`);
+
+  view.rerender(<CommunitySkinsPage client={replacement} theme="dark" />);
+  await waitFor(() => expect(oldFinishTrial).toHaveBeenCalledWith("stale-trial", false));
+  expect(screen.queryByText(`正在试用：${original.name}`)).toBeNull();
+  expect(replacementFinishTrial).not.toHaveBeenCalled();
+});
+
 test("leaving an active trial restores it and keeping it suppresses later recovery", async () => {
   const original = skin("10000000-0000-4000-8000-000000000008", "退出恢复皮肤");
   const finishTrial = vi.fn().mockResolvedValue(undefined);
