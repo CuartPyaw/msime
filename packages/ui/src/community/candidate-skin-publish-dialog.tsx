@@ -369,71 +369,51 @@ export function CandidateSkinPublishDialog({
           </div>
         )}
         {packError && licenseless && (
-          <div className={style.confirmation} role="alert">
-            <p>
-              公开发布需要说明别人可以怎样使用这款皮肤的图片素材。选择一种授权，会写入皮肤的
-              skin.toml 后继续发布。
+          <fieldset className={style.field} disabled={writingLicense}>
+            <legend>素材授权</legend>
+            <p className={style.metrics}>
+              公开发布需要注明别人可以怎样使用皮肤里的图片，选择后会写入 skin.toml。
             </p>
-            <fieldset className={style.field} disabled={writingLicense}>
-              <legend>素材授权</legend>
-              {assetLicenses.map((item) => (
-                <label key={item.value}>
-                  <input
-                    type="radio"
-                    name="candidate-skin-asset-license"
-                    checked={licenseChoice === item.value}
-                    onChange={() => setLicenseChoice(item.value)}
-                  />{" "}
-                  {item.label}
-                </label>
-              ))}
-              <label>
+            {assetLicenses.map((item) => (
+              <label key={item.value}>
                 <input
                   type="radio"
                   name="candidate-skin-asset-license"
-                  checked={licenseChoice === "other"}
-                  onChange={() => setLicenseChoice("other")}
+                  checked={licenseChoice === item.value}
+                  onChange={() => setLicenseChoice(item.value)}
                 />{" "}
-                其他
+                {item.label}
               </label>
-              {licenseChoice === "other" && (
-                <input
-                  className={style.fieldControl}
-                  aria-label="其他素材授权"
-                  placeholder="例如：仅限个人使用，不得转售"
-                  value={customLicense}
-                  onChange={(event) => setCustomLicense(event.target.value)}
-                />
-              )}
-            </fieldset>
+            ))}
+            <label>
+              <input
+                type="radio"
+                name="candidate-skin-asset-license"
+                checked={licenseChoice === "other"}
+                onChange={() => setLicenseChoice("other")}
+              />{" "}
+              其他
+            </label>
+            {licenseChoice === "other" && (
+              <input
+                className={style.fieldControl}
+                aria-label="其他素材授权"
+                placeholder="例如：仅限个人使用，不得转售"
+                value={customLicense}
+                onChange={(event) => setCustomLicense(event.target.value)}
+              />
+            )}
             {licenseChoice === "other" && customLicense.trim() !== "" && !licenseValid && (
-              <p>授权说明太长，请控制在 40 个汉字以内。</p>
+              <p className={style.metrics} role="alert">
+                授权说明太长，请控制在 40 个汉字以内。
+              </p>
             )}
             {licenseFailed && (
-              <p>写入授权失败，请重试，或在 skin.toml 的 [license] 中自己填写 assets。</p>
+              <p className={style.metrics} role="alert">
+                写入授权失败，请重试，或在 skin.toml 的 [license] 中自己填写 assets。
+              </p>
             )}
-            <div className={style.confirmationActions}>
-              {openSkinDirectory && (
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={writingLicense}
-                  onClick={() => void openFolder()}
-                >
-                  打开目录
-                </button>
-              )}
-              <button
-                type="button"
-                className="primary"
-                disabled={writingLicense || !licenseValid}
-                onClick={() => void writeLicense()}
-              >
-                {writingLicense ? "正在写入…" : "使用此授权"}
-              </button>
-            </div>
-            {openFailed && <p>无法打开皮肤目录，请重试。</p>}
-          </div>
+          </fieldset>
         )}
         {packError && !(previewless && readImage) && !licenseless && (
           <div className={style.confirmation} role="alert">
@@ -483,6 +463,16 @@ export function CandidateSkinPublishDialog({
           <button type="button" className="secondary" disabled={busy} onClick={onClose}>
             取消
           </button>
+          {packError && licenseless && (
+            <button
+              type="button"
+              className="primary"
+              disabled={writingLicense || !licenseValid}
+              onClick={() => void writeLicense()}
+            >
+              {writingLicense ? "正在写入…" : "使用此授权并继续"}
+            </button>
+          )}
           {!packError && (
             <button
               type="button"
