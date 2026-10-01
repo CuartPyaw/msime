@@ -298,6 +298,9 @@ pub struct HostCapabilities {
     /// 背单词书目里列出单词本插件（`pack-<插件 id>` 词书）：宿主把插件目录交给背单词的入口。缺省 false，旧宿主不会让插件详情里的「去背单词」指向一本它列不出来的书。
     #[serde(default)]
     pub wordbook_packs: bool,
+    /// 宿主的符号面板显示已安装的符号集插件。缺省 false；每个宿主在接入它的那次改动里打开，没打开时插件详情说明本机的符号面板不显示插件符号集。
+    #[serde(default)]
+    pub symbol_set_packs: bool,
     /// The host plays the sound packs in `plugins`: a sample per key class, the melody, the commit sound and the achievement jingle. Only an input process that sees the keys can, and only where it has somewhere to play them; a host without the player keeps the settings but offers no switches for them.
     #[serde(default)]
     pub key_sound: bool,
@@ -603,6 +606,8 @@ impl HostCapabilities {
             vocabulary_review: true,
             // 桌面宿主的背单词由 Tauri 层传入插件目录；HarmonyOS 在自己的设置投影里按形态打开；Android 和 iOS 不传插件目录。
             wordbook_packs: platform.is_desktop(),
+            // Windows 的符号面板是 Tauri 层的表情面板（`load_emoji_catalog`）。macOS、Linux 和 HarmonyOS 各有原生选择器，各自在接入的那次改动里打开。
+            symbol_set_packs: platform == HostPlatform::Windows,
             // The three desktop hosts play the packs, route V, / and @ by the Engine's spelling symbols and stream music while they are the active input method. HarmonyOS claims key sounds, music and the triggers per form factor in its own settings projection (2in1 only); the phone and tablet hosts wire none of them. A switch with nothing behind it reads as a setting being ignored, so each host flips here only in the change that wires it.
             key_sound: platform.is_desktop(),
             plugin_triggers: platform.is_desktop(),

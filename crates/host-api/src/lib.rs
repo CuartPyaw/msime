@@ -1454,6 +1454,13 @@ pub fn local_emoji_catalog_slice(
         .map_err(|_| "local emoji catalog unavailable")
 }
 
+pub use msime_client_core::plugins::symbol_set::PluginSymbolGroup;
+
+/// 插件目录 `root` 下已安装的符号集的全部组，供宿主追加到内置符号目录之后：`symbols` 组放在以 `pack_name` 为上级分类的分组下，`kaomoji` 组放在颜文字的 All 之后。读几个小清单：不要在按键路径上调用。
+pub fn plugin_symbol_groups(root: &std::path::Path) -> Vec<PluginSymbolGroup> {
+    msime_client_core::plugins::symbol_set::plugin_symbol_groups(root)
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct LocalSymbolCatalogGroup {
     pub parent: String,

@@ -5546,6 +5546,54 @@ fn complete_candidate_abi_keeps_view_paged_and_selects_a_later_entry() {
     assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }
 
+/// 表情目录请求列出插件符号组：不需要 others.db，没传插件目录时为空，相对路径被拒绝。
+#[test]
+#[cfg(unix)]
+fn emoji_catalog_lists_plugin_symbol_groups() {
+    let directory = tempfile::tempdir().unwrap();
+    let pack = directory.path().join("plugins/symbol_set/arrows");
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        "schema_version = 1\nkind = \"symbol_set\"\nid = \"arrows\"\nname = \"箭头大全\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n[[groups]]\ntab = \"symbols\"\ntitle = \"箭头\"\nkeywords = \"jiantou\"\nitems = [\"→\", \"←\"]\n[[groups]]\ntab = \"kaomoji\"\ntitle = \"开心\"\nitems = [\"(^_^)\"]\n",
+    )
+    .unwrap();
+    let resources = directory.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    let resources = resources.to_str().unwrap().to_owned();
+    let call = |query: Value| {
+        let query = query.to_string();
+        read(unsafe {
+            super::ffi::msime_client_emoji_catalog_request(
+                query.as_ptr(),
+                query.len(),
+                resources.as_ptr(),
+                resources.len(),
+            )
+        })
+    };
+    let listed = call(json!({
+        "list_plugin_symbol_groups": true,
+        "plugins": directory.path().join("plugins"),
+    }));
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(
+        listed["value"]["plugin_symbol_groups"],
+        json!([
+            {"pack": "arrows", "pack_name": "箭头大全", "tab": "symbols", "title": "箭头", "keywords": "jiantou", "items": ["→", "←"]},
+            {"pack": "arrows", "pack_name": "箭头大全", "tab": "kaomoji", "title": "开心", "keywords": "", "items": ["(^_^)"]},
+        ])
+    );
+    assert_eq!(
+        call(json!({"list_plugin_symbol_groups": true}))["value"]["plugin_symbol_groups"],
+        json!([])
+    );
+    assert_eq!(
+        call(json!({"list_plugin_symbol_groups": true, "plugins": "plugins"}))["ok"],
+        false
+    );
+}
+
 #[test]
 #[cfg(unix)]
 fn emoji_catalog_pagination_preserves_legacy_defaults() {

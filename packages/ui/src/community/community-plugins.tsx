@@ -52,6 +52,7 @@ export const communityPluginKinds: readonly CommunityPluginKind[] = [
   "phrase_table",
   "helpcode",
   "wordbook",
+  "symbol_set",
 ];
 
 /** One publication, `client-core::plugins::community::CommunityPlugin`. */
@@ -391,7 +392,7 @@ export function CommunityPluginsPage({
         <div className={style.headingBody}>
           <h2 className={style.headingTitle}>社区插件</h2>
           <p className={style.headingNote}>
-            音效、音乐、指令表、短语表、辅助码表与单词本，安装后在「我的插件」中选用
+            音效、音乐、指令表、短语表、辅助码表、单词本与符号集，安装后在「我的插件」中选用
           </p>
         </div>
         <div className={style.headingActions}>
@@ -651,7 +652,7 @@ export function CommunityPluginPublishDialog({
         {optionsLoading && <p role="status">正在读取本地插件…</p>}
         {!optionsLoading && options.length === 0 && (
           <p className={style.notice}>
-            还没有可发布的插件。内置插件和特效包不能发布，请先在「我的插件」中导入自己的音效包、音乐包、指令表、短语表、辅助码表或单词本。
+            还没有可发布的插件。内置插件和特效包不能发布，请先在「我的插件」中导入自己的音效包、音乐包、指令表、短语表、辅助码表、单词本或符号集。
           </p>
         )}
         {options.length > 0 && (

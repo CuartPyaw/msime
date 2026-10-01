@@ -638,6 +638,10 @@ char *msime_client_emoji_provider_request(const uint8_t *query,
  * {groups:[name,...]} in catalog order instead of an item page.
  * list_symbol_groups:true returns {symbol_groups:[{parent,title},...]}.
  * Optional parent narrows symbols to a parent category before paging.
+ * list_plugin_symbol_groups:true with plugins (absolute plugins directory) returns
+ * {plugin_symbol_groups:[{pack,pack_name,tab:"symbols"|"kaomoji",title,keywords,items:[text,...]},...]}:
+ * 已安装符号集插件的全部组，包按名字排序、组按清单顺序；keywords 没写时为空串。宿主把 symbols 组追加在内置符号之后、以 pack_name 为上级分类，
+ * kaomoji 组追加在颜文字 All 之后，不与内置目录去重。没传 plugins 时为空列表。
  * Advance offset by limit, not returned item count: each page deduplicates text. */
 char *msime_client_emoji_catalog_request(const uint8_t *query,
                                          size_t query_length,
@@ -769,7 +773,7 @@ char *msime_client_music_pack(const uint8_t *request, size_t length);
 /* The settings page's pack store and @ name list, for a settings host other than the desktop shell (HarmonyOS). Request (<=2 MiB): {state_root: absolute, sound_packs: absolute|null, action}; packs and mentions.json live in state_root/plugins, sound_packs is the bundle's built-in sound pack root. action.operation:
  * "catalog": value {packages:[...], issues:[{kind, folder, reason}]}, every installed pack and the built-in sound packs, as the desktop shell lists them.
  * "import" {source: absolute path of a pack folder or .zip file}: installs it, replacing an installed pack of the same id whole; value is the installed pack.
- * "remove" {kind: "sound"|"music"|"command_table"|"effect"|"phrase_table"|"helpcode"|"wordbook", id}: value null; a pack that is not installed is already removed.
+ * "remove" {kind: "sound"|"music"|"command_table"|"effect"|"phrase_table"|"helpcode"|"wordbook"|"symbol_set", id}: value null; a pack that is not installed is already removed.
  * "load_mentions": value [{text, key}], empty before a list was saved.
  * "save_mentions" {entries:[{text, key}]}: replaces the list; value null.
  * A failure is {ok:false, error: code, detail?}: the codes are the desktop shell's (invalid, storage, plugin_invalid, plugin_unsupported_source, plugin_archive, plugin_reserved, plugin_storage, mention_invalid, mention_format, mention_storage) and detail, when present, is the rule a refused pack or entry broke, in Chinese for the page. Reads and writes files, and an import copies up to a music pack's size: use a worker thread where the host has one. */

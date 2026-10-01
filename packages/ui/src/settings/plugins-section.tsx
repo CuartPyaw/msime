@@ -28,6 +28,7 @@ export type {
   PluginPackage,
   PluginPhrase,
   PluginSettingsPage,
+  PluginSymbolGroup,
 } from "./plugin-types";
 export { kindLabels, pluginErrorMessage } from "./plugin-catalog-helpers";
 export { MAX_MENTIONS, mentionListIssue } from "./plugin-mentions-view";
@@ -54,6 +55,8 @@ export interface PluginsSectionProps {
   helpcode?: boolean;
   /** 宿主的背单词书目列出单词本插件（`HostCapabilities.wordbook_packs`）。 */
   wordbookPacks?: boolean;
+  /** 宿主的符号面板显示符号集插件（`HostCapabilities.symbol_set_packs`）。 */
+  symbolSetPacks?: boolean;
   /** 在背单词里选中一本书并打开背单词；没有背单词的宿主为空。 */
   onOpenWordbook?: (book: string) => void;
   /** 打开设置里的另一页（输入、背单词）；没有时详情里不显示这些链接。 */
@@ -93,6 +96,7 @@ export function PluginsSection({
   quickPhraseMode = true,
   helpcode = false,
   wordbookPacks = false,
+  symbolSetPacks = false,
   onOpenWordbook,
   onOpenPage,
   active,
@@ -331,6 +335,7 @@ export function PluginsSection({
             quickPhraseMode={quickPhraseMode}
             helpcode={helpcode}
             wordbookPacks={wordbookPacks}
+            symbolSetPacks={symbolSetPacks}
             onOpenWordbook={onOpenWordbook}
             working={working}
             onChange={onChange}

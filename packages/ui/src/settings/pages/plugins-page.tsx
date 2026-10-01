@@ -22,6 +22,7 @@ export function PluginsSettingsPage({ hidden = false }: { hidden?: boolean }) {
     showTypingEffectPacks,
     showHelpcode,
     showWordbookPacks,
+    showSymbolSetPacks,
     selectPage,
   } = useSettingsForm();
   const vocabulary = client.vocabularyReview;
@@ -50,6 +51,7 @@ export function PluginsSettingsPage({ hidden = false }: { hidden?: boolean }) {
           quickPhraseMode={draft.local_modes?.quick_phrase ?? true}
           helpcode={showHelpcode}
           wordbookPacks={showWordbookPacks}
+          symbolSetPacks={showSymbolSetPacks}
           onOpenWordbook={openWordbook}
           onOpenPage={selectPage}
           active={page === "plugins" && !hidden}

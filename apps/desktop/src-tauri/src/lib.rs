@@ -2515,11 +2515,63 @@ fn read_local_emoji_groups(
         .collect())
 }
 
+/// 把已安装符号集插件的组追加到内置目录之后：`symbols` 组以插件名为上级分类，`kaomoji` 组排在颜文字的 All 之后；不跨包、不与内置目录去重。
+fn append_plugin_symbol_groups(
+    groups: Vec<msime_host_api::PluginSymbolGroup>,
+    kaomoji: &mut Vec<EmojiCatalogGroup>,
+    symbols: &mut Vec<EmojiCatalogGroup>,
+) {
+    use msime_client_core::plugins::symbol_set::SymbolTab;
+    for group in groups {
+        let keywords = group.keywords;
+        let items: Vec<EmojiCatalogItem> = group
+            .items
+            .into_iter()
+            .map(|text| EmojiCatalogItem {
+                keywords: if keywords.is_empty() {
+                    text.clone()
+                } else {
+                    keywords.clone()
+                },
+                text,
+            })
+            .collect();
+        match group.tab {
+            SymbolTab::Symbols => symbols.push(EmojiCatalogGroup {
+                icon: items
+                    .first()
+                    .map(|item| item.text.clone())
+                    .unwrap_or_default(),
+                title: group.title,
+                parent: Some(group.pack_name),
+                items,
+            }),
+            SymbolTab::Kaomoji => kaomoji.push(EmojiCatalogGroup {
+                icon: ";-)".to_owned(),
+                title: group.title,
+                parent: None,
+                items,
+            }),
+        }
+    }
+}
+
 #[tauri::command]
 async fn load_emoji_catalog(
+    app: tauri::AppHandle,
     state: tauri::State<'_, DictionaryHostOptions>,
 ) -> Result<EmojiCatalogResponse, CommandError> {
     let options = state.inner().clone();
+    // 桌面宿主的插件目录；没有插件目录的平台不追加插件符号组。
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    let plugin_root = app
+        .try_state::<desktop_plugins::PluginsState>()
+        .map(|plugins| plugins.root().to_path_buf());
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    let plugin_root: Option<std::path::PathBuf> = {
+        let _ = &app;
+        None
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let document = options.snapshot()?;
         #[cfg(target_os = "linux")]
@@ -2544,8 +2596,15 @@ async fn load_emoji_catalog(
             })
         };
         let emoji = read("", "emoji");
-        let kaomoji = read("kaomoji", "kaomoji");
-        let symbols = read("symbols", "symbols");
+        let mut kaomoji = read("kaomoji", "kaomoji");
+        let mut symbols = read("symbols", "symbols");
+        if let Some(root) = plugin_root {
+            append_plugin_symbol_groups(
+                msime_host_api::plugin_symbol_groups(&root),
+                &mut kaomoji,
+                &mut symbols,
+            );
+        }
         Ok(EmojiCatalogResponse {
             emoji,
             kaomoji,

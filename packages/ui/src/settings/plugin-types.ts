@@ -8,12 +8,22 @@ export type PluginKind =
   | "effect"
   | "phrase_table"
   | "helpcode"
-  | "wordbook";
+  | "wordbook"
+  | "symbol_set";
 
 export type PluginCommand = { trigger: string; title: string; template: string };
 
 /** 辅助码表的一条：`client-core::plugins::helpcode_pack::HelpcodeEntry`。 */
 export type PluginHelpcodeEntry = { character: string; code: string };
+
+/** 符号集的一组：`client-core::plugins::symbol_set::SymbolGroup`。 */
+export type PluginSymbolGroup = {
+  tab: "symbols" | "kaomoji";
+  title: string;
+  /** 没写时为空串。 */
+  keywords: string;
+  items: string[];
+};
 
 /** 短语表的一行：`client-core::plugins::phrase_table::PhraseRow`。 */
 export type PluginPhrase = { key: string; text: string };
@@ -45,6 +55,8 @@ export type PluginPackage = {
   file?: string;
   word_count?: number;
   first_words?: string[];
+  /** 符号集的各组。 */
+  groups?: PluginSymbolGroup[];
   /** Effect packs: `client-core::plugins::effect_pack::EffectPack`, never `off`. */
   style?: EffectStyle;
   intensity?: number;

@@ -16,6 +16,7 @@ pub mod mentions;
 pub mod music_pack;
 pub mod phrase_table;
 pub mod sound_pack;
+pub mod symbol_set;
 pub mod wordbook_pack;
 
 pub use failure::{remove_named, PluginFailure};
@@ -90,10 +91,12 @@ pub enum PluginKind {
     Helpcode,
     /// 单词本：一个 `.tsv` 数据文件，作为一本词书出现在背单词里。
     Wordbook,
+    /// 符号集：追加到符号面板的符号组和颜文字组，全部写在清单里。
+    SymbolSet,
 }
 
 impl PluginKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Sound,
         Self::Music,
         Self::CommandTable,
@@ -101,6 +104,7 @@ impl PluginKind {
         Self::PhraseTable,
         Self::Helpcode,
         Self::Wordbook,
+        Self::SymbolSet,
     ];
 
     /// The manifest's `kind` and the directory under the plugins root.
@@ -113,6 +117,7 @@ impl PluginKind {
             Self::PhraseTable => "phrase_table",
             Self::Helpcode => "helpcode",
             Self::Wordbook => "wordbook",
+            Self::SymbolSet => "symbol_set",
         }
     }
 
@@ -130,7 +135,8 @@ pub fn is_builtin(kind: PluginKind, id: &str) -> bool {
         | PluginKind::Effect
         | PluginKind::PhraseTable
         | PluginKind::Helpcode
-        | PluginKind::Wordbook => false,
+        | PluginKind::Wordbook
+        | PluginKind::SymbolSet => false,
     }
 }
 
@@ -195,6 +201,7 @@ impl PluginSummary {
             PluginContent::PhraseTable(_) => PluginKind::PhraseTable,
             PluginContent::Helpcode(_) => PluginKind::Helpcode,
             PluginContent::Wordbook(_) => PluginKind::Wordbook,
+            PluginContent::SymbolSet(_) => PluginKind::SymbolSet,
         }
     }
 }
@@ -209,6 +216,7 @@ pub enum PluginContent {
     PhraseTable(phrase_table::PhraseTable),
     Helpcode(helpcode_pack::HelpcodePack),
     Wordbook(wordbook_pack::WordbookPack),
+    SymbolSet(symbol_set::SymbolSet),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -460,6 +468,7 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
         PluginKind::PhraseTable => &phrase_table::MANIFEST_KEYS,
         PluginKind::Helpcode => &helpcode_pack::MANIFEST_KEYS,
         PluginKind::Wordbook => &wordbook_pack::MANIFEST_KEYS,
+        PluginKind::SymbolSet => &symbol_set::MANIFEST_KEYS,
     };
     if let Some(key) = table
         .keys()
@@ -512,6 +521,11 @@ pub(crate) fn load_directory(directory: &Path) -> Result<PluginSummary, String> 
                 AudioLimits::NONE,
             )
         }
+        PluginKind::SymbolSet => (
+            PluginContent::SymbolSet(symbol_set::parse(table)?),
+            Vec::new(),
+            AudioLimits::NONE,
+        ),
         PluginKind::Wordbook => {
             wordbook_pack::check_identity(&id, &name)?;
             let file = wordbook_pack::parse(table)?;

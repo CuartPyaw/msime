@@ -1424,3 +1424,35 @@ test("a wordbook pack previews its words and opens 背单词 on its book", async
     defaultPluginPreferences,
   );
 });
+
+test("a symbol set lists its groups and says when the panel does not show it", async () => {
+  const items = Array.from({ length: 20 }, (_, index) => `s${index}`);
+  const client = fakeClient({
+    catalog: vi.fn(async () => ({
+      packages: [
+        ...catalog.packages,
+        pack({
+          id: "math",
+          kind: "symbol_set",
+          name: "数学符号",
+          groups: [
+            { tab: "symbols", title: "运算", keywords: "", items },
+            { tab: "kaomoji", title: "开心", keywords: "kaixin", items: ["(^_^)"] },
+          ],
+        }),
+      ],
+      issues: [],
+    })),
+  });
+  renderSection({ client });
+  await openPack("数学符号");
+  expect(screen.getByText("符号集")).toBeTruthy();
+  expect(screen.getByText("符号 · 运算（20）")).toBeTruthy();
+  expect(screen.getByText("颜文字 · 开心（1）")).toBeTruthy();
+  expect(screen.getByText(`${items.slice(0, 16).join(" ")} …`)).toBeTruthy();
+  expect(screen.getByText("这台设备的符号面板不显示插件符号集。")).toBeTruthy();
+  cleanup();
+  renderSection({ client, symbolSetPacks: true });
+  await openPack("数学符号");
+  expect(screen.getByText(/装上即在符号面板里显示/)).toBeTruthy();
+});

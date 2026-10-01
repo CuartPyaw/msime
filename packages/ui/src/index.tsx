@@ -1473,6 +1473,8 @@ export interface HostCapabilities {
   typing_effects?: boolean;
   /** 背单词书目列出单词本插件（`pack-<插件 id>` 词书）。旧宿主没有这个字段。 */
   wordbook_packs?: boolean;
+  /** 符号面板显示已安装的符号集插件。旧宿主没有这个字段。 */
+  symbol_set_packs?: boolean;
   /** The input schemes this host offers; the others are shown disabled. Absent on a host older than the field, which offers 全拼, 双拼, 五笔, 日文 and 韩文. */
   input_schemes?: InputScheme[];
 }
@@ -2092,6 +2094,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showTypingEffectStyles,
     showTypingEffectPacks,
     showWordbookPacks,
+    showSymbolSetPacks,
   } = capabilities;
   const {
     fullwidthChord,
@@ -2642,6 +2645,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showTypingEffectStyles,
     showTypingEffectPacks,
     showWordbookPacks,
+    showSymbolSetPacks,
     snapshot,
     draft,
     setDraft,

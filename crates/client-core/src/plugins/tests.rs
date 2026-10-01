@@ -1680,6 +1680,70 @@ const FIXTURE_REFUSALS: &[(&str, &str)] = &[
         "短语编码 Dh 必须是 1 到 32 个小写字母",
     ),
     (
+        "symbol_set-bad-tab",
+        "第 1 组的 tab 只能是 symbols 或 kaomoji",
+    ),
+    (
+        "symbol_set-blank-item",
+        "第 1 组有一项为空、超过 64 个 UTF-16 单元或含有控制字符",
+    ),
+    (
+        "symbol_set-blank-title",
+        "第 1 组的 title 为空、超过 48 字节或含有控制字符",
+    ),
+    (
+        "symbol_set-control-in-keywords",
+        "第 1 组的 keywords 为空、超过 256 字节或含有控制字符",
+    ),
+    (
+        "symbol_set-control-item",
+        "第 1 组有一项为空、超过 64 个 UTF-16 单元或含有控制字符",
+    ),
+    ("symbol_set-duplicate-item", "第 1 组里「→」重复了"),
+    (
+        "symbol_set-empty-item",
+        "第 1 组有一项为空、超过 64 个 UTF-16 单元或含有控制字符",
+    ),
+    (
+        "symbol_set-empty-keywords",
+        "第 1 组的 keywords 为空、超过 256 字节或含有控制字符",
+    ),
+    (
+        "symbol_set-long-item",
+        "第 1 组有一项为空、超过 64 个 UTF-16 单元或含有控制字符",
+    ),
+    (
+        "symbol_set-long-keywords",
+        "第 1 组的 keywords 为空、超过 256 字节或含有控制字符",
+    ),
+    (
+        "symbol_set-long-title",
+        "第 1 组的 title 为空、超过 48 字节或含有控制字符",
+    ),
+    ("symbol_set-missing-items", "第 1 组需要 items"),
+    (
+        "symbol_set-missing-tab",
+        "第 1 组的 tab 只能是 symbols 或 kaomoji",
+    ),
+    ("symbol_set-missing-title", "第 1 组需要字符串 title"),
+    ("symbol_set-no-groups", "符号集必须有 1 到 32 组"),
+    ("symbol_set-no-items", "第 1 组必须有 1 到 512 项"),
+    ("symbol_set-number-item", "第 1 组的每一项都必须是字符串"),
+    ("symbol_set-too-many-groups", "符号集必须有 1 到 32 组"),
+    (
+        "symbol_set-too-many-items-in-group",
+        "第 1 组必须有 1 到 512 项",
+    ),
+    ("symbol_set-too-many-items-total", "符号集合计超过 2048 项"),
+    (
+        "symbol_set-unknown-group-key",
+        "a symbol group 里有未知的键 parent",
+    ),
+    (
+        "symbol_set-with-data-file",
+        "symbols.tsv 没有在 plugin.toml 里用到",
+    ),
+    (
         "wordbook-control-in-meaning",
         "words.tsv 第 1 行的单词或释义为空，或者某一列太长、含有控制字符",
     ),
@@ -1743,18 +1807,13 @@ const FIXTURE_REFUSALS: &[(&str, &str)] = &[
     ("wordbook-wrong-extension", "words.csv 的扩展名必须是 .tsv"),
 ];
 
-/// `group` 下的 fixture，按名字排序；类型前缀还不是已知插件类型的跳过（实现那种类型之前）。
+/// `group` 下的 fixture，按名字排序。
 fn fixture_cases(group: &str) -> Vec<(String, PathBuf)> {
     let mut cases: Vec<_> = fs::read_dir(fixture_packs().join(group))
         .unwrap()
         .map(|entry| {
             let entry = entry.unwrap();
             (entry.file_name().into_string().unwrap(), entry.path())
-        })
-        .filter(|(case, _)| {
-            case.split_once('-')
-                .and_then(|(kind, _)| PluginKind::parse(kind))
-                .is_some()
         })
         .collect();
     cases.sort();
@@ -1778,15 +1837,7 @@ fn shared_fixture_packs_are_accepted_and_refused_as_listed() {
         report.push_str(&format!("    (\"{case}\", \"{actual}\"),\n"));
     }
     let names: Vec<&str> = invalid.iter().map(|(case, _)| case.as_str()).collect();
-    let listed: Vec<&str> = FIXTURE_REFUSALS
-        .iter()
-        .map(|(case, _)| *case)
-        .filter(|case| {
-            case.split_once('-')
-                .and_then(|(kind, _)| PluginKind::parse(kind))
-                .is_some()
-        })
-        .collect();
+    let listed: Vec<&str> = FIXTURE_REFUSALS.iter().map(|(case, _)| *case).collect();
     assert_eq!(
         names, listed,
         "每个 invalid fixture 都要在 FIXTURE_REFUSALS 里写明原因：\n{report}"
@@ -1980,4 +2031,59 @@ fn wordbooks_are_bounded_and_load_as_books() {
     assert!(book.is_valid());
     assert!(wordbook_pack::load_book(root.path(), "pack-missing").is_none());
     assert!(wordbook_pack::load_book(root.path(), "full").is_none());
+}
+
+#[test]
+fn symbol_sets_list_their_groups_by_pack_name_in_manifest_order() {
+    let root = tempdir().unwrap();
+    let install = |id: &str, name: &str, groups: &str| {
+        let pack = kind_directory(root.path(), PluginKind::SymbolSet).join(id);
+        fs::create_dir_all(&pack).unwrap();
+        fs::write(
+            pack.join(MANIFEST_FILE),
+            format!("schema_version = 1\nkind = 'symbol_set'\nid = '{id}'\nname = '{name}'\nversion = '1'\nlicense = 'CC0-1.0'\n{groups}"),
+        )
+        .unwrap();
+    };
+    install(
+        "math",
+        "数学",
+        "[[groups]]\ntab = 'symbols'\ntitle = '运算'\nitems = ['±', '×']\n[[groups]]\ntab = 'kaomoji'\ntitle = '算不出'\nkeywords = 'suan'\nitems = ['(・_・;)']\n",
+    );
+    install(
+        "arrows",
+        "箭头",
+        "[[groups]]\ntab = 'symbols'\ntitle = '箭头'\nitems = ['→']\n",
+    );
+    install(
+        "broken",
+        "坏的",
+        "[[groups]]\ntab = 'emoji'\ntitle = 'x'\nitems = ['x']\n",
+    );
+    let groups = symbol_set::plugin_symbol_groups(root.path());
+    let listed: Vec<_> = groups
+        .iter()
+        .map(|group| {
+            (
+                group.pack.as_str(),
+                group.tab.as_str(),
+                group.title.as_str(),
+            )
+        })
+        .collect();
+    // 包按名字排序（「数学」在「箭头」之前），组按清单顺序；载不入的包不贡献组。
+    assert_eq!(
+        listed,
+        [
+            ("math", "symbols", "运算"),
+            ("math", "kaomoji", "算不出"),
+            ("arrows", "symbols", "箭头"),
+        ]
+    );
+    assert_eq!(groups[1].keywords, "suan");
+    assert_eq!(groups[0].keywords, "");
+    let summary = load_package(root.path(), None, PluginKind::SymbolSet, "math").unwrap();
+    let json = serde_json::to_value(&summary).unwrap();
+    assert_eq!(json["kind"], "symbol_set");
+    assert_eq!(json["groups"][1]["tab"], "kaomoji");
 }

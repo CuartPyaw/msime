@@ -19,6 +19,7 @@ import {
   packKindLabel,
   PHRASE_PREVIEW_ROWS,
   WORDBOOK_PREVIEW_WORDS,
+  SYMBOL_PREVIEW_ITEMS,
   wordbookPackBookId,
   type MissingSelection,
 } from "./plugin-catalog-helpers";
@@ -57,6 +58,8 @@ export interface PluginDetailViewProps {
   helpcode: boolean;
   /** 宿主的背单词书目列出单词本插件。 */
   wordbookPacks: boolean;
+  /** 宿主的符号面板显示符号集插件。 */
+  symbolSetPacks: boolean;
   /** 在背单词里选中这本书并打开背单词；没有背单词的宿主为空。 */
   onOpenWordbook?: (book: string) => void;
   working: boolean;
@@ -80,6 +83,7 @@ export function PluginDetailView({
   quickPhraseMode,
   helpcode,
   wordbookPacks,
+  symbolSetPacks,
   onOpenWordbook,
   working,
   onChange,
@@ -113,6 +117,7 @@ export function PluginDetailView({
           quickPhraseMode={quickPhraseMode}
           helpcode={helpcode}
           wordbookPacks={wordbookPacks}
+          symbolSetPacks={symbolSetPacks}
           onOpenWordbook={onOpenWordbook}
           onSelect={select}
           onChange={onChange}
@@ -142,6 +147,23 @@ export function PluginDetailView({
 
 /** 各类型自己的内容：音乐包的曲目、指令表的指令、特效包的样式和参数、短语表的行数与前几行、辅助码表的条数与前几条。 */
 function PackContent({ pack }: { pack: PluginPackage }) {
+  if (pack.kind === "symbol_set") {
+    return (
+      <>
+        {(pack.groups ?? []).map((group, index) => (
+          <GroupList
+            key={`${index}/${group.title}`}
+            title={`${group.tab === "kaomoji" ? "颜文字" : "符号"} · ${group.title}（${group.items.length}）`}
+          >
+            <p className={`${settings.groupNote} break-anywhere`}>
+              {group.items.slice(0, SYMBOL_PREVIEW_ITEMS).join(" ")}
+              {group.items.length > SYMBOL_PREVIEW_ITEMS ? " …" : ""}
+            </p>
+          </GroupList>
+        ))}
+      </>
+    );
+  }
   if (pack.kind === "wordbook") {
     const words = (pack.first_words ?? []).slice(0, WORDBOOK_PREVIEW_WORDS);
     return (
@@ -247,6 +269,7 @@ function PackActions({
   quickPhraseMode,
   helpcode,
   wordbookPacks,
+  symbolSetPacks,
   onOpenWordbook,
   onSelect,
   onChange,
@@ -263,6 +286,7 @@ function PackActions({
   quickPhraseMode: boolean;
   helpcode: boolean;
   wordbookPacks: boolean;
+  symbolSetPacks: boolean;
   onOpenWordbook?: (book: string) => void;
   onSelect: () => void;
   onChange: (preferences: PluginPreferences) => void;
@@ -370,6 +394,16 @@ function PackActions({
         </Row>
       );
     }
+    case "symbol_set":
+      return (
+        <ActionBlock
+          note={
+            symbolSetPacks
+              ? "装上即在符号面板里显示：符号组以插件名为分类排在内置符号之后，颜文字组排在颜文字的 All 之后。卸载后不再显示。"
+              : "这台设备的符号面板不显示插件符号集。"
+          }
+        />
+      );
     case "wordbook": {
       if (!wordbookPacks || !onOpenWordbook)
         return <ActionBlock note="这台设备的背单词不列出单词本插件。" />;

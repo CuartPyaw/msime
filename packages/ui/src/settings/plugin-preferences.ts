@@ -119,8 +119,8 @@ export function withoutRemovedPack(
       phrase_tables: preferences.phrase_tables.filter((table) => table !== id),
     };
   }
-  // 单词本没有偏好键；它的复习进度留在背单词里。
-  if (kind === "wordbook") return preferences;
+  // 单词本和符号集没有偏好键；单词本的复习进度留在背单词里。
+  if (kind === "wordbook" || kind === "symbol_set") return preferences;
   if (kind === "helpcode") {
     return {
       ...preferences,
@@ -180,8 +180,9 @@ export function withPackSelected(
       return preferences.phrase_tables.includes(pack.id)
         ? preferences
         : { ...preferences, phrase_tables: [...preferences.phrase_tables, pack.id] };
-    // 单词本在背单词里选，不在偏好里。
+    // 单词本在背单词里选，符号集装上就显示，都不在偏好里。
     case "wordbook":
+    case "symbol_set":
       return preferences;
     // 辅助码表包可以分别用于全拼和双拼；整体选中时两个方案都用它。
     case "helpcode":
