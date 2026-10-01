@@ -1228,6 +1228,7 @@ test("the theme page opens the candidate publish dialog outside the settings fie
       size: 4096,
     }),
     addPreview: vi.fn(),
+    addLicense: vi.fn(),
     publish: vi.fn(),
     rate: vi.fn(),
     unpublish: vi.fn(),
