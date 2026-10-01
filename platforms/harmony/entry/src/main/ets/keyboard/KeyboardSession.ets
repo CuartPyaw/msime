@@ -1065,7 +1065,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     shuangpinProfile: 'xiaohe',
     layout: 'twenty_six_key',
     candidateFollowCursor: true,
-    numberRowSelection: false,
+    // The shared default (`number_row_selection` in client-core preferences.rs): 1 through 9 pick a candidate.
+    numberRowSelection: true,
     candidateShowPreedit: true,
     candidateLayout: 'vertical',
     navigation: {

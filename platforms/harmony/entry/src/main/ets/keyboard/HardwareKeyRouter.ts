@@ -271,6 +271,7 @@ export class HardwareKeyRouter {
   /**
    * @param composing whether the Engine is holding a composition right now, as `composing` answers it
    * @param chinese whether the Engine would spell with a letter rather than pass it through
+   * @param numberRowSelection the shared `number_row_selection` preference: true, its default, has 1 through 9 pick a candidate off the visible page; false gives the number row back to the application, a digit then ending the composition and being typed after it
    * @param chinesePunctuationInEnglish whether punctuation is still the keyboard's in English mode, which the Windows host does when `punctuation_lock` is Chinese (`ResolvePunctuationOpen`)
    * @param korean whether letters go to the Korean Hangul automaton, which routes on rules of its own; see routeKorean
    * @param hanjaList whether the composing Korean syllable's Hanja list is open, as KoreanCompositionPolicy.hanjaListOpen answers it
@@ -279,7 +280,7 @@ export class HardwareKeyRouter {
     key: HardwareKey,
     composing: boolean,
     chinese: boolean,
-    releaseNumberRow: boolean = false,
+    numberRowSelection: boolean = true,
     navigation: HardwareNavigationPreferences = {
       minusEqual: true,
       commaPeriod: true,
@@ -305,7 +306,13 @@ export class HardwareKeyRouter {
     // the character and a keypad digit does not always carry one.
     key = HardwareKeyRouter.normalizeNumpad(key);
     if (korean) {
-      return HardwareKeyRouter.routeKorean(key, composing, hanjaList, releaseNumberRow, navigation);
+      return HardwareKeyRouter.routeKorean(
+        key,
+        composing,
+        hanjaList,
+        numberRowSelection,
+        navigation,
+      );
     }
     // Japanese romaji reserves an unmodified minus for the long-vowel mark. It is a composition key even before the first kana exists. '=' and shifted '-' are never paging keys in Japanese (`IsJapaneseDisabledPagingKey` on Windows): mid-composition they are punctuation that commits the highlighted candidate first, and with nothing composed they are the application's.
     if (
@@ -445,7 +452,7 @@ export class HardwareKeyRouter {
       // 1 through 9 pick a candidate off the strip while something is being spelled, which is what
       // the number row is for on every desktop input method.
       if (key.unicodeChar >= 0x31 && key.unicodeChar <= 0x39) {
-        if (releaseNumberRow) {
+        if (!numberRowSelection) {
           return decision(HardwareKeyAction.COMMIT_THEN_TYPE, key.unicodeChar);
         }
         return decision(HardwareKeyAction.SELECT, 0, key.unicodeChar - 0x31);
@@ -489,7 +496,7 @@ export class HardwareKeyRouter {
     key: HardwareKey,
     composing: boolean,
     hanjaList: boolean,
-    releaseNumberRow: boolean,
+    numberRowSelection: boolean,
     navigation: HardwareNavigationPreferences,
   ): HardwareKeyDecision {
     const character: number = key.unicodeChar;
@@ -513,7 +520,7 @@ export class HardwareKeyRouter {
     if (hanjaList && !modified) {
       const listDecision: HardwareKeyDecision | undefined = HardwareKeyRouter.routeHanjaList(
         key,
-        releaseNumberRow,
+        numberRowSelection,
         navigation,
       );
       if (listDecision !== undefined) {
@@ -543,11 +550,11 @@ export class HardwareKeyRouter {
   /**
    * A key that means something to the open Hanja list of a Korean syllable, or undefined for one that keeps its plain Korean meaning.
    *
-   * Space and Return choose the highlighted Hanja; Return sends the candidate command because only the session knows the highlight (msime_client.h). The number row picks from the visible page, unless the number row is released to the application, where a digit commits the syllable and is typed as it is without the list. Up and Down, the page keys and Tab move through the list as their navigation bindings say, and Left and Right move the highlight while the arrow binding is on, since a syllable has no caret inside it to move. A binding turned off leaves its key with its plain Korean meaning rather than eating it, and so do Home and End. The marks - = [ ] , . stay punctuation rather than paging or taking a character from a word: a Hanja is one character already, and the Engine closes the list and writes the Hangul with the mark, as every other host does with the list open. Backspace and Escape need nothing here: the Engine has them close the list and keep the syllable.
+   * Space and Return choose the highlighted Hanja; Return sends the candidate command because only the session knows the highlight (msime_client.h). The number row picks from the visible page while `number_row_selection` is on; with it off a digit commits the syllable and is typed as it is without the list. Up and Down, the page keys and Tab move through the list as their navigation bindings say, and Left and Right move the highlight while the arrow binding is on, since a syllable has no caret inside it to move. A binding turned off leaves its key with its plain Korean meaning rather than eating it, and so do Home and End. The marks - = [ ] , . stay punctuation rather than paging or taking a character from a word: a Hanja is one character already, and the Engine closes the list and writes the Hangul with the mark, as every other host does with the list open. Backspace and Escape need nothing here: the Engine has them close the list and keep the syllable.
    */
   private static routeHanjaList(
     key: HardwareKey,
-    releaseNumberRow: boolean,
+    numberRowSelection: boolean,
     navigation: HardwareNavigationPreferences,
   ): HardwareKeyDecision | undefined {
     const code: number = key.keyCode;
@@ -555,9 +562,9 @@ export class HardwareKeyRouter {
       return decision(HardwareKeyAction.COMMIT);
     }
     if (key.unicodeChar >= 0x31 && key.unicodeChar <= 0x39) {
-      return releaseNumberRow
-        ? decision(HardwareKeyAction.COMMIT_THEN_TYPE, key.unicodeChar)
-        : decision(HardwareKeyAction.SELECT, 0, key.unicodeChar - 0x31);
+      return numberRowSelection
+        ? decision(HardwareKeyAction.SELECT, 0, key.unicodeChar - 0x31)
+        : decision(HardwareKeyAction.COMMIT_THEN_TYPE, key.unicodeChar);
     }
     if (code === KEYCODE_DPAD_LEFT || code === KEYCODE_DPAD_RIGHT) {
       if (!navigation.arrows) {
