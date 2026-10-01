@@ -361,6 +361,42 @@ function validSkinDesign(value: unknown): boolean {
   return true;
 }
 
+/** 社区皮肤的发布分类 id，与服务端和共享客户端核心一致。 */
+const COMMUNITY_SKIN_CATEGORIES: readonly string[] = [
+  "nature",
+  "guofeng",
+  "acg",
+  "cute",
+  "food",
+  "tech",
+  "minimal",
+  "other",
+];
+
+/** 每个返回社区皮肤条目的请求都带上它，服务端才在条目里加上 `category`；不带时服务端不返回该字段。 */
+const INCLUDE_CATEGORY = "include=category";
+
+function validCommunitySkinCategory(value: unknown): value is string {
+  return typeof value === "string" && COMMUNITY_SKIN_CATEGORIES.includes(value);
+}
+
+/** 服务端将来新增的分类读作 `other`，与共享客户端核心的读法一致，页面只会收到它认识的分类。 */
+function normalizeCommunitySkinCategory(skin: Action): void {
+  if (skin.category !== undefined && !validCommunitySkinCategory(skin.category)) {
+    skin.category = "other";
+  }
+}
+
+function normalizeCommunitySkinCategories(value: unknown): void {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return;
+  const object = value as Action;
+  if (Array.isArray(object.skins)) {
+    for (const item of object.skins as Action[]) normalizeCommunitySkinCategory(item);
+  } else {
+    normalizeCommunitySkinCategory(object);
+  }
+}
+
 function validCommunitySkinResponse(value: unknown, expectedId?: string): boolean {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const skin = value as Action;
@@ -384,7 +420,10 @@ function validCommunitySkinResponse(value: unknown, expectedId?: string): boolea
     skin.rating_average >= 0 &&
     skin.rating_average <= 5 &&
     (skin.rating_count !== 0 || skin.rating_average === 0) &&
-    validModeration(skin.moderation)
+    validModeration(skin.moderation) &&
+    // 早于分类功能的服务端不返回分类；返回时必须是字符串，未知的新分类随后读作 `other`。
+    (skin.category === undefined ||
+      (typeof skin.category === "string" && skin.category.length <= 32))
   );
 }
 
@@ -1238,23 +1277,27 @@ export class AccountCloudBridge {
     if (operation === "list") {
       // 我的作品 is the one scope besides the public gallery; it is about the signed-in user, so it needs the session, and it asks for each item's moderation state so a removed skin can carry its 已下架 badge.
       const mine = action.scope === "mine";
+      // 不传或为 null 时列出全部分类。
+      const category = action.category ?? null;
       if (
         (action.scope !== undefined && action.scope !== "" && !mine) ||
         !this.boundedNumber(action.offset, 0, 1000000) ||
-        !validString(action.search, MAX_COMMUNITY_SEARCH, true)
+        !validString(action.search, MAX_COMMUNITY_SEARCH, true) ||
+        (category !== null && !validCommunitySkinCategory(category))
       ) {
         return error("community_invalid");
       }
+      const filter = category === null ? "" : `&category=${category}`;
       const path =
         `/v1/community/skins?${mine ? "scope=mine&fields=moderation&" : ""}offset=${action.offset}&q=` +
-        `${encodeURIComponent(action.search)}`;
+        `${encodeURIComponent(action.search)}${filter}&${INCLUDE_CATEGORY}`;
       return await this.communityRequest("GET", path, mine);
     }
     if (operation === "detail") {
       if (!validUuid(action.id)) return error("community_invalid");
       return await this.communityRequest(
         "GET",
-        `/v1/community/skins/${action.id}?fields=moderation`,
+        `/v1/community/skins/${action.id}?fields=moderation&${INCLUDE_CATEGORY}`,
         false,
       );
     }
@@ -1279,16 +1322,35 @@ export class AccountCloudBridge {
         !validCommunityText(name, 1, 32) ||
         name.trim() !== name ||
         !validCommunityText(description, 0, 280, true) ||
-        !validSkinDesign(action.design)
+        !validSkinDesign(action.design) ||
+        (action.category !== undefined && !validCommunitySkinCategory(action.category))
       ) {
         return error("community_invalid");
       }
-      return await this.communityRequest("POST", "/v1/community/skins", true, {
+      const body: Record<string, unknown> = {
         id: action.id,
         name,
         description,
         design: action.design,
-      });
+      };
+      // 不传分类时不发送该字段，由服务端归入默认分类。
+      if (action.category !== undefined) body.category = action.category;
+      return await this.communityRequest("POST", "/v1/community/skins", true, body);
+    }
+    if (operation === "set_category") {
+      const id = action.id;
+      const category = action.category;
+      if (!validUuid(id) || !validCommunitySkinCategory(category)) {
+        return error("community_invalid");
+      }
+      return await this.communityRequest(
+        "PATCH",
+        `/v1/community/skins/${id}?${INCLUDE_CATEGORY}`,
+        true,
+        { category },
+        // 回显的分类不是请求的分类，说明修改没有生效。
+        (value) => validCommunitySkinResponse(value, id) && value.category === category,
+      );
     }
     if (operation === "unpublish") {
       if (!validUuid(action.id)) return error("community_invalid");
@@ -1367,7 +1429,9 @@ export class AccountCloudBridge {
       }
     }
     if (response.status < 200 || response.status >= 300) {
-      return error(communityRefusal(response.status, response.body) ?? communityStatus(response.status));
+      return error(
+        communityRefusal(response.status, response.body) ?? communityStatus(response.status),
+      );
     }
     const value = parseJson(response.body, communityResponseLimit(path));
     if (value === null && response.body.length > 0) return error("community_unavailable");
@@ -1388,6 +1452,7 @@ export class AccountCloudBridge {
     if (responseValidator !== undefined && (value === null || !responseValidator(value))) {
       return error("community_unavailable");
     }
+    if (path.startsWith("/v1/community/skins")) normalizeCommunitySkinCategories(value);
     return success(value ?? {});
   }
 
