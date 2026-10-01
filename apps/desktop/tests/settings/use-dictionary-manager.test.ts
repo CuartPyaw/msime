@@ -206,3 +206,40 @@ test("a phrase save response from a replaced dictionary client is ignored", asyn
     previous: null,
   });
 });
+
+test("a phrase removal response from a replaced dictionary client is ignored", async () => {
+  let resolve!: () => void;
+  const pending = new Promise<void>((accept) => {
+    resolve = accept;
+  });
+  const existing = { kind: "quick_phrase" as const, key: "shortcut", value: "保留", weight: 1 };
+  const oldClient: DictionaryManagerClient = {
+    dictionary: {
+      list: vi.fn().mockResolvedValue({ entries: [existing], has_more: false }),
+      edit: vi.fn().mockReturnValue(pending),
+    },
+  };
+  const nextList = vi.fn().mockResolvedValue({ entries: [existing], has_more: false });
+  const nextClient: DictionaryManagerClient = {
+    dictionary: { list: nextList, edit: vi.fn().mockResolvedValue(undefined) },
+  };
+  const confirm = vi.fn().mockResolvedValue(true);
+  const { result, rerender } = renderHook(
+    ({ client }) => useDictionaryManager({ client, confirm }),
+    { initialProps: { client: oldClient } },
+  );
+  act(() => result.current.setPhrases([existing]));
+
+  let pendingRemove!: Promise<void>;
+  act(() => {
+    pendingRemove = result.current.removePhrase(existing);
+  });
+  await waitFor(() => expect(oldClient.dictionary?.edit).toHaveBeenCalledOnce());
+  rerender({ client: nextClient });
+  resolve();
+  await act(async () => pendingRemove);
+
+  expect(oldClient.dictionary?.list).not.toHaveBeenCalled();
+  expect(nextList).not.toHaveBeenCalled();
+  expect(result.current.phrases).toEqual([existing]);
+});
