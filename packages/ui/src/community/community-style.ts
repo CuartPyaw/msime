@@ -87,9 +87,10 @@ export const divided = "border-t border-[var(--divider-color)] pt-3.5";
 export const action = "min-h-[42px] self-stretch";
 export const actionNotice = "m-0 rounded-[9px] bg-accent-soft px-3 py-2.5 text-xs text-secondary";
 
+/** `danger` has no shared style of its own, and the shared `secondary` carries a 12px top margin; without these the confirming button falls back to the bare button look and sits higher than 取消, as settings' `serviceConfirmation` already handles. */
 export const confirmation =
-  "flex flex-col gap-3 rounded-[10px] border border-danger bg-raised p-3.5 [&>p]:m-0 [&>p]:leading-relaxed [&>p]:text-secondary";
-export const confirmationActions = "flex flex-wrap gap-2";
+  "flex flex-col gap-3 rounded-[10px] border border-danger bg-raised p-3.5 [&>p]:m-0 [&>p]:leading-relaxed [&>p]:text-secondary [&>div]:flex [&>div]:flex-wrap [&>div]:items-center [&>div]:gap-2 [&_.secondary]:mt-0 [&_.danger]:rounded-lg [&_.danger]:border [&_.danger]:border-danger [&_.danger]:bg-danger [&_.danger]:px-3 [&_.danger]:py-[7px] [&_.danger]:text-white";
+export const confirmationActions = "flex flex-wrap items-center gap-2";
 export const destructive = "rounded-lg border border-danger bg-danger px-3 py-[7px] text-white";
 
 export const backdrop = "fixed inset-0 z-20 grid place-items-center overflow-auto bg-black/45 p-6";
