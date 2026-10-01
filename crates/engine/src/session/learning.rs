@@ -46,6 +46,13 @@ fn normalized_syllables(pinyin: &str) -> Vec<String> {
     segments
 }
 
+fn join_words(first: &str, second: &str) -> String {
+    let mut word = String::with_capacity(first.len() + second.len());
+    word.push_str(first);
+    word.push_str(second);
+    word
+}
+
 impl InputSession {
     /// input_session.cpp:1274-1319; `index` is in ranking order.
     pub(super) fn learn_candidate(&mut self, index: usize) -> Option<String> {
@@ -319,7 +326,7 @@ impl InputSession {
         {
             return None;
         }
-        let word = format!("{}{}", previous.word, current.word);
+        let word = join_words(&previous.word, &current.word);
         if count_utf8_chars(&word) > MAX_PICK_PAIR_WORD_CHARS || !is_all_han(&word) {
             return None;
         }
@@ -569,6 +576,13 @@ mod tests {
             trigger_count,
             linear_step,
         }
+    }
+
+    #[test]
+    fn joined_words_allocates_only_result_bytes() {
+        let word = join_words("你好", "世界");
+        assert_eq!(word, "你好世界");
+        assert_eq!(word.capacity(), word.len());
     }
 
     /// F1 (test_input_session.cpp:1091-1119): the pick's place in a new session, per mode.
