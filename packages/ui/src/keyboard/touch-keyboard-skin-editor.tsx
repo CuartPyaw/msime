@@ -59,6 +59,7 @@ function AiSkinGeneration({
   const [publishDescription, setPublishDescription] = useState("");
   const [publishAgreed, setPublishAgreed] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
+  const publishRunning = useRef(false);
   const requestRef = useRef("");
   const mounted = useRef(true);
 
@@ -155,13 +156,15 @@ function AiSkinGeneration({
   };
 
   const publish = async () => {
-    if (!publishing || !communitySkins || !publishAgreed || publishBusy) return;
+    if (!publishing || !communitySkins || !publishAgreed || publishBusy || publishRunning.current)
+      return;
     const name = publishing.name.trim();
     const description = publishDescription.trim();
     if (!name || name.length > 32 || description.length > 280) {
       setMessage("请填写有效的名称和设计说明。");
       return;
     }
+    publishRunning.current = true;
     setPublishBusy(true);
     try {
       await communitySkins.publish(publishing.id, name, description, publishing.design);
@@ -175,6 +178,7 @@ function AiSkinGeneration({
       if (mounted.current)
         setMessage(code ? `发布失败：${code}` : "暂时无法发布皮肤，请稍后重试。");
     } finally {
+      publishRunning.current = false;
       if (mounted.current) setPublishBusy(false);
     }
   };
