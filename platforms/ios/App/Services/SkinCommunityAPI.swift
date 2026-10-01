@@ -15,7 +15,37 @@ struct CommunitySkin: Codable, Identifiable, Sendable {
   var moderation: String? = nil
   /// Post-moderation: only a removal is shown to the author, never a pending state or a reason.
   var removed: Bool { owned && moderation == "removed" }
+  /// 发布分类。每个返回皮肤条目的请求都带 `include=category`；早于分类功能的服务端不返回该字段，此时为 `nil`。
+  var category: CommunitySkinCategory? = nil
 }
+
+/// 社区键盘皮肤的发布分类，与候选窗皮肤共用同一组固定 id。分类只是发布元数据，不计入任何请求摘要。
+enum CommunitySkinCategory: String, CaseIterable, Identifiable, Codable, Sendable {
+  case nature, guofeng, acg, cute, food, tech, minimal, other
+
+  var id: String { rawValue }
+
+  /// 界面上显示的分类名称，`allCases` 的顺序即筛选按钮的顺序。
+  var label: String {
+    switch self {
+    case .nature: "自然"
+    case .guofeng: "国风"
+    case .acg: "二次元"
+    case .cute: "可爱"
+    case .food: "美食"
+    case .tech: "科技夜色"
+    case .minimal: "简约"
+    case .other: "其他"
+    }
+  }
+
+  /// 服务端将来新增的分类 id 一律读作 `other`，旧客户端不会因此丢掉整个条目。
+  init(from decoder: Decoder) throws {
+    let value = try decoder.singleValueContainer().decode(String.self)
+    self = Self(rawValue: value) ?? .other
+  }
+}
+
 struct CommunityPage: Decodable, Sendable { let skins: [CommunitySkin]; let has_more: Bool }
 struct CommunityChallenge: Decodable, Sendable { let challenge_id: String; let nonce: String }
 typealias CommunityUser = BackendAccountClient.User
@@ -112,6 +142,8 @@ enum CommunityProfilePolicy {
 actor SkinCommunityAPI {
   static let shared = SkinCommunityAPI()
   private static let maximumPageItems = 20
+  /// 每个返回皮肤条目的请求都带上它，服务端才会在条目里附带 `category`。
+  private static let includeCategory = URLQueryItem(name: "include", value: "category")
   private let client: BackendAccountClient
   private let account: BackendAccountSession
   init(client: BackendAccountClient = BackendAccountClient(), account: BackendAccountSession = .shared) {
@@ -196,15 +228,21 @@ actor SkinCommunityAPI {
     } else { try await account.logout(all: all) }
   }
   func clearExpiredLogin() async throws { try await account.forget() }
-  func list(offset: Int = 0, search: String = "", mine: Bool = false) async throws -> CommunityPage {
+  /// `category` 为 `nil` 时不按分类筛选。
+  func list(offset: Int = 0, search: String = "", mine: Bool = false,
+            category: CommunitySkinCategory? = nil) async throws -> CommunityPage {
     #if DEBUG && targetEnvironment(simulator)
-    if CommunityPreviewFixtures.enabled { return CommunityPage(skins: CommunityPreviewFixtures.skins, has_more: false) }
+    if CommunityPreviewFixtures.enabled {
+      return CommunityPage(skins: CommunityPreviewFixtures.skins.filter { category == nil || $0.category == category }, has_more: false)
+    }
     #endif
     var parts = URLComponents()
     parts.path = "/v1/community/skins"
     parts.queryItems = [.init(name: "offset", value: String(offset)), .init(name: "q", value: search)]
+    if let category { parts.queryItems!.append(.init(name: "category", value: category.rawValue)) }
     // The author's own list, with each skin's moderation state so a removed one can be marked.
     if mine { parts.queryItems! += [.init(name: "scope", value: "mine"), .init(name: "fields", value: "moderation")] }
+    parts.queryItems!.append(Self.includeCategory)
     parts.percentEncodedQuery = parts.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
     let page: CommunityPage = try await request(parts.string!, authenticated: mine)
     guard Self.validPage(page.skins, hasMore: page.has_more),
@@ -220,23 +258,47 @@ actor SkinCommunityAPI {
     guard CommunityResponseValidation.validID(id) else {
       throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
     }
-    let skin: CommunitySkin = try await request("/v1/community/skins/\(id)?fields=moderation")
+    let skin: CommunitySkin = try await request(Self.skinPath(id))
     guard CommunityResponseValidation.validSkin(skin),
           CommunityResponseValidation.matchesID(skin.id, requested: id) else {
       throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
     }
     return skin
   }
-  func publish(id: String, name: String, description: String, design: CustomKeyboardSkin) async throws {
-    struct Payload: Encodable { let id: String; let name: String; let description: String; let design: CustomKeyboardSkin }
+  func publish(id: String, name: String, description: String, design: CustomKeyboardSkin,
+               category: CommunitySkinCategory = .other) async throws {
+    struct Payload: Encodable {
+      let id: String; let name: String; let description: String; let design: CustomKeyboardSkin
+      let category: CommunitySkinCategory
+    }
     struct Result: Decodable { let id: String }
     guard CommunityResponseValidation.validID(id) else {
       throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
     }
-    let result: Result = try await request("/v1/community/skins", method: "POST", body: JSONEncoder().encode(Payload(id: id, name: name, description: description, design: design.normalized)), authenticated: true)
+    let result: Result = try await request("/v1/community/skins", method: "POST", body: JSONEncoder().encode(Payload(id: id, name: name, description: description, design: design.normalized, category: category)), authenticated: true)
     guard CommunityResponseValidation.matchesID(result.id, requested: id) else {
       throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
     }
+  }
+  /// 作者修改自己作品的分类，返回更新后的条目。请求体只能有 `category` 一个键，服务端对多余的键回 400。返回的条目不带 `moderation`，调用方要沿用原条目的审核状态。
+  func setCategory(_ id: String, category: CommunitySkinCategory) async throws -> CommunitySkin {
+    guard CommunityResponseValidation.validID(id) else {
+      throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
+    }
+    let skin: CommunitySkin = try await request(Self.skinPath(id, moderation: false), method: "PATCH",
+      body: JSONEncoder().encode(["category": category]), authenticated: true)
+    guard CommunityResponseValidation.validSkin(skin),
+          CommunityResponseValidation.matchesID(skin.id, requested: id), skin.category == category else {
+      throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
+    }
+    return skin
+  }
+  /// 单个皮肤条目的路径，总是带分类；详情另外带上审核状态，作者据此看到已下架标记。
+  private static func skinPath(_ id: String, moderation: Bool = true) -> String {
+    var parts = URLComponents()
+    parts.path = "/v1/community/skins/\(id)"
+    parts.queryItems = (moderation ? [URLQueryItem(name: "fields", value: "moderation")] : []) + [includeCategory]
+    return parts.string!
   }
   func download(_ id: String) async throws -> CustomKeyboardSkin {
     #if DEBUG && targetEnvironment(simulator)

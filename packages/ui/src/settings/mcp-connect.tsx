@@ -40,7 +40,7 @@ const code =
 const command =
   "m-0 overflow-x-auto rounded-lg border border-edge bg-raised p-3 text-xs leading-relaxed whitespace-pre-wrap break-all";
 
-/** The flags that widen what the assistant may do. Both switches start on, so the commands and configuration the page shows let the assistant manage quick phrases, settings, skins and words; the entry the host writes itself (one-click install) stays read-only, which the page says next to that button. */
+/** The flags that widen what the assistant may do; both are off in the host's own entry. */
 const permissionFlags = [
   {
     flag: "--allow-write",
@@ -151,9 +151,7 @@ export function McpConnectSection({
   const [result, setResult] = useState<string>();
   const [copied, setCopied] = useState<string>();
   const [tab, setTab] = useState<McpTab>("claude_code");
-  const [flags, setFlags] = useState<McpFlag[]>(() =>
-    permissionFlags.map((permission) => permission.flag),
-  );
+  const [flags, setFlags] = useState<McpFlag[]>([]);
   const mounted = useRef(true);
   const refreshGeneration = useRef(0);
   const clientGeneration = useRef(0);
