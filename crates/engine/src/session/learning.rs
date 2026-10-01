@@ -53,6 +53,17 @@ fn join_words(first: &str, second: &str) -> String {
     word
 }
 
+fn english_context_key(context: &str) -> String {
+    let mut key = String::with_capacity("english:".len() + context.len());
+    key.push_str("english:");
+    key.extend(
+        context
+            .chars()
+            .map(|character| character.to_ascii_lowercase()),
+    );
+    key
+}
+
 impl InputSession {
     /// input_session.cpp:1274-1319; `index` is in ranking order.
     pub(super) fn learn_candidate(&mut self, index: usize) -> Option<String> {
@@ -100,7 +111,7 @@ impl InputSession {
             } else {
                 self.engine.request().raw_input.clone()
             };
-            let context_key = format!("english:{}", context.to_ascii_lowercase());
+            let context_key = english_context_key(&context);
             let english_rows: Vec<WordItem> = ordered
                 .into_iter()
                 .filter(|item| item.source == CandidateSource::EnglishDictionary)
@@ -583,6 +594,13 @@ mod tests {
         let word = join_words("你好", "世界");
         assert_eq!(word, "你好世界");
         assert_eq!(word.capacity(), word.len());
+    }
+
+    #[test]
+    fn english_context_key_allocates_only_result_bytes() {
+        let key = english_context_key("HeLLo");
+        assert_eq!(key, "english:hello");
+        assert_eq!(key.capacity(), key.len());
     }
 
     /// F1 (test_input_session.cpp:1091-1119): the pick's place in a new session, per mode.
