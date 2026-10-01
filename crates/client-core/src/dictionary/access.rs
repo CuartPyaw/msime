@@ -28,6 +28,8 @@ impl DictionaryAccess {
                 "absolute dictionary paths required",
             ));
         }
+        crate::storage::reject_symlink(user)?;
+        crate::storage::reject_symlink(dictionaries)?;
         let mut roots = vec![user.canonicalize()?, dictionaries.canonicalize()?];
         roots.sort();
         roots.dedup();
@@ -102,5 +104,23 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_symlinked_root_before_creating_an_external_lock() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let user = parent.path().join("user");
+        symlink(outside.path(), &user).unwrap();
+        let dictionaries = tempfile::tempdir().unwrap();
+
+        assert!(DictionaryAccess::try_session(&user, dictionaries.path()).is_err());
+        assert!(!outside
+            .path()
+            .join(".msime-dictionary-access.lock")
+            .exists());
     }
 }
