@@ -769,7 +769,11 @@ export {
   CloudCandidatesSection,
   type CloudCandidatesSectionProps,
 } from "./settings/cloud-candidates-section";
-export { TelemetrySection, type TelemetrySectionProps } from "./settings/telemetry-section";
+export {
+  TelemetrySection,
+  usageReportingDescription,
+  type TelemetrySectionProps,
+} from "./settings/telemetry-section";
 export { WubiSection, type WubiPreferences, type WubiSectionProps } from "./settings/wubi-section";
 export {
   InputModeSection,
@@ -1379,8 +1383,8 @@ export type Preferences = {
   translation_secondary_language?: "en" | "fr" | "ja" | "es" | "ru" | "de" | "ko" | null;
   /** The user explicitly chose the MSIME account (api.msime.app) for candidate translations; absent means not chosen. */
   translation_account?: boolean;
-  /** Anonymous start and crash events; off by default and honoured only by the Windows Server. */
-  telemetry_enabled?: boolean;
+  /** Anonymous usage reporting (daily activity, session ends, crash summaries) read by every host; absent means on, the default. */
+  usage_reporting?: boolean;
   floating_toolbar?: FloatingToolbarPreferences;
   mixed_input?: MixedInputPreferences;
   fuzzy_pinyin?: FuzzyPinyinPreferences;
