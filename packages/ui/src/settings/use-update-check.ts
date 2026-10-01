@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { runAsyncAction } from "../core/async-action";
 import {
   compareVersions,
@@ -28,18 +28,30 @@ export function useUpdateCheck({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [available, setAvailable] = useState<ValidatedUpdate | null>(null);
+  const requestGeneration = useRef(0);
+
+  useEffect(() => {
+    requestGeneration.current += 1;
+    setStatus("");
+    setBusy(false);
+    setAvailable(null);
+    return () => {
+      requestGeneration.current += 1;
+    };
+  }, [clientHostedPlatform, currentAppVersion, releasePageUrl, releasePlatform]);
 
   async function checkForUpdate() {
     if (busy) return;
+    const generation = requestGeneration.current;
     setAvailable(null);
     await runAsyncAction(
       {
         busy,
-        isCurrent: () => true,
+        isCurrent: () => generation === requestGeneration.current,
         setBusy,
         setError: setStatus,
       },
-      async () => {
+      async (isCurrent) => {
         const controller = new AbortController();
         const timeout = window.setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
         try {
@@ -55,7 +67,7 @@ export function useUpdateCheck({
             if (!Array.isArray(manifest)) throw new Error("invalid release list");
             update = selectPlatformRelease(manifest, releasePlatform, releasePageUrl);
             if (!update) {
-              setStatus("暂无可用发行版");
+              if (isCurrent()) setStatus("暂无可用发行版");
               return;
             }
           } else {
@@ -63,6 +75,7 @@ export function useUpdateCheck({
           }
           const current = parseVersion(currentAppVersion);
           if (!update || !current) throw new Error("invalid update manifest");
+          if (!isCurrent()) return;
           if (compareVersions(update.version, current) > 0) {
             setAvailable(update);
             setStatus(`发现新版本 v${update.version.display}`);

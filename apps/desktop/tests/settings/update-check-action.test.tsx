@@ -48,3 +48,37 @@ test("an update check already in progress ignores a second trigger", async () =>
   });
   expect(result.current.status).toBe("检查失败，请稍后重试");
 });
+
+test("a check started for an older app version is ignored after the version changes", async () => {
+  const request = deferred<Response>();
+  vi.stubGlobal("fetch", vi.fn().mockReturnValue(request.promise));
+  const { result, rerender } = renderHook(
+    ({ currentAppVersion }) =>
+      useUpdateCheck({
+        clientHostedPlatform: false,
+        releasePlatform: null,
+        releasePageUrl: "https://updates.example.test/releases",
+        currentAppVersion,
+      }),
+    { initialProps: { currentAppVersion: "1.0.0" } },
+  );
+
+  let pending!: Promise<void>;
+  act(() => {
+    pending = result.current.checkForUpdate();
+  });
+  await waitFor(() => expect(result.current.busy).toBe(true));
+  rerender({ currentAppVersion: "2.0.0" });
+  request.resolve({
+    ok: true,
+    json: async () => ({
+      version: "1.5.0",
+      releaseUrl: "https://updates.example.test/releases/v1.5.0",
+    }),
+  } as Response);
+  await act(async () => pending);
+
+  expect(result.current.available).toBeNull();
+  expect(result.current.status).toBe("");
+  expect(result.current.busy).toBe(false);
+});
