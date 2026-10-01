@@ -103,6 +103,45 @@ impl LanguageDictionary {
             .prepare_cached("SELECT 1 FROM syllables WHERE syllable = ?1")?
             .exists((syllable,))?)
     }
+
+    /// The whole syllable inventory, for a scheme that segments typed letters against it in memory.
+    pub fn syllables(&self) -> Result<Vec<String>> {
+        let mut statement = self
+            .connection
+            .prepare_cached("SELECT syllable FROM syllables")?;
+        let rows = statement.query_map((), |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The entries whose key completes the last syllable of `prefix`: the key starts with `prefix` and has no syllable boundary after it, so `nei h` finds `nei hou` but not `nei hou aa`. Each comes with its key, heaviest first and by text within a weight, at most `limit`.
+    pub fn lookup_completions(
+        &self,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, LanguageEntry)>> {
+        // Keys are space-joined syllables, so every key starting with `prefix` sorts at or after it and before `prefix` with its last character incremented.
+        let Some(last) = prefix.chars().next_back() else {
+            return Ok(Vec::new());
+        };
+        let Some(next) = char::from_u32(u32::from(last) + 1) else {
+            return Ok(Vec::new());
+        };
+        let upper = format!("{}{next}", &prefix[..prefix.len() - last.len_utf8()]);
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut statement = self.connection.prepare_cached(
+            "SELECT key, text, weight FROM entries WHERE key >= ?1 AND key < ?2 AND instr(substr(key, length(?1) + 1), ' ') = 0 ORDER BY weight DESC, text ASC LIMIT ?3",
+        )?;
+        let rows = statement.query_map((prefix, upper, limit), |row| {
+            Ok((
+                row.get(0)?,
+                LanguageEntry {
+                    text: row.get(1)?,
+                    weight: row.get(2)?,
+                },
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
 }
 
 #[cfg(test)]
@@ -179,6 +218,50 @@ mod tests {
             Some("CC-BY-4.0")
         );
         assert_eq!(dictionary.metadata("missing").unwrap(), None);
+    }
+
+    #[test]
+    fn lists_syllables_and_completes_the_last_syllable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cantonese.db");
+        build(&path, &FORMAT_VERSION.to_string());
+        let connection = Connection::open(&path).unwrap();
+        for (key, text, weight) in [("nei hou aa", "你好呀", 10), ("nei i", "你意", 5)] {
+            connection
+                .execute(
+                    "INSERT INTO entries VALUES (?1, ?2, ?3)",
+                    (key, text, weight),
+                )
+                .unwrap();
+        }
+        drop(connection);
+
+        let dictionary = open_read_only(&path).unwrap();
+        let mut syllables = dictionary.syllables().unwrap();
+        syllables.sort();
+        assert_eq!(syllables, ["hou", "nei"]);
+        let completions = |prefix: &str, limit| {
+            dictionary
+                .lookup_completions(prefix, limit)
+                .unwrap()
+                .into_iter()
+                .map(|(key, entry)| (key, entry.text))
+                .collect::<Vec<_>>()
+        };
+        let pair = |key: &str, text: &str| (key.to_owned(), text.to_owned());
+        assert_eq!(
+            completions("nei h", 10),
+            [
+                pair("nei hou", "你好"),
+                pair("nei hou", "你號"),
+                pair("nei hou", "妳好")
+            ]
+        );
+        assert_eq!(completions("nei h", 1), [pair("nei hou", "你好")]);
+        assert_eq!(completions("ne", 10), [pair("nei", "你")]);
+        assert!(completions("nei ho", 0).is_empty());
+        assert!(completions("ngo", 10).is_empty());
+        assert!(completions("", 10).is_empty());
     }
 
     #[cfg(unix)]
