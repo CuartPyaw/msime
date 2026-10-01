@@ -540,8 +540,8 @@ impl HostCapabilities {
             key_sound: platform.is_desktop(),
             plugin_triggers: platform.is_desktop(),
             music: platform.is_desktop(),
-            // macOS draws the sparks, the card flash and the combo badge (TypingEffectPanel.mm), Windows the flash and the badge on its candidate window (CandidateWindow.cpp), and both Linux hosts the combo count in the candidate aux line (KeySound.h). HarmonyOS claims them per form factor in its own settings projection; the phone hosts wire none.
-            typing_effects: platform.is_desktop(),
+            // macOS draws the sparks, the card flash and the combo badge (TypingEffectPanel.mm), Windows the flash and the badge on its candidate window (CandidateWindow.cpp), both Linux hosts the combo count in the candidate aux line (KeySound.h), and HarmonyOS the flash and the combo badge on its KeyboardView. Linux draws no style, only the count; the settings page hides the style controls there itself (`showTypingEffectStyles`). HarmonyOS still narrows this per form factor in its own settings projection; Android and iOS wire none.
+            typing_effects: platform.is_desktop() || platform == HostPlatform::Harmony,
             os_version: None,
             candidate_panel_limit: None,
         }

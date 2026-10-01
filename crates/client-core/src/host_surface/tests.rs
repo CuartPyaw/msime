@@ -552,7 +552,7 @@ fn plugin_surfaces_are_claimed_only_by_the_hosts_that_wire_them() {
             "{platform:?}"
         );
     }
-    // HarmonyOS claims its 2in1 surfaces in its own form-factor projection; the phone hosts wire none.
+    // HarmonyOS claims its 2in1 sound and trigger surfaces in its own form-factor projection; Android and iOS wire none.
     for platform in [
         HostPlatform::Android,
         HostPlatform::Ios,
@@ -560,10 +560,13 @@ fn plugin_surfaces_are_claimed_only_by_the_hosts_that_wire_them() {
     ] {
         let capabilities = HostCapabilities::for_platform(platform);
         assert!(
-            !capabilities.key_sound
-                && !capabilities.plugin_triggers
-                && !capabilities.music
-                && !capabilities.typing_effects,
+            !capabilities.key_sound && !capabilities.plugin_triggers && !capabilities.music,
+            "{platform:?}"
+        );
+        // The HarmonyOS KeyboardView draws the flash and the combo badge itself.
+        assert_eq!(
+            capabilities.typing_effects,
+            platform == HostPlatform::Harmony,
             "{platform:?}"
         );
     }
