@@ -1409,7 +1409,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     snapshot[@"platform.macos.candidate_page_shortcut"] = @([self storedPageShortcutForCurrentBindings]);
     NSArray *schemes = @[@"quanpin", @"shuangpin", @"wubi"];
     NSUInteger schemeIndex = [schemes indexOfObject:self.inputScheme];
-    // The fixed Apple cloud contract has no Japanese or Korean entry. Keep its historical Chinese fallback instead of serializing NSNotFound when a shared Tauri snapshot currently uses the Japanese or Korean Engine scheme.
+    // The fixed Apple cloud contract names only quanpin, shuangpin and wubi. Keep its historical quanpin fallback instead of serializing NSNotFound when a shared Tauri snapshot currently uses any other Engine scheme (japanese, korean, cantonese, zhuyin, vietnamese).
     snapshot[@"platform.macos.input_scheme"] = @(schemeIndex == NSNotFound ? 0 : schemeIndex);
     snapshot[@"platform.macos.quanpin_helpcode_schema"] = @([MSIMECloudHelpcodeSchemas() indexOfObject:[self helpcodeOptionsForScheme:@"quanpin"][@"schema"]]);
     snapshot[@"platform.macos.shuangpin_helpcode_schema"] = @([MSIMECloudHelpcodeSchemas() indexOfObject:[self helpcodeOptionsForScheme:@"shuangpin"][@"schema"]]);

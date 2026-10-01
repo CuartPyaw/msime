@@ -2191,6 +2191,8 @@ static void TestGlossSenseTraditionalOutput(MSIMEAppearancePreferences *appearan
                                         @"candidates": @[@{@"text": @"apple", @"highlighted": @YES, @"translation": gloss},
                                                          @{@"text": @"apply"}] } mutableCopy];
         if (localMode) view[@"local_mode"] = localMode;
+        // The runtime reports conversion for quanpin outside the unicode and temporary Japanese modes.
+        view[@"script_conversion"] = @(localMode == nil);
         [controller setValue:view forKey:@"view"];
         panel.visible = YES;
     };
@@ -2292,6 +2294,84 @@ static void TestSegmentEditingChords(MSIMEAppearancePreferences *appearance) {
     session.lastCommand = UINT32_MAX;
     assert([controller handleEvent:ModeKey(51, NSEventModifierFlagControl, NO) client:client]);
     assert(session.lastCommand == MSIME_BACKSPACE_SEGMENT);
+}
+
+// The scheme behaviour the controller used to infer from "scheme == 4" is read from the view and from msime::mac::scheme traits, so Zhuyin and Vietnamese get the rules of the scheme they behave like rather than quanpin's. The views here are what the runtime would publish; the real Korean session in TestRealSessionComposition covers scheme 4 end to end.
+static void TestSchemeTraitsFromView(MSIMEAppearancePreferences *appearance) {
+    // View fields the runtime publishes are read as they are, not recomputed from the scheme.
+    assert(MSIMEScriptConversionApplies(@{@"scheme": @5, @"local_mode": @"none", @"script_conversion": @YES}));
+    assert(!MSIMEScriptConversionApplies(@{@"scheme": @0, @"local_mode": @"none", @"script_conversion": @NO}));
+    assert(!MSIMEScriptConversionApplies(@{@"scheme": @0, @"local_mode": @"none"}));
+    assert(!MSIMEScriptConversionApplies(nil));
+    assert(MSIMECandidateListOpen(@{@"scheme": @6, @"candidate_list_open": @YES, @"candidates": @[@{@"text": @"中"}]}));
+    assert(!MSIMECandidateListOpen(@{@"scheme": @4, @"candidates": @[@{@"text": @"韓"}]}));
+    assert(!MSIMECandidateListOpen(@{@"scheme": @0, @"candidate_list_open": @NO, @"candidates": @[@{@"text": @"中"}]}));
+    // Glosses: the three Chinese schemes that always had them, not temporary Japanese inside them, and none of the schemes after them. A view without a scheme is quanpin.
+    for (NSNumber *scheme in @[@0, @1, @2]) assert(MSIMEViewShowsGlosses(@{@"scheme": scheme}));
+    for (NSNumber *scheme in @[@3, @4, @5, @6, @7, @99]) assert(!MSIMEViewShowsGlosses(@{@"scheme": scheme}));
+    assert(!MSIMEViewShowsGlosses(@{@"scheme": @0, @"local_mode": @"temporary_japanese"}));
+    assert(MSIMEViewShowsGlosses(@{}));
+    // Scheme traits hold only while the scheme's own rules do: dedicated English and the local modes keep theirs.
+    assert(MSIMESchemeTrait(@{@"scheme": @6}, msime::mac::scheme::LocksCaret));
+    assert(MSIMESchemeTrait(@{@"scheme": @7, @"local_mode": @"none"}, msime::mac::scheme::LocksCaret));
+    assert(!MSIMESchemeTrait(@{@"scheme": @7, @"dedicated_english": @YES}, msime::mac::scheme::LocksCaret));
+    assert(!MSIMESchemeTrait(@{@"scheme": @6, @"local_mode": @"emoji"}, msime::mac::scheme::LocksCaret));
+    assert(!MSIMESchemeTrait(nil, msime::mac::scheme::LocksCaret));
+
+    ModeController *controller = [ModeController alloc];
+    ShortcutSession *session = [ShortcutSession new];
+    ShortcutClient *client = [ShortcutClient new];
+    [controller setValue:appearance forKey:@"appearance"];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:client forKey:@"activeClient"];
+    appearance.englishMode = NO;
+    NSDictionary *(^composing)(NSNumber *) = ^NSDictionary *(NSNumber *scheme) {
+        return @{@"focused": @YES, @"scheme": scheme, @"local_mode": @"none", @"editing_text": @"abc", @"caret_position": @3,
+                 @"candidates": @[]};
+    };
+
+    // Ctrl+Backspace edits a segment only where the caret is not locked to the end of the composition; Zhuyin and Vietnamese finish the composition and leave the chord to the application, as Korean does.
+    for (NSNumber *scheme in @[@0, @1, @2, @3, @5, @4, @6, @7]) {
+        const BOOL locked = scheme.intValue == 4 || scheme.intValue == 6 || scheme.intValue == 7;
+        [controller setValue:composing(scheme) forKey:@"view"];
+        session.lastCommand = UINT32_MAX;
+        assert([controller handleEvent:ModeKey(51, NSEventModifierFlagControl, NO) client:client] == !locked);
+        assert(session.lastCommand == (locked ? MSIME_FINISH_COMPOSITION : MSIME_BACKSPACE_SEGMENT));
+    }
+
+    // Option+Return opens the candidate list of a scheme that has one to open (Korean, Zhuyin) and is swallowed while composing; elsewhere it finishes the composition and goes to the application as before.
+    for (NSNumber *scheme in @[@0, @3, @5, @7, @4, @6]) {
+        const BOOL opens = scheme.intValue == 4 || scheme.intValue == 6;
+        [controller setValue:composing(scheme) forKey:@"view"];
+        session.lastCommand = UINT32_MAX;
+        assert([controller handleEvent:ModeKey(36, NSEventModifierFlagOption, NO) client:client] == opens);
+        assert(session.lastCommand == (opens ? MSIME_OPEN_CANDIDATE_LIST : MSIME_FINISH_COMPOSITION));
+    }
+    // Dedicated English keeps its own rules inside Zhuyin: no list to open there.
+    NSMutableDictionary *dedicated = [composing(@6) mutableCopy];
+    dedicated[@"dedicated_english"] = @YES;
+    [controller setValue:dedicated forKey:@"view"];
+    session.lastCommand = UINT32_MAX;
+    assert(![controller handleEvent:ModeKey(36, NSEventModifierFlagOption, NO) client:client]);
+    assert(session.lastCommand == MSIME_FINISH_COMPOSITION);
+
+    // A Caps Lock uppercase letter with nothing composing goes back to the application except where the scheme composes it: Korean folds it to the Shift-less jamo key, Vietnamese types the uppercase letter.
+    NSEvent *capsA = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:NSEventModifierFlagCapsLock timestamp:0
+                                  windowNumber:0 context:nil characters:@"A" charactersIgnoringModifiers:@"a" isARepeat:NO keyCode:0];
+    session.nextTransition = @{@"handled": @YES, @"view": @{@"editing_text": @"", @"caret_position": @0, @"candidates": @[]}};
+    for (NSNumber *scheme in @[@0, @5, @6, @4, @7]) {
+        const int value = scheme.intValue;
+        [controller setValue:@{@"focused": @YES, @"scheme": scheme, @"local_mode": @"none", @"editing_text": @"", @"caret_position": @0,
+                               @"candidates": @[]} forKey:@"view"];
+        session.asciiCalls = 0;
+        session.lastASCII = 0;
+        const BOOL composes = value == 4 || value == 7;
+        assert([controller handleEvent:capsA client:client] == composes);
+        assert(session.asciiCalls == (composes ? 1u : 0u));
+        if (value == 4) assert(session.lastASCII == 'a');
+        if (value == 7) assert(session.lastASCII == 'A');
+    }
+    session.nextTransition = nil;
 }
 
 static void TestKeypadOperators(MSIMEAppearancePreferences *appearance) {
@@ -3424,9 +3504,9 @@ static void TestRealSessionComposition() {
     };
     NSDictionary *(^currentView)(void) = ^NSDictionary *{ return [controller valueForKey:@"view"]; };
     typeHan();
-    assert(!panel.isVisible && !MSIMEKoreanHanjaListOpen(currentView()));
+    assert(!panel.isVisible && !MSIMECandidateListOpen(currentView()));
     assert([controller handleEvent:hanja client:client]);
-    assert(MSIMEKoreanHanjaListOpen(currentView()) && panel.isVisible);
+    assert(MSIMECandidateListOpen(currentView()) && panel.isVisible);
     assert([currentView()[@"candidates"][0][@"text"] isEqual:@"韓"] && [currentView()[@"candidates"][1][@"text"] isEqual:@"漢"]);
     assert([client.marked isEqual:@"한"] && client.insertions.count == 0);
     // Hanja rows take no pin, fixed position or removal, so a right click offers no menu for them.
@@ -3449,7 +3529,7 @@ static void TestRealSessionComposition() {
     prefs.vertical = NO;
     typeHan();
     assert([controller handleEvent:keypadHanja client:client]);
-    assert(MSIMEKoreanHanjaListOpen(currentView()));
+    assert(MSIMECandidateListOpen(currentView()));
     assert([controller handleEvent:KeypadKey(124, @"\uF703", NSEventModifierFlagFunction | NSEventModifierFlagNumericPad, NO) client:client]);
     assert([currentView()[@"candidates"][1][@"highlighted"] isEqual:@YES] && [client.marked isEqual:@"한"]);
     assert([controller handleEvent:enter client:client]);
@@ -3467,23 +3547,23 @@ static void TestRealSessionComposition() {
     assert([controller handleEvent:KeypadKey(124, @"\uF703", NSEventModifierFlagFunction | NSEventModifierFlagNumericPad, NO) client:client]);
     assert([currentView()[@"page"] isEqual:@1] && [client.marked isEqual:@"한"] && client.insertions.count == 3);
     assert([controller handleEvent:KeypadKey(123, @"\uF702", NSEventModifierFlagFunction | NSEventModifierFlagNumericPad, NO) client:client]);
-    assert([currentView()[@"page"] isEqual:@0] && MSIMEKoreanHanjaListOpen(currentView()));
+    assert([currentView()[@"page"] isEqual:@0] && MSIMECandidateListOpen(currentView()));
     assert([controller handleEvent:KeypadKey(125, @"\uF701", NSEventModifierFlagFunction | NSEventModifierFlagNumericPad, NO) client:client]);
     assert([currentView()[@"candidates"][1][@"highlighted"] isEqual:@YES]);
     prefs.vertical = savedVertical;
     // With its paging binding off Page Down is swallowed while the list is on screen, as it is for any candidate list, instead of writing the syllable out for the application.
     [prefs setNavigation:@"page_up_down" enabled:NO];
     assert([controller handleEvent:KeypadKey(121, @"\uF72D", NSEventModifierFlagFunction, NO) client:client]);
-    assert(MSIMEKoreanHanjaListOpen(currentView()) && [client.marked isEqual:@"한"] && client.insertions.count == 3);
+    assert(MSIMECandidateListOpen(currentView()) && [client.marked isEqual:@"한"] && client.insertions.count == 3);
     [prefs setNavigation:@"page_up_down" enabled:YES];
 
     // Escape closes the list and keeps the syllable composing; the trigger reopens it, and a second press closes it again.
     assert([controller handleEvent:escape client:client]);
-    assert(!MSIMEKoreanHanjaListOpen(currentView()) && !panel.isVisible && [client.marked isEqual:@"한"] && client.insertions.count == 3);
+    assert(!MSIMECandidateListOpen(currentView()) && !panel.isVisible && [client.marked isEqual:@"한"] && client.insertions.count == 3);
     assert([controller handleEvent:hanja client:client]);
-    assert(MSIMEKoreanHanjaListOpen(currentView()));
+    assert(MSIMECandidateListOpen(currentView()));
     assert([controller handleEvent:hanja client:client]);
-    assert(!MSIMEKoreanHanjaListOpen(currentView()) && [client.marked isEqual:@"한"] && client.insertions.count == 3);
+    assert(!MSIMECandidateListOpen(currentView()) && [client.marked isEqual:@"한"] && client.insertions.count == 3);
 
     // The paging marks and the word-to-character pair are punctuation while the list is open: the Hangul is written with the mark, never a page turned or a Hanja picked.
     assert([prefs navigationEnabled:@"comma_period"] && [prefs navigationEnabled:@"minus_equal"]);
@@ -3504,7 +3584,7 @@ static void TestRealSessionComposition() {
     // A lone jamo has no Hanja. The chord is still swallowed while it composes, so the jamo is not written out with a line break after it; with nothing composing the chord is the application's.
     assert([controller handleEvent:letter(@"r", 15, 0) client:client]);
     assert([controller handleEvent:hanja client:client]);
-    assert([client.marked isEqual:@"ㄱ"] && client.insertions.count == 6 && !MSIMEKoreanHanjaListOpen(currentView()));
+    assert([client.marked isEqual:@"ㄱ"] && client.insertions.count == 6 && !MSIMECandidateListOpen(currentView()));
     assert([controller handleEvent:escape client:client]);
     assert(client.marked.length == 0);
     assert(![controller handleEvent:hanja client:client]);
@@ -8121,14 +8201,14 @@ int main(int argc, char **argv) {
         // With traditional output on, the edge character comes from the converted phrase, as Windows takes ExtractHanCharacter(CandidateTextForOutput(word)): 头发+] is 髮 and 皇后+] is 后, where s2t of the Engine's lone 发 or 后 would give 發 or 後.
         [appearance setNavigation:@"brackets" enabled:NO];
         [appearance setWordCharacterEnabled:YES keys:@"brackets"];
-        NSDictionary *chineseContext = @{@"scheme": @0, @"local_mode": @"none"};
+        NSDictionary *chineseContext = @{@"scheme": @0, @"local_mode": @"none", @"script_conversion": @YES};
         NSDictionary *emptyView = @{@"editing_text": @"", @"candidates": @[]};
         NSEvent *(^bracket)(BOOL) = ^NSEvent *(BOOL last) {
             NSString *glyph = last ? @"]" : @"[";
             return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0 context:nil characters:glyph charactersIgnoringModifiers:glyph isARepeat:NO keyCode:last ? 30 : 33];
         };
         NSString *(^pressHeldEdge)(NSString *, NSString *, BOOL, NSString *, NSDictionary *) = ^NSString *(NSString *held, NSString *word, BOOL last, NSString *engineCommit, NSDictionary *context) {
-            NSMutableDictionary *wordView = [@{@"session": @71, @"generation": @72, @"focused": @YES, @"editing_text": @"synthetic", @"scheme": @0, @"local_mode": @"none",
+            NSMutableDictionary *wordView = [@{@"session": @71, @"generation": @72, @"focused": @YES, @"editing_text": @"synthetic", @"scheme": @0, @"local_mode": @"none", @"script_conversion": @YES,
                 @"candidates": @[@{@"text": word, @"highlighted": @YES, @"id": @{@"session": @71, @"generation": @72, @"index": @8}}]} mutableCopy];
             if (held) wordView[@"phrase_prefix"] = held;
             [controller setValue:wordView forKey:@"view"];
@@ -8155,8 +8235,8 @@ int main(int argc, char **argv) {
         assert([pressEdge(@"面条", NO, @"面", chineseContext) isEqual:@"麪"]);
         assert([pressEdge(@"头发", NO, @"头", chineseContext) isEqual:@"頭"]);
         // Japanese and Unicode commits keep the Engine's text untouched, the same rule apply: uses for every commit.
-        assert([pressEdge(@"头发", YES, @"发", @{@"scheme": @0, @"local_mode": @"temporary_japanese"}) isEqual:@"发"]);
-        assert([pressEdge(@"头发", YES, @"发", @{@"scheme": @0, @"local_mode": @"unicode"}) isEqual:@"发"]);
+        assert([pressEdge(@"头发", YES, @"发", @{@"scheme": @0, @"local_mode": @"temporary_japanese", @"script_conversion": @NO}) isEqual:@"发"]);
+        assert([pressEdge(@"头发", YES, @"发", @{@"scheme": @0, @"local_mode": @"unicode", @"script_conversion": @NO}) isEqual:@"发"]);
         [controller selectSimplifiedOutput:nil];
         assert([pressEdge(@"头发", YES, @"发", chineseContext) isEqual:@"发"]);
         assert([pressHeldEdge(@"你好", @"头发", YES, @"你好发", chineseContext) isEqual:@"你好发"]);
@@ -8263,7 +8343,7 @@ int main(int argc, char **argv) {
             assert(([CandidateDisplay(@{@"text":@"汉语", @"source":source}, NO) isEqual:@"汉语"]));
         assert(([CandidateDisplay(@{@"text":@"汉语", @"annotation":@"(aB)", @"source":@2}, YES) isEqual:@"漢語(aB) ☁️"]));
         assert(([CandidateDisplay(@{@"text":@"汉语", @"annotation":@"(aB)", @"source":@3}, NO) isEqual:@"汉语(aB) 🤖"]));
-        NSMutableDictionary *scriptView = [@{@"scheme": @0, @"local_mode": @"none", @"session": @1, @"generation": @20, @"editing_text": @"hanyu", @"caret_position": @5, @"candidates": @[@{@"text": @"汉语", @"highlighted": @YES, @"id": @{@"session": @1, @"generation": @20, @"index": @0}}]} mutableCopy];
+        NSMutableDictionary *scriptView = [@{@"scheme": @0, @"local_mode": @"none", @"script_conversion": @YES, @"session": @1, @"generation": @20, @"editing_text": @"hanyu", @"caret_position": @5, @"candidates": @[@{@"text": @"汉语", @"highlighted": @YES, @"id": @{@"session": @1, @"generation": @20, @"index": @0}}]} mutableCopy];
         [controller setValue:[scriptView copy] forKey:@"view"];
         NSDictionary *preserved = [[controller valueForKey:@"view"] copy];
         [controller selectTraditionalOutput:nil];
@@ -8368,10 +8448,12 @@ int main(int argc, char **argv) {
             }
         }
         NSUInteger contextIndex = 0;
-        for (NSDictionary *context in @[@{@"scheme": @0, @"local_mode": @"none"}, @{@"scheme": @1, @"local_mode": @"quick_phrase"}, @{@"scheme": @3, @"local_mode": @"none"}, @{@"scheme": @0, @"local_mode": @"unicode"}, @{@"scheme": @0, @"local_mode": @"temporary_japanese"}, @{@"scheme": @1, @"local_mode": @"temporary_japanese"}, @{}]) {
+        // The view and the commit context say whether conversion applies (`script_conversion`), as the runtime decides it from the scheme and local mode; the host no longer infers it from those. A view or context without the field converts nothing.
+        for (NSDictionary *context in @[@{@"scheme": @0, @"local_mode": @"none", @"script_conversion": @YES}, @{@"scheme": @1, @"local_mode": @"quick_phrase", @"script_conversion": @YES}, @{@"scheme": @3, @"local_mode": @"none", @"script_conversion": @NO}, @{@"scheme": @0, @"local_mode": @"unicode", @"script_conversion": @NO}, @{@"scheme": @0, @"local_mode": @"temporary_japanese", @"script_conversion": @NO}, @{@"scheme": @1, @"local_mode": @"temporary_japanese", @"script_conversion": @NO}, @{@"scheme": @0, @"local_mode": @"none"}, @{}]) {
             BOOL convert = contextIndex++ < 2;
             assert(MSIMEScriptConversionApplies(context) == convert);
             NSMutableDictionary *candidateView = [scriptView mutableCopy];
+            [candidateView removeObjectForKey:@"script_conversion"];
             [candidateView addEntriesFromDictionary:context];
             if (context.count == 0) [candidateView removeObjectForKey:@"scheme"];
             [controller setValue:candidateView forKey:@"view"];
@@ -8386,17 +8468,18 @@ int main(int argc, char **argv) {
         }
         NSMutableDictionary *japaneseView = [scriptView mutableCopy];
         japaneseView[@"local_mode"] = @"temporary_japanese";
+        japaneseView[@"script_conversion"] = @NO;
         japaneseView[@"candidates"] = @[@{@"text": @"日本国", @"highlighted": @YES, @"id": word[@"id"]}];
         [controller setValue:japaneseView forKey:@"view"];
         [controller renderCandidates];
         assert([PageButton(layoutPanel.contentView, 0).toolTip isEqual:@"日本国"]);
         assert([PageButton(layoutPanel.contentView, 0).candidateID isEqual:word[@"id"]]);
-        [controller apply:@{@"commit": @"日本国", @"commit_context": @{@"scheme": @0, @"local_mode": @"temporary_japanese"},
+        [controller apply:@{@"commit": @"日本国", @"commit_context": @{@"scheme": @0, @"local_mode": @"temporary_japanese", @"script_conversion": @NO},
                             @"view": @{@"scheme": @0, @"local_mode": @"none", @"editing_text": @"", @"candidates": @[]}}];
         assert([client.committed isEqual:@"日本国"]);
         [controller selectSimplifiedOutput:nil];
         assert([controller.menu itemAtIndex:4].state == NSControlStateValueOff);
-        [controller apply:@{@"commit": @"汉语", @"commit_context": @{@"scheme": @0, @"local_mode": @"none"}, @"view": @{@"editing_text": @"", @"candidates": @[]}}];
+        [controller apply:@{@"commit": @"汉语", @"commit_context": @{@"scheme": @0, @"local_mode": @"none", @"script_conversion": @YES}, @"view": @{@"editing_text": @"", @"candidates": @[]}}];
         assert([client.committed isEqual:@"汉语"]);
         TestInputMode(defaults, appearance);
         TestControlOptionSpace();
@@ -8425,6 +8508,7 @@ int main(int argc, char **argv) {
         TestGlossSensePage(appearance);
         TestGlossSenseTraditionalOutput(appearance);
         TestSegmentEditingChords(appearance);
+        TestSchemeTraitsFromView(appearance);
         TestBackspaceHoldDoesNotEscapeComposition();
         TestPassthroughKeysAreCounted();
         TestKeyLatencyIsLoggedWithoutTheKey();

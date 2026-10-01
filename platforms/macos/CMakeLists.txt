@@ -1010,6 +1010,11 @@ target_compile_features(paired-punctuation-test PRIVATE cxx_std_17)
 target_compile_options(paired-punctuation-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME paired-punctuation COMMAND paired-punctuation-test)
 
+add_executable(input-scheme-traits-test tests/input/InputSchemeTraitsTest.cpp)
+target_compile_features(input-scheme-traits-test PRIVATE cxx_std_17)
+target_compile_options(input-scheme-traits-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME input-scheme-traits COMMAND input-scheme-traits-test)
+
 add_executable(candidate-font-cache-test tests/candidate/CandidateFontCacheTest.mm src/candidate/CandidateFontCache.mm)
 target_compile_options(candidate-font-cache-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(candidate-font-cache-test PRIVATE "-framework AppKit" "-framework CoreText")

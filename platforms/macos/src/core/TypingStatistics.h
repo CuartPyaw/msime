@@ -20,6 +20,9 @@ enum class TypingSource {
     Wubi,
     Japanese,
     Korean,
+    Cantonese,
+    Zhuyin,
+    Vietnamese,
     Handwriting,
     English,
     Local,
@@ -40,6 +43,9 @@ constexpr std::string_view TypingSourceId(TypingSource source) {
     case TypingSource::Wubi: return "wubi";
     case TypingSource::Japanese: return "japanese";
     case TypingSource::Korean: return "korean";
+    case TypingSource::Cantonese: return "cantonese";
+    case TypingSource::Zhuyin: return "zhuyin";
+    case TypingSource::Vietnamese: return "vietnamese";
     case TypingSource::Handwriting: return "handwriting";
     case TypingSource::English: return "english";
     case TypingSource::Local: return "local";
@@ -51,7 +57,7 @@ constexpr std::string_view TypingSourceId(TypingSource source) {
     return "unknown";
 }
 
-// View exposes the applied Engine scheme: 0 quanpin, 1 shuangpin, 2 wubi, 3 Japanese, 4 Korean. Local modes take precedence, matching the other native hosts.
+// View exposes the applied Engine scheme: 0 quanpin, 1 shuangpin, 2 wubi, 3 Japanese, 4 Korean, 5 Cantonese, 6 Zhuyin, 7 Vietnamese. Local modes take precedence, matching the other native hosts.
 constexpr TypingSource ResolveTypingSource(int scheme, bool nineKey,
                                             bool dedicatedEnglish,
                                             std::string_view localMode,
@@ -69,6 +75,9 @@ constexpr TypingSource ResolveTypingSource(int scheme, bool nineKey,
     case 2: return TypingSource::Wubi;
     case 3: return TypingSource::Japanese;
     case 4: return TypingSource::Korean;
+    case 5: return TypingSource::Cantonese;
+    case 6: return TypingSource::Zhuyin;
+    case 7: return TypingSource::Vietnamese;
     default: return TypingSource::Unknown;
     }
 }
