@@ -107,7 +107,7 @@ pub fn convert(
             }
         }
     }
-    let mut spans = Vec::new();
+    let mut spans = Vec::with_capacity(count);
     let mut end = count;
     while end > 0 {
         let span = paths[end]
@@ -206,10 +206,9 @@ mod tests {
 
     #[test]
     fn unknown_syllables_convert_to_themselves() {
-        assert_eq!(
-            texts(&run(&["ㄅㄧㄤ", "ㄋㄧˇ"], &[], &ENTRIES)),
-            ["ㄅㄧㄤ", "你"]
-        );
+        let spans = run(&["ㄅㄧㄤ", "ㄋㄧˇ"], &[], &ENTRIES);
+        assert_eq!(texts(&spans), ["ㄅㄧㄤ", "你"]);
+        assert_eq!(spans.capacity(), spans.len());
         assert!(run(&[], &[], &ENTRIES).is_empty());
     }
 
