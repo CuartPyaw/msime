@@ -334,6 +334,7 @@ export function CommunitySkinsPage({
     return () => {
       const pending = trialRef.current;
       trialRef.current = null;
+      setTrial(null);
       if (pending) void client.finishTrial(pending.id, false).catch(() => undefined);
     };
   }, [client]);
