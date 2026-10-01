@@ -317,7 +317,7 @@ pub struct HostCapabilities {
     /// Why the desktop's candidate panel on this machine ignores the candidate font, colour and skin settings, when the running Linux host has found that it does. Filled in at runtime from what the host reports, the way `os_version` is; absent when the panel honours them or nothing has been reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub candidate_panel_limit: Option<CandidatePanelLimit>,
-    /// The input schemes this host offers; the settings page shows the others disabled. A host older than the field sends none and gets the five every host has always run. A host may narrow the list at runtime the way it fills `os_version`, as the desktop app does when the Cantonese or Zhuyin dictionary is not installed.
+    /// The input schemes this host offers; the settings page shows the others disabled. A host older than the field sends none and gets the five every host has always run. A host may narrow the list at runtime the way it fills `os_version`, for instance when the Cantonese or Zhuyin dictionary is not installed.
     #[serde(default = "base_input_schemes")]
     pub input_schemes: Vec<InputScheme>,
 }
