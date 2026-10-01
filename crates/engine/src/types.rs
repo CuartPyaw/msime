@@ -73,6 +73,8 @@ pub enum SchemeType {
     JapaneseRomaji = 3,
     /// Korean Hangul on the Dubeolsik layout: syllables compose in the preedit and commit themselves; the only candidates are the composing syllable's Hanja, after `Command::ConvertHanja`.
     Korean = 4,
+    /// Cantonese in toneless Jyutping read against `cantonese.db`: candidates are Traditional as stored, a candidate covering the leading syllables commits at once and leaves the rest composing, and nothing is learned.
+    Cantonese = 5,
     /// Vietnamese through Telex or VNI: the keystrokes compose into one word in the preedit, which any key outside the spelling commits; there are no candidates.
     Vietnamese = 7,
 }
@@ -85,6 +87,7 @@ impl SchemeType {
             2 => Self::Wubi,
             3 => Self::JapaneseRomaji,
             4 => Self::Korean,
+            5 => Self::Cantonese,
             7 => Self::Vietnamese,
             _ => return None,
         })
@@ -98,6 +101,7 @@ impl SchemeType {
             Self::Wubi => "wubi",
             Self::JapaneseRomaji => "japanese",
             Self::Korean => "korean",
+            Self::Cantonese => "cantonese",
             Self::Vietnamese => "vietnamese",
         }
     }
@@ -113,7 +117,7 @@ impl SchemeType {
     /// A Chinese scheme: what 中文 returns to and what the Chinese statistics count.
     pub const fn is_chinese(self) -> bool {
         match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::Cantonese => true,
             Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
         }
     }
@@ -127,6 +131,7 @@ impl SchemeType {
             | Self::JapaneseRomaji
             | Self::Korean
             | Self::Vietnamese => false,
+            Self::Cantonese => true,
         }
     }
 
@@ -134,14 +139,18 @@ impl SchemeType {
     pub const fn script_conversion_applies(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
-            Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
+            Self::JapaneseRomaji | Self::Korean | Self::Vietnamese | Self::Cantonese => false,
         }
     }
 
     /// The engine translates punctuation through the Chinese table. Korean writes half-width ASCII marks instead; Japanese goes through the table like the Chinese schemes.
     pub const fn uses_chinese_punctuation(self) -> bool {
         match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => true,
+            Self::Quanpin
+            | Self::Shuangpin
+            | Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Cantonese => true,
             Self::Korean | Self::Vietnamese => false,
         }
     }
@@ -149,7 +158,7 @@ impl SchemeType {
     /// The host's smart punctuation (context-dependent marks) may run.
     pub const fn host_smart_punctuation(self) -> bool {
         match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::Cantonese => true,
             Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
         }
     }
@@ -157,7 +166,11 @@ impl SchemeType {
     /// Commits are widened when the full-width switch is on.
     pub const fn widens_full_width(self) -> bool {
         match self {
-            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => true,
+            Self::Quanpin
+            | Self::Shuangpin
+            | Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Cantonese => true,
             Self::Korean | Self::Vietnamese => false,
         }
     }
@@ -166,7 +179,11 @@ impl SchemeType {
     pub const fn allows_english_emoji_mixing(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi | Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
+            Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Korean
+            | Self::Vietnamese
+            | Self::Cantonese => false,
         }
     }
 
@@ -174,7 +191,11 @@ impl SchemeType {
     pub const fn opens_local_modes(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi | Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
+            Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Korean
+            | Self::Vietnamese
+            | Self::Cantonese => false,
         }
     }
 
@@ -182,7 +203,7 @@ impl SchemeType {
     pub const fn learns_into_main_dictionary(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
-            Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
+            Self::JapaneseRomaji | Self::Korean | Self::Vietnamese | Self::Cantonese => false,
         }
     }
 
@@ -190,7 +211,11 @@ impl SchemeType {
     pub const fn learns_english_words(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi | Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
+            Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Korean
+            | Self::Vietnamese
+            | Self::Cantonese => false,
         }
     }
 
@@ -198,7 +223,7 @@ impl SchemeType {
     pub const fn cloud_eligible(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin | Self::JapaneseRomaji => true,
-            Self::Wubi | Self::Korean | Self::Vietnamese => false,
+            Self::Wubi | Self::Korean | Self::Vietnamese | Self::Cantonese => false,
         }
     }
 
@@ -206,7 +231,7 @@ impl SchemeType {
     pub const fn shows_glosses(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin | Self::Wubi => true,
-            Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
+            Self::JapaneseRomaji | Self::Korean | Self::Vietnamese | Self::Cantonese => false,
         }
     }
 
@@ -214,7 +239,11 @@ impl SchemeType {
     pub const fn commits_on_blur(self) -> bool {
         match self {
             Self::Korean | Self::Vietnamese => true,
-            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => false,
+            Self::Quanpin
+            | Self::Shuangpin
+            | Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Cantonese => false,
         }
     }
 
@@ -222,7 +251,7 @@ impl SchemeType {
     pub const fn holds_phrase_progress(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => true,
-            Self::Korean | Self::Vietnamese => false,
+            Self::Korean | Self::Vietnamese | Self::Cantonese => false,
         }
     }
 
@@ -230,7 +259,11 @@ impl SchemeType {
     pub const fn reranks_with_sentence_model(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi | Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
+            Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Korean
+            | Self::Vietnamese
+            | Self::Cantonese => false,
         }
     }
 
@@ -238,7 +271,9 @@ impl SchemeType {
     pub const fn draws_reading(self) -> bool {
         match self {
             Self::JapaneseRomaji | Self::Korean => true,
-            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::Vietnamese => false,
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::Vietnamese | Self::Cantonese => {
+                false
+            }
         }
     }
 
@@ -250,7 +285,8 @@ impl SchemeType {
             | Self::Shuangpin
             | Self::Wubi
             | Self::JapaneseRomaji
-            | Self::Vietnamese => false,
+            | Self::Vietnamese
+            | Self::Cantonese => false,
         }
     }
 
@@ -258,7 +294,7 @@ impl SchemeType {
     pub const fn selection_completes(self) -> bool {
         match self {
             Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => true,
-            Self::Quanpin | Self::Shuangpin | Self::Wubi => false,
+            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::Cantonese => false,
         }
     }
 
@@ -266,14 +302,18 @@ impl SchemeType {
     pub const fn follows_pinyin_candidates(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi | Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
+            Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Korean
+            | Self::Vietnamese
+            | Self::Cantonese => false,
         }
     }
 
     /// An apostrophe typed inside the composition is a syllable boundary the scheme keeps.
     pub const fn accepts_apostrophe(self) -> bool {
         match self {
-            Self::Quanpin | Self::Shuangpin | Self::JapaneseRomaji => true,
+            Self::Quanpin | Self::Shuangpin | Self::JapaneseRomaji | Self::Cantonese => true,
             Self::Wubi | Self::Korean | Self::Vietnamese => false,
         }
     }
@@ -282,7 +322,11 @@ impl SchemeType {
     pub const fn locks_caret(self) -> bool {
         match self {
             Self::Korean | Self::Vietnamese => true,
-            Self::Quanpin | Self::Shuangpin | Self::Wubi | Self::JapaneseRomaji => false,
+            Self::Quanpin
+            | Self::Shuangpin
+            | Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Cantonese => false,
         }
     }
 
@@ -290,7 +334,11 @@ impl SchemeType {
     pub const fn supports_fuzzy(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi | Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
+            Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Korean
+            | Self::Vietnamese
+            | Self::Cantonese => false,
         }
     }
 
@@ -302,7 +350,8 @@ impl SchemeType {
             | Self::Wubi
             | Self::JapaneseRomaji
             | Self::Korean
-            | Self::Vietnamese => false,
+            | Self::Vietnamese
+            | Self::Cantonese => false,
         }
     }
 
@@ -314,7 +363,8 @@ impl SchemeType {
             | Self::Wubi
             | Self::JapaneseRomaji
             | Self::Korean
-            | Self::Vietnamese => false,
+            | Self::Vietnamese
+            | Self::Cantonese => false,
         }
     }
 
@@ -322,7 +372,11 @@ impl SchemeType {
     pub const fn helpcode(self) -> bool {
         match self {
             Self::Quanpin | Self::Shuangpin => true,
-            Self::Wubi | Self::JapaneseRomaji | Self::Korean | Self::Vietnamese => false,
+            Self::Wubi
+            | Self::JapaneseRomaji
+            | Self::Korean
+            | Self::Vietnamese
+            | Self::Cantonese => false,
         }
     }
 }
@@ -1104,6 +1158,80 @@ mod tests {
         assert_eq!(SchemeType::from_u8(7), Some(SchemeType::Vietnamese));
         assert_eq!(SchemeType::Vietnamese.name(), "vietnamese");
         assert!(!SchemeType::Vietnamese.is_pinyin());
+    }
+
+    #[test]
+    fn cantonese_round_trips_through_code_five() {
+        assert_eq!(SchemeType::Cantonese as u8, 5);
+        assert_eq!(SchemeType::from_u8(5), Some(SchemeType::Cantonese));
+        assert_eq!(SchemeType::Cantonese.name(), "cantonese");
+        assert!(!SchemeType::Cantonese.is_pinyin());
+        assert_eq!(SchemeType::from_u8(6), None);
+    }
+
+    // Cantonese is a Chinese scheme writing Traditional text as stored, with Chinese punctuation and `'` boundaries; it learns nothing, holds no phrase progress and has none of the pinyin machinery.
+    #[test]
+    fn cantonese_predicates() {
+        let scheme = SchemeType::Cantonese;
+        let on: [Named; 6] = [
+            ("is_chinese", SchemeType::is_chinese),
+            (
+                "outputs_traditional_natively",
+                SchemeType::outputs_traditional_natively,
+            ),
+            (
+                "uses_chinese_punctuation",
+                SchemeType::uses_chinese_punctuation,
+            ),
+            ("host_smart_punctuation", SchemeType::host_smart_punctuation),
+            ("widens_full_width", SchemeType::widens_full_width),
+            ("accepts_apostrophe", SchemeType::accepts_apostrophe),
+        ];
+        let off: [Named; 19] = [
+            (
+                "script_conversion_applies",
+                SchemeType::script_conversion_applies,
+            ),
+            (
+                "allows_english_emoji_mixing",
+                SchemeType::allows_english_emoji_mixing,
+            ),
+            ("opens_local_modes", SchemeType::opens_local_modes),
+            (
+                "learns_into_main_dictionary",
+                SchemeType::learns_into_main_dictionary,
+            ),
+            ("learns_english_words", SchemeType::learns_english_words),
+            ("cloud_eligible", SchemeType::cloud_eligible),
+            ("shows_glosses", SchemeType::shows_glosses),
+            ("commits_on_blur", SchemeType::commits_on_blur),
+            ("holds_phrase_progress", SchemeType::holds_phrase_progress),
+            (
+                "reranks_with_sentence_model",
+                SchemeType::reranks_with_sentence_model,
+            ),
+            ("draws_reading", SchemeType::draws_reading),
+            (
+                "has_openable_candidate_list",
+                SchemeType::has_openable_candidate_list,
+            ),
+            ("selection_completes", SchemeType::selection_completes),
+            (
+                "follows_pinyin_candidates",
+                SchemeType::follows_pinyin_candidates,
+            ),
+            ("locks_caret", SchemeType::locks_caret),
+            ("supports_fuzzy", SchemeType::supports_fuzzy),
+            ("supports_autocorrect", SchemeType::supports_autocorrect),
+            ("nine_key", SchemeType::nine_key),
+            ("helpcode", SchemeType::helpcode),
+        ];
+        for (name, predicate) in on {
+            assert!(predicate(scheme), "{name}");
+        }
+        for (name, predicate) in off {
+            assert!(!predicate(scheme), "{name}");
+        }
     }
 
     // Vietnamese composes one word in the preedit with no candidates and no learning: it commits on blur and keeps the caret at the end, and every Chinese trait is off.

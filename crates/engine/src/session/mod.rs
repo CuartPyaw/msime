@@ -212,10 +212,11 @@ impl Session {
         self.input.finish_composition(first_index)
     }
 
-    /// Discards the composition.
-    pub fn switch_scheme(&mut self, scheme: SchemeType) {
+    /// Discards the composition. Fails, staying in the current scheme with the composition untouched, when the new scheme's dictionary cannot be opened (Cantonese without a usable `cantonese.db`: `LANGUAGE_DICTIONARY_UNAVAILABLE`, `LANGUAGE_DICTIONARY_VERSION_UNSUPPORTED`).
+    pub fn switch_scheme(&mut self, scheme: SchemeType) -> Result<()> {
+        self.input.switch_scheme(scheme)?;
         self.nine_key.command(Command::Cancel);
-        self.input.switch_scheme(scheme);
+        Ok(())
     }
 
     pub fn is_supported_helpcode_schema(schema: &str) -> bool {

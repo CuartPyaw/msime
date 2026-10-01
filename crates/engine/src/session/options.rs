@@ -1,5 +1,7 @@
 //! The public option and snapshot values of `Session` (`include/metasequoia/session.h`). Shared by the session, the nine-key session, the host facade and the golden harness.
 
+use std::path::PathBuf;
+
 use crate::paths::RuntimePaths;
 use crate::types::{
     CandidateSource, CommandTableEntry, EnglishInputOptions, FrequencyAdjustmentOptions,
@@ -20,6 +22,8 @@ pub struct SessionOptions {
     pub vietnamese_input_method: VietnameseInputMethod,
     /// Where the Vietnamese scheme puts the tone on `oa`, `oe` and `uy`.
     pub vietnamese_tone_style: VietnameseToneStyle,
+    /// Where `cantonese.db` is; empty when the host has none. Read only when Cantonese is activated, which fails without it.
+    pub cantonese_dictionary: PathBuf,
     pub helpcode_schema: String,
     /// `autocorrect_type` bits; 0 keeps the user's spelling. Either of transposition and neighbor also enables missing and extra letters, and on inputs of three or more complete syllables offers a sentence that reads one syllable as a typo. Committing the raw letters while a correction is offered turns correction off for that exact input.
     pub autocorrect_types: u32,
@@ -58,6 +62,7 @@ impl SessionOptions {
             shuangpin_preedit_uses_raw: true,
             vietnamese_input_method: VietnameseInputMethod::Telex,
             vietnamese_tone_style: VietnameseToneStyle::Modern,
+            cantonese_dictionary: PathBuf::new(),
             helpcode_schema: "lantian".to_owned(),
             autocorrect_types: 0,
             helpcode: true,

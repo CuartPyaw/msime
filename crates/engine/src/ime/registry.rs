@@ -1,8 +1,13 @@
-//! The providers, one per scheme family (`R/providers/provider_registry.cpp`, `pinyin_candidate_provider.cpp`): pinyin (quanpin and shuangpin engines), wubi and Japanese. Korean syllables are the text, so a Korean query answers nothing until the user opens the Hanja list, and then the embedded Hanja table (`korean::hanja`) answers it.
+//! The providers, one per scheme family (`R/providers/provider_registry.cpp`, `pinyin_candidate_provider.cpp`): pinyin (quanpin and shuangpin engines), wubi and Japanese. Korean syllables are the text, so a Korean query answers nothing until the user opens the Hanja list, and then the embedded Hanja table (`korean::hanja`) answers it. Cantonese is answered by `cantonese.db`, which is opened the first time the scheme is activated and then kept for the session.
 //!
 //! The registry answers queries and lookups only. The reference also routed `create_word` / `update_weight_by_pinyin_and_word` / `delete_by_pinyin_and_word` through it; here the session writes pins, removals and frequency learning into user_dictionary itself, choosing the dictionary kind from the selected row's scheme (overlays.md §3.3), and phrases through its own canonical-pinyin `QuanpinEngine`, so a second writer path would only diverge from it.
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use crate::assets;
+use crate::cantonese::{CantoneseDictionary, CantoneseScheme, Inventory};
+use crate::error::Result;
 use crate::helpcode::SharedKeymap;
 use crate::japanese::JapaneseProvider;
 use crate::korean::hanja;
@@ -19,18 +24,40 @@ pub struct ProviderRegistry {
     wubi: WubiProvider,
     japanese: JapaneseProvider,
     keymap: Option<SharedKeymap>,
+    /// Where `cantonese.db` is; empty when the host has none.
+    cantonese_path: PathBuf,
+    cantonese: Option<CantoneseDictionary>,
 }
 
 impl ProviderRegistry {
     /// Wubi reads the generation's `msime.db`; the Japanese model is the immutable resource (provider_registry.cpp:4-10).
-    pub fn new(profile_kind: ShuangpinProfileKind, paths: &RuntimePaths) -> Self {
+    pub fn new(
+        profile_kind: ShuangpinProfileKind,
+        paths: &RuntimePaths,
+        cantonese_path: PathBuf,
+    ) -> Self {
         Self {
             quanpin: QuanpinEngine::new(paths),
             shuangpin: ShuangpinEngine::new(profile(profile_kind), paths),
             wubi: WubiProvider::new(&paths.dictionary(assets::MAIN_DICTIONARY)),
             japanese: JapaneseProvider::new(&paths.resource(assets::JAPANESE_MODEL)),
             keymap: None,
+            cantonese_path,
+            cantonese: None,
         }
+    }
+
+    /// Opens what `scheme` reads before it becomes active: `cantonese.db` for Cantonese, once per session, failing as `CantoneseDictionary::open` does when the file is missing or of an unknown version. Nothing for the other schemes.
+    pub fn activate(&mut self, scheme: SchemeType) -> Result<()> {
+        if scheme == SchemeType::Cantonese && self.cantonese.is_none() {
+            self.cantonese = Some(CantoneseDictionary::open(&self.cantonese_path)?);
+        }
+        Ok(())
+    }
+
+    /// The syllable inventory of the open `cantonese.db`; `None` until Cantonese has been activated.
+    pub fn cantonese_inventory(&self) -> Option<Arc<Inventory>> {
+        self.cantonese.as_ref().map(CantoneseDictionary::inventory)
     }
 
     /// Cached pinyin answers carry the old table's annotations and the online rows stored beside them, so both pinyin engines drop their caches, as the reference's setters did (quanpin/engine.h:37-41, shuangpin/shuangpin_dictionary.h:250-254). The reference left the shuangpin fuzzy cache alone; clearing it too only costs one requery.
@@ -52,6 +79,7 @@ impl ProviderRegistry {
             SchemeType::Wubi => return self.wubi.query(request),
             SchemeType::JapaneseRomaji => return self.japanese.query(request),
             SchemeType::Korean if request.korean_hanja => return hanja::candidates(request),
+            SchemeType::Cantonese => return self.cantonese_candidates(request),
             // Vietnamese composes its text in the preedit and has no candidates.
             SchemeType::Korean | SchemeType::Vietnamese => return Vec::new(),
         };
@@ -61,7 +89,7 @@ impl ProviderRegistry {
         candidates
     }
 
-    /// Wubi, Japanese, Korean and Vietnamese never answer a lookup (wubi_candidate_provider.h:19-22; the Japanese one read the dropped `japanese_lexicon`).
+    /// Wubi, Japanese, Korean, Cantonese and Vietnamese never answer a lookup (wubi_candidate_provider.h:19-22; the Japanese one read the dropped `japanese_lexicon`).
     pub fn find_candidate(&self, scheme: SchemeType, key: &str, value: &str) -> Option<WordItem> {
         match scheme {
             SchemeType::Quanpin => self.quanpin.find_candidate(key, value),
@@ -69,6 +97,7 @@ impl ProviderRegistry {
             SchemeType::Wubi
             | SchemeType::JapaneseRomaji
             | SchemeType::Korean
+            | SchemeType::Cantonese
             | SchemeType::Vietnamese => None,
         }
     }
@@ -82,7 +111,8 @@ impl ProviderRegistry {
             }
             SchemeType::Wubi => self.wubi.reset_cache(),
             SchemeType::JapaneseRomaji => self.japanese.reset_cache(),
-            SchemeType::Korean | SchemeType::Vietnamese => {}
+            // `cantonese.db` is read-only and its rows are never rewritten, so there is no cache to drop.
+            SchemeType::Korean | SchemeType::Cantonese | SchemeType::Vietnamese => {}
         }
     }
 
@@ -103,8 +133,8 @@ impl ProviderRegistry {
                     .cache_dynamic_candidate(&request.raw_input, word, source),
                 _ => false,
             },
-            // Korean and Vietnamese take no online rows.
-            SchemeType::Korean | SchemeType::Vietnamese => false,
+            // Korean, Cantonese and Vietnamese take no online rows.
+            SchemeType::Korean | SchemeType::Cantonese | SchemeType::Vietnamese => false,
         }
     }
 
@@ -122,7 +152,35 @@ impl ProviderRegistry {
             SchemeType::Wubi
             | SchemeType::JapaneseRomaji
             | SchemeType::Korean
+            | SchemeType::Cantonese
             | SchemeType::Vietnamese => false,
         }
+    }
+
+    /// The `cantonese.db` rows for the request's letters, read again through the activated inventory, as `CantoneseScheme::candidates` lists them. Each row is keyed by the typed letters it covers (`pinyin`, apostrophes kept) and the dictionary key it was found under (`canonical_pinyin`), which is what selecting it takes out of the composition. A read that fails answers nothing, like the wubi table.
+    fn cantonese_candidates(&self, request: &QueryRequest) -> Vec<WordItem> {
+        let Some(dictionary) = &self.cantonese else {
+            return Vec::new();
+        };
+        let mut scheme = CantoneseScheme::new(dictionary.inventory());
+        scheme.set_raw_input(&request.raw_input);
+        let Ok(candidates) = scheme.candidates(dictionary.dictionary()) else {
+            return Vec::new();
+        };
+        let input = scheme.input();
+        candidates
+            .into_iter()
+            .map(|candidate| {
+                let mut item = WordItem::new(
+                    &input[..candidate.end],
+                    candidate.text,
+                    candidate.weight,
+                    CandidateSource::Database,
+                    candidate.key,
+                );
+                item.scheme = SchemeType::Cantonese;
+                item
+            })
+            .collect()
     }
 }

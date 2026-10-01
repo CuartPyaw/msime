@@ -693,7 +693,7 @@ mod tests {
             });
             type_text(&mut session, "nihc");
             select_word(&mut session, "拟好");
-            session.switch_scheme(SchemeType::Wubi);
+            session.switch_scheme(SchemeType::Wubi).unwrap();
             type_text(&mut session, "aaaa");
             select_word(&mut session, "或");
         }
@@ -711,7 +711,7 @@ mod tests {
         });
         type_text(&mut session, "nihc");
         assert_eq!(words(&session)[0], "拟好");
-        session.switch_scheme(SchemeType::Wubi);
+        session.switch_scheme(SchemeType::Wubi).unwrap();
         type_text(&mut session, "aaaa");
         assert_eq!(words(&session)[0], "或");
     }

@@ -17,6 +17,9 @@ use super::fixture::stage_fixture;
 use super::golden_dir;
 use super::snapshot::{dump_journal, query_rows, result_json, scrub, snapshot_json};
 
+/// The file name a scenario fixture stages `cantonese.db` under, beside the resource set's own files.
+const CANTONESE_DICTIONARY: &str = "cantonese.db";
+
 pub const SCENARIO_ENV: &str = "MSIME_GOLDEN_SCENARIO";
 
 /// Differences printed per scenario before the rest is summarised as a count.
@@ -326,6 +329,7 @@ fn scheme_from(name: &str) -> SchemeType {
         "wubi" => SchemeType::Wubi,
         "japanese" => SchemeType::JapaneseRomaji,
         "korean" => SchemeType::Korean,
+        "cantonese" => SchemeType::Cantonese,
         "vietnamese" => SchemeType::Vietnamese,
         _ => panic!("unknown scheme {name}"),
     }
@@ -441,6 +445,11 @@ impl Scenario {
         });
         let mut options = self.options.clone();
         options.paths = self.paths.clone();
+        // `cantonese.db` ships beside the resource set, so a fixture that stages one hands its path to the session as a host would.
+        let cantonese = self.resources.join(CANTONESE_DICTIONARY);
+        if cantonese.exists() {
+            options.cantonese_dictionary = cantonese;
+        }
         self.session = Some(Session::new(options).unwrap_or_else(|error| {
             panic!(
                 "Session::new failed: {}",
@@ -589,8 +598,11 @@ impl Scenario {
                 None
             }
             "switch_scheme" => {
-                self.session().switch_scheme(scheme_from(as_str(arg)));
-                None
+                // A scheme whose dictionary cannot be opened is refused and the session stays where it was; the refusal is the step's result.
+                match self.session().switch_scheme(scheme_from(as_str(arg))) {
+                    Ok(()) => None,
+                    Err(error) => Some(json!({"error": scrub(&error.to_string(), &self.roots)})),
+                }
             }
             "set_helpcode_schema" => {
                 let accepted = self.session().set_helpcode_schema(as_str(arg));
@@ -807,7 +819,7 @@ mod tests {
     #[test]
     fn every_scenario_is_selected_in_name_order_without_a_filter() {
         let all = selected_scenarios_from(None);
-        assert_eq!(all.len(), 276);
+        assert_eq!(all.len(), 279);
         let mut sorted = all.clone();
         sorted.sort();
         assert_eq!(all, sorted);

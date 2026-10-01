@@ -959,6 +959,25 @@ fn schemes_without_an_openable_list_never_report_one_open() {
 }
 
 #[test]
+fn cantonese_is_unavailable_without_its_dictionary() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 5;
+    let error = Session::new(&value).err().expect("no cantonese.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    value.cantonese_dictionary = dir.path().join("missing.db").to_str().unwrap().to_owned();
+    let error = Session::new(&value).err().expect("missing cantonese.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    assert!(!dir.path().join("missing.db").exists());
+}
+
+#[test]
 fn commit_raw_applies_windows_english_learning_policy() {
     let dir = tempfile::tempdir().unwrap();
     let value = options(dir.path());

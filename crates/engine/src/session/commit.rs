@@ -72,6 +72,22 @@ impl InputSession {
         self.caret = None;
         let selected = self.candidates().get(index).cloned();
         // A Korean commit is the chosen Hanja or the Hangul itself, and nothing about it is learned: the rows are keyed by Dubeolsik letters, which every learning path below would read as pinyin. A Vietnamese commit is the displayed word, learned nowhere either.
+        // A Cantonese commit is learned nowhere either. A row that covers only the leading syllables commits at once and the letters after it keep composing (`holds_phrase_progress` is false), so there is no phrase being built to hold.
+        if self.cantonese_rules_apply() {
+            let Some(selected) = selected else {
+                let text = self.preedit();
+                self.reset_composition();
+                self.chain.reset();
+                return KeyResult::committed(text);
+            };
+            if self.engine.select_cantonese(&selected) {
+                self.update_mixed_candidates();
+            } else {
+                self.reset_composition();
+            }
+            self.chain.reset();
+            return KeyResult::committed(selected.word);
+        }
         if self.korean_rules_apply() || self.vietnamese_rules_apply() {
             let text = selected.map_or_else(|| self.preedit(), |item| item.word);
             self.reset_composition();

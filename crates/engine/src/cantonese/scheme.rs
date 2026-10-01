@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::syllable::{self, Inventory, Segmentation};
 use crate::error::Result;
 use crate::language_dictionary::LanguageDictionary;
-use crate::types::SchemeKey;
+use crate::types::{QueryRequest, SchemeKey, SchemeType};
 
 /// Entries read for one span of complete syllables.
 pub const SPAN_LIMIT: usize = 200;
@@ -67,13 +67,13 @@ impl CantoneseScheme {
         }
     }
 
-    /// Replaces the composition with a host edit: letters are lowercased, anything else but `'` is dropped, and boundaries are normalized as typing would leave them.
+    /// Replaces the composition with a host edit: letters are lowercased, `'` and the spaces `editing_text` shows at syllable boundaries are both boundaries, anything else is dropped, and boundaries are normalized as typing would leave them. Reading a space as a boundary keeps the syllables the user saw when an edit changes the letters around them (`ngo oi` edited to `ngo i` stays two syllables rather than becoming `ngoi`).
     pub fn set_raw_input(&mut self, raw: &str) {
         self.input.clear();
         for character in raw.chars() {
             if character.is_ascii_alphabetic() {
                 self.input.push(character.to_ascii_lowercase());
-            } else if character == '\'' {
+            } else if character == '\'' || character == ' ' {
                 self.handle_key(SchemeKey::Apostrophe);
             }
         }
@@ -107,6 +107,27 @@ impl CantoneseScheme {
             text.push('\'');
         }
         text
+    }
+
+    /// The request the session refreshes with. `raw_input` is the typed letters and boundaries, which the provider reads again through the same inventory; `segmentation` is the dictionary key of the reading and `normalized_segmentation` the text the composition shows.
+    pub fn build_request(&self) -> QueryRequest {
+        let reading = self.segmentation();
+        QueryRequest {
+            scheme: SchemeType::Cantonese,
+            raw_input: self.input.clone(),
+            raw_input_with_cases: self.input.clone(),
+            normalized_input: self.input.replace('\'', ""),
+            raw_segmentation: self.input.clone(),
+            normalized_segmentation: self.editing_text(),
+            segmentation: reading.key(&self.input, reading.syllables.len()),
+            valid: !self.input.is_empty(),
+            ..QueryRequest::default()
+        }
+    }
+
+    /// The letters and boundaries as typed, which is what Enter commits; the spaced form the composition shows is `editing_text`.
+    pub fn preedit(&self) -> String {
+        self.input.clone()
     }
 
     /// The candidates for the composition, each text listed once per span length:
@@ -415,6 +436,24 @@ mod tests {
         assert_eq!(scheme.editing_text(), "");
         let fixture = fixture();
         assert!(scheme.candidates(&fixture.dictionary).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_edit_of_the_spaced_text_keeps_the_shown_boundaries() {
+        // `ngo'oi` shows `ngo oi`; deleting its `o` must leave `ngo` and `i`, not the single syllable `ngoi`.
+        let mut scheme = typed("ngo'oi");
+        let mut text = scheme.editing_text();
+        text.remove(4);
+        assert_eq!(text, "ngo i");
+        scheme.set_raw_input(&text);
+        assert_eq!(scheme.input(), "ngo'i");
+        assert_eq!(scheme.editing_text(), "ngo i");
+        // A spaced reading read back is the same reading, with the boundaries made explicit.
+        let mut scheme = typed("neihou");
+        let text = scheme.editing_text();
+        scheme.set_raw_input(&text);
+        assert_eq!(scheme.input(), "nei'hou");
+        assert_eq!(scheme.editing_text(), "nei hou");
     }
 
     #[test]

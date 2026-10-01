@@ -7,9 +7,11 @@ pub mod registry;
 pub mod scheme;
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::assets;
+use crate::error::Result;
 use crate::helpcode::SharedKeymap;
 use crate::paths::RuntimePaths;
 use crate::pinyin::autocorrect::autocorrect_suppression_key;
@@ -68,16 +70,24 @@ pub struct ImeSession {
 }
 
 impl ImeSession {
-    /// ime_session.cpp:42-49.
-    pub fn new(scheme: SchemeType, profile: ShuangpinProfileKind, paths: &RuntimePaths) -> Self {
+    /// ime_session.cpp:42-49. `cantonese_dictionary` is where `cantonese.db` is, read only when Cantonese is activated; starting in Cantonese fails as `switch_scheme` does when it cannot be opened.
+    pub fn new(
+        scheme: SchemeType,
+        profile: ShuangpinProfileKind,
+        paths: &RuntimePaths,
+        cantonese_dictionary: PathBuf,
+    ) -> Result<Self> {
+        let mut registry = ProviderRegistry::new(profile, paths, cantonese_dictionary);
+        registry.activate(scheme)?;
         let mut session = Self {
             scheme: Scheme::new(
                 scheme,
                 profile,
                 VietnameseInputMethod::default(),
                 VietnameseToneStyle::default(),
-            ),
-            registry: ProviderRegistry::new(profile, paths),
+                registry.cantonese_inventory(),
+            )?,
+            registry,
             state: CompositionState::default(),
             profile,
             vietnamese_method: VietnameseInputMethod::default(),
@@ -94,7 +104,7 @@ impl ImeSession {
             typo_profile: PersonalTypoProfile::shared(&paths.user(assets::USER_JOURNAL)),
         };
         session.bind_wubi_scheme();
-        session
+        Ok(session)
     }
 
     pub fn candidates(&self) -> &[WordItem] {
@@ -121,17 +131,25 @@ impl ImeSession {
         self.refresh_candidates();
     }
 
-    /// A new scheme and an empty state.
-    pub fn switch_scheme(&mut self, scheme: SchemeType) {
+    /// Opens what `scheme` reads (`cantonese.db` for Cantonese) without switching to it, so a caller can learn that the scheme is unavailable before it discards anything; `switch_scheme` to an activated scheme cannot fail.
+    pub fn activate(&mut self, scheme: SchemeType) -> Result<()> {
+        self.registry.activate(scheme)
+    }
+
+    /// A new scheme and an empty state. Cantonese opens `cantonese.db` the first time it is activated; when that fails (`LANGUAGE_DICTIONARY_UNAVAILABLE`, `LANGUAGE_DICTIONARY_VERSION_UNSUPPORTED`) the scheme is unavailable and the current scheme and its composition stay as they were.
+    pub fn switch_scheme(&mut self, scheme: SchemeType) -> Result<()> {
+        self.registry.activate(scheme)?;
         self.scheme = Scheme::new(
             scheme,
             self.profile,
             self.vietnamese_method,
             self.vietnamese_style,
-        );
+            self.registry.cantonese_inventory(),
+        )?;
         self.bind_wubi_scheme();
         self.state = CompositionState::default();
         self.pinyin_tail = false;
+        Ok(())
     }
 
     pub fn reset(&mut self) {
@@ -248,6 +266,13 @@ impl ImeSession {
         }
     }
 
+    /// Takes the letters a selected Cantonese row covers out of the composition and answers what is left; returns whether letters are left composing.
+    pub fn select_cantonese(&mut self, item: &WordItem) -> bool {
+        let composing = self.scheme.select_cantonese(item);
+        self.refresh_candidates();
+        composing
+    }
+
     /// Whether the active scheme is wubi and its code is exactly four letters.
     pub fn wubi_has_complete_code(&self) -> bool {
         self.scheme
@@ -278,14 +303,17 @@ impl ImeSession {
                 .expand_initial_candidates(&request, candidates)
     }
 
-    /// The request a scratch scheme of the current type builds for `raw`, with the session's switches applied.
+    /// The request a scratch scheme of the current type builds for `raw`, with the session's switches applied. The current scheme was activated before it became current, so building its scratch twin cannot fail; an invalid request stands for that impossible failure.
     fn raw_request(&self, raw: &str, raw_with_cases: &str) -> QueryRequest {
-        let mut scratch = Scheme::new(
+        let Ok(mut scratch) = Scheme::new(
             self.current_scheme_type(),
             self.profile,
             self.vietnamese_method,
             self.vietnamese_style,
-        );
+            self.registry.cantonese_inventory(),
+        ) else {
+            return QueryRequest::default();
+        };
         if let Some(wubi) = scratch.as_wubi_mut() {
             wubi.set_mixed_pinyin_allowed(self.wubi_options.mixed_pinyin);
             wubi.set_extended_length_allowed(self.wubi_options.mixed_pinyin);

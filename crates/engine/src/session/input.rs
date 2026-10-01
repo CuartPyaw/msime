@@ -11,6 +11,7 @@ use super::editing::temporary_japanese_preedit;
 use super::online::OnlineRequestGuard;
 use super::options::SessionOptions;
 use crate::assets;
+use crate::cantonese;
 use crate::diagnostics;
 use crate::error::{EngineError, Result};
 use crate::helpcode::{is_supported_helpcode_schema, load_helpcode_keymap, SharedKeymap};
@@ -98,7 +99,12 @@ impl InputSession {
     pub fn new(options: &SessionOptions) -> Result<Self> {
         let paths = options.paths.clone();
         let journal = paths.user(assets::USER_JOURNAL);
-        let mut engine = ImeSession::new(options.scheme, options.shuangpin_profile, &paths);
+        let mut engine = ImeSession::new(
+            options.scheme,
+            options.shuangpin_profile,
+            &paths,
+            options.cantonese_dictionary.clone(),
+        )?;
         engine.set_autocorrect_types(0);
         engine.set_quanpin_helpcode_enabled(true);
         engine.set_shuangpin_helpcode_enabled(true);
@@ -683,6 +689,14 @@ impl InputSession {
         if self.vietnamese_rules_apply() {
             return self.engine.vietnamese_spelling_symbols().to_owned();
         }
+        // `'` is a Jyutping syllable boundary only inside a composition; idle it is punctuation.
+        if self.cantonese_rules_apply() {
+            return if self.has_composition() {
+                cantonese::SPELLING_SYMBOLS_COMPOSING.to_owned()
+            } else {
+                String::new()
+            };
+        }
         if self.has_composition() || !self.scheme().opens_local_modes() {
             return String::new();
         }
@@ -774,12 +788,15 @@ impl InputSession {
         &self.mixed_candidates
     }
 
-    /// Discards the composition.
-    pub fn switch_scheme(&mut self, scheme: SchemeType) {
+    /// Discards the composition. A scheme whose dictionary cannot be opened is unavailable: the error is returned and the session stays in its scheme with its composition untouched.
+    pub fn switch_scheme(&mut self, scheme: SchemeType) -> Result<()> {
+        // Opening the dictionary first leaves nothing changed when it fails; the switch after it then cannot fail. Resetting must come before the switch, because leaving temporary Japanese switches back to the scheme it was entered from.
+        self.engine.activate(scheme)?;
         self.reset_composition();
         self.chain.reset();
-        self.engine.switch_scheme(scheme);
+        self.engine.switch_scheme(scheme)?;
         self.update_mixed_candidates();
+        Ok(())
     }
 
     pub fn set_dedicated_english_mode(&mut self, enabled: bool) {
@@ -847,7 +864,9 @@ impl InputSession {
         self.engine.reset();
         if let Some(original) = original_scheme {
             if self.engine.current_scheme_type() != original {
-                self.engine.switch_scheme(original);
+                // Temporary Japanese is entered only from a scheme that opens local modes, and none of those reads a language dictionary, so returning to it cannot fail.
+                let returned = self.engine.switch_scheme(original);
+                debug_assert!(returned.is_ok());
             }
         }
     }
@@ -938,6 +957,15 @@ impl InputSession {
         self.is_vietnamese() && self.local_mode == LocalInputMode::None && !self.dedicated_english
     }
 
+    pub(super) fn is_cantonese(&self) -> bool {
+        self.engine.current_scheme_type() == SchemeType::Cantonese
+    }
+
+    /// The Cantonese scheme's own rules are in force: dedicated English keeps its own inside it.
+    pub(super) fn cantonese_rules_apply(&self) -> bool {
+        self.is_cantonese() && self.local_mode == LocalInputMode::None && !self.dedicated_english
+    }
+
     /// The scheme's openable candidate list is showing: the composing syllable's Hanja in Korean.
     pub(super) fn candidate_list_open(&self) -> bool {
         self.engine
@@ -955,6 +983,7 @@ impl InputSession {
             SchemeType::Wubi
             | SchemeType::JapaneseRomaji
             | SchemeType::Korean
+            | SchemeType::Cantonese
             | SchemeType::Vietnamese => false,
         }
     }
@@ -1073,7 +1102,9 @@ impl InputSession {
     fn enter_local_mode(&mut self, mode: LocalInputMode, letter: u8) -> Option<String> {
         if mode == LocalInputMode::TemporaryJapanese {
             self.temporary_original_scheme = Some(self.scheme());
-            self.engine.switch_scheme(SchemeType::JapaneseRomaji);
+            // Japanese reads no language dictionary, so the switch cannot fail.
+            let switched = self.engine.switch_scheme(SchemeType::JapaneseRomaji);
+            debug_assert!(switched.is_ok());
         }
         self.local_mode = mode;
         self.local_preedit = (letter as char).to_string();
@@ -1160,13 +1191,13 @@ impl InputSession {
         item.scheme == SchemeType::Wubi
     }
 
-    /// Whether a row came from a dictionary a pin, fixed position or removal can write to. Japanese rows come from a read-only model and Korean Hanja rows from the embedded table; keyed by their letters, either would land in the pinyin user dictionary.
+    /// Whether a row came from a dictionary a pin, fixed position or removal can write to. Japanese rows come from a read-only model, Korean Hanja rows from the embedded table and Cantonese rows from the read-only `cantonese.db`; keyed by their letters, any of them would land in the pinyin user dictionary.
     pub(super) fn is_editable_source(&self, item: &WordItem) -> bool {
         item.source == CandidateSource::EnglishDictionary
             || (item.source.is_dictionary()
                 && !matches!(
                     self.scheme(),
-                    SchemeType::JapaneseRomaji | SchemeType::Korean
+                    SchemeType::JapaneseRomaji | SchemeType::Korean | SchemeType::Cantonese
                 ))
     }
 }

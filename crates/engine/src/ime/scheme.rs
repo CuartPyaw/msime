@@ -1,11 +1,16 @@
-//! The active input scheme. Six concrete schemes with the same five operations: an enum, not a trait object.
+//! The active input scheme. Seven concrete schemes with the same five operations: an enum, not a trait object.
 
+use std::sync::Arc;
+
+use crate::cantonese::{CantoneseCandidate, CantoneseScheme, Inventory};
+use crate::diagnostics;
+use crate::error::{EngineError, Result};
 use crate::japanese::JapaneseRomajiScheme;
 use crate::korean::KoreanScheme;
 use crate::quanpin::QuanpinScheme;
 use crate::shuangpin::profile::profile;
 use crate::shuangpin::ShuangpinScheme;
-use crate::types::{QueryRequest, SchemeKey, SchemeType, ShuangpinProfileKind};
+use crate::types::{QueryRequest, SchemeKey, SchemeType, ShuangpinProfileKind, WordItem};
 use crate::vietnamese::{InputMethod, ToneStyle, VietnameseScheme};
 use crate::wubi::scheme::WubiScheme;
 
@@ -15,27 +20,35 @@ pub enum Scheme {
     Wubi(WubiScheme),
     Japanese(JapaneseRomajiScheme),
     Korean(KoreanScheme),
+    Cantonese(CantoneseScheme),
     Vietnamese(VietnameseScheme),
 }
 
 impl Scheme {
-    /// ime_session.cpp:371-386; the profile only matters for shuangpin, the input method and tone style only for Vietnamese.
+    /// ime_session.cpp:371-386; the profile only matters for shuangpin, the input method and tone style only for Vietnamese, and the syllable inventory only for Cantonese, which cannot be built without one (`LANGUAGE_DICTIONARY_UNAVAILABLE`): the inventory exists once `cantonese.db` has been opened.
     pub fn new(
         scheme: SchemeType,
         profile_kind: ShuangpinProfileKind,
         vietnamese_method: InputMethod,
         vietnamese_style: ToneStyle,
-    ) -> Self {
-        match scheme {
+        cantonese_inventory: Option<Arc<Inventory>>,
+    ) -> Result<Self> {
+        Ok(match scheme {
             SchemeType::Quanpin => Self::Quanpin(QuanpinScheme::new()),
             SchemeType::Shuangpin => Self::Shuangpin(ShuangpinScheme::new(profile(profile_kind))),
             SchemeType::Wubi => Self::Wubi(WubiScheme::new()),
             SchemeType::JapaneseRomaji => Self::Japanese(JapaneseRomajiScheme::new()),
             SchemeType::Korean => Self::Korean(KoreanScheme::new()),
+            SchemeType::Cantonese => {
+                let inventory = cantonese_inventory.ok_or_else(|| {
+                    EngineError::failed(diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE)
+                })?;
+                Self::Cantonese(CantoneseScheme::new(inventory))
+            }
             SchemeType::Vietnamese => {
                 Self::Vietnamese(VietnameseScheme::new(vietnamese_method, vietnamese_style))
             }
-        }
+        })
     }
 
     pub fn scheme_type(&self) -> SchemeType {
@@ -45,6 +58,7 @@ impl Scheme {
             Self::Wubi(_) => SchemeType::Wubi,
             Self::Japanese(_) => SchemeType::JapaneseRomaji,
             Self::Korean(_) => SchemeType::Korean,
+            Self::Cantonese(_) => SchemeType::Cantonese,
             Self::Vietnamese(_) => SchemeType::Vietnamese,
         }
     }
@@ -56,6 +70,7 @@ impl Scheme {
             Self::Wubi(scheme) => scheme.reset(),
             Self::Japanese(scheme) => scheme.reset(),
             Self::Korean(scheme) => scheme.reset(),
+            Self::Cantonese(scheme) => scheme.reset(),
             Self::Vietnamese(scheme) => scheme.reset(),
         }
     }
@@ -67,6 +82,7 @@ impl Scheme {
             Self::Wubi(scheme) => scheme.handle_key(key),
             Self::Japanese(scheme) => scheme.handle_key(key),
             Self::Korean(scheme) => scheme.handle_key(key),
+            Self::Cantonese(scheme) => scheme.handle_key(key),
             Self::Vietnamese(scheme) => scheme.handle_key(key),
         }
     }
@@ -78,6 +94,7 @@ impl Scheme {
             Self::Wubi(scheme) => scheme.build_request(),
             Self::Japanese(scheme) => scheme.build_request(),
             Self::Korean(scheme) => scheme.build_request(),
+            Self::Cantonese(scheme) => scheme.build_request(),
             Self::Vietnamese(scheme) => scheme.build_request(),
         }
     }
@@ -89,11 +106,12 @@ impl Scheme {
             Self::Wubi(scheme) => scheme.preedit(),
             Self::Japanese(scheme) => scheme.preedit(),
             Self::Korean(scheme) => scheme.preedit(),
+            Self::Cantonese(scheme) => scheme.preedit(),
             Self::Vietnamese(scheme) => scheme.preedit(),
         }
     }
 
-    /// Wubi keeps no case, so it only takes the plain letters.
+    /// Wubi and Cantonese keep no case, so they only take the plain letters.
     pub fn set_raw_input(&mut self, raw: &str, raw_with_cases: &str) {
         match self {
             Self::Quanpin(scheme) => scheme.set_raw_input(raw, raw_with_cases),
@@ -101,6 +119,7 @@ impl Scheme {
             Self::Wubi(scheme) => scheme.set_raw_input(raw),
             Self::Japanese(scheme) => scheme.set_raw_input(raw, raw_with_cases),
             Self::Korean(scheme) => scheme.set_raw_input(raw, raw_with_cases),
+            Self::Cantonese(scheme) => scheme.set_raw_input(raw),
             Self::Vietnamese(scheme) => scheme.set_raw_input(raw, raw_with_cases),
         }
     }
@@ -117,5 +136,19 @@ impl Scheme {
             Self::Wubi(scheme) => Some(scheme),
             _ => None,
         }
+    }
+
+    /// Takes the letters a Cantonese candidate covers out of the composition, as `CantoneseScheme::select`; returns whether letters are left composing. False, with nothing changed, for every other scheme.
+    pub fn select_cantonese(&mut self, item: &WordItem) -> bool {
+        let Self::Cantonese(scheme) = self else {
+            return false;
+        };
+        scheme.select(&CantoneseCandidate {
+            text: item.word.clone(),
+            weight: item.weight,
+            key: item.canonical_pinyin.clone(),
+            syllables: item.canonical_pinyin.split(' ').count(),
+            end: item.pinyin.len(),
+        })
     }
 }

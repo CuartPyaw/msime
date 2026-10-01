@@ -16,7 +16,7 @@ pub(super) fn temporary_japanese_preedit(raw: &str) -> String {
 }
 
 impl InputSession {
-    /// Dedicated preedit; `"R" + cased raw` in temporary Japanese; the local preedit; the displayed word in Vietnamese; else the cased raw input.
+    /// Dedicated preedit; `"R" + cased raw` in temporary Japanese; the local preedit; the displayed word in Vietnamese; the letters spaced at syllable boundaries in Cantonese; else the cased raw input.
     pub(super) fn editing_text(&self) -> String {
         if self.dedicated_english {
             return self.dedicated_english_preedit.clone();
@@ -27,6 +27,10 @@ impl InputSession {
             }
             // A Vietnamese word is edited as the text it shows, not as its keystrokes.
             LocalInputMode::None if self.is_vietnamese() => self.engine.preedit().to_owned(),
+            // Jyutping is edited as the syllables it shows (`nei hou`); an edit drops the spaces again, because the scheme keeps only letters and `'`.
+            LocalInputMode::None if self.is_cantonese() => {
+                self.engine.request().normalized_segmentation.clone()
+            }
             LocalInputMode::None => self.raw_with_cases().to_owned(),
             _ => self.local_preedit.clone(),
         }
@@ -201,9 +205,11 @@ impl InputSession {
             SchemeType::Quanpin => {
                 quanpin_raw_boundaries(raw_with_cases, &self.pinyin_segmentation_with_cases())
             }
+            // The Cantonese editing text is spaced, so raw offsets would not land on its syllables; the host edits it one character at a time.
             SchemeType::Wubi
             | SchemeType::JapaneseRomaji
             | SchemeType::Korean
+            | SchemeType::Cantonese
             | SchemeType::Vietnamese => Vec::new(),
         }
     }

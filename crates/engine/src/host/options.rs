@@ -27,7 +27,7 @@ pub struct EngineOptions {
     pub user_data: String,
     pub cache: String,
     pub dictionaries: String,
-    /// 0 quanpin, 1 shuangpin, 2 wubi, 3 Japanese, 4 Korean, 7 Vietnamese.
+    /// 0 quanpin, 1 shuangpin, 2 wubi, 3 Japanese, 4 Korean, 5 Cantonese, 7 Vietnamese.
     pub scheme: u8,
     /// 0 xiaohe, 1 ziranma, 2 shoudao, 3 microsoft.
     pub shuangpin_profile: u8,
@@ -177,6 +177,7 @@ pub fn session_options(options: &EngineOptions) -> Result<SessionOptions> {
     session.shuangpin_preedit_uses_raw = options.shuangpin_preedit_uses_raw;
     session.vietnamese_input_method = vietnamese_input_method;
     session.vietnamese_tone_style = vietnamese_tone_style;
+    session.cantonese_dictionary = PathBuf::from(&options.cantonese_dictionary);
     session.learning = options.learning;
     session.autocorrect_types = autocorrect_types;
     session.fuzzy_pinyin = FuzzyPinyinOptions {

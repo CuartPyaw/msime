@@ -239,8 +239,8 @@ impl InputSession {
                     state.query_text = request.raw_input.clone();
                 }
             }
-            // Korean syllables and Vietnamese words are already the text: there is nothing for a cloud provider to convert.
-            SchemeType::Korean | SchemeType::Vietnamese => {}
+            // Korean syllables and Vietnamese words are already the text: there is nothing for a cloud provider to convert. Cantonese is answered by its own dictionary only.
+            SchemeType::Korean | SchemeType::Cantonese | SchemeType::Vietnamese => {}
             // Wubi codes are not spellings a cloud provider understands, and wubi providers cannot take dynamic rows.
             SchemeType::Wubi => state.cache_key = request.normalized_input.clone(),
             SchemeType::Shuangpin => {
