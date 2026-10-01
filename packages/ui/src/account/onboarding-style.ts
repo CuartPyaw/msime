@@ -119,3 +119,29 @@ export const splashTagline =
   "relative text-[13px] tracking-[0.18em] text-white/62 animate-splash-tagline motion-reduce:animate-none";
 export const splashHint =
   "absolute bottom-[max(36px,env(safe-area-inset-bottom))] text-xs text-white/40 animate-splash-hint motion-reduce:animate-none";
+
+// ---- the macOS input-source guide ----
+
+/** A Mac window rather than a phone page: the platform's own palette and font, 13-point text, a header that sits beside the icon, and a button bar along the bottom edge. The top padding clears the traffic lights the overlay title bar draws over the page. */
+export const macPage =
+  "flex h-full min-h-full w-full flex-col bg-[var(--p-bg)] font-[family-name:var(--p-font)] text-[13px] text-[var(--p-text)]";
+export const macBody = "flex-1 overflow-y-auto px-10 pt-14 pb-6";
+const macColumn = "mx-auto w-[min(640px,100%)]";
+export const macHeader = `${macColumn} flex items-center gap-4 [&>img]:size-16 [&>img]:flex-none`;
+export const macHeading = "min-w-0 flex-1";
+export const macTitle = "m-0 text-xl font-semibold tracking-[-0.01em]";
+export const macLead = "mt-1.5 mb-0 leading-relaxed text-[var(--p-sub)]";
+export const macContent = `${macColumn} mt-6 flex flex-col gap-4`;
+export const macNote = "m-0 text-xs leading-relaxed text-[var(--p-sub)]";
+/** The steps as a System Settings group: one rounded box, rows split by hairlines. */
+export const macSteps =
+  "m-0 list-none overflow-hidden rounded-[var(--p-group-r)] bg-[var(--p-group-bg)] p-0 shadow-[var(--p-group-shadow)]";
+export const macStep =
+  "flex items-start gap-3 px-4 py-3 [&+&]:border-t [&+&]:border-[var(--p-row-divider)] [&_strong]:block [&_strong]:font-semibold [&_small]:mt-0.5 [&_small]:block [&_small]:text-xs [&_small]:leading-relaxed [&_small]:text-[var(--p-sub)]";
+export const macStepNumber =
+  "mt-px grid size-5 flex-none place-items-center rounded-full bg-accent-soft text-[11px] font-semibold text-[var(--p-accent-text)] tabular-nums";
+export const macError = `${macColumn} mt-4 mb-0 text-xs text-danger`;
+/** The button bar: a hairline above, a status on the left, and the buttons on the right with the default one last, as in a Mac dialog. */
+export const macFooter =
+  "flex flex-none items-center gap-2 border-t border-[var(--p-hair)] bg-[var(--p-chrome)] px-5 py-3 [&_button]:m-0 [&_button]:h-7 [&_button]:rounded-[var(--p-r-ctl)] [&_button]:px-3.5 [&_button]:py-0 [&_button]:text-[13px] [&_.secondary]:border-[length:0.5px] [&_.secondary]:border-[var(--p-hair)] [&_.secondary]:bg-[var(--p-btn-bg)] [&_.secondary]:text-[var(--p-btn-fg)] [&_.primary]:border-0 [&_.primary]:bg-accent-strong [&_.primary]:text-[var(--p-on-accent)]";
+export const macStatus = "min-w-0 flex-1 truncate text-xs text-[var(--p-sub)]";
