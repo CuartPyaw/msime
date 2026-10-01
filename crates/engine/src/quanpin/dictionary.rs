@@ -762,11 +762,11 @@ impl QuanpinDictionary {
 
     /// The first correction-mode cut of the raw input, cached (QD:777-788).
     fn computed_segments(&mut self, raw: &str) -> Vec<String> {
-        let key = raw.to_owned();
-        if let Some(cached) = lookup_cached_segments(&self.segmentation_cache, &key) {
+        if let Some(cached) = lookup_cached_segments(&self.segmentation_cache, raw) {
             return cached;
         }
         let segments = first_correction_cut(raw).unwrap_or_default();
+        let key = raw.to_owned();
         self.segmentation_cache.insert(key, segments.clone());
         segments
     }
@@ -854,9 +854,9 @@ impl QuanpinDictionary {
 
 fn lookup_cached_segments(
     cache: &FifoCache<String, Vec<String>>,
-    key: &String,
+    key: &str,
 ) -> Option<Vec<String>> {
-    cache.get_ref(key).cloned()
+    cache.get_ref_by(key).cloned()
 }
 
 fn resolution_cache_hash(types: u32, raw: &str, segmentation: &str) -> u64 {

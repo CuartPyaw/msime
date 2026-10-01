@@ -20,12 +20,11 @@ fn words(items: &[WordItem]) -> Vec<&str> {
 }
 
 #[test]
-fn segmentation_cache_lookup_uses_one_owned_key() {
+fn segmentation_cache_lookup_borrows_query_key() {
     let mut cache = FifoCache::new(2);
     cache.insert("ni".to_owned(), vec!["ni".to_owned()]);
-    let key = "ni".to_owned();
     assert_eq!(
-        lookup_cached_segments(&cache, &key),
+        lookup_cached_segments(&cache, "ni"),
         Some(vec!["ni".to_owned()])
     );
 }
