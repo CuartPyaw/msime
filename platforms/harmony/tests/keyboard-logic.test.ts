@@ -220,6 +220,19 @@ import {
   dictionaryChangePageChanged,
 } from "../entry/src/main/ets/account/AccountCloudBridge";
 import {
+  CLOUD_CLIPBOARD_EMPTY,
+  CLOUD_CLIPBOARD_FAILED,
+  CLOUD_CLIPBOARD_LOADING,
+  CLOUD_CLIPBOARD_SEND,
+  CLOUD_CLIPBOARD_SEND_FAILED,
+  CLOUD_CLIPBOARD_SENT,
+  CLOUD_CLIPBOARD_TAB,
+  CLOUD_CLIPBOARD_TOO_LONG,
+  CloudClipboardPolicy,
+  CloudClipboardSendOutcome,
+  CloudClipboardState,
+} from "../entry/src/main/ets/keyboard/clipboard/CloudClipboardPolicy";
+import {
   AiSkinCancelled,
   AiSkinFailure,
   AiSkinRun,
@@ -7529,6 +7542,240 @@ group("the settings app and the keyboard never present a spent refresh token", (
     .then((reply) => {
       check(JSON.parse(reply).error === "account_unauthorized", "a refused refresh signs out");
       check(expiredDisk.box.value === null, "and clears the stored session");
+    });
+});
+
+group("cloud clipboard text follows the shared clipboard bounds", () => {
+  check(
+    CloudClipboardPolicy.validText("第一行\n第二行\r\n\t缩进"),
+    "line breaks and tabs are content",
+  );
+  check(!CloudClipboardPolicy.validText("   \n\t "), "blank text is refused");
+  check(!CloudClipboardPolicy.validText("a\u0000b"), "NUL is refused");
+  check(!CloudClipboardPolicy.validText("a\u0001b"), "other C0 controls are refused");
+  check(!CloudClipboardPolicy.validText("a\u007fb"), "DEL is refused");
+  check(
+    !CloudClipboardPolicy.validText("a\u0085b"),
+    "C1 controls are refused as Rust's is_control does",
+  );
+  check(CloudClipboardPolicy.validText("x".repeat(4000)), "4,000 UTF-16 units fit");
+  check(!CloudClipboardPolicy.validText("x".repeat(4001)), "4,001 do not");
+  check(
+    CloudClipboardPolicy.validText("😀".repeat(2000)),
+    "an astral character counts as two units",
+  );
+  check(
+    !CloudClipboardPolicy.validText("😀".repeat(2000) + "x"),
+    "so 2,000 of them fill the bound",
+  );
+  check(!CloudClipboardPolicy.validText(42), "only strings are text");
+});
+
+group("cloud clipboard listings are read whole", () => {
+  const id = (digit: string) => digit.repeat(64);
+  const page = (items: unknown[], enabled = true) =>
+    JSON.stringify({ ok: true, value: { enabled, items } });
+  const item = (digit: string, text: string) => ({
+    id: id(digit),
+    text,
+    updated_at: "2026-10-01T08:00:00Z",
+  });
+
+  const ready = CloudClipboardPolicy.parseList(
+    page([item("a", "来自手机"), item("b", "两行\n文本")]),
+  );
+  check(ready.state === CloudClipboardState.READY, "a valid page is ready");
+  check(
+    ready.items.length === 2 &&
+      ready.items[0].id === id("a") &&
+      ready.items[1].text === "两行\n文本" &&
+      ready.items[0].updatedAt === "2026-10-01T08:00:00Z",
+    "items keep their order, id, text and time",
+  );
+  check(
+    CloudClipboardPolicy.parseList(page([])).state === CloudClipboardState.READY &&
+      CloudClipboardPolicy.parseList(page([])).items.length === 0,
+    "an empty clipboard is ready with no items",
+  );
+
+  const disabled = CloudClipboardPolicy.parseList(page([item("a", "hidden")], false));
+  check(
+    disabled.state === CloudClipboardState.DISABLED && disabled.items.length === 0,
+    "a disabled clipboard shows nothing it carries",
+  );
+  check(
+    CloudClipboardPolicy.parseList('{"ok":false,"error":"account_unauthorized"}').state ===
+      CloudClipboardState.SIGNED_OUT,
+    "an unauthorized reply reads as signed out",
+  );
+  for (const failure of [
+    '{"ok":false,"error":"account_unavailable"}',
+    '{"ok":false,"error":"account_rate_limited"}',
+    "not json",
+    "[]",
+    '{"ok":true,"value":null}',
+    '{"ok":true,"value":{"items":[]}}',
+    '{"ok":true,"value":{"enabled":true}}',
+    page([{ id: "1", text: "short id", updated_at: "2026" }]),
+    page([{ id: "A".repeat(64), text: "upper-case id", updated_at: "2026" }]),
+    page([item("a", "bell\u0007")]),
+    page([item("a", "   ")]),
+    page([{ id: id("a"), text: "no time" }]),
+    page([{ id: id("a"), text: "control in time", updated_at: "2026\n" }]),
+    page([{ id: id("a"), text: "long time", updated_at: "9".repeat(129) }]),
+    page([item("a", "fine"), null]),
+    page(Array.from({ length: 51 }, (_unused, index) => item("c", `item ${index}`))),
+  ]) {
+    const listing = CloudClipboardPolicy.parseList(failure);
+    check(
+      listing.state === CloudClipboardState.FAILED && listing.items.length === 0,
+      `a malformed or failed reply shows nothing: ${failure.slice(0, 60)}`,
+    );
+  }
+  check(
+    CloudClipboardPolicy.parseList(page(Array.from({ length: 50 }, () => item("d", "x")))).items
+      .length === 50,
+    "fifty items is the service's page",
+  );
+});
+
+group("cloud clipboard items stay out of password fields and stale editors", () => {
+  check(CloudClipboardPolicy.editorAllows(true, false), "an ordinary field may show cloud items");
+  check(!CloudClipboardPolicy.editorAllows(true, true), "a password field never does");
+  check(
+    !CloudClipboardPolicy.editorAllows(false, false),
+    "nor a field whose attributes have not arrived",
+  );
+  check(CloudClipboardPolicy.current(7, 7), "a listing for the focused editor is current");
+  check(!CloudClipboardPolicy.current(7, 8), "a listing for the previous editor is dropped");
+  check(!CloudClipboardPolicy.current(-1, -1), "a listing never fetched belongs to no editor");
+  check(
+    !CloudClipboardPolicy.current(Number.NaN, Number.NaN),
+    "a non-integer generation is refused",
+  );
+});
+
+group("sending to the cloud clipboard needs a signed-in account with the clipboard on", () => {
+  check(
+    CloudClipboardPolicy.sendBlock(null, "hello") === CLOUD_CLIPBOARD_LOADING,
+    "nothing is sent before the account's state is known",
+  );
+  check(
+    CloudClipboardPolicy.sendBlock(CloudClipboardState.SIGNED_OUT, "hello") ===
+      "登录水杉账号后可在设备间同步剪贴板",
+    "signed out says how to sign in",
+  );
+  check(
+    CloudClipboardPolicy.sendBlock(CloudClipboardState.DISABLED, "hello") === "云剪贴板未开启",
+    "a disabled clipboard says so",
+  );
+  check(
+    CloudClipboardPolicy.sendBlock(CloudClipboardState.FAILED, "hello") === CLOUD_CLIPBOARD_FAILED,
+    "an unreadable clipboard is not written to",
+  );
+  check(
+    CloudClipboardPolicy.sendBlock(CloudClipboardState.READY, "hello") === null,
+    "ready and valid may be sent",
+  );
+  check(
+    CloudClipboardPolicy.sendBlock(CloudClipboardState.READY, "x".repeat(4001)) ===
+      CLOUD_CLIPBOARD_TOO_LONG,
+    "a local entry beyond the shared bound is refused before the network",
+  );
+  check(CLOUD_CLIPBOARD_SEND === "发到云剪贴板" && CLOUD_CLIPBOARD_TAB === "云端", "shared labels");
+
+  check(
+    CloudClipboardPolicy.parseSend('{"ok":true,"value":{}}') === CloudClipboardSendOutcome.SENT,
+    "an accepted add is sent",
+  );
+  check(
+    CloudClipboardPolicy.parseSend('{"ok":false,"error":"account_unauthorized"}') ===
+      CloudClipboardSendOutcome.SIGNED_OUT,
+    "an expired session is named",
+  );
+  check(
+    CloudClipboardPolicy.parseSend('{"ok":false,"error":"account_invalid"}') ===
+      CloudClipboardSendOutcome.INVALID,
+    "refused text is named",
+  );
+  check(
+    CloudClipboardPolicy.parseSend('{"ok":false,"error":"account_unavailable"}') ===
+      CloudClipboardSendOutcome.FAILED &&
+      CloudClipboardPolicy.parseSend("") === CloudClipboardSendOutcome.FAILED,
+    "anything else is a failure",
+  );
+  check(
+    CloudClipboardPolicy.sendNotice(CloudClipboardSendOutcome.SENT) === CLOUD_CLIPBOARD_SENT &&
+      CloudClipboardPolicy.sendNotice(CloudClipboardSendOutcome.FAILED) ===
+        CLOUD_CLIPBOARD_SEND_FAILED,
+    "each outcome has its line",
+  );
+
+  check(CloudClipboardPolicy.notice(null, true, 0) === CLOUD_CLIPBOARD_LOADING, "loading says so");
+  check(CloudClipboardPolicy.notice(null, false, 0) === "", "nothing is claimed before a fetch");
+  check(
+    CloudClipboardPolicy.notice(CloudClipboardState.READY, false, 0) === CLOUD_CLIPBOARD_EMPTY,
+    "an empty clipboard says it is empty",
+  );
+  check(
+    CloudClipboardPolicy.notice(CloudClipboardState.READY, false, 3) === "",
+    "items speak for themselves",
+  );
+  check(
+    CloudClipboardPolicy.notice(CloudClipboardState.SIGNED_OUT, false, 0) ===
+      "登录水杉账号后可在设备间同步剪贴板" &&
+      CloudClipboardPolicy.notice(CloudClipboardState.DISABLED, false, 0) === "云剪贴板未开启",
+    "signed-out and disabled use the shared wording",
+  );
+});
+
+group("the account bridge sends multi-line clipboard text the shared client accepts", () => {
+  let stored: string | null = JSON.stringify({
+    access_token: "a".repeat(64),
+    refresh_token: "b".repeat(64),
+    token_type: "Bearer",
+    expires_at: Date.now() + 600_000,
+    user: { id: "synthetic-user", display_name: "Test", created_at: "2026-01-01" },
+  });
+  const bodies: (Record<string, unknown> | undefined)[] = [];
+  const bridge = new AccountCloudBridge(
+    {
+      request: async (_method, _path, _token, body) => {
+        bodies.push(body);
+        return {
+          status: 200,
+          body: JSON.stringify({ id: "e".repeat(64), text: body?.text, updated_at: "2026-10-01" }),
+        };
+      },
+    },
+    {
+      load: () => stored,
+      save: (value) => {
+        stored = value;
+      },
+      clear: () => {
+        stored = null;
+      },
+    },
+  );
+  void bridge
+    .handle(
+      JSON.stringify({
+        operation: "clipboard",
+        clipboard_operation: "add",
+        text: "第一行\n第二行",
+      }),
+    )
+    .then((reply) => {
+      check(JSON.parse(reply).ok === true, "a copied paragraph is accepted");
+      check(bodies[0]?.text === "第一行\n第二行", "and sent with its line break");
+    });
+  void bridge
+    .handle(
+      JSON.stringify({ operation: "clipboard", clipboard_operation: "add", text: "a\u0085b" }),
+    )
+    .then((reply) => {
+      check(JSON.parse(reply).error === "account_invalid", "a C1 control is refused locally");
     });
 });
 

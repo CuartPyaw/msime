@@ -1,5 +1,6 @@
 import { utf8Length } from "../keyboard/Utf8";
 import { CustomKeyboardSkin, CustomSkinDocument } from "../keyboard/skin/CustomKeyboardSkin";
+import { CloudClipboardPolicy } from "../keyboard/clipboard/CloudClipboardPolicy";
 
 export type AccountTransportResponse = { status: number; body: string; contentLength?: number };
 export type AccountDownloadResponse = {
@@ -84,7 +85,6 @@ const MAX_COMMUNITY_RESOURCE_PAGE_BYTES = 48 * 1024 * 1024;
 const MAX_COMMUNITY_RESOURCE_DETAIL_BYTES = 3 * 1024 * 1024;
 const MAX_SESSION_SECONDS = 86_400 * 30;
 const MAX_SESSION_MILLISECONDS = MAX_SESSION_SECONDS * 1000;
-const MAX_CLIPBOARD_TEXT = 4000;
 const MAX_SEARCH = 256;
 
 /**
@@ -1013,8 +1013,8 @@ export class AccountCloudBridge {
       );
     }
     if (operation === "add") {
-      if (!validString(action.text, MAX_CLIPBOARD_TEXT) || action.text.trim().length === 0)
-        return error("account_invalid");
+      // Clipboard text keeps its line breaks and tabs, as the shared client allows; the generic string check here would refuse every multi-line copy.
+      if (!CloudClipboardPolicy.validText(action.text)) return error("account_invalid");
       return this.authenticated("POST", "/v1/users/me/clipboard", { text: action.text });
     }
     if (operation === "delete") {
