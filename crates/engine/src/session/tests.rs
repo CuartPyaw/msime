@@ -809,6 +809,18 @@ fn position_context_borrows_normalized_pinyin() {
     ));
 }
 
+#[test]
+fn pinyin_ranking_context_borrows_normalized_segmentation() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    type_text(&mut session, "n");
+
+    assert!(matches!(
+        session.input.pinyin_ranking_context(),
+        std::borrow::Cow::Borrowed(_)
+    ));
+}
+
 /// Phrase progress follows the selected row (`transition.wubi_native`), not the list: two quanpin picks out of a list that still holds 工 compose a storable pinyin phrase.
 #[test]
 fn quanpin_picks_beside_a_wubi_row_learn_a_pinyin_phrase() {
