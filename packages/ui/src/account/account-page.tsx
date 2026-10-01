@@ -893,11 +893,12 @@ function AccountDetailsPage({
 
   const requestCode = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       if (!channel) return;
       const normalized = target.trim();
       if (!normalized) throw { code: "account_invalid" };
       const value = await client.requestCode(channel, normalized);
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       const timestamp = Date.now();
       setNow(timestamp);
       setChallenge(value);
@@ -927,8 +928,9 @@ function AccountDetailsPage({
 
   const signOut = (all: boolean) =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       await client.logout(all);
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setUser(null);
       setProfile(null);
       setName("");
@@ -938,8 +940,9 @@ function AccountDetailsPage({
 
   const deleteAccount = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       await client.deleteAccount();
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setUser(null);
       setProfile(null);
       setName("");
@@ -949,8 +952,9 @@ function AccountDetailsPage({
 
   const clearExpired = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       await client.clearExpired();
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setUser(null);
       setProfile(null);
       setName("");
@@ -959,11 +963,12 @@ function AccountDetailsPage({
 
   const rename = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       const normalized = name.trim();
       if (!normalized || [...normalized].length > 64 || /[\u0000-\u001f\u007f]/.test(normalized))
         throw { code: "account_invalid" };
       const updated = await client.rename(normalized);
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       applyProfile(updated);
       setNotice("昵称已更新。");
     });
@@ -1439,7 +1444,14 @@ function AccountDetailsPage({
                 type="button"
                 className="secondary"
                 disabled={busy}
-                onClick={() => void perform(async () => setProviders(await client.providers()))}
+                onClick={() =>
+                  void perform(async () => {
+                    const generation = clientGeneration.current;
+                    const value = await client.providers();
+                    if (!mounted.current || generation !== clientGeneration.current) return;
+                    setProviders(value);
+                  })
+                }
               >
                 刷新登录方式
               </button>

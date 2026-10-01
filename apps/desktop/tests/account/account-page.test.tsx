@@ -112,6 +112,36 @@ test("a late profile mutation is ignored after the profile page unmounts", async
   await Promise.resolve();
 });
 
+test("a desktop profile rename response from a replaced client is ignored", async () => {
+  let resolveOld!: (value: AccountProfile) => void;
+  const oldClient = account({
+    status: vi.fn().mockResolvedValue({ user }),
+    rename: vi.fn(
+      () =>
+        new Promise<AccountProfile>((resolve) => {
+          resolveOld = resolve;
+        }),
+    ),
+  });
+  const nextClient = account({
+    status: vi.fn().mockResolvedValue({ user }),
+  });
+  const view = render(<AccountPage client={oldClient} />);
+  const name = await screen.findByRole("textbox", { name: "社区昵称" });
+  fireEvent.change(name, { target: { value: "旧客户端昵称" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存昵称" }));
+  await waitFor(() => expect(oldClient.rename).toHaveBeenCalledWith("旧客户端昵称"));
+
+  view.rerender(<AccountPage client={nextClient} />);
+  await screen.findByRole("textbox", { name: "社区昵称" });
+  await act(async () => {
+    resolveOld({ user: { ...user, displayName: "响应旧昵称" }, providers: ["email"] });
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(screen.queryByDisplayValue("响应旧昵称")).toBeNull();
+});
+
 test("mobile accounts keep profile editing and session actions on the pushed profile page", async () => {
   window.history.replaceState({ msimeSettings: true, page: "account" }, "");
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });
