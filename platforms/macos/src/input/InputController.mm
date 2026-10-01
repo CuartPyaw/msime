@@ -2872,6 +2872,26 @@ static MSIMEPreferenceSaveState MSIMESharedPreferenceSaveState;
 static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
 // The controller whose client has the focus. Every controller observes the shared appearance and the one that registered first saves a change, usually a controller whose client lost focus long ago, so after the save this is the one that has to load the document into its session.
 static __weak MSIMEInputController *MSIMEFocusedController;
+// A scheme reaches the Engine only through the shared document, and the save that the appearance change starts runs off the main thread, so the key typed right after a switch from 한 to 中 still composed Hangul, and the open syllable then held the new scheme back until it ended. A switch therefore writes the document here, on the main thread before the next key, and hands the focused session exactly what was written. The composition was finished before the scheme changed, so the session is idle and applies it at once. The save the appearance change also started writes the same preferences again, which the session takes as no change. Fcitx5 waits for its save on a scheme switch the same way; a failed save here leaves the switch to that one.
+- (void)applyPreferencesToSessionNow {
+    if (!_session || !_activeClient || !_preferencesDirectory || !_appearance) return;
+    NSDictionary *overrides = [_appearance sharedPreferencesByMerging:@{}];
+    NSDictionary *saved = nil;
+    // The background save can take the revision in between; the second attempt merges onto what it wrote, as that save does.
+    for (int attempt = 0; attempt < 2 && !saved; ++attempt) {
+        NSDictionary *snapshot = [MSIMEClientSession loadPreferencesInDirectory:_preferencesDirectory error:nil];
+        NSDictionary *preferences = snapshot ? MSIMEMergePreferenceSnapshot(snapshot[@"preferences"], overrides) : nil;
+        if (!preferences) break;
+        id revision = snapshot[@"revision"] ?: @0;
+        saved = [MSIMEClientSession savePreferencesInDirectory:_preferencesDirectory expectedRevision:[revision unsignedLongLongValue]
+                                                     snapshot:@{ @"format_version": @1, @"revision": revision, @"preferences": preferences } error:nil];
+    }
+    if (![saved isKindOfClass:NSDictionary.class]) { msime_macos_diagnostic_write("preferences_save_failed"); return; }
+    // Through the load path, so the revision is recorded as applied and a read still in flight is dropped rather than applied over it.
+    _preferenceLoadState.reset();
+    if (!_preferenceLoadState.begin()) return;
+    [self completePreferenceLoad:saved error:nil generation:_preferenceLoadState.generation session:_session client:_activeClient];
+}
 - (void)persistAppearancePreferences {
     if (!_preferencesDirectory) return;
     if (!MSIMESharedPreferenceSaveState.request()) { MSIMEQueuedPreferenceSaver = self; return; }
@@ -3352,6 +3372,9 @@ static __weak MSIMEInputController *MSIMEFocusedController;
     [super setValue:value forTag:tag client:sender];
 }
 - (void)systemDidReportInputMode:(id)value client:(id)sender {
+    // The switch belongs to the session that will receive the next key, which is the focused controller's whichever controller the system told.
+    MSIMEInputController *focused = MSIMEFocusedController;
+    if (focused && focused != self) { [focused systemDidReportInputMode:value client:sender]; return; }
     if (!MSIMEAdoptReportedInputMode(MSIMESharedSystemInputModeState(), value)) return;
     [self ensureAppearance];
     // The report can arrive before activateServer: or handleEvent: has named the client, and the mode is remembered per application.
@@ -3370,6 +3393,7 @@ static __weak MSIMEInputController *MSIMEFocusedController;
             if (finished) [self apply:finished];
         }
         _appearance.inputScheme = target;
+        [self applyPreferencesToSessionNow];
     }
     [self setEnglishInputMode:mode == MSIMEInputMode::English];
     state.selecting = false;
@@ -4723,6 +4747,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     _appearance.candidateTranslations = !_appearance.candidateTranslations;
 }
 - (void)selectInputScheme:(id)sender {
+    MSIMEInputController *focused = MSIMEFocusedController;
+    if (focused && focused != self) { [focused selectInputScheme:sender]; return; }
     [self ensureAppearance];
     NSString *scheme = [sender respondsToSelector:@selector(representedObject)] ? [sender representedObject] : nil;
     if (![@[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean"] containsObject:scheme] || [_appearance.inputScheme isEqual:scheme]) return;
@@ -4733,6 +4759,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         [self apply:finished];
     }
     _appearance.inputScheme = scheme;
+    [self applyPreferencesToSessionNow];
 }
 - (void)selectGlobalTheme:(id)sender {
     [self ensureAppearance];

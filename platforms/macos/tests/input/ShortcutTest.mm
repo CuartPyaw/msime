@@ -2860,6 +2860,82 @@ static void TestSavedPreferencesReachTheFocusedController() {
     MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
 
+// A mode switch is a scheme change, and the scheme reaches the Engine only through the shared document. The key typed right after Ctrl+Space has to compose in the new scheme, before any background save or poll has had a turn of the run loop: the switch writes the document and applies it to the session there and then. Checked against a real session for each direction, from the input menu too, and the save that follows must leave the switch where it is.
+static void TestModeSwitchReachesTheSessionBeforeTheNextKey() {
+    NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    NSMutableDictionary *options = [@{@"api_version": @1,
+        @"preferences": @{@"scheme": @"quanpin", @"default_ime_mode": @"chinese", @"candidate_page_size": @5,
+                          @"learning": @NO, @"chinese_punctuation": @YES}} mutableCopy];
+    for (NSString *name in @[@"resources", @"user_data", @"cache", @"dictionaries", @"preferences"]) {
+        NSString *path = [root stringByAppendingPathComponent:name];
+        assert([NSFileManager.defaultManager createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil]);
+        if (![name isEqual:@"preferences"]) options[name] = path;
+    }
+    NSError *error = nil;
+    MSIMEClientSession *session = [[MSIMEClientSession alloc] initWithOptions:options error:&error];
+    assert(session && !error);
+    assert([session setFocused:YES error:&error] && !error);
+    NSString *suite = [@"msime.mode-switch-session." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *prefs =
+        [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults skinsRoot:[NSURL fileURLWithPath:root]];
+    prefs.inputScheme = @"quanpin";
+    prefs.englishMode = NO;
+    ShortcutClient *client = [ShortcutClient new];
+    client.document = @"";
+    client.caret = NSMakeRect(100, 100, 1, 16);
+    ModeController *controller = [ModeController alloc];
+    [controller setValue:prefs forKey:@"appearance"];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:client forKey:@"activeClient"];
+    [controller setValue:[root stringByAppendingPathComponent:@"preferences"] forKey:@"preferencesDirectory"];
+    [controller setValue:[[HiddenCandidatePanel alloc] init] forKey:@"panel"];
+    MSIMEFocusedController = controller;
+    MSIMEResetSystemInputModeState(MSIMESharedSystemInputModeState());
+    auto scheme = ^NSInteger { return [[controller valueForKey:@"view"][@"scheme"] integerValue]; };
+    auto type = ^(unsigned short keyCode, NSString *letter) {
+        assert([controller handleEvent:KeypadKey(keyCode, letter, 0, NO) client:client]);
+    };
+
+    // 中 to 한: the very next letter is a Hangul jamo.
+    [controller systemDidReportInputMode:MSIMEKoreanInputModeID client:client];
+    type(15, @"r");
+    assert(scheme() == msime::mac::KoreanScheme && [client.marked isEqual:@"\u3131"]);
+    // 한 to 中 with a syllable still open: the syllable is written out first, then the next letter is pinyin.
+    [controller systemDidReportInputMode:MSIMEChineseInputModeID client:client];
+    assert([client.insertions.lastObject isEqual:@"\u3131"]);
+    type(45, @"n");
+    assert(scheme() == 0 && [client.marked isEqual:@"n"]);
+    // 中 to 日 and back.
+    [controller systemDidReportInputMode:MSIMEJapaneseInputModeID client:client];
+    type(40, @"k");
+    assert(scheme() == 3);
+    [controller systemDidReportInputMode:MSIMEChineseInputModeID client:client];
+    type(45, @"n");
+    assert(scheme() == 0 && [client.marked isEqual:@"n"]);
+    // The input menu's scheme items take the same path.
+    NSMenuItem *korean = [[NSMenuItem alloc] initWithTitle:@"韩语" action:@selector(selectInputScheme:) keyEquivalent:@""];
+    korean.representedObject = @"korean";
+    [controller selectInputScheme:korean];
+    type(15, @"r");
+    assert(scheme() == msime::mac::KoreanScheme && [client.marked isEqual:@"\u3131"]);
+
+    // The background save the appearance change starts writes the same preferences again, and the reload after it is no second switch and no revert.
+    [controller persistAppearancePreferences];
+    SettleWindowLayout();
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1.5];
+    while (deadline.timeIntervalSinceNow > 0) [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    type(15, @"r");
+    assert(scheme() == msime::mac::KoreanScheme && [prefs.inputScheme isEqual:@"korean"]);
+    NSDictionary *stored = [MSIMEClientSession loadPreferencesInDirectory:[root stringByAppendingPathComponent:@"preferences"] error:&error];
+    assert(!error && [stored[@"preferences"][@"scheme"] isEqual:@"korean"]);
+
+    MSIMEFocusedController = nil;
+    MSIMEResetSystemInputModeState(MSIMESharedSystemInputModeState());
+    [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+}
+
 // The poll reads the preferences document once a second, and most of those reads find exactly what
 // was applied a second ago. Applying it again walks every preference, goes back into the Engine and
 // writes a diagnostic line - once a second, for nothing. It also buried the diagnostic log under
@@ -8448,6 +8524,7 @@ int main(int argc, char **argv) {
         TestSoundsFollowKeysCommitsAndActivation();
         TestPreferenceClientGeneration();
         TestSavedPreferencesReachTheFocusedController();
+        TestModeSwitchReachesTheSessionBeforeTheNextKey();
         TestPreferenceRevisionSkipsUnchangedDocuments();
         TestUnreadablePreferencesAreRecoveredOnce();
         TestProviderSettingsPersistTheSharedSnapshot();
