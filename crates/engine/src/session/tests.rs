@@ -3180,6 +3180,22 @@ fn zhuyin_session(fixture: &Fixture) -> Session {
 }
 
 #[test]
+fn zhuyin_keeps_its_dictionary_open_across_scheme_switches() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = zhuyin_session(&fixture);
+    session.switch_scheme(SchemeType::Quanpin).unwrap();
+    // The file is gone, but the connection opened at activation is still the session's.
+    std::fs::remove_file(fixture.path().join("zhuyin.db")).unwrap();
+    session.switch_scheme(SchemeType::Zhuyin).unwrap();
+    session.switch_scheme(SchemeType::Zhuyin).unwrap();
+    type_text(&mut session, "su3");
+    assert_eq!(
+        session.command(Command::CommitRaw).commit.as_deref(),
+        Some("你")
+    );
+}
+
+#[test]
 fn zhuyin_without_its_dictionary_is_unavailable() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let error = Session::new({
@@ -3357,8 +3373,18 @@ fn zhuyin_enter_shift_punctuation_and_other_keys_commit() {
     type_text(&mut session, "su3");
     let finished = session.punctuation(b'!');
     assert!(finished.handled);
-    assert!(finished.commit.as_deref().unwrap().starts_with('你'));
+    assert_eq!(finished.commit.as_deref(), Some("你！"));
     assert!(session.snapshot().preedit.is_empty());
+
+    // With Chinese punctuation off the Shift overlay still writes its full-width mark, while other ASCII punctuation is left to the host.
+    session.set_chinese_punctuation_enabled(false);
+    let overlay = session.punctuation(b'<');
+    assert!(overlay.handled);
+    assert_eq!(overlay.commit.as_deref(), Some("，"));
+    let plain = session.punctuation(b'!');
+    assert!(!plain.handled);
+    assert_eq!(plain.commit, None);
+    session.set_chinese_punctuation_enabled(true);
 
     // A key the editor does not claim commits the text and goes to the host.
     type_text(&mut session, "su3");

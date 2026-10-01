@@ -167,6 +167,14 @@ impl Scheme {
         }
     }
 
+    /// The `zhuyin.db` connection a Zhuyin scheme holds, `None` for every other scheme.
+    pub fn into_zhuyin_dictionary(self) -> Option<LanguageDictionary> {
+        match self {
+            Self::Zhuyin(scheme) => Some(scheme.into_dictionary()),
+            _ => None,
+        }
+    }
+
     /// Takes the letters a Cantonese candidate covers out of the composition, as `CantoneseScheme::select`; returns whether letters are left composing. False, with nothing changed, for every other scheme.
     pub fn select_cantonese(&mut self, item: &WordItem) -> bool {
         let Self::Cantonese(scheme) = self else {

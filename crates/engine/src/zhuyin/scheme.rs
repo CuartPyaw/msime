@@ -71,6 +71,11 @@ impl ZhuyinScheme {
         }
     }
 
+    /// The `zhuyin.db` connection, given back when the editor is replaced so the next one reuses it.
+    pub fn into_dictionary(self) -> LanguageDictionary {
+        self.dictionary
+    }
+
     /// Drops the composition and any text not yet taken.
     pub fn reset(&mut self) {
         self.clear_composition();

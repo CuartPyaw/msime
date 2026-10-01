@@ -1,4 +1,4 @@
-//! The providers, one per scheme family (`R/providers/provider_registry.cpp`, `pinyin_candidate_provider.cpp`): pinyin (quanpin and shuangpin engines), wubi and Japanese. Korean syllables are the text, so a Korean query answers nothing until the user opens the Hanja list, and then the embedded Hanja table (`korean::hanja`) answers it. Cantonese is answered by `cantonese.db`, which is opened the first time the scheme is activated and then kept for the session. Zhuyin's editor reads `zhuyin.db` itself while it converts, so the registry only opens that file on activation and hands the connection to the scheme being built; its list rows reach the session through the scheme, never through `query`.
+//! The providers, one per scheme family (`R/providers/provider_registry.cpp`, `pinyin_candidate_provider.cpp`): pinyin (quanpin and shuangpin engines), wubi and Japanese. Korean syllables are the text, so a Korean query answers nothing until the user opens the Hanja list, and then the embedded Hanja table (`korean::hanja`) answers it. Cantonese is answered by `cantonese.db`, which is opened the first time the scheme is activated and then kept for the session. Zhuyin's editor reads `zhuyin.db` itself while it converts, so the registry opens that file the first time the scheme is activated, lends the connection to each Zhuyin scheme built and takes it back when that scheme is replaced; its list rows reach the session through the scheme, never through `query`.
 //!
 //! The registry answers queries and lookups only. The reference also routed `create_word` / `update_weight_by_pinyin_and_word` / `delete_by_pinyin_and_word` through it; here the session writes pins, removals and frequency learning into user_dictionary itself, choosing the dictionary kind from the selected row's scheme (overlays.md §3.3), and phrases through its own canonical-pinyin `QuanpinEngine`, so a second writer path would only diverge from it.
 
@@ -30,7 +30,7 @@ pub struct ProviderRegistry {
     cantonese: Option<CantoneseDictionary>,
     /// Where `zhuyin.db` is; empty when the host has none.
     zhuyin_path: PathBuf,
-    /// `zhuyin.db` opened by `activate` and not yet taken by a Zhuyin scheme.
+    /// `zhuyin.db` opened by `activate`; `None` before that and while the live Zhuyin scheme holds it.
     zhuyin: Option<LanguageDictionary>,
 }
 
@@ -55,7 +55,7 @@ impl ProviderRegistry {
         }
     }
 
-    /// Opens what `scheme` reads before it becomes active: `cantonese.db` for Cantonese, once per session, and `zhuyin.db` for Zhuyin, once per Zhuyin scheme built, failing as `language_dictionary::open_read_only` does when the file is missing or of an unknown version. Nothing for the other schemes.
+    /// Opens what `scheme` reads before it becomes active, once per session: `cantonese.db` for Cantonese and `zhuyin.db` for Zhuyin, failing as `language_dictionary::open_read_only` does when the file is missing or of an unknown version. Nothing for the other schemes. The caller does not activate Zhuyin while a Zhuyin scheme holds the connection, which would open the file again.
     pub fn activate(&mut self, scheme: SchemeType) -> Result<()> {
         if scheme == SchemeType::Cantonese && self.cantonese.is_none() {
             self.cantonese = Some(CantoneseDictionary::open(&self.cantonese_path)?);
@@ -66,13 +66,18 @@ impl ProviderRegistry {
         Ok(())
     }
 
-    /// Hands the `zhuyin.db` connection `activate` opened to the Zhuyin scheme about to be built; `None` for any other scheme, and for Zhuyin when it has not been activated since the last one was built.
+    /// Lends the `zhuyin.db` connection `activate` opened to the Zhuyin scheme about to be built; `None` for any other scheme, and for Zhuyin before it has been activated.
     pub fn take_dictionary(&mut self, scheme: SchemeType) -> Option<LanguageDictionary> {
         if scheme == SchemeType::Zhuyin {
             self.zhuyin.take()
         } else {
             None
         }
+    }
+
+    /// Takes back the `zhuyin.db` connection of a Zhuyin scheme being replaced, so switching back to Zhuyin reuses it instead of opening the file again.
+    pub fn return_dictionary(&mut self, dictionary: LanguageDictionary) {
+        self.zhuyin = Some(dictionary);
     }
 
     /// The syllable inventory of the open `cantonese.db`; `None` until Cantonese has been activated.

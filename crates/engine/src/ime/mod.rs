@@ -136,22 +136,39 @@ impl ImeSession {
         self.refresh_candidates();
     }
 
-    /// Opens what `scheme` reads (`cantonese.db` for Cantonese, `zhuyin.db` for Zhuyin) without switching to it, so a caller can learn that the scheme is unavailable before it discards anything; `switch_scheme` to an activated scheme cannot fail.
+    /// Opens what `scheme` reads (`cantonese.db` for Cantonese, `zhuyin.db` for Zhuyin) without switching to it, so a caller can learn that the scheme is unavailable before it discards anything; `switch_scheme` to an activated scheme cannot fail. A live Zhuyin scheme already holds `zhuyin.db`, so activating Zhuyin again opens nothing.
     pub fn activate(&mut self, scheme: SchemeType) -> Result<()> {
+        if scheme == SchemeType::Zhuyin && self.scheme.as_zhuyin().is_some() {
+            return Ok(());
+        }
         self.registry.activate(scheme)
     }
 
-    /// A new scheme and an empty state. Cantonese opens `cantonese.db` the first time it is activated and Zhuyin opens `zhuyin.db` for every Zhuyin scheme built; when that fails (`LANGUAGE_DICTIONARY_UNAVAILABLE`, `LANGUAGE_DICTIONARY_VERSION_UNSUPPORTED`) the scheme is unavailable and the current scheme and its composition stay as they were.
+    /// A new scheme and an empty state. Cantonese and Zhuyin open their dictionary the first time they are activated and keep it for the session; when that fails (`LANGUAGE_DICTIONARY_UNAVAILABLE`, `LANGUAGE_DICTIONARY_VERSION_UNSUPPORTED`) the scheme is unavailable and the current scheme and its composition stay as they were.
     pub fn switch_scheme(&mut self, scheme: SchemeType) -> Result<()> {
-        self.registry.activate(scheme)?;
-        self.scheme = Scheme::new(
-            scheme,
-            self.profile,
-            self.vietnamese_method,
-            self.vietnamese_style,
-            self.registry.cantonese_inventory(),
-            self.registry.take_dictionary(scheme),
-        )?;
+        self.activate(scheme)?;
+        if let Some(zhuyin) = self
+            .scheme
+            .as_zhuyin_mut()
+            .filter(|_| scheme == SchemeType::Zhuyin)
+        {
+            // The live editor holds `zhuyin.db`; an idle editor over the same connection is the new scheme.
+            zhuyin.reset();
+        } else {
+            let next = Scheme::new(
+                scheme,
+                self.profile,
+                self.vietnamese_method,
+                self.vietnamese_style,
+                self.registry.cantonese_inventory(),
+                self.registry.take_dictionary(scheme),
+            )?;
+            if let Some(dictionary) =
+                std::mem::replace(&mut self.scheme, next).into_zhuyin_dictionary()
+            {
+                self.registry.return_dictionary(dictionary);
+            }
+        }
         self.bind_wubi_scheme();
         self.state = CompositionState::default();
         self.pinyin_tail = false;
