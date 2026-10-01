@@ -1827,6 +1827,106 @@ static void TestSystemInputModeReport(MSIMEAppearancePreferences *appearance) {
     appearance.englishMode = english;
 }
 
+@interface SchemeHostSession : ShortcutSession
+@property(nonatomic, copy) NSDictionary *hostOptions;
+@end
+@implementation SchemeHostSession
+@end
+
+// Cantonese and Zhuyin are offered only where their dictionary is installed: the input menu leaves them out, its check falls on the scheme the Engine falls back to, and the settings radios are disabled. An opt-in mode is enabled when the scheme running moves to its scheme - in this process, while the input method was not running, or by the dictionary arriving after the scheme was picked - and never for the scheme the last sync already showed.
+static void TestOptInSchemeModes() {
+    NSString *suite = [@"msime.opt-in-modes." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    NSString *dictionaries = [NSTemporaryDirectory() stringByAppendingPathComponent:[@"msime-language-dictionaries-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+    assert([NSFileManager.defaultManager createDirectoryAtPath:dictionaries withIntermediateDirectories:YES attributes:nil error:nil]);
+    assert([NSData.data writeToFile:[dictionaries stringByAppendingPathComponent:@"cantonese.db"] atomically:YES]);
+    NSMutableArray<NSString *> *enabled = [NSMutableArray array];
+    auto makeController = [&](MSIMEAppearancePreferences *appearance, BOOL withEnabler) {
+        MSIMEInputController *controller = [MSIMEInputController alloc];
+        SchemeHostSession *session = [SchemeHostSession new];
+        session.hostOptions = @{@"language_dictionaries": dictionaries};
+        [controller setValue:appearance forKey:@"appearance"];
+        [controller setValue:session forKey:@"session"];
+        [controller setValue:[ModeSelectingClient new] forKey:@"activeClient"];
+        if (withEnabler) [controller setValue:^OSStatus(NSString *identifier) { [enabled addObject:identifier]; return noErr; } forKey:@"optInInputModeEnabler"];
+        return controller;
+    };
+    MSIMEAppearancePreferences *appearance = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    appearance.inputScheme = @"quanpin";
+    MSIMEInputController *controller = makeController(appearance, YES);
+    id client = [controller valueForKey:@"activeClient"];
+
+    // With cantonese.db alone the menu lists exactly seven schemes, in the Engine's order, without 注音.
+    NSMenuItem *schemeItem = [controller.menu itemAtIndex:9];
+    NSMutableArray<NSString *> *listed = [NSMutableArray array];
+    for (NSMenuItem *item in schemeItem.submenu.itemArray) [listed addObject:item.representedObject];
+    assert(([listed isEqualToArray:@[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean", @"cantonese", @"vietnamese"]]));
+
+    // The first sync ever only records the scheme.
+    assert(!appearance.lastSyncedInputScheme);
+    [controller syncSystemInputModeForClient:client];
+    assert([appearance.lastSyncedInputScheme isEqual:@"quanpin"] && enabled.count == 0);
+
+    // Picking vietnamese from the menu enables its mode once; syncing again on the same scheme does not repeat it.
+    [NSApp sendAction:@selector(selectInputScheme:) to:controller from:[schemeItem.submenu itemAtIndex:6]];
+    [controller syncSystemInputModeForClient:client];
+    [controller syncSystemInputModeForClient:client];
+    assert(([enabled isEqualToArray:@[MSIMEVietnameseInputModeID]]) && [appearance.lastSyncedInputScheme isEqual:@"vietnamese"]);
+
+    // Zhuyin without its dictionary runs as quanpin: the menu checks 全拼, and nothing is enabled.
+    appearance.inputScheme = @"zhuyin";
+    [controller syncSystemInputModeForClient:client];
+    assert(enabled.count == 1 && [appearance.lastSyncedInputScheme isEqual:@"quanpin"]);
+    schemeItem = [controller.menu itemAtIndex:9];
+    assert([schemeItem.title isEqual:@"输入方案（全拼）"] && [schemeItem.submenu itemAtIndex:0].state == NSControlStateValueOn);
+    // Installing the dictionary afterwards makes zhuyin the scheme running, which enables its mode.
+    assert([NSData.data writeToFile:[dictionaries stringByAppendingPathComponent:@"zhuyin.db"] atomically:YES]);
+    [controller syncSystemInputModeForClient:client];
+    assert(([enabled isEqualToArray:@[MSIMEVietnameseInputModeID, MSIMEZhuyinInputModeID]]));
+    schemeItem = [controller.menu itemAtIndex:9];
+    assert(schemeItem.submenu.numberOfItems == 8 && [schemeItem.title isEqual:@"输入方案（注音）"]);
+
+    // A later process starting on the scheme the last sync showed enables nothing, so a mode removed from the input menu stays removed.
+    MSIMEAppearancePreferences *relaunched = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    MSIMEInputController *next = makeController(relaunched, YES);
+    [next syncSystemInputModeForClient:[next valueForKey:@"activeClient"]];
+    assert(enabled.count == 2);
+    // A scheme picked while the input method was not running is still a change when it next syncs.
+    [defaults setObject:@"cantonese" forKey:@"MSIMEClientInputScheme"];
+    relaunched = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    next = makeController(relaunched, YES);
+    [next syncSystemInputModeForClient:[next valueForKey:@"activeClient"]];
+    assert(([enabled.lastObject isEqual:MSIMECantoneseInputModeID]) && enabled.count == 3);
+
+    // A stand-in session with no enabler never reaches TIS, and the change stays unrecorded so a real session would still enable it.
+    [defaults setObject:@"quanpin" forKey:@"MSIMEClientLastSyncedInputScheme"];
+    relaunched = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    next = makeController(relaunched, NO);
+    [next syncSystemInputModeForClient:[next valueForKey:@"activeClient"]];
+    assert(enabled.count == 3 && [relaunched.lastSyncedInputScheme isEqual:@"quanpin"]);
+
+    // The settings radios read the runtime options on disk: with only cantonese.db named there, 注音 is disabled and says why, and the rest are enabled.
+    assert([NSFileManager.defaultManager removeItemAtPath:[dictionaries stringByAppendingPathComponent:@"zhuyin.db"] error:nil]);
+    NSString *optionsPath = MSIMEDefaultRuntimeOptionsPath(NSFileManager.defaultManager);
+    assert(![NSFileManager.defaultManager fileExistsAtPath:optionsPath]);
+    assert([NSFileManager.defaultManager createDirectoryAtPath:optionsPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil]);
+    assert([[NSJSONSerialization dataWithJSONObject:@{@"language_dictionaries": dictionaries} options:0 error:nil] writeToFile:optionsPath atomically:YES]);
+    MSIMEAppearancePreferences *settings = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    NSArray<NSControl *> *radios = MSIMEFindPreferenceControls(settings.window.contentView, @selector(schemeRadioChanged:));
+    assert(radios.count == 8);
+    for (NSControl *radio in radios) {
+        const BOOL missing = radio.tag == 6;
+        assert(radio.enabled == !missing && (missing ? [radio.toolTip isEqual:@"未安装该方案的词库，暂不可用"] : radio.toolTip == nil));
+    }
+    assert([NSFileManager.defaultManager removeItemAtPath:optionsPath error:nil]);
+    settings = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    radios = MSIMEFindPreferenceControls(settings.window.contentView, @selector(schemeRadioChanged:));
+    for (NSControl *radio in radios) assert(radio.enabled == (radio.tag != 5 && radio.tag != 6));
+
+    [NSFileManager.defaultManager removeItemAtPath:dictionaries error:nil];
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+}
+
 static void TestFloatingToolbarMenuToggle(MSIMEAppearancePreferences *appearance) {
     ModeController *controller = [ModeController alloc];
     [controller setValue:appearance forKey:@"appearance"];
@@ -4155,8 +4255,8 @@ static void TestInputMode(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     appearance.inputScheme = @"quanpin";
     appearance.shuangpinProfile = @"ziranma";
     NSMenuItem *schemeItem = [controller.menu itemAtIndex:9];
-    // Cantonese and Zhuyin are listed only where their dictionary is installed, which depends on the machine; the other six are always there, in the Engine's order.
-    assert([schemeItem.title isEqual:@"输入方案（全拼）"] && schemeItem.submenu.numberOfItems >= 6 && schemeItem.submenu.numberOfItems <= 8);
+    // Cantonese and Zhuyin are listed only where their dictionary is installed, and the isolated home names none, so the other six are listed, in the Engine's order. TestOptInSchemeModes covers the dictionaries being there.
+    assert([schemeItem.title isEqual:@"输入方案（全拼）"] && schemeItem.submenu.numberOfItems == 6);
     NSArray<NSString *> *schemeTitles = @[@"全拼", @"双拼（自然码）", @"五笔 86", @"日语", @"韩语", @"粤拼", @"注音", @"越南语"];
     NSArray<NSString *> *schemeIDs = @[@"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean", @"cantonese", @"zhuyin", @"vietnamese"];
     NSUInteger expected = 0;
@@ -8537,6 +8637,7 @@ int main(int argc, char **argv) {
         TestCharacterSetShortcut();
         TestDedicatedEnglish(appearance);
         TestSystemInputModeReport(appearance);
+        TestOptInSchemeModes();
         TestKeymap(defaults, appearance);
         Method fontMethod = class_getClassMethod(NSFont.class, @selector(monospacedSystemFontOfSize:weight:));
         assert(fontMethod);

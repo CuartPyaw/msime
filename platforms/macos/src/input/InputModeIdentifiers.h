@@ -166,7 +166,7 @@ static inline BOOL MSIMESelectSystemInputMode(MSIMESystemInputModeState &state, 
     return YES;
 }
 
-// The opt-in mode to enable when the scheme moves from `previous` to `scheme`, or nil. Only a change to a scheme whose mode is opt-in qualifies: the mode is enabled when the user picks the scheme, in the menu, in either settings window or through its mode, not every time an input method process starts on a scheme the user may since have removed from the input menu. A nil `previous` is that process start. A scheme that cannot run here (MSIMEInputSchemeAvailable) enables nothing, so the input menu never offers a mode that would fall back to another scheme.
+// The opt-in mode to enable when the scheme moves from `previous` to `scheme`, or nil. Only a change to a scheme whose mode is opt-in qualifies: the mode is enabled when the user picks the scheme, in the menu, in either settings window or through its mode, not every time the input method starts on a scheme whose mode the user may since have removed from the input menu. A nil `previous` is the first sync ever, which only records the scheme. A scheme that cannot run here (MSIMEInputSchemeAvailable) enables nothing, so the input menu never offers a mode that would fall back to another scheme.
 static inline NSString *MSIMEOptInInputModeToEnable(NSString *previous, NSString *scheme, BOOL available) {
     if (!previous || [previous isEqualToString:scheme] || !available) return nil;
     NSString *mode = MSIMEInputModeID(MSIMEInputModeFor(NO, scheme));

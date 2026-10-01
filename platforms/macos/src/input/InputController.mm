@@ -912,6 +912,8 @@ static NSImage *MSIMECandidateLogoImage() {
 
 @implementation MSIMEInputController {
     MSIMEClientSession *_session;
+    // Stands in for TISEnableInputSource when set, so a test can see which opt-in mode a scheme change enables.
+    OSStatus (^_optInInputModeEnabler)(NSString *identifier);
     MSIMEVoiceInputService *_voiceService;
     MSIMEVoiceWaveOverlay *_voiceOverlay;
     MSIMEVoiceCuePlayer *_voiceCuePlayer;
@@ -3349,17 +3351,26 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
 - (NSDictionary *)inputSchemeHostOptions {
     return [_session respondsToSelector:@selector(hostOptions)] ? _session.hostOptions : MSIMELoadRuntimeOptions();
 }
+// Turns an opt-in mode on in the system's input menu. Only an Engine session reaches TIS; a test's stand-in session reaches the enabler the test set, or nothing, so no test changes the developer's input menu. NO means nothing was asked, and the change is tried again on the next sync.
+- (BOOL)enableOptInInputMode:(NSString *)identifier {
+    if (_optInInputModeEnabler) {
+        _optInInputModeEnabler(identifier);
+        return YES;
+    }
+    if (![_session isKindOfClass:MSIMEClientSession.class]) return NO;
+    MSIMEEnableInputMode(identifier, TISCreateInputSourceList, TISEnableInputSource);
+    return YES;
+}
 // Keeps the selected input mode - 中, 双, 五, 粤, 注, 英, 日, 한 or 越 in the input menu - in step with the Chinese/English state and the scheme actually running. A switch the system reported is already recorded as shown, so this does not echo it back.
 //
-// Every scheme change reaches this, whether made from the input menu, either settings window or a mode the user picked, so this is also where an opt-in mode is turned on: the first time the scheme moves to cantonese, zhuyin or vietnamese in this process, its mode is enabled before it is selected. System Settings cannot add it, since its add dialog does not list a third-party input method's modes. The scheme the process started on enables nothing, so a mode the user removed from the input menu is not added back at every launch.
+// Every scheme change reaches this, whether made from the input menu, either settings window, the Tauri settings or a mode the user picked, so this is also where an opt-in mode is turned on: when the scheme running moves to cantonese, zhuyin or vietnamese from the one last synced (lastSyncedInputScheme, kept across launches), its mode is enabled before it is selected. System Settings cannot add it, since its add dialog does not list a third-party input method's modes. The running scheme is the effective one, so a scheme picked before its dictionary was installed counts as picked once the dictionary arrives. A scheme that was already the synced one enables nothing, so a mode the user removed from the input menu is not added back at every launch, and the first sync ever only records the scheme.
 - (void)syncSystemInputModeForClient:(id)client {
-    static NSString *lastSyncedScheme = nil; // Process-wide, like the system's selected mode.
-    NSDictionary *hostOptions = [self inputSchemeHostOptions];
-    NSString *preferred = _appearance.inputScheme;
-    NSString *optIn = MSIMEOptInInputModeToEnable(lastSyncedScheme, preferred, MSIMEInputSchemeAvailable(preferred, hostOptions));
-    lastSyncedScheme = [preferred copy];
-    if (optIn) MSIMEEnableInputMode(optIn, TISCreateInputSourceList, TISEnableInputSource);
-    NSString *scheme = MSIMEEffectiveInputScheme(preferred, _appearance.lastChineseScheme, hostOptions);
+    NSString *scheme = MSIMEEffectiveInputScheme(_appearance.inputScheme, _appearance.lastChineseScheme, [self inputSchemeHostOptions]);
+    NSString *synced = _appearance.lastSyncedInputScheme;
+    if (![scheme isEqualToString:synced]) {
+        NSString *optIn = MSIMEOptInInputModeToEnable(synced, scheme, YES);
+        if (!optIn || [self enableOptInInputMode:optIn]) _appearance.lastSyncedInputScheme = scheme;
+    }
     NSString *mode = MSIMEInputModeID(MSIMEInputModeFor(_appearance.englishMode, scheme));
     MSIMESelectSystemInputMode(MSIMESharedSystemInputModeState(), mode, client, MSIMEInputSourceIsEnabled);
 }
