@@ -1068,3 +1068,24 @@ foreach(msime_target IN LISTS MSIME_VOICE_SERVICE_TARGETS)
     target_link_libraries(${msime_target} PRIVATE msime-voice-local-asr)
   endif()
 endforeach()
+
+# InputController.mm draws typing effects through TypingEffectPanel.mm, which animates with Core Animation. Every target compiling the controller next to its HUD panel - the input method and each controller test - takes the panel and QuartzCore, found by source like the loops above so a new controller test cannot miss it.
+get_property(MSIME_TYPING_EFFECT_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(msime_target IN LISTS MSIME_TYPING_EFFECT_TARGETS)
+  get_target_property(msime_target_sources ${msime_target} SOURCES)
+  if(NOT msime_target_sources OR NOT "src/input/InputModeHUDPanel.mm" IN_LIST msime_target_sources)
+    continue()
+  endif()
+  if(NOT "src/input/InputController.mm" IN_LIST msime_target_sources
+     AND NOT "src/core/FloatingToolbarPanel.mm" IN_LIST msime_target_sources)
+    continue()
+  endif()
+  target_sources(${msime_target} PRIVATE src/input/TypingEffectPanel.mm)
+  target_link_libraries(${msime_target} PRIVATE "-framework QuartzCore")
+endforeach()
+
+# The typing effect panel on its own: the packed answer decoded, the Reduce Motion and Low Power fallback, and the idle state that leaves no emitter running and no window on screen.
+add_executable(typing-effect-panel-test tests/input/TypingEffectPanelTest.mm src/input/TypingEffectPanel.mm)
+target_compile_options(typing-effect-panel-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(typing-effect-panel-test PRIVATE "-framework AppKit" "-framework QuartzCore")
+add_test(NAME typing-effect-panel COMMAND typing-effect-panel-test)

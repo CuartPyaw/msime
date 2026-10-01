@@ -51,6 +51,7 @@
 #import "../settings/ShuangpinKeymapPanel.h"
 #import "../core/FloatingToolbarPanel.h"
 #import "InputModeHUDPanel.h"
+#import "TypingEffectPanel.h"
 #import "InputModeIdentifiers.h"
 #import "../voice/VoiceInputService.h"
 #import "../voice/VoiceProviderSocket.h"
@@ -951,6 +952,11 @@ static NSImage *MSIMECandidateLogoImage() {
     NSNumber *_typingSourceOverride;
     // Whether secure event input was on at the last key or activation. Nothing is played while it is, and background music waits for it to go off; see secureEventInputActive.
     BOOL _secureEventInput;
+    // Typing effects: whether the foreground application held a full-screen display when this activation began (checked once, after activation, since it walks the window list), and the answers of msime_client_typing_effect not yet drawn. Keys only record their answer here; drawing waits for the main queue's next turn so a key never waits on it, and keys arriving in between are drawn once with the latest count.
+    BOOL _typingEffectFullscreen;
+    BOOL _typingEffectScheduled;
+    BOOL _typingEffectCommit;
+    uint32_t _typingEffectPacked;
     // The ASCII punctuation key behind the transition about to be applied, or 0. Set only on the punctuation-key routes and consumed by the next apply:, so pairing can read the last mark of a commit that finished a composition (`nihao(` gives `你好（`) without ever rewriting a candidate that merely ends in a mark.
     unichar _punctuationKeyInFlight;
     MSIMEModifierTap _modifierTap;
@@ -4048,6 +4054,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     if (!_appearance.englishMode) [self prepareSession];
     else [self startPreferencesMonitoring];
     [self claimBackgroundMusic];
+    [self refreshTypingEffectFullscreen];
     [self requestCloudCandidatesConsentIfNeeded];
     [self commitPendingEmojiForClient:sender];
 }
@@ -4515,6 +4522,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     [_toolbar applySizingPreferences:preferences];
     // And it is the toolbar's size, from the same font size and scale.
     [[MSIMEInputModeHUDPanel sharedPanel] applySizingPreferences:preferences];
+    // Typing effects follow preferences.plugins; a partial document without it leaves them as they are.
+    [[MSIMETypingEffectPanel sharedPanel] applyPreferences:preferences];
     NSDictionary *toolbar = preferences[@"floating_toolbar"];
     id enabled = [toolbar isKindOfClass:NSDictionary.class] ? toolbar[@"enabled"] : nil;
     if ([enabled isKindOfClass:NSNumber.class]) {
@@ -4525,6 +4534,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
 
 - (void)deactivateServer:(id)sender {
     [[MSIMEInputModeHUDPanel sharedPanel] orderOut:nil];
+    [[MSIMETypingEffectPanel sharedPanel] settle];
     [self flushPendingPairedClosing];
     _pairedPunctuation.clear();
     // A delayed callback from the previous client must not tear down the
@@ -4723,7 +4733,61 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
         if (MSIMEMusicOwner == self) [_session setMusicActive:!secure];
     }
     const BOOL shortcut = (event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) != 0;
-    if (!secure && !shortcut && !_appearance.englishMode) [_session keySound:msime::mac::PhysicalKeySoundClass(event.keyCode)];
+    if (secure || shortcut || _appearance.englishMode) return;
+    const uint32_t keyClass = msime::mac::PhysicalKeySoundClass(event.keyCode);
+    [_session keySound:keyClass];
+    // The typing effect counts the same keys the key sound plays for.
+    [self typingEffect:keyClass commit:NO];
+}
+
+// The foreground application's full-screen state, read once per activation on the main queue's next turn rather than on a key: it walks the on-screen window list.
+- (void)refreshTypingEffectFullscreen {
+    _typingEffectFullscreen = NO;
+    if (!MSIMETypingEffectPanel.sharedPanel.configured) return;
+    __weak MSIMEInputController *weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        MSIMEInputController *strongSelf = weakSelf;
+        if (strongSelf && strongSelf->_activeClient) strongSelf->_typingEffectFullscreen = MetasequoiaFrontmostApplicationOwnsFullscreenDisplay();
+    });
+}
+
+// One key or commit for the typing effect. The library call is integer arithmetic on the session; nothing is drawn here. A full-screen foreground application keeps the tier-up sound quiet and gets nothing drawn over it, while the combo still counts.
+- (void)typingEffect:(uint32_t)event commit:(BOOL)commit {
+    if (!_session || !MSIMETypingEffectPanel.sharedPanel.configured) return;
+    const uint32_t packed = [_session typingEffect:event | (_typingEffectFullscreen ? MSIMETypingEffectEventMuted : 0)];
+    if (_typingEffectFullscreen) return;
+    // A tier reached by an earlier key still undrawn is kept, so its bounce is not lost to the key after it.
+    _typingEffectPacked = packed | (_typingEffectScheduled ? (_typingEffectPacked & MSIMETypingEffectTierUp) : 0);
+    _typingEffectCommit = commit || (_typingEffectScheduled && _typingEffectCommit);
+    if (_typingEffectScheduled) return;
+    _typingEffectScheduled = YES;
+    __weak MSIMEInputController *weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf presentTypingEffect]; });
+}
+
+- (void)presentTypingEffect {
+    const uint32_t packed = _typingEffectPacked;
+    const BOOL commit = _typingEffectCommit;
+    _typingEffectScheduled = NO;
+    _typingEffectPacked = 0;
+    _typingEffectCommit = NO;
+    if (!_activeClient || _secureEventInput) return;
+    MSIMETypingEffectPanel *panel = MSIMETypingEffectPanel.sharedPanel;
+    const MSIMETypingEffect effect = MSIMETypingEffectDecode(packed);
+    // Nothing to draw, as after a backspace with only the counter on: the panel only takes a stale badge down, so the client is not asked for its caret.
+    if (effect.style == MSIMETypingEffectStyleOff && MSIMETypingEffectComboText(effect.combo) == nil) {
+        [panel presentEffect:packed commit:commit caretRect:NSZeroRect candidateView:nil cardRect:NSZeroRect cornerRadius:0];
+        return;
+    }
+    NSRect caret = NSZeroRect;
+    [(id<IMKTextInput>)_activeClient attributesForCharacterIndex:0 lineHeightRectangle:&caret];
+    if (!MSIMEValidCaret(caret)) caret = NSZeroRect;
+    MSIMECandidateChromeView *card = _panel.isVisible && [_panel.contentView isKindOfClass:MSIMECandidateChromeView.class]
+        ? (MSIMECandidateChromeView *)_panel.contentView
+        : nil;
+    const NSRect bounds = card.bounds;
+    const NSRect cardRect = card ? NSMakeRect(NSMinX(bounds), NSMinY(bounds), NSWidth(bounds), MAX(0.0, NSHeight(bounds) - MAX(0.0, card.cardTopInset))) : NSZeroRect;
+    [panel presentEffect:packed commit:commit caretRect:caret candidateView:card cardRect:cardRect cornerRadius:card.cornerRadius];
 }
 
 // Every key down leaves through here, so the smart punctuation shadow sees each one exactly once, after it has been handled and with what became of it. Events this host posted itself (the voice sendinput route and the smart punctuation rewrite) are skipped: whoever posted them has already recorded what they carry.
@@ -5558,7 +5622,10 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
             MSIMERecordTypingStatistics(_preferencesDirectory ?: MSIMEStatisticsHostOptions(_session)[@"preferences_directory"],
                                         displayTransition[@"commit"], source);
         // Dictated text is not typing, and the melody follows the keyboard.
-        if (source != msime::mac::TypingSource::Voice && !_secureEventInput) [_session commitSound];
+        if (source != msime::mac::TypingSource::Voice && !_secureEventInput) {
+            [_session commitSound];
+            [self typingEffect:MSIMETypingEffectEventCommit commit:YES];
+        }
     }
     // A key handled while this transition's text was being written has already put the newer view on screen; this one is older and must not replace it.
     if (applySequence != _applySequence) return;

@@ -614,6 +614,9 @@ static NSDictionary *decode(char *response, NSError **error) {
 - (BOOL)setMusicActive:(BOOL)active {
     return _handle && msime_client_music_set_active(_handle, active);
 }
+- (uint32_t)typingEffect:(uint32_t)event {
+    return _handle ? msime_client_typing_effect(_handle, event) : 0;
+}
 - (nullable NSDictionary *)setCandidatePageSize:(uint8_t)size error:(NSError **)error {
     if (![self checkThreadAndHandle:error]) return nil;
     return decode(msime_client_set_candidate_page_size(_handle, size), error);
