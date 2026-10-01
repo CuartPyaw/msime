@@ -78,10 +78,6 @@ int main() {
                     !MSIMEIsInputModeID(@"com.apple.keylayout.ABC") && !MSIMEIsInputModeID(@"app.msime.inputmethod.MetasequoiaIME") &&
                     !MSIMEIsInputModeID(@42) && !MSIMEIsInputModeID(nil),
                 "Something other than this bundle's six modes was taken for one of them.");
-        require(MSIMEIsOptInInputModeID(MSIMEShuangpinInputModeID) && MSIMEIsOptInInputModeID(MSIMEWubiInputModeID) &&
-                    !MSIMEIsOptInInputModeID(MSIMEChineseInputModeID) && !MSIMEIsOptInInputModeID(MSIMEEnglishInputModeID) &&
-                    !MSIMEIsOptInInputModeID(MSIMEJapaneseInputModeID) && !MSIMEIsOptInInputModeID(MSIMEKoreanInputModeID),
-                "Only the Shuangpin and Wubi modes are left for the user to add.");
 
         // 双, 五, 日 and 한 name their scheme and 英 leaves it alone, whatever scheme is behind them.
         require([MSIMESchemeForReportedInputMode(MSIMEInputMode::Wubi, @"japanese", @"quanpin", Available) isEqualToString:@"wubi"] &&
@@ -103,7 +99,7 @@ int main() {
         require(MSIMESchemeForReportedInputMode(MSIMEInputMode::Chinese, @"shuangpin", nil, Available) == nil &&
                     MSIMESchemeForReportedInputMode(MSIMEInputMode::Chinese, @"wubi", nil, Available) == nil &&
                     [MSIMESchemeForReportedInputMode(MSIMEInputMode::Chinese, @"japanese", @"shuangpin", Available) isEqualToString:@"shuangpin"],
-                "中 standing in for a Shuangpin or Wubi mode the user never added moved the scheme.");
+                "中 standing in for a Shuangpin or Wubi mode the user removed moved the scheme.");
         gShuangpinModeEnabled = YES;
         gWubiModeEnabled = YES;
 
@@ -204,7 +200,7 @@ int main() {
         gKoreanModeEnabled = YES;
         MSIMEAdoptReportedInputMode(state, MSIMEChineseInputModeID);
 
-        // A Shuangpin or Wubi mode the user never added shows 中 for its scheme, and one they did add is selected.
+        // A Shuangpin or Wubi mode the user removed shows 中 for its scheme, and one still enabled is selected.
         const NSUInteger beforeShuangpin = client.selected.count;
         gShuangpinModeEnabled = NO;
         require(!MSIMESelectSystemInputMode(state, MSIMEShuangpinInputModeID, client, Available) && client.selected.count == beforeShuangpin &&

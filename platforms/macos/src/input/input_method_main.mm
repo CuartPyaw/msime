@@ -82,6 +82,15 @@ int main(int argc, const char *argv[]) {
         [[[MSIMEVoiceAudioMuter alloc] init] restore];
         __attribute__((objc_precise_lifetime)) IMKServer *server = [[IMKServer alloc] initWithName:@"MSIMEClientPreviewConnection" bundleIdentifier:NSBundle.mainBundle.bundleIdentifier];
         if (!server) return 1;
+        // Turn on, once each, the input modes this version added and the install that brought it did not register.
+        NSString *const offeredModesKey = @"MSIMEOfferedInputModes";
+        NSArray *offeredModes = [NSUserDefaults.standardUserDefaults arrayForKey:offeredModesKey];
+        NSArray<NSString *> *offered = MSIMEEnableNewInputModes(NSBundle.mainBundle.bundleIdentifier, offeredModes,
+            TISCreateInputSourceList,
+            [](TISInputSourceRef source, CFStringRef key) -> void * {
+                return (void *)TISGetInputSourceProperty(source, key);
+            }, TISEnableInputSource);
+        if (![offered isEqualToArray:offeredModes]) [NSUserDefaults.standardUserDefaults setObject:offered forKey:offeredModesKey];
         __attribute__((objc_precise_lifetime)) MSIMEInputSourceMonitor *sourceMonitor =
             [[MSIMEInputSourceMonitor alloc] initWithCenter:NSDistributedNotificationCenter.defaultCenter
                 bundleIdentifier:NSBundle.mainBundle.bundleIdentifier copySource:TISCopyCurrentKeyboardInputSource

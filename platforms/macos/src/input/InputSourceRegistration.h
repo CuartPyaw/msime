@@ -23,6 +23,11 @@ OSStatus MSIMERegisterAndEnableInputSources(NSURL *bundleURL, NSString *bundleId
                                             MSIMEInputSourceLister lister,
                                             MSIMEInputSourcePropertyGetter propertyGetter,
                                             MSIMEInputSourceEnabler enabler);
+/// Enables each of the bundle's input modes that `offered` does not name yet, once, and returns `offered` with them added; the caller persists it. An update that only replaces the bundle does not re-register it, which leaves the modes it added off with no entry in System Settings' add dialog to turn them on, since that dialog does not list a third-party input method's modes. A mode already recorded is left alone, so one the user removed stays removed. A nil `offered` starts from the modes every earlier install enabled.
+NSArray<NSString *> *MSIMEEnableNewInputModes(NSString *bundleIdentifier, NSArray<NSString *> *offered,
+                                              MSIMEInputSourceLister lister,
+                                              MSIMEInputSourcePropertyGetter propertyGetter,
+                                              MSIMEInputSourceEnabler enabler);
 /// Whether the input source with this identifier is enabled, so the system can select it.
 BOOL MSIMEInputSourceIsEnabled(NSString *identifier);
 /// Starts a separate non-activating helper instance of the current input method

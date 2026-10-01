@@ -1,6 +1,7 @@
 #import "../../src/input/InputSourceRegistration.h"
 #import "../../src/input/InputModeIdentifiers.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <vector>
 
@@ -36,6 +37,10 @@ TISInputSourceRef englishModeSource = reinterpret_cast<TISInputSourceRef>(0x103)
 TISInputSourceRef hansModeSource = reinterpret_cast<TISInputSourceRef>(0x104);
 TISInputSourceRef shuangpinModeSource = reinterpret_cast<TISInputSourceRef>(0x105);
 TISInputSourceRef wubiModeSource = reinterpret_cast<TISInputSourceRef>(0x106);
+TISInputSourceRef koreanModeSource = reinterpret_cast<TISInputSourceRef>(0x107);
+TISInputSourceRef japaneseModeSource = reinterpret_cast<TISInputSourceRef>(0x108);
+TISInputSourceRef appParentSource = reinterpret_cast<TISInputSourceRef>(0x109);
+std::vector<TISInputSourceRef> alreadyEnabledSources;
 
 void require(bool condition, const char *message)
 {
@@ -68,10 +73,18 @@ CFArrayRef CopyInputSources(CFDictionaryRef properties, Boolean includeAllInstal
 
 void *GetInputSourceProperty(TISInputSourceRef inputSource, CFStringRef propertyKey)
 {
+    if (propertyKey == kTISPropertyInputSourceIsEnabled)
+    {
+        const bool enabled = std::find(alreadyEnabledSources.begin(), alreadyEnabledSources.end(), inputSource) != alreadyEnabledSources.end();
+        return const_cast<void *>(reinterpret_cast<const void *>(enabled ? kCFBooleanTrue : kCFBooleanFalse));
+    }
     if (propertyKey != kTISPropertyInputSourceID)
     {
         return nullptr;
     }
+    if (inputSource == koreanModeSource) return (__bridge void *)MSIMEKoreanInputModeID;
+    if (inputSource == japaneseModeSource) return (__bridge void *)MSIMEJapaneseInputModeID;
+    if (inputSource == appParentSource) return (__bridge void *)@"app.msime.inputmethod.MetasequoiaIME";
     if (inputSource == hansModeSource) return (__bridge void *)MSIMEChineseInputModeID;
     if (inputSource == shuangpinModeSource) return (__bridge void *)MSIMEShuangpinInputModeID;
     if (inputSource == wubiModeSource) return (__bridge void *)MSIMEWubiInputModeID;
@@ -193,18 +206,72 @@ int main()
         CFRelease(sourceList);
         sourceList = nullptr;
 
-        // Shuangpin and Wubi are opt-in: listed first, they must neither become the primary mode nor be enabled after it.
-        const void *optInSources[] = {shuangpinModeSource, wubiModeSource, hansModeSource};
-        sourceList = CFArrayCreate(nullptr, optInSources, 3, nullptr);
+        // Registration enables every mode, Shuangpin and Wubi included: System Settings' add dialog does not list a third-party input method's modes, so one left off could not be turned on.
+        const void *chineseSchemeSources[] = {shuangpinModeSource, wubiModeSource, hansModeSource};
+        sourceList = CFArrayCreate(nullptr, chineseSchemeSources, 3, nullptr);
         enabledSources.clear();
         require(MSIMERegisterAndEnableInputSources(bundleURL, @"app.msime.inputmethod.MetasequoiaIME", CaptureRegistration,
                                                          CopyInputSources, GetInputSourceProperty,
                                                          EnableInputSource) == noErr,
-                "A bundle with opt-in Shuangpin and Wubi modes was rejected.");
-        require(enabledSources.size() == 1 && enabledSources[0] == hansModeSource,
-                "Registration enabled the opt-in Shuangpin or Wubi mode.");
+                "A bundle with Shuangpin and Wubi modes was rejected.");
+        require(enabledSources.size() == 3 && enabledSources[0] == shuangpinModeSource && enabledSources[1] == wubiModeSource &&
+                    enabledSources[2] == hansModeSource,
+                "Registration did not enable the Shuangpin and Wubi modes with the others.");
         CFRelease(sourceList);
         sourceList = nullptr;
+
+        // An update that only replaced the bundle left the modes it added off. The first launch that keeps a record counts the modes every earlier install enabled as offered and turns on the rest, once each; the bundle-level source is not a mode.
+        NSString *appBundle = @"app.msime.inputmethod.MetasequoiaIME";
+        const void *installedSources[] = {appParentSource, hansModeSource, japaneseModeSource, koreanModeSource, shuangpinModeSource, wubiModeSource};
+        sourceList = CFArrayCreate(nullptr, installedSources, 6, nullptr);
+        alreadyEnabledSources = {appParentSource, hansModeSource, japaneseModeSource};
+        enabledSources.clear();
+        NSArray<NSString *> *offered = MSIMEEnableNewInputModes(appBundle, nil, CopyInputSources, GetInputSourceProperty, EnableInputSource);
+        require([listedBundleIdentifier isEqualToString:appBundle] && enableCapableOnly && includedAllInstalled,
+                "New-mode discovery did not list every installed source of the bundle.");
+        require(enabledSources.size() == 3 && enabledSources[0] == koreanModeSource && enabledSources[1] == shuangpinModeSource &&
+                    enabledSources[2] == wubiModeSource,
+                "The first recorded launch did not enable exactly the modes added since the earlier installs.");
+        require([offered isEqualToArray:@[MSIMEChineseInputModeID, MSIMEEnglishInputModeID, MSIMEJapaneseInputModeID,
+                                          MSIMEKoreanInputModeID, MSIMEShuangpinInputModeID, MSIMEWubiInputModeID]],
+                "The record does not name the earlier modes and the newly enabled ones.");
+
+        // A mode the user removed afterwards stays removed.
+        alreadyEnabledSources = {appParentSource, hansModeSource, japaneseModeSource, shuangpinModeSource, wubiModeSource};
+        enabledSources.clear();
+        require([MSIMEEnableNewInputModes(appBundle, offered, CopyInputSources, GetInputSourceProperty, EnableInputSource) isEqualToArray:offered] &&
+                    enabledSources.empty(),
+                "A recorded mode the user removed was enabled again.");
+
+        // A Japanese mode the user removed before any record existed is not brought back either.
+        alreadyEnabledSources = {appParentSource, hansModeSource};
+        enabledSources.clear();
+        offered = MSIMEEnableNewInputModes(appBundle, nil, CopyInputSources, GetInputSourceProperty, EnableInputSource);
+        require(std::find(enabledSources.begin(), enabledSources.end(), japaneseModeSource) == enabledSources.end(),
+                "A Japanese mode removed before the first record was enabled again.");
+
+        // A new mode that is already on is only recorded, and one the system refuses stays unrecorded so the next launch retries it.
+        alreadyEnabledSources = {appParentSource, hansModeSource, japaneseModeSource, koreanModeSource};
+        rejectedSource = wubiModeSource;
+        enabledSources.clear();
+        offered = MSIMEEnableNewInputModes(appBundle, nil, CopyInputSources, GetInputSourceProperty, EnableInputSource);
+        require(enabledSources.size() == 2 && enabledSources[0] == shuangpinModeSource && enabledSources[1] == wubiModeSource &&
+                    [offered containsObject:MSIMEKoreanInputModeID] && [offered containsObject:MSIMEShuangpinInputModeID] &&
+                    ![offered containsObject:MSIMEWubiInputModeID],
+                "An enabled new mode was enabled again, or a refused one was recorded.");
+        rejectedSource = nullptr;
+        enabledSources.clear();
+        offered = MSIMEEnableNewInputModes(appBundle, offered, CopyInputSources, GetInputSourceProperty, EnableInputSource);
+        require(enabledSources.size() == 1 && enabledSources[0] == wubiModeSource && [offered containsObject:MSIMEWubiInputModeID],
+                "A mode the system refused was not retried on the next launch.");
+        alreadyEnabledSources.clear();
+        CFRelease(sourceList);
+        sourceList = nullptr;
+
+        // Without the system calls nothing is enabled and the record is only seeded.
+        require([MSIMEEnableNewInputModes(appBundle, nil, nullptr, GetInputSourceProperty, EnableInputSource)
+                    isEqualToArray:@[MSIMEChineseInputModeID, MSIMEEnglishInputModeID, MSIMEJapaneseInputModeID]],
+                "A missing lister did not leave just the seeded record.");
 
         require(MSIMERegisterAndEnableInputSources(bundleURL, bundleIdentifier, RejectRegistration,
                                                          CopyInputSources, GetInputSourceProperty,
