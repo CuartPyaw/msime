@@ -1356,14 +1356,15 @@ fn nine_key_mode_follows_only_the_scheme_the_grid_spells() {
 }
 
 #[test]
-fn the_repeat_gesture_arms_only_in_schemes_with_host_smart_punctuation() {
-    // The repeat gesture is host smart punctuation (`SchemeType::host_smart_punctuation`), the same gate the punctuation route reads: it arms in the pinyin and wubi schemes, never in Japanese or Korean.
+fn the_repeat_gesture_arms_except_in_schemes_that_write_no_chinese_marks() {
+    // The repeat gesture turns an ASCII mark into a Chinese one. It never arms in Korean or Vietnamese, which write only ASCII marks, or in Zhuyin, whose punctuation keys spell bopomofo; Japanese arms as it did before the new schemes. Cantonese and Zhuyin are left out because this host installs no language dictionaries, so the runtime would not run them.
     for (scheme, arms) in [
         (InputScheme::Quanpin, true),
         (InputScheme::Shuangpin, true),
         (InputScheme::Wubi, true),
-        (InputScheme::Japanese, false),
+        (InputScheme::Japanese, true),
         (InputScheme::Korean, false),
+        (InputScheme::Vietnamese, false),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let handle = test_host_preferences(
