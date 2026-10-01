@@ -11,6 +11,8 @@ import fs from '@ohos.file.fs';
 import common from '@ohos.app.ability.common';
 import client from 'libmsimeclient.so';
 import { KeyboardLog, describeError } from './KeyboardLog';
+import { KeySoundPolicy } from './KeySoundPolicy';
+import { KeySoundPlayer } from './KeySoundPlayer';
 import {
   MUSIC_OFF, MusicChange, MusicPackTracks, MusicPolicy, MusicSettings, MusicStep, MusicTransport
 } from './MusicPolicy';
@@ -48,8 +50,11 @@ export class MusicPlayer {
   private readonly transport: MusicTransport = new MusicTransport();
   /** The playing track's descriptor, which has to stay open until its player is released. */
   private file: fs.File | undefined = undefined;
+  /** The manifests the pack was resolved from, and their stamp then (`KeySoundPolicy.stamp`): a pack imported again under the same id, or removed, moves the stamp, and `recheck` starts afresh. Empty until a pack is resolved. */
+  private manifests: string[] = [];
+  private stamp: string = '';
 
-  /** Where the built-in packs are, for the request that names them. Music packs are only ever installed under the state root. */
+  /** Where the built-in packs are, for the request that names them: the built-in music packs sit beside the built-in sound packs, and any other is installed under the state root. */
   use(context: common.Context): void {
     this.soundPacks = `${context.resourceDir}/sound-packs`;
   }
@@ -67,15 +72,38 @@ export class MusicPlayer {
       return;
     }
     if (change === MusicChange.RELOAD || this.failed) {
-      this.release();
-      this.pack = null;
-      this.track = 0;
-      this.checked.clear();
+      this.forget();
     } else if (this.player !== undefined && MusicPlayer.audible(this.player.state)) {
       this.player.setVolume(MusicPolicy.gain(settings));
     }
     this.failed = false;
     this.update();
+  }
+
+  /**
+   * Start afresh when the pack changed on disk since it was resolved: imported again under the same id, which replaces its folder whole, or removed. The session calls this when an editor takes focus, as host-api re-stamps its packs on focus; the stat runs off the caller's turn. A pack that failed to resolve is tried again once it changes.
+   */
+  recheck(): void {
+    if (this.manifests.length === 0) {
+      return;
+    }
+    setTimeout((): void => {
+      if (this.manifests.length > 0 && KeySoundPlayer.stampOf(this.manifests) !== this.stamp) {
+        this.forget();
+        this.failed = false;
+        this.update();
+      }
+    }, 0);
+  }
+
+  /** Let the playing track go and forget the pack, so the next start resolves it again. */
+  private forget(): void {
+    this.release();
+    this.pack = null;
+    this.track = 0;
+    this.checked.clear();
+    this.manifests = [];
+    this.stamp = '';
   }
 
   /** Whether music may play now; see `MusicPolicy.active`. */
@@ -95,6 +123,8 @@ export class MusicPlayer {
     this.pack = null;
     this.track = 0;
     this.checked.clear();
+    this.manifests = [];
+    this.stamp = '';
   }
 
   /** The states AVPlayer takes a volume in. */
@@ -160,6 +190,9 @@ export class MusicPlayer {
 
   /** The selected pack's validated tracks, or null after turning music off with the reason. */
   private resolve(): MusicPackTracks | null {
+    // Stamped before the pack is read, so a change while it is read is seen by the next recheck rather than missed.
+    this.manifests = KeySoundPolicy.manifests('music', this.soundPacks, this.stateRoot, this.settings.pack);
+    this.stamp = KeySoundPlayer.stampOf(this.manifests);
     const request: MusicPackRequest = {
       state_root: this.stateRoot, sound_packs: this.soundPacks, pack: this.settings.pack
     };

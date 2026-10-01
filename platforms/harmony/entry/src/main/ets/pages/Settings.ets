@@ -1285,6 +1285,7 @@ class SettingsBridge {
       value['key_sound'] = projection.keySound;
       value['music'] = projection.music;
       value['plugin_triggers'] = projection.pluginTriggers;
+      value['typing_effects'] = projection.typingEffects;
       if (release !== null) {
         value['os_version'] = release;
       }

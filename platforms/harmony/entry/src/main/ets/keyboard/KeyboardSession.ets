@@ -39,6 +39,9 @@ import { KeySoundPlayer } from './KeySoundPlayer';
 import { KEY_SOUNDS_OFF, KeySoundPolicy, PluginPreferenceDocument } from './KeySoundPolicy';
 import { MusicPlayer } from './MusicPlayer';
 import { MUSIC_OFF, MusicPolicy } from './MusicPolicy';
+import {
+  TYPING_EFFECT_COMMIT, TYPING_EFFECTS_OFF, TypingEffect, TypingEffectPolicy, TypingEffectSettings
+} from './TypingEffectPolicy';
 import { EnglishCompletions, EnglishReplacement, EnglishSuggestionPolicy }
   from './input/EnglishSuggestionPolicy';
 import { ImeModeScopePolicy } from './input/ImeModeScopePolicy';
@@ -950,6 +953,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   // Key, melody, commit and achievement sounds. Configured off on a phone, which keeps its own key feedback.
   private readonly soundPlayer: KeySoundPlayer = new KeySoundPlayer();
   private readonly musicPlayer: MusicPlayer = new MusicPlayer();
+  /** The typing effect and combo settings; off on a phone, as the sounds are. */
+  private typingEffects: TypingEffectSettings = TYPING_EFFECTS_OFF;
   /** The focused editor's attributes have arrived, so whether it is a password field is known; background music waits for that. */
   private editorAttributesKnown: boolean = false;
   private modeScope: ImeModeScopePolicy = new ImeModeScopePolicy();
@@ -1063,6 +1068,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   onVoiceInputChanged: ((enabled: boolean) => void) | undefined = undefined;
   /** Lets a desktop panel resize when a vertical candidate page changes height. */
   onCandidateCount: ((count: number) => void) | undefined = undefined;
+  /** Lets a desktop panel flash its candidate card and show the combo for each key and commit handed to the typing effect, with the intensity it is drawn at; `key` is false for a commit, which counts nothing and only reports the combo. */
+  onTypingEffect: ((effect: TypingEffect, intensity: number, key: boolean) => void) | undefined = undefined;
   /** Lets a desktop panel follow the widest current candidate without measuring ArkUI nodes. */
   onCandidateWidth: ((widthVp: number) => void) | undefined = undefined;
   /** The native host owns panel geometry; the touch view reports its newly requested total height. */
@@ -1420,6 +1427,8 @@ export class KeyboardSession implements HardwareKeyTarget {
         ? KeySoundPolicy.settings(preferences.plugins) : KEY_SOUNDS_OFF, stateRoot);
       this.musicPlayer.configure(KeyboardFormFactor.isDesktop()
         ? MusicPolicy.settings(preferences.plugins) : MUSIC_OFF, stateRoot);
+      this.typingEffects = KeyboardFormFactor.isDesktop()
+        ? TypingEffectPolicy.settings(preferences.plugins) : TYPING_EFFECTS_OFF;
     } catch (error) {
       KeyboardLog.error(`host preparation unreadable: ${describeError(error)}`);
       return false;
@@ -2450,6 +2459,9 @@ export class KeyboardSession implements HardwareKeyTarget {
       this.previewSupported = attribute.isTextPreviewSupported === true;
       this.traits = KeyboardSession.traitsFor(attribute.inputPattern);
       this.editorAttributesKnown = true;
+      // A pack imported again under the same id, or removed, while another editor had focus is picked up here, as host-api re-stamps its packs on focus.
+      this.soundPlayer.recheck();
+      this.musicPlayer.recheck();
       this.updateMusic();
       this.capitalization = EditorPolicy.capitalizationMode(this.traits,
         KeyboardSession.capitalizationFor(attribute.capitalizeMode));
@@ -3272,6 +3284,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       }
       if (!this.soundsSilencedByEditor()) {
         this.soundPlayer.commit();
+        this.typingEffect(TYPING_EFFECT_COMMIT);
       }
     }
     this.render(value.view);
@@ -4880,6 +4893,28 @@ export class KeyboardSession implements HardwareKeyTarget {
     const keyClass: number = KeySoundPolicy.keyClass(keyCode, unicodeChar, ctrl, alt, logo);
     if (keyClass >= 0) {
       this.soundPlayer.key(keyClass);
+      // HarmonyOS key events do not say whether a key is an auto-repeat, so every key-down counts.
+      this.typingEffect(keyClass);
+    }
+  }
+
+  /**
+   * Hand one key or commit to the session's typing effect, alongside its sound, while a style is drawn or the combo is counted. host-api links no audio stack here, so a tier-up sound it reports due is played by this host; the view draws the rest.
+   *
+   * @param event a `msime_client_typing_effect` event: a key sound class, or `TYPING_EFFECT_COMMIT`
+   */
+  private typingEffect(event: number): void {
+    if (this.handle === 0 || !TypingEffectPolicy.active(this.typingEffects)) {
+      return;
+    }
+    const effect: TypingEffect = TypingEffectPolicy.decode(client.typingEffect(this.handle, event));
+    if (effect.tierSound) {
+      this.soundPlayer.tierUp(TypingEffectPolicy.tier(effect.count));
+    }
+    const listener: ((effect: TypingEffect, intensity: number, key: boolean) => void) | undefined =
+      this.onTypingEffect;
+    if (listener !== undefined) {
+      listener(effect, this.typingEffects.intensity, event !== TYPING_EFFECT_COMMIT);
     }
   }
 

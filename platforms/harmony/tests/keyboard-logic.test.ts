@@ -276,6 +276,13 @@ import {
   MusicTransport,
 } from "../entry/src/main/ets/keyboard/MusicPolicy";
 import {
+  COMBO_IDLE_RESET_MILLIS,
+  TYPING_EFFECT_COMMIT,
+  TYPING_EFFECTS_OFF,
+  TypingEffectPolicy,
+  TypingEffectStyle,
+} from "../entry/src/main/ets/keyboard/TypingEffectPolicy";
+import {
   EmojiPanelKeyAction,
   EmojiPanelKeyPolicy,
 } from "../entry/src/main/ets/keyboard/emoji/EmojiPanelKeyPolicy";
@@ -634,12 +641,12 @@ group("projects the same form factor into every settings capability", () => {
   );
   check(desktop.voiceHotkeys, "2-in-1 settings offer the voice hotkeys");
   check(
-    desktop.keySound && desktop.music && desktop.pluginTriggers,
-    "2-in-1 settings offer key sounds, background music and the V, / and @ modes",
+    desktop.keySound && desktop.music && desktop.pluginTriggers && desktop.typingEffects,
+    "2-in-1 settings offer key sounds, background music, the V, / and @ modes and the typing effects",
   );
   check(
-    !phone.keySound && !phone.music && !phone.pluginTriggers,
-    "a phone keeps its own key feedback, plays no music and does not claim the hardware-only modes",
+    !phone.keySound && !phone.music && !phone.pluginTriggers && !phone.typingEffects,
+    "a phone keeps its own key feedback, plays no music, draws no typing effect and does not claim the hardware-only modes",
   );
   // The phone strip is always horizontal, so a layout select there is a control that does nothing; the 2in1 candidate window keeps the choice.
   check(
@@ -10722,7 +10729,7 @@ group("key sounds follow the desktop player's settings and pack rules", () => {
   check(KeySoundPolicy.keyClass(2014, 0, false, false, false) === -1, "an arrow is silent");
   check(KeySoundPolicy.keyClass(2047, 0, false, false, false) === -1, "Shift on its own is silent");
 
-  const requests = KeySoundPolicy.samples(keys, twinkle);
+  const requests = KeySoundPolicy.samples(keys, twinkle, []);
   check(
     requests.map((request) => request.file).join(",") ===
       "/packs/default/key.wav,/packs/default/space.wav,/packs/default/backspace.wav," +
@@ -10734,7 +10741,7 @@ group("key sounds follow the desktop player's settings and pack rules", () => {
     "a melody sample is rendered once per distinct pitch of its tune",
   );
   check(
-    KeySoundPolicy.samples(twinkle, null).length === 0,
+    KeySoundPolicy.samples(twinkle, null, TypingEffectPolicy.tierSemitones()).length === 0,
     "a key pack in sequence mode has no key, commit or achievement samples here",
   );
 
@@ -10830,6 +10837,191 @@ group("key sounds follow the desktop player's settings and pack rules", () => {
   check(
     KeySoundPolicy.cueKey("/a.wav", -2) !== KeySoundPolicy.cueKey("/a.wav", 2),
     "each pitch of a file is its own sound",
+  );
+
+  const tiered: KeySoundSettings = KeySoundPolicy.settings({
+    combo_counter: true,
+    combo_tier_sound: true,
+  });
+  check(
+    tiered.tierSound && KeySoundPolicy.wanted(tiered),
+    "the tier-up sound alone is enough to load sounds",
+  );
+  check(
+    !KeySoundPolicy.settings({ combo_tier_sound: true }).tierSound,
+    "the tier-up sound needs the combo counter, as host-api's tier_sound does",
+  );
+  check(
+    KeySoundPolicy.selection(tiered).pack === "default" &&
+      KeySoundPolicy.selection(tiered).tierSound &&
+      !KeySoundPolicy.selection(on).tierSound,
+    "the tier-up sound loads the key pack, and its switch is part of what a reload is decided by",
+  );
+  const tierRequests = KeySoundPolicy.samples(keys, null, TypingEffectPolicy.tierSemitones());
+  const commitRequest = tierRequests.find(
+    (request) => request.file === "/packs/default/commit.wav",
+  );
+  check(
+    commitRequest !== undefined && commitRequest.semitones.join(",") === "0,3,6,9,12",
+    "the commit sample is prepared at its own pitch and at each tier's, 3 semitones apart up to an octave",
+  );
+  check(
+    KeySoundPolicy.samples(keys, null, [])
+      .filter((request) => request.file === "/packs/default/commit.wav")[0]
+      .semitones.join(",") === "0",
+    "without the tier-up sound the commit sample is prepared at its own pitch only",
+  );
+  const tierCue = KeySoundPolicy.tierCue(tiered, keys, TypingEffectPolicy.tierSemitone(2));
+  check(
+    tierCue !== null && tierCue.file === "/packs/default/commit.wav" && tierCue.semitone === 6,
+    "the second tier plays the commit sample 6 semitones up",
+  );
+  check(
+    KeySoundPolicy.tierCue(on, keys, 3) === null &&
+      KeySoundPolicy.tierCue(tiered, null, 3) === null,
+    "no tier-up sound while it is off or before the key pack has loaded",
+  );
+
+  check(
+    KeySoundPolicy.manifests("sound", "/res/sound-packs", "/state", "rain").join(",") ===
+      "/res/sound-packs/rain/plugin.toml,/state/plugins/sound/rain/plugin.toml",
+    "a pack is watched where it is built in and where it would be installed",
+  );
+  check(
+    KeySoundPolicy.manifests("music", "/res/sound-packs", "", "lofi").join(",") ===
+      "/res/sound-packs/lofi/plugin.toml",
+    "without a state root only the built-in manifest is watched",
+  );
+  const manifestStat = { ino: BigInt(42), size: 120, mtime: 1700000000 };
+  const loadedStamp = KeySoundPolicy.stamp([manifestStat, null]);
+  check(
+    loadedStamp === KeySoundPolicy.stamp([{ ...manifestStat }, null]),
+    "an untouched manifest keeps its stamp",
+  );
+  check(
+    loadedStamp !== KeySoundPolicy.stamp([{ ...manifestStat, ino: BigInt(43) }, null]) &&
+      loadedStamp !== KeySoundPolicy.stamp([{ ...manifestStat, size: 121 }, null]) &&
+      loadedStamp !== KeySoundPolicy.stamp([{ ...manifestStat, mtime: 1700000001 }, null]),
+    "a pack imported again under the same id moves the stamp, whichever of inode, size or time changed",
+  );
+  check(
+    loadedStamp !== KeySoundPolicy.stamp([null, null]) &&
+      KeySoundPolicy.stamp([null, null]) !== KeySoundPolicy.stamp([null, manifestStat]),
+    "removing a pack, or installing one that was missing, moves the stamp",
+  );
+});
+
+group("typing effects decode host-api's answer and draw what it asks", () => {
+  check(TypingEffectPolicy.settings(undefined) === TYPING_EFFECTS_OFF, "no plugins record is off");
+  check(
+    !TypingEffectPolicy.active(TypingEffectPolicy.settings({})),
+    "keys are not handed to host-api while the effect and the counter are both off",
+  );
+  const power = TypingEffectPolicy.settings({
+    effect_style: "power_mode",
+    effect_intensity: 80,
+    combo_counter: true,
+    combo_tier_sound: true,
+  });
+  check(
+    power.style === TypingEffectStyle.POWER_MODE &&
+      power.intensity === 80 &&
+      power.comboCounter &&
+      power.tierSound &&
+      TypingEffectPolicy.active(power),
+    "the shared preference keys are read",
+  );
+  check(
+    TypingEffectPolicy.settings({ effect_style: "confetti", effect_intensity: 150 }).style ===
+      TypingEffectStyle.OFF &&
+      TypingEffectPolicy.settings({ effect_intensity: 150 }).intensity === 50,
+    "an unknown style is off and an out-of-range intensity takes the default",
+  );
+  check(
+    TypingEffectPolicy.active(TypingEffectPolicy.settings({ combo_counter: true })),
+    "the counter alone is enough to count keys",
+  );
+  check(
+    !TypingEffectPolicy.settings({ combo_tier_sound: true }).tierSound,
+    "the tier-up sound needs the counter",
+  );
+
+  const answer = 25 | (1 << 16) | (TypingEffectStyle.SPARKS << 17) | (1 << 20);
+  const decoded = TypingEffectPolicy.decode(answer);
+  check(
+    decoded.count === 25 &&
+      decoded.tierUp &&
+      decoded.style === TypingEffectStyle.SPARKS &&
+      decoded.tierSound,
+    "every field of the answer is unpacked",
+  );
+  const quiet = TypingEffectPolicy.decode(0);
+  check(
+    quiet.count === 0 && !quiet.tierUp && quiet.style === TypingEffectStyle.OFF && !quiet.tierSound,
+    "0 is nothing to draw",
+  );
+  check(
+    TypingEffectPolicy.decode(0xffff | (TypingEffectStyle.POWER_MODE << 17)).count === 65535 &&
+      TypingEffectPolicy.decode(0xffff | (TypingEffectStyle.POWER_MODE << 17)).style ===
+        TypingEffectStyle.POWER_MODE,
+    "a saturated count does not spill into the style",
+  );
+  check(
+    TypingEffectPolicy.tier(9) === 0 &&
+      TypingEffectPolicy.tier(10) === 1 &&
+      TypingEffectPolicy.tier(25) === 2 &&
+      TypingEffectPolicy.tier(50) === 3 &&
+      TypingEffectPolicy.tier(100) === 4 &&
+      TypingEffectPolicy.tier(400) === 4,
+    "the tiers are client-core's milestones 10, 25, 50 and 100",
+  );
+  check(
+    TypingEffectPolicy.tierSemitone(4) === 12 &&
+      TypingEffectPolicy.tierSemitones().join(",") === "3,6,9,12",
+    "the fourth tier's sound is an octave up, as host-api pitches it",
+  );
+  check(
+    TYPING_EFFECT_COMMIT === 4 && COMBO_IDLE_RESET_MILLIS === 3000,
+    "the ABI's commit code and idle time",
+  );
+
+  const flash = TypingEffectPolicy.decode(12 | (TypingEffectStyle.FLASH << 17));
+  const sparks = TypingEffectPolicy.decode(12 | (TypingEffectStyle.SPARKS << 17));
+  const powerKey = TypingEffectPolicy.decode(12 | (TypingEffectStyle.POWER_MODE << 17));
+  check(
+    TypingEffectPolicy.flashOpacity(quiet, 50) === 0 &&
+      TypingEffectPolicy.flashOpacity(TypingEffectPolicy.decode(12), 100) === 0,
+    "no style, no flash",
+  );
+  check(
+    TypingEffectPolicy.flashOpacity(flash, 50) < TypingEffectPolicy.flashOpacity(sparks, 50) &&
+      TypingEffectPolicy.flashOpacity(sparks, 50) < TypingEffectPolicy.flashOpacity(powerKey, 50),
+    "a stronger style flashes brighter",
+  );
+  check(
+    TypingEffectPolicy.flashOpacity(flash, 0) === 0 &&
+      TypingEffectPolicy.flashOpacity(flash, 100) > TypingEffectPolicy.flashOpacity(flash, 50),
+    "the intensity scales the flash, 0 drawing none",
+  );
+  check(
+    TypingEffectPolicy.flashOpacity(decoded, 100) <= 0.6 &&
+      TypingEffectPolicy.flashOpacity(decoded, 50) > TypingEffectPolicy.flashOpacity(sparks, 50),
+    "a tier-up flashes brighter, and no flash hides the candidates",
+  );
+  check(
+    TypingEffectPolicy.badge(0) === "" &&
+      TypingEffectPolicy.badge(1) === "" &&
+      TypingEffectPolicy.badge(12) === "连击 ×12",
+    "the badge shows a combo from two keys on",
+  );
+  check(
+    TypingEffectPolicy.badgeScale(sparks, 100) === 1 &&
+      TypingEffectPolicy.badgeScale(powerKey, 100) > 1 &&
+      TypingEffectPolicy.badgeScale(
+        TypingEffectPolicy.decode(25 | (1 << 16) | (TypingEffectStyle.POWER_MODE << 17)),
+        100,
+      ) > TypingEffectPolicy.badgeScale(powerKey, 100),
+    "only power mode swells the badge, harder on a tier-up",
   );
 });
 

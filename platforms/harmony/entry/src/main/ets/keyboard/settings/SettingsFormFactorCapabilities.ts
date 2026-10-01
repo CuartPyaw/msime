@@ -25,6 +25,8 @@ export interface SettingsFormFactorProjection {
   music: boolean;
   /** The V, / and @ modes, claimed for the 2in1, the PC form factor they were built around: a hardware keyboard sends their digits, operators and marks through the Engine's spelling symbols. */
   pluginTriggers: boolean;
+  /** The typing effect and the combo counter: a 2in1 flashes its candidate card, shows the combo and plays the tier-up sound for a hardware keyboard; a phone draws none. */
+  typingEffects: boolean;
 }
 
 /** Keep the shared settings page aligned with the keyboard's actual device form factor. */
@@ -49,6 +51,7 @@ export class SettingsFormFactorCapabilities {
       keySound: desktop,
       music: desktop,
       pluginTriggers: desktop,
+      typingEffects: desktop,
     };
   }
 }

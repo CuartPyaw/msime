@@ -52,6 +52,12 @@ export interface PluginPreferenceDocument {
   melody?: MelodyPreferenceDocument;
   achievements?: SwitchPreferenceDocument;
   music?: MusicPreferenceDocument;
+  /** "off", "flash", "sparks" or "power_mode"; `TypingEffectPolicy` reads it. */
+  effect_style?: string;
+  /** 0-100. */
+  effect_intensity?: number;
+  combo_counter?: boolean;
+  combo_tier_sound?: boolean;
 }
 
 /** The effect settings of one preference document. Background music is `MusicPolicy`'s. */
@@ -65,12 +71,23 @@ export interface KeySoundSettings {
   readonly melodyPack: string;
   /** 0-100, for every effect sound. */
   readonly volume: number;
+  /** The combo tier-up sound, the key pack's commit sample raised per tier: on only with the combo counter, as host-api's `tier_sound` holds. */
+  readonly tierSound: boolean;
 }
 
 /** The packs a set of settings plays from; null where no sound uses one. */
 export interface KeySoundSelection {
   readonly pack: string | null;
   readonly melodyPack: string | null;
+  /** The key pack's commit sample is prepared at the tier-up pitches too. */
+  readonly tierSound: boolean;
+}
+
+/** What one stat of a pack manifest reports, as far as telling a replaced manifest from the one loaded goes. */
+export interface KeySoundManifestStat {
+  readonly ino: number | bigint;
+  readonly size: number;
+  readonly mtime: number;
 }
 
 /** `sounds` of `msime_client_key_sound_pack`: absolute paths, null where the pack has none. */
@@ -134,6 +151,7 @@ export const KEY_SOUNDS_OFF: KeySoundSettings = {
   pack: DEFAULT_SOUND_PACK,
   melodyPack: DEFAULT_MELODY_PACK,
   volume: DEFAULT_VOLUME,
+  tierSound: false,
 };
 
 /** Steps through a melody note by note, as host-api's `Melody` does. */
@@ -181,22 +199,27 @@ export class KeySoundPolicy {
       melodyPack:
         typeof plugins.melody?.pack === "string" ? plugins.melody.pack : DEFAULT_MELODY_PACK,
       volume: volume,
+      tierSound: plugins.combo_counter === true && plugins.combo_tier_sound === true,
     };
   }
 
   /** Whether anything plays at all. Nothing is loaded, and no SoundPool created, until this holds. */
   static wanted(settings: KeySoundSettings): boolean {
-    return settings.key || settings.commit || settings.achievements;
+    return settings.key || settings.commit || settings.achievements || settings.tierSound;
   }
 
-  /** The key pack when a key, commit or achievement sound uses it, and the melody pack when keys play the melody. */
+  /** The key pack when a key, commit, achievement or tier-up sound uses it, and the melody pack when keys play the melody. */
   static selection(settings: KeySoundSettings): KeySoundSelection {
     return {
       pack:
-        (settings.key && !settings.melody) || settings.commit || settings.achievements
+        (settings.key && !settings.melody) ||
+        settings.commit ||
+        settings.achievements ||
+        settings.tierSound
           ? settings.pack
           : null,
       melodyPack: settings.key && settings.melody ? settings.melodyPack : null,
+      tierSound: settings.tierSound,
     };
   }
 
@@ -239,10 +262,11 @@ export class KeySoundPolicy {
     return unicodeChar > 0x20 && unicodeChar !== 0x7f ? KeySoundClass.DEFAULT : -1;
   }
 
-  /** The files `keys` and `melody` play, each once, with every pitch it is played at. A melody sample is played at its tune's pitches; every other sample at its own. */
+  /** The files `keys` and `melody` play, each once, with every pitch it is played at. A melody sample is played at its tune's pitches; the commit sample at its own and at `tierSemitones`, the tier-up sound's pitches (empty while that sound is off); every other sample at its own. */
   static samples(
     keys: KeySoundPackFiles | null,
     melody: KeySoundPackFiles | null,
+    tierSemitones: number[],
   ): KeySoundSampleRequest[] {
     const pitches: Map<string, number[]> = new Map<string, number[]>();
     const add = (file: string | null, semitones: number[]): void => {
@@ -266,6 +290,7 @@ export class KeySoundPolicy {
         add(sounds.backspace, [0]);
       }
       add(sounds.commit, [0]);
+      add(sounds.commit, tierSemitones);
       add(sounds.achievement, [0]);
     }
     if (melody !== null && melody.sequence !== null) {
@@ -330,6 +355,19 @@ export class KeySoundPolicy {
     return cues;
   }
 
+  /** The tier-up sound: the key pack's commit sample at `semitone`, or null while that sound is off or the pack has no commit sample. */
+  static tierCue(
+    settings: KeySoundSettings,
+    keys: KeySoundPackFiles | null,
+    semitone: number,
+  ): KeySoundCue | null {
+    const file: string | null = keys === null ? null : keys.sounds.commit;
+    if (!settings.tierSound || file === null || file.length === 0) {
+      return null;
+    }
+    return { file: file, semitone: semitone };
+  }
+
   /** The sample for a key class, or the pack's default when it has none of its own. */
   static keySample(sounds: KeySoundPackSounds, keyClass: number): string | null {
     let own: string | null = null;
@@ -353,5 +391,29 @@ export class KeySoundPolicy {
    */
   static isWav(file: string): boolean {
     return file.toLowerCase().endsWith(".wav");
+  }
+
+  /**
+   * The manifests a pack named `id` may be read from: the built-in one under `soundPacks`, and the installed one under `stateRoot/plugins/<kind>`. host-api resolves a built-in id from the first and any other from the second; this host does not know which ids are built in, so it watches both, and the one that does not exist stamps as absent.
+   *
+   * @param kind "sound" for a key sound or melody pack, "music" for a music pack
+   */
+  static manifests(kind: string, soundPacks: string, stateRoot: string, id: string): string[] {
+    const paths: string[] = [`${soundPacks}/${id}/plugin.toml`];
+    if (stateRoot.length > 0) {
+      paths.push(`${stateRoot}/plugins/${kind}/${id}/plugin.toml`);
+    }
+    return paths;
+  }
+
+  /**
+   * A stamp of the manifests a loaded pack came from, as host-api stamps them (`restamp`): inode, size and modification time of each, or "-" where there is none. Importing a pack again under the same id replaces its folder whole and removing it deletes it, so either moves the stamp, and a player holding the old files reloads.
+   */
+  static stamp(stats: (KeySoundManifestStat | null)[]): string {
+    return stats
+      .map((stat: KeySoundManifestStat | null): string =>
+        stat === null ? "-" : `${String(stat.ino)}:${stat.size}:${stat.mtime}`,
+      )
+      .join("|");
   }
 }

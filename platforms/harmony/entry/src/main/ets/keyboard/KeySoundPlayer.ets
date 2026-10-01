@@ -12,9 +12,10 @@ import common from '@ohos.app.ability.common';
 import client from 'libmsimeclient.so';
 import { KeyboardLog, describeError } from './KeyboardLog';
 import {
-  KEY_SOUNDS_OFF, KeySoundCue, KeySoundEvent, KeySoundMelody, KeySoundPackFiles, KeySoundPolicy,
-  KeySoundSampleRequest, KeySoundSelection, KeySoundSettings
+  KEY_SOUNDS_OFF, KeySoundCue, KeySoundEvent, KeySoundManifestStat, KeySoundMelody, KeySoundPackFiles,
+  KeySoundPolicy, KeySoundSampleRequest, KeySoundSelection, KeySoundSettings
 } from './KeySoundPolicy';
+import { TypingEffectPolicy } from './TypingEffectPolicy';
 
 interface KeySoundPackRequest {
   state_root: string;
@@ -51,6 +52,9 @@ export class KeySoundPlayer {
   /** loadComplete can arrive before load() resolves with the same id. */
   private readonly completed: Set<number> = new Set<number>();
   private failed: boolean = false;
+  /** The manifests the loaded packs were read from, and their stamp then (`KeySoundPolicy.stamp`): a pack imported again under the same id, or removed, moves the stamp, and `recheck` reloads. Empty while nothing is loaded. */
+  private manifests: string[] = [];
+  private stamp: string = '';
 
   /** Where the built-in packs are and where rendered notes may be written. */
   use(context: common.Context): void {
@@ -67,16 +71,40 @@ export class KeySoundPlayer {
     const selection: KeySoundSelection = KeySoundPolicy.selection(settings);
     // After a play failure the pool is gone, so any settings change loads it again, as the failure message promises.
     const reload: boolean = this.failed || selection.pack !== this.selection.pack
-      || selection.melodyPack !== this.selection.melodyPack || stateRoot !== this.stateRoot;
+      || selection.melodyPack !== this.selection.melodyPack || selection.tierSound !== this.selection.tierSound
+      || stateRoot !== this.stateRoot;
     this.settings = settings;
     if (!reload) {
       return;
     }
     this.selection = selection;
     this.stateRoot = stateRoot;
+    this.reload();
+  }
+
+  /**
+   * Reload the packs when one of them changed on disk since it was loaded: imported again under the same id, which replaces its folder whole, or removed. The session calls this when an editor takes focus, as host-api re-stamps its packs on focus; the stat runs off the caller's turn.
+   */
+  recheck(): void {
+    if (this.manifests.length === 0) {
+      return;
+    }
+    const generation: number = this.generation;
+    setTimeout((): void => {
+      if (generation === this.generation && this.manifests.length > 0
+        && KeySoundPlayer.stampOf(this.manifests) !== this.stamp) {
+        this.reload();
+      }
+    }, 0);
+  }
+
+  /** Let whatever is loaded go and load the current selection afresh. Ends a failure. */
+  private reload(): void {
     this.release();
     this.failed = false;
-    if (!KeySoundPolicy.wanted(settings) || this.soundPacks.length === 0) {
+    this.manifests = [];
+    this.stamp = '';
+    if (!KeySoundPolicy.wanted(this.settings) || this.soundPacks.length === 0) {
       return;
     }
     const generation: number = this.generation;
@@ -101,6 +129,19 @@ export class KeySoundPlayer {
   /** The commit count just passed a milestone. */
   achievement(): void {
     this.play(KeySoundEvent.ACHIEVEMENT, 0);
+  }
+
+  /** The typing combo reached `tier` and host-api reported its tier-up sound due: the key pack's commit sample, raised per tier. */
+  tierUp(tier: number): void {
+    const pool: media.SoundPool | undefined = this.pool;
+    if (pool === undefined || this.failed) {
+      return;
+    }
+    const cue: KeySoundCue | null =
+      KeySoundPolicy.tierCue(this.settings, this.keys, TypingEffectPolicy.tierSemitone(tier));
+    if (cue !== null) {
+      this.sound(pool, [cue]);
+    }
   }
 
   /** Let go of the pool, its sounds and the rendered notes. The settings stay, so the next configure with a different pack loads again. */
@@ -131,6 +172,8 @@ export class KeySoundPlayer {
     this.release();
     this.settings = KEY_SOUNDS_OFF;
     this.selection = KeySoundPolicy.selection(KEY_SOUNDS_OFF);
+    this.manifests = [];
+    this.stamp = '';
   }
 
   private play(event: KeySoundEvent, keyClass: number): void {
@@ -140,6 +183,11 @@ export class KeySoundPlayer {
     }
     const cues: KeySoundCue[] = KeySoundPolicy.cues(this.settings, this.keys, this.melody, event,
       keyClass, this.melodyState, Date.now());
+    this.sound(pool, cues);
+  }
+
+  /** Play each cue SoundPool has finished loading, at the current volume. */
+  private sound(pool: media.SoundPool, cues: KeySoundCue[]): void {
     const gain: number = KeySoundPolicy.gain(this.settings);
     if (gain <= 0) {
       return;
@@ -172,6 +220,10 @@ export class KeySoundPlayer {
     if (generation !== this.generation) {
       return;
     }
+    // Stamped before the packs are read, so a change while they are read is seen by the next recheck rather than missed.
+    const manifests: string[] = this.manifestPaths();
+    this.manifests = manifests;
+    this.stamp = KeySoundPlayer.stampOf(manifests);
     const keys: KeySoundPackFiles | null =
       this.selection.pack === null ? null : this.packFiles(this.selection.pack);
     const melody: KeySoundPackFiles | null =
@@ -208,7 +260,8 @@ export class KeySoundPlayer {
         KeyboardLog.error(`key sound pool error: ${describeError(error)}`);
       }
     });
-    const requests: KeySoundSampleRequest[] = KeySoundPolicy.samples(keys, melody);
+    const requests: KeySoundSampleRequest[] = KeySoundPolicy.samples(keys, melody,
+      this.selection.tierSound ? TypingEffectPolicy.tierSemitones() : []);
     const bound: KeySoundPackFiles | null = keys !== null ? keys : melody;
     const maxMillis: number = bound === null ? 0 : bound.max_sample_millis;
     for (let index: number = 0; index < requests.length; index++) {
@@ -219,6 +272,37 @@ export class KeySoundPlayer {
         return;
       }
     }
+  }
+
+  /** The manifests of the selected packs, wherever host-api may read them from. */
+  private manifestPaths(): string[] {
+    let paths: string[] = [];
+    if (this.selection.pack !== null) {
+      paths = paths.concat(KeySoundPolicy.manifests('sound', this.soundPacks, this.stateRoot,
+        this.selection.pack));
+    }
+    if (this.selection.melodyPack !== null) {
+      paths = paths.concat(KeySoundPolicy.manifests('sound', this.soundPacks, this.stateRoot,
+        this.selection.melodyPack));
+    }
+    return paths;
+  }
+
+  /** The stamp of `paths` now; a manifest that cannot be read stamps as absent. `MusicPlayer` stamps its pack the same way. */
+  static stampOf(paths: string[]): string {
+    const stats: (KeySoundManifestStat | null)[] = [];
+    for (const path of paths) {
+      let stat: KeySoundManifestStat | null = null;
+      try {
+        const found: fs.Stat = fs.lstatSync(path);
+        stat = { ino: found.ino, size: found.size, mtime: found.mtime };
+      } catch (error) {
+        // A manifest that is not there is part of the stamp: the pack may be installed later.
+        stat = null;
+      }
+      stats.push(stat);
+    }
+    return KeySoundPolicy.stamp(stats);
   }
 
   /** One pack's validated files, or null after saying why there are none. */

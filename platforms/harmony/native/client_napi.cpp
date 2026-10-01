@@ -793,6 +793,20 @@ static napi_value Command(napi_env env, napi_callback_info info) {
     return response(env, msime_client_command(handle, command));
 }
 
+// The typing effect of one key or commit: the packed integer msime_client.h documents. Called on the key path, so it allocates nothing beyond the returned number.
+static napi_value TypingEffect(napi_env env, napi_callback_info info) {
+    std::vector<napi_value> argv;
+    uint64_t handle = 0;
+    uint32_t event = 0;
+    if (!arguments(env, info, 2, argv) || !argumentHandle(env, argv[0], handle)
+            || napi_get_value_uint32(env, argv[1], &event) != napi_ok) {
+        return invalid(env, "Expected a session handle and a typing effect event");
+    }
+    napi_value output = nullptr;
+    if (napi_create_uint32(env, msime_client_typing_effect(handle, event), &output) != napi_ok) return nullptr;
+    return output;
+}
+
 static napi_value FixCandidatePosition(napi_env env, napi_callback_info info) {
     std::vector<napi_value> argv;
     uint64_t handle = 0;
@@ -1103,6 +1117,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         ENTRY("punctuationWithContext", PunctuationWithContext),
         ENTRY("balancePairedPunctuationAfterAutoClose", BalancePairedPunctuationAfterAutoClose),
         ENTRY("command", Command),
+        ENTRY("typingEffect", TypingEffect),
         ENTRY("select", Select),
         ENTRY("selectEdge", SelectEdge),
         ENTRY("selectAnyCandidate", SelectAnyCandidate),
