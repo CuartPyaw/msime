@@ -43,6 +43,11 @@ ibus_source = (root / "src/core/ClientEngine.cpp").read_text()
 record_statistics = source[source.index("void recordTypingStatistics("):source.index("  // `typingStatistics`", source.index("void recordTypingStatistics("))]
 assert "fcitx_key_press_writes.begin();" in record_statistics
 assert "fcitx_key_press_writes.end();" in record_statistics
+# Provider callbacks cross the C ABI from a worker thread. The streaming text
+# callback must contain allocation/UI queue failures so no C++ exception can
+# escape through the Rust provider boundary and terminate the input method.
+stream_update = ibus_source[ibus_source.index("extern \"C\" void voice_provider_stream_update"):ibus_source.index("// English mode", ibus_source.index("extern \"C\" void voice_provider_stream_update"))]
+assert "try" in stream_update and "catch (...)" in stream_update
 # 中英文切换提示：面板那个弹出物必须排在面板更新之后，先弹再刷会被 clearPanel()/render()
 # 收掉，表现为提示时有时无。
 assert "showCustomInputMethodInformation" in source
