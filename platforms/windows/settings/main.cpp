@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "CandidatePalette.h"
+#include "CandidateWindowStyle.h"
 #include "SettingsNavigation.h"
 #include "ShellLauncher.h"
 #include "msime_client.h"
@@ -2043,7 +2044,8 @@ private:
   FrameworkElement slider_control(std::wstring const &name, double minimum,
                                   double maximum, double value,
                                   std::function<void(double)> apply,
-                                  bool enabled = true) {
+                                  bool enabled = true, double step = 1,
+                                  std::wstring const &suffix = L"") {
     StackPanel box;
     box.Orientation(Orientation::Horizontal);
     box.Spacing(16);
@@ -2051,25 +2053,26 @@ private:
     slider.Width(180);
     slider.Minimum(minimum);
     slider.Maximum(maximum);
-    slider.StepFrequency(1);
-    slider.SmallChange(1);
-    slider.LargeChange(1);
+    slider.StepFrequency(step);
+    slider.SmallChange(step);
+    slider.LargeChange(step);
     slider.Value(std::clamp(value, minimum, maximum));
     slider.VerticalAlignment(VerticalAlignment::Center);
     slider.IsEnabled(enabled && loaded_);
     A11y::SetName(slider, hstring(name));
-    auto label = make_text(number_text(std::clamp(value, minimum, maximum)), 14,
-                           palette_.text);
+    auto label = make_text(
+        number_text(std::clamp(value, minimum, maximum)) + suffix, 14,
+        palette_.text);
     label.Width(60);
     label.TextAlignment(TextAlignment::Right);
     label.VerticalAlignment(VerticalAlignment::Center);
     slider.ValueChanged(
-        [weak_label = make_weak(label), on_slide = std::move(apply)](
-            Inspectable const &,
-            Controls::Primitives::RangeBaseValueChangedEventArgs const &args) {
-          const double rounded = std::round(args.NewValue());
+        [weak_label = make_weak(label), on_slide = std::move(apply), step,
+         suffix](Inspectable const &,
+                 Controls::Primitives::RangeBaseValueChangedEventArgs const &args) {
+          const double rounded = std::round(args.NewValue() / step) * step;
           if (auto block = weak_label.get())
-            block.Text(number_text(rounded));
+            block.Text(number_text(rounded) + suffix);
           on_slide(rounded);
         });
     box.Children().Append(slider);
@@ -2186,7 +2189,8 @@ private:
   void slider_row(StackPanel const &group, wchar_t glyph,
                   std::wstring const &title, std::wstring const &subtitle,
                   std::wstring key, double minimum, double maximum,
-                  double fallback) {
+                  double fallback, double step = 1,
+                  std::wstring const &suffix = L"") {
     add_row(group, glyph, title, subtitle,
             slider_control(title, minimum, maximum,
                            document_.Number(key, fallback),
@@ -2194,7 +2198,8 @@ private:
                              document_.SetNumber(key, value);
                              schedule_save();
                              update_preview();
-                           }));
+                           },
+                           true, step, suffix));
   }
 
   // A surface of the shared desktop app this window does not draw itself.
@@ -2538,26 +2543,37 @@ private:
     const bool preedit =
         document_.String(L"candidate_preedit_style", L"pinyin") != L"empty";
     const bool translations = document_.Boolean(L"candidate_translations", false);
+    // Scale, opacity and radius through the rules the card itself uses (CandidateWindowStyle.h). The package's own radius is not known here, so an unset radius previews the theme's.
+    const auto style = candidate_window_style();
+    const double scale = style.scale();
+    const double radius = msime::windows::candidate_card_radius(
+        style, std::nullopt, theme.radius);
+    const double row_radius =
+        msime::windows::candidate_row_radius(style, theme.item_radius,
+                                             static_cast<float>(radius));
 
-    preview_host_.Background(brush(to_color(theme.surface)));
-    preview_host_.BorderBrush(brush(to_color(theme.border)));
+    preview_host_.Background(
+        brush(to_color(msime::windows::candidate_faded(theme.surface, style))));
+    preview_host_.BorderBrush(
+        brush(to_color(msime::windows::candidate_faded(theme.border, style))));
     preview_host_.BorderThickness(Thickness{1, 1, 1, 1});
-    preview_host_.CornerRadius(CornerRadius{8, 8, 8, 8});
-    preview_host_.Padding(Thickness{12, 8, 12, 10});
+    preview_host_.CornerRadius(CornerRadius{radius, radius, radius, radius});
+    preview_host_.Padding(
+        Thickness{12 * scale, 8 * scale, 12 * scale, 10 * scale});
     A11y::SetName(preview_host_, L"候选窗口预览");
 
     StackPanel body;
-    body.Spacing(6);
+    body.Spacing(6 * scale);
     StackPanel head;
     head.Orientation(Orientation::Horizontal);
-    head.Spacing(12);
-    head.Padding(Thickness{4, 0, 4, 0});
-    auto mode = make_text(L"中", 13, to_color(theme.accent));
+    head.Spacing(12 * scale);
+    head.Padding(Thickness{4 * scale, 0, 4 * scale, 0});
+    auto mode = make_text(L"中", 13 * scale, to_color(theme.accent));
     mode.FontWeight(Windows::UI::Text::FontWeight{600});
     head.Children().Append(mode);
     // The candidate window draws the preedit in the accent colour at semibold.
     if (preedit) {
-      auto pre = make_text(L"hou’xuan’xiang", 15, to_color(theme.accent));
+      auto pre = make_text(L"hou’xuan’xiang", 15 * scale, to_color(theme.accent));
       pre.FontWeight(Windows::UI::Text::FontWeight{600});
       head.Children().Append(pre);
     }
@@ -2565,29 +2581,30 @@ private:
 
     StackPanel list;
     list.Orientation(vertical ? Orientation::Vertical : Orientation::Horizontal);
-    list.Spacing(4);
+    list.Spacing(4 * scale);
     for (int i = 0; i < count; ++i) {
       const auto &[word, gloss] = preview_words[static_cast<size_t>(i)];
       const bool highlighted = i == 0;
       Grid item;
-      item.Padding(Thickness{6, 4, 10, 4});
-      item.CornerRadius(CornerRadius{4, 4, 4, 4});
+      item.Padding(Thickness{6 * scale, 4 * scale, 10 * scale, 4 * scale});
+      item.CornerRadius(CornerRadius{row_radius, row_radius, row_radius, row_radius});
       if (highlighted)
         item.Background(brush(to_color(theme.selected)));
       if (highlighted && theme.show_selected_bar) {
         Border bar;
-        bar.Width(3);
-        bar.Height(16);
-        bar.CornerRadius(CornerRadius{1.5, 1.5, 1.5, 1.5});
+        bar.Width(3 * scale);
+        bar.Height(16 * scale);
+        bar.CornerRadius(CornerRadius{1.5 * scale, 1.5 * scale, 1.5 * scale,
+                                      1.5 * scale});
         bar.Background(brush(to_color(theme.accent)));
         bar.HorizontalAlignment(HorizontalAlignment::Left);
         bar.VerticalAlignment(VerticalAlignment::Center);
-        bar.Margin(Thickness{-6, 0, 0, 0});
+        bar.Margin(Thickness{-6 * scale, 0, 0, 0});
         item.Children().Append(bar);
       }
       StackPanel cell;
       cell.Orientation(Orientation::Horizontal);
-      cell.Spacing(8);
+      cell.Spacing(8 * scale);
       // Alpha 0 in the selected slots means "keep the unselected colour", as the renderer reads it. The translation draws in the package's translation colour, or else the number colour, as the renderer draws it.
       const auto number_color =
           msime::windows::candidate_row_number_color(theme, highlighted);
@@ -2595,15 +2612,17 @@ private:
           msime::windows::candidate_row_translation_color(theme, highlighted);
       const auto row_color = msime::windows::candidate_row_text_color(
           theme, theme.text, highlighted, false);
-      auto number = make_text(std::to_wstring(i + 1), 13, to_color(number_color));
+      auto number =
+          make_text(std::to_wstring(i + 1), 13 * scale, to_color(number_color));
       number.VerticalAlignment(VerticalAlignment::Center);
       cell.Children().Append(number);
       StackPanel words;
-      auto candidate = make_text(word, font, to_color(row_color));
+      auto candidate = make_text(word, font * scale, to_color(row_color));
       candidate.TextWrapping(TextWrapping::NoWrap);
       words.Children().Append(candidate);
       if (translations)
-        words.Children().Append(make_text(gloss, 13, to_color(translation_color)));
+        words.Children().Append(
+            make_text(gloss, 13 * scale, to_color(translation_color)));
       cell.Children().Append(words);
       item.Children().Append(cell);
       list.Children().Append(item);
@@ -2625,6 +2644,13 @@ private:
     bool_row(layout, 0xE718, L"候选窗口跟随光标",
              L"关闭后保持首次出现的位置，直到候选窗口消失。",
              L"candidate_follow_cursor", true);
+
+    auto look = add_group(page, L"外观");
+    slider_row(look, 0xE740, L"整体大小", L"候选窗口连同文字一起缩放（75–150%）",
+               L"candidate_scale_percent", 75, 150, 100, 5, L"%");
+    slider_row(look, 0xE7B3, L"不透明度", L"只淡化候选框的底色和边框，文字保持清晰（50–100%）",
+               L"candidate_opacity_percent", 50, 100, 100, 5, L"%");
+    corner_radius_row(look);
 
     auto preedit = add_group(page, L"预编辑");
     select_row(preedit, 0xE70F, L"候选窗预编辑", L"", L"candidate_preedit_style",
@@ -2663,6 +2689,48 @@ private:
     }
     add_row(paging, 0xE8AB, L"翻页方式", L"选择用于翻页的按键", nullptr,
             checks_panel(std::move(checks), 190));
+  }
+
+  // 圆角大小. A value overrides the skin package's radius; 默认 clears it, so the card follows the package again, else the theme. An unset radius shows the theme's on the slider.
+  void corner_radius_row(StackPanel const &group) {
+    const auto stored = document_.Value(L"candidate_corner_radius");
+    const bool overridden = stored && stored.ValueType() == JsonValueType::Number;
+    const double fallback =
+        msime::windows::candidate_native_palette(candidate_dark()).radius;
+    StackPanel box;
+    box.Orientation(Orientation::Horizontal);
+    box.Spacing(8);
+    box.Children().Append(slider_control(
+        L"圆角大小", 0, 16, overridden ? stored.GetNumber() : fallback,
+        [this](double value) {
+          document_.SetNumber(L"candidate_corner_radius", value);
+          schedule_save();
+          update_preview();
+        },
+        true, 1, L"pt"));
+    box.Children().Append(button_control(L"默认", [this] {
+      change([](PreferencesDocument &doc) {
+        doc.SetValue(L"candidate_corner_radius", JsonValue::CreateNullValue());
+      }, true);
+    }, loaded_));
+    add_row(group, 0xE739, L"圆角大小",
+            overridden ? L"已覆盖皮肤包的圆角，点“默认”恢复跟随皮肤"
+                : L"跟随皮肤；设定后会覆盖皮肤包的圆角（0–16pt）",
+            box);
+  }
+
+  // The style fields as the preview draws them. A document out of range previews the defaults; the card itself refuses such a document and keeps its previous style.
+  msime::windows::CandidateWindowStyle candidate_window_style() const {
+    msime::windows::CandidateWindowStyle style;
+    style.scale_percent = static_cast<unsigned>(
+        std::lround(document_.Number(L"candidate_scale_percent", 100)));
+    style.opacity_percent = static_cast<unsigned>(
+        std::lround(document_.Number(L"candidate_opacity_percent", 100)));
+    const auto radius = document_.Value(L"candidate_corner_radius");
+    if (radius && radius.ValueType() == JsonValueType::Number)
+      style.corner_radius =
+          static_cast<unsigned>(std::lround((std::max)(0.0, radius.GetNumber())));
+    return style.valid() ? style : msime::windows::CandidateWindowStyle{};
   }
 
   // ---- 悬浮工具栏 ----
