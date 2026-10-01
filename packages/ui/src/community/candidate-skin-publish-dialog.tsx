@@ -181,20 +181,31 @@ export function CandidateSkinPublishDialog({
       : undefined;
   const drawPreview = async () => {
     if (!previewless || !readImage || drawing) return;
-    const generation = packGeneration.current;
+    const clientGenerationAtStart = clientGeneration.current;
+    const packGenerationAtStart = packGeneration.current;
     setDrawing(true);
     setDrawFailed(false);
     try {
       const bytes = await renderSkinPreview(previewless, readImage);
       const catalog = await client.addPreview(previewless.id, bytes);
-      if (generation !== clientGeneration.current || generation !== packGeneration.current) return;
+      if (
+        clientGenerationAtStart !== clientGeneration.current ||
+        packGenerationAtStart !== packGeneration.current
+      )
+        return;
       setPackages(catalog.packages);
       setPackRevision((revision) => revision + 1);
     } catch {
-      if (generation === packGeneration.current && generation === clientGeneration.current)
+      if (
+        packGenerationAtStart === packGeneration.current &&
+        clientGenerationAtStart === clientGeneration.current
+      )
         setDrawFailed(true);
     } finally {
-      if (generation === packGeneration.current && generation === clientGeneration.current)
+      if (
+        packGenerationAtStart === packGeneration.current &&
+        clientGenerationAtStart === clientGeneration.current
+      )
         setDrawing(false);
     }
   };
@@ -206,19 +217,30 @@ export function CandidateSkinPublishDialog({
     licenseValue.length > 0 && new TextEncoder().encode(licenseValue).length <= assetLicenseLimit;
   const writeLicense = async () => {
     if (!licenseless || !licenseValid || writingLicense) return;
-    const generation = packGeneration.current;
+    const clientGenerationAtStart = clientGeneration.current;
+    const packGenerationAtStart = packGeneration.current;
     setWritingLicense(true);
     setLicenseFailed(false);
     try {
       const catalog = await client.addLicense(skinId, licenseValue);
-      if (generation !== clientGeneration.current || generation !== packGeneration.current) return;
+      if (
+        clientGenerationAtStart !== clientGeneration.current ||
+        packGenerationAtStart !== packGeneration.current
+      )
+        return;
       setPackages(catalog.packages);
       setPackRevision((revision) => revision + 1);
     } catch {
-      if (generation === packGeneration.current && generation === clientGeneration.current)
+      if (
+        packGenerationAtStart === packGeneration.current &&
+        clientGenerationAtStart === clientGeneration.current
+      )
         setLicenseFailed(true);
     } finally {
-      if (generation === packGeneration.current && generation === clientGeneration.current)
+      if (
+        packGenerationAtStart === packGeneration.current &&
+        clientGenerationAtStart === clientGeneration.current
+      )
         setWritingLicense(false);
     }
   };
