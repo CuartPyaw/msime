@@ -696,7 +696,12 @@ export function CommunityResourcesPage({
       setItems((value) => (append ? appendUniqueById(value, page.items) : page.items));
       setMore(page.has_more);
     } catch (loadError) {
-      if (current === generation.current) setError(resourceMessage(loadError));
+      if (current === generation.current) {
+        setError(resourceMessage(loadError));
+        // The existing rows belong to the previous query or scope. Do not let
+        // their continuation offset be used with the failed fresh request.
+        if (!append) setMore(false);
+      }
     } finally {
       if (current === generation.current) setBusy(false);
     }
