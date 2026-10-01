@@ -35,6 +35,17 @@ test("renders each notice's Markdown and opens its links externally", async () =
   expect(openExternalUrl).toHaveBeenCalledWith("https://msime.app/news/");
 });
 
+test("a middle click on a link opens it externally instead of in the webview", async () => {
+  const openExternalUrl = vi.fn();
+  render(<NoticeBanner client={client([notice()])} openExternalUrl={openExternalUrl} />);
+  const card = await screen.findByRole("article", { name: "服务维护通知" });
+  const link = within(card).getByRole("link", { name: "公告" });
+  const event = new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 });
+  link.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(openExternalUrl).toHaveBeenCalledWith("https://msime.app/news/");
+});
+
 test("raw HTML, scripts and images in a body never become markup", () => {
   const html = noticeBodyHtml(
     '<img src=x onerror="alert(1)"> <script>alert(2)</script> ![追踪](https://example.com/p.png) [坏链接](javascript:alert(3))',

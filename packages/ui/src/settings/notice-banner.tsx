@@ -98,6 +98,8 @@ export function NoticeBanner({
             <div
               className="mt-1.5 text-sm leading-relaxed text-secondary break-anywhere [&_a]:underline [&_p]:my-1 [&_ul]:my-1 [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:pl-5"
               onClick={openLink}
+              // A middle click would otherwise let the webview open the link in a window of its own (WebView2 does) instead of the system browser.
+              onAuxClick={openLink}
               // markdown-it with html disabled escapes any HTML in the body, so this holds only the elements Markdown itself produces.
               dangerouslySetInnerHTML={{ __html: noticeBodyHtml(notice.body) }}
             />
