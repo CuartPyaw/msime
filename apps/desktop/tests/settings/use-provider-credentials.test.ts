@@ -64,6 +64,33 @@ test("a credential test already in progress ignores a second trigger", async () 
   });
 });
 
+test("a same-tick duplicate credential test is ignored", async () => {
+  let resolve!: (value: { ok: boolean; message: string }) => void;
+  const pending = new Promise<{ ok: boolean; message: string }>((accept) => {
+    resolve = accept;
+  });
+  const testApiCredential = vi.fn().mockReturnValue(pending);
+  const { result } = renderHook(() => useProviderCredentials({ client: { testApiCredential } }));
+
+  let first!: Promise<void>;
+  let second!: Promise<void>;
+  act(() => {
+    first = result.current.runCredentialTest("ai.assistant", {
+      endpoint: "https://ai.example.test",
+    });
+    second = result.current.runCredentialTest("ai.assistant", {
+      endpoint: "https://ai.example.test",
+    });
+  });
+  expect(testApiCredential).toHaveBeenCalledOnce();
+
+  resolve({ ok: true, message: "连接成功" });
+  await act(async () => {
+    await first;
+    await second;
+  });
+});
+
 test("a credential save from a replaced client is ignored", async () => {
   let resolve!: (value: never) => void;
   const pending = new Promise<never>((accept) => {

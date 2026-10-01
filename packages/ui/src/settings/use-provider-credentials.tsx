@@ -64,6 +64,8 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
   >({});
   const clientGeneration = useRef(0);
   const credentialSaveRunning = useRef(false);
+  const credentialTestRunning = useRef<Partial<Record<ApiCredentialTestService, number>>>({});
+  const credentialTestOwner = useRef(0);
 
   const updateTencentCredentialInput = (patch: Partial<TencentCredentialInput>) =>
     setTencentCredentialInput((current) => ({ ...current, ...patch }));
@@ -71,6 +73,8 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
   useEffect(() => {
     const generation = ++clientGeneration.current;
     credentialTestGeneration.current = {};
+    credentialTestRunning.current = {};
+    credentialTestOwner.current++;
     credentialSaveRunning.current = false;
     setCredentialTests((current) => (Object.keys(current).length ? {} : current));
     setProviderCredentialBusy(undefined);
@@ -98,8 +102,11 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
     config: Record<string, unknown>,
   ) => {
     if (!client.testApiCredential) return;
-    if (credentialTests[service]?.busy) return;
+    if (credentialTests[service]?.busy || credentialTestRunning.current[service] !== undefined)
+      return;
     const clientVersion = clientGeneration.current;
+    const owner = ++credentialTestOwner.current;
+    credentialTestRunning.current[service] = owner;
     const signature = JSON.stringify(config);
     const generation = (credentialTestGeneration.current[service] ?? 0) + 1;
     credentialTestGeneration.current[service] = generation;
@@ -108,31 +115,36 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
         ...current,
         [service]: { signature, ...patch },
       }));
-    await runAsyncAction(
-      {
-        busy: false,
-        isCurrent: () =>
-          clientGeneration.current === clientVersion &&
-          credentialTestGeneration.current[service] === generation,
-        setBusy: (busy) =>
-          setCredentialTests((current) => ({
-            ...current,
-            [service]: {
-              ...(current[service]?.signature === signature ? current[service] : {}),
-              signature,
-              busy,
-            },
-          })),
-        setError: (message) =>
-          update(message ? { busy: true, ok: false, message } : { busy: true, message }),
-      },
-      async (isCurrent) => {
-        const result = await client.testApiCredential!(service, config);
-        if (!isCurrent()) return;
-        update({ busy: true, ...result });
-      },
-      { formatError: () => "无法连接 provider，请确认服务已启动。" },
-    );
+    try {
+      await runAsyncAction(
+        {
+          busy: false,
+          isCurrent: () =>
+            clientGeneration.current === clientVersion &&
+            credentialTestGeneration.current[service] === generation,
+          setBusy: (busy) =>
+            setCredentialTests((current) => ({
+              ...current,
+              [service]: {
+                ...(current[service]?.signature === signature ? current[service] : {}),
+                signature,
+                busy,
+              },
+            })),
+          setError: (message) =>
+            update(message ? { busy: true, ok: false, message } : { busy: true, message }),
+        },
+        async (isCurrent) => {
+          const result = await client.testApiCredential!(service, config);
+          if (!isCurrent()) return;
+          update({ busy: true, ...result });
+        },
+        { formatError: () => "无法连接 provider，请确认服务已启动。" },
+      );
+    } finally {
+      if (credentialTestRunning.current[service] === owner)
+        delete credentialTestRunning.current[service];
+    }
   };
 
   async function runCredentialSave<T>(
