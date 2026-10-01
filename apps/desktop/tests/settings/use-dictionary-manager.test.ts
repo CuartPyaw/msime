@@ -281,3 +281,40 @@ test("a phrase removal response from a replaced dictionary client is ignored", a
   expect(nextList).not.toHaveBeenCalled();
   expect(result.current.phrases).toEqual([existing]);
 });
+
+test("a dictionary failure retry from a replaced client cannot reload stale phrases", async () => {
+  let resolveRetry!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    resolveRetry = resolve;
+  });
+  const stale = { kind: "quick_phrase" as const, key: "old", value: "旧结果", weight: 1 };
+  const oldList = vi.fn().mockResolvedValue({ entries: [stale], has_more: false });
+  const oldClient: DictionaryManagerClient = {
+    dictionary: {
+      list: oldList,
+      edit: vi.fn().mockResolvedValue(undefined),
+      retry: vi.fn(() => pending),
+    },
+  };
+  const nextList = vi.fn().mockResolvedValue({ entries: [], has_more: false });
+  const nextClient: DictionaryManagerClient = {
+    dictionary: { list: nextList, edit: vi.fn().mockResolvedValue(undefined) },
+  };
+  const { result, rerender } = renderHook(
+    ({ client }) => useDictionaryManager({ client, confirm: vi.fn() }),
+    { initialProps: { client: oldClient } },
+  );
+
+  let pendingRetry!: Promise<void>;
+  act(() => {
+    pendingRetry = result.current.retryDictionaryFailure("request-1");
+  });
+  await waitFor(() => expect(result.current.phraseBusy).toBe(true));
+  rerender({ client: nextClient });
+  resolveRetry();
+  await act(async () => pendingRetry);
+
+  expect(oldList).not.toHaveBeenCalled();
+  expect(nextList).not.toHaveBeenCalled();
+  expect(result.current.phrases).toEqual([]);
+});
