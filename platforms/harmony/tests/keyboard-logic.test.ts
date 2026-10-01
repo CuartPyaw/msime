@@ -7344,6 +7344,194 @@ group("account access tokens rotate once and cannot outlive logout", () => {
   });
 });
 
+group("the settings app and the keyboard never present a spent refresh token", () => {
+  const user = (id: string) => ({ id, display_name: "Test", created_at: "2026-01-01" });
+  const session = (access: string, refresh: string, expiresAt: number, id = "synthetic-user") =>
+    JSON.stringify({
+      access_token: access.repeat(64),
+      refresh_token: refresh.repeat(64),
+      token_type: "Bearer",
+      expires_at: expiresAt,
+      user: user(id),
+    });
+  const profile = JSON.stringify({ user: user("synthetic-user"), identities: [] });
+  // Both processes' locks on the one file, as an async mutex.
+  const sharedLock = () => {
+    let tail: Promise<void> = Promise.resolve();
+    return async <T>(body: () => Promise<T>): Promise<T> => {
+      const previous = tail;
+      let release: () => void = () => {};
+      tail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await body();
+      } finally {
+        release();
+      }
+    };
+  };
+  // The service: one live refresh token, rotated on use; presenting any other revokes the session.
+  const service = (initialRefresh: string) => {
+    const state = { live: initialRefresh.repeat(64), revoked: false, refreshes: 0, rotation: 0 };
+    const transport: AccountTransport = {
+      request: async (_method, path, token, body) => {
+        await Promise.resolve();
+        if (path === "/v1/auth/refresh") {
+          state.refreshes += 1;
+          if (state.revoked || body?.refresh_token !== state.live) {
+            state.revoked = true;
+            return { status: 401, body: "" };
+          }
+          state.rotation += 1;
+          const access = String(state.rotation).repeat(64);
+          state.live = String(state.rotation + 5).repeat(64);
+          return {
+            status: 200,
+            body: JSON.stringify({
+              access_token: access,
+              refresh_token: state.live,
+              token_type: "Bearer",
+              expires_in: 900,
+              user: user("synthetic-user"),
+            }),
+          };
+        }
+        return state.revoked || token === undefined
+          ? { status: 401, body: "" }
+          : { status: 200, body: profile };
+      },
+    };
+    return { state, transport };
+  };
+  const disk = (initial: string, lock: (<T>(body: () => Promise<T>) => Promise<T>) | undefined) => {
+    const box: { value: string | null } = { value: initial };
+    const store = (): AccountSessionStore => ({
+      load: () => box.value,
+      save: (value) => {
+        box.value = value;
+      },
+      clear: () => {
+        box.value = null;
+      },
+      exclusive: lock,
+    });
+    return { box, store };
+  };
+
+  // Both processes find the access token expired at the same moment.
+  const raced = service("b");
+  const racedDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  const settings = new AccountCloudBridge(raced.transport, racedDisk.store());
+  const keyboard = new AccountCloudBridge(raced.transport, racedDisk.store());
+  void Promise.all([
+    settings.handle('{"operation":"profile"}'),
+    keyboard.handle('{"operation":"profile"}'),
+  ]).then((replies) => {
+    check(
+      replies.every((reply) => JSON.parse(reply).ok === true),
+      "both processes stay signed in",
+    );
+    check(raced.state.refreshes === 1, "only one of them refreshes");
+    check(!raced.state.revoked, "the session is never revoked");
+    check(
+      racedDisk.box.value !== null &&
+        JSON.parse(racedDisk.box.value).refresh_token === raced.state.live,
+      "the live rotation is what is on disk",
+    );
+  });
+
+  // The keyboard read the file before the settings app rotated it.
+  const stale = service("d");
+  const staleDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  const staleKeyboard = new AccountCloudBridge(stale.transport, staleDisk.store());
+  staleDisk.box.value = session("c", "d", Date.now() + 600_000);
+  void staleKeyboard.handle('{"operation":"profile"}').then((reply) => {
+    check(JSON.parse(reply).ok === true, "a rotation saved by the other process is used");
+    check(stale.state.refreshes === 0, "and the spent token in memory is never presented");
+    check(!stale.state.revoked, "so the session survives a stale read");
+  });
+
+  // A document older than the one in memory, left by a write that failed, is not taken up.
+  const older = service("b");
+  const olderDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  const olderBridge = new AccountCloudBridge(older.transport, olderDisk.store());
+  olderDisk.box.value = session("c", "d", Date.now() - 60_000);
+  void olderBridge.handle('{"operation":"profile"}').then((reply) => {
+    check(JSON.parse(reply).ok === true, "the newer session in memory refreshes");
+    check(!older.state.revoked, "an older stored token is never presented");
+  });
+
+  // Another account on disk is the settings page's business, never adopted mid-request.
+  const switched = service("b");
+  const switchedDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  const switchedBridge = new AccountCloudBridge(switched.transport, switchedDisk.store());
+  switchedDisk.box.value = session("c", "d", Date.now() + 600_000, "other-user");
+  void switchedBridge.handle('{"operation":"profile"}').then((reply) => {
+    check(
+      JSON.parse(reply).error === "account_cancelled",
+      "another user's session is not taken up",
+    );
+    check(switched.state.refreshes === 0, "nor is the previous account's token refreshed");
+    check(
+      switchedDisk.box.value !== null &&
+        JSON.parse(switchedDisk.box.value).user.id === "other-user",
+      "so the new sign-in is never cleared by the old account's refusal",
+    );
+  });
+
+  // The settings page signs in as someone else while this process is refreshing the previous account.
+  const replaced = service("b");
+  const replacedDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  const replacing: AccountTransport = {
+    request: async (method, path, token, body) => {
+      if (path === "/v1/auth/refresh") {
+        replacedDisk.box.value = session("c", "d", Date.now() + 600_000, "other-user");
+      }
+      return await replaced.transport.request(method, path, token, body);
+    },
+  };
+  void new AccountCloudBridge(replacing, replacedDisk.store())
+    .handle('{"operation":"profile"}')
+    .then((reply) => {
+      check(
+        JSON.parse(reply).error === "account_cancelled",
+        "a rotation for the previous account is abandoned",
+      );
+      check(
+        replacedDisk.box.value !== null &&
+          JSON.parse(replacedDisk.box.value).user.id === "other-user",
+        "and never written over the new sign-in",
+      );
+    });
+
+  // Without the lock there is no refresh at all.
+  const unlocked = service("b");
+  const unlockedDisk = disk(session("a", "b", Date.now() - 1), async () => {
+    throw new Error("lock unavailable");
+  });
+  const unlockedBridge = new AccountCloudBridge(unlocked.transport, unlockedDisk.store());
+  void unlockedBridge.handle('{"operation":"profile"}').then((reply) => {
+    check(
+      JSON.parse(reply).error === "account_unavailable",
+      "a failed lock is a temporary failure",
+    );
+    check(unlocked.state.refreshes === 0, "no refresh is attempted outside the lock");
+    check(unlockedDisk.box.value !== null, "and the session is kept");
+  });
+
+  // A real expiry still signs out.
+  const expired = service("z");
+  const expiredDisk = disk(session("a", "b", Date.now() - 1), sharedLock());
+  void new AccountCloudBridge(expired.transport, expiredDisk.store())
+    .handle('{"operation":"profile"}')
+    .then((reply) => {
+      check(JSON.parse(reply).error === "account_unauthorized", "a refused refresh signs out");
+      check(expiredDisk.box.value === null, "and clears the stored session");
+    });
+});
+
 group("profile updates preserve the session and cannot outlive logout", () => {
   const expiresAt = Date.now() + 600000;
   const original = JSON.stringify({

@@ -46,6 +46,12 @@ export interface AccountSessionStore {
   load(): string | null;
   save(value: string): void;
   clear(): void;
+  /**
+   * Runs `body` holding a lock that every process sharing this store takes before it refreshes.
+   *
+   * A store only one process ever reads may leave it out. One that the settings application and the keyboard extension both read must provide it, because the service revokes the whole session when a spent refresh token is presented.
+   */
+  exclusive?<T>(body: () => Promise<T>): Promise<T>;
 }
 
 type Session = {
@@ -245,16 +251,32 @@ function validSkinDesign(value: unknown): boolean {
   if (Object.keys(design).some((field) => !fields.includes(field))) return false;
   const color = (field: string, allowNull = false): boolean => {
     const current = design[field];
-    return current === undefined || (allowNull && current === null) ||
-      (typeof current === "number" && safeInteger(current) && current >= 0 && current <= 0xffffff);
+    return (
+      current === undefined ||
+      (allowNull && current === null) ||
+      (typeof current === "number" && safeInteger(current) && current >= 0 && current <= 0xffffff)
+    );
   };
-  const boundedNumber = (field: string, minimum: number, maximum: number, allowNull = false): boolean => {
+  const boundedNumber = (
+    field: string,
+    minimum: number,
+    maximum: number,
+    allowNull = false,
+  ): boolean => {
     const current = design[field];
-    return current === undefined || (allowNull && current === null) ||
-      (typeof current === "number" && Number.isFinite(current) && current >= minimum && current <= maximum);
+    return (
+      current === undefined ||
+      (allowNull && current === null) ||
+      (typeof current === "number" &&
+        Number.isFinite(current) &&
+        current >= minimum &&
+        current <= maximum)
+    );
   };
   if (
-    !["background", "keyBackground", "keyForeground", "accent", "actionBackground"].every((field) => color(field)) ||
+    !["background", "keyBackground", "keyForeground", "accent", "actionBackground"].every((field) =>
+      color(field),
+    ) ||
     !boundedNumber("cornerRadius", 0, 20) ||
     !boundedNumber("borderWidth", 0, 2) ||
     !boundedNumber("shadow", 0, 0.4) ||
@@ -268,11 +290,14 @@ function validSkinDesign(value: unknown): boolean {
   const pattern = design.pattern;
   if (pattern !== undefined && (!safeInteger(pattern) || pattern < 0 || pattern > 3)) return false;
   if (design.monospaced !== undefined && typeof design.monospaced !== "boolean") return false;
-  if (design.gradientHorizontal !== undefined && typeof design.gradientHorizontal !== "boolean") return false;
+  if (design.gradientHorizontal !== undefined && typeof design.gradientHorizontal !== "boolean")
+    return false;
   if (
-    (design.keyShape !== undefined && design.keyShape !== null &&
+    (design.keyShape !== undefined &&
+      design.keyShape !== null &&
       !["rounded", "capsule", "ticket", "pebble"].includes(design.keyShape as string)) ||
-    (design.keyMaterial !== undefined && design.keyMaterial !== null &&
+    (design.keyMaterial !== undefined &&
+      design.keyMaterial !== null &&
       !["flat", "raised", "glass", "paper"].includes(design.keyMaterial as string)) ||
     !color("gradientEnd", true) ||
     !color("customBorderColor", true)
@@ -323,7 +348,8 @@ function validateCommunitySkinResponse(path: string, value: unknown): boolean {
       page.skins.length > 20 ||
       typeof page.has_more !== "boolean" ||
       (page.has_more && page.skins.length === 0)
-    ) return false;
+    )
+      return false;
     const ids: string[] = [];
     for (const item of page.skins as unknown[]) {
       if (!validCommunitySkinResponse(item)) return false;
@@ -1240,12 +1266,18 @@ export class AccountCloudBridge {
     }
     const value = parseJson(response.body, communityResponseLimit(path));
     if (value === null && response.body.length > 0) return error("community_unavailable");
-    if (method === "GET" && path.startsWith("/v1/community/resources") &&
-        !validateCommunityResourceResponse(path, value)) {
+    if (
+      method === "GET" &&
+      path.startsWith("/v1/community/resources") &&
+      !validateCommunityResourceResponse(path, value)
+    ) {
       return error("community_unavailable");
     }
-    if (method === "GET" && path.startsWith("/v1/community/skins") &&
-        !validateCommunitySkinResponse(path, value)) {
+    if (
+      method === "GET" &&
+      path.startsWith("/v1/community/skins") &&
+      !validateCommunitySkinResponse(path, value)
+    ) {
       return error("community_unavailable");
     }
     if (responseValidator !== undefined && (value === null || !responseValidator(value))) {
@@ -1660,16 +1692,87 @@ export class AccountCloudBridge {
   private async credential(rejectedToken?: string): Promise<CredentialReply> {
     const usable: string | null = this.usableToken(rejectedToken);
     if (usable !== null) return { token: usable };
-    const current = this.session;
-    if (current === null) return { error: "account_unauthorized" };
+    if (this.session === null) return { error: "account_unauthorized" };
     if (this.refreshing !== null) return await this.refreshing;
     const generation = this.generation;
-    const flight: Promise<CredentialReply> = this.refresh(current.refresh_token, generation);
+    const flight: Promise<CredentialReply> = this.exclusiveRefresh(generation, rejectedToken);
     this.refreshing = flight;
     try {
       return await flight;
     } finally {
       if (this.refreshing === flight) this.refreshing = null;
+    }
+  }
+
+  /**
+   * Refresh while holding the store's cross-process lock, deciding from the session on disk rather than the one in memory.
+   *
+   * The settings application and the keyboard extension run in different processes over the one session file. The service rotates the refresh token on every refresh and revokes the whole session when a spent one is presented, so two processes refreshing the same token, or one refreshing a token the other has already rotated, signs the user out everywhere. Inside the lock this re-reads the store and takes up a rotation the other process saved; only when the stored access token is no better than this one's does it refresh, and the rotation is saved before the lock is released.
+   */
+  private async exclusiveRefresh(
+    generation: number,
+    rejectedToken?: string,
+  ): Promise<CredentialReply> {
+    const store: AccountSessionStore = this.store;
+    if (store.exclusive === undefined) return await this.refreshLatest(generation, rejectedToken);
+    try {
+      return await store.exclusive<CredentialReply>(
+        async (): Promise<CredentialReply> => await this.refreshLatest(generation, rejectedToken),
+      );
+    } catch {
+      // Without the lock there is no knowing the other process is not refreshing this token right now, and guessing wrong revokes the session; leaving it unrefreshed is the safe failure.
+      return { error: "account_unavailable" };
+    }
+  }
+
+  private async refreshLatest(
+    generation: number,
+    rejectedToken?: string,
+  ): Promise<CredentialReply> {
+    if (generation !== this.generation) return { error: "account_cancelled" };
+    // The settings page signed in as someone else since this bridge read the file. Refreshing the old account's token would be refused and the refusal would clear the new account's session.
+    if (this.storedUserChanged()) return { error: "account_cancelled" };
+    this.adoptStored();
+    const usable: string | null = this.usableToken(rejectedToken);
+    if (usable !== null) return { token: usable };
+    const current: Session | null = this.session;
+    if (current === null) return { error: "account_unauthorized" };
+    return await this.refresh(current.refresh_token, generation);
+  }
+
+  /**
+   * Take up a rotation another process saved for this account since this one last read the store.
+   *
+   * Only a valid session for the same user that expires later than the one in memory is newer: each rotation moves the expiry forward, so an older document left behind by a failed write is never mistaken for one. A sign-out or a different account is not picked up here; those are the settings page's own operations and arrive through them.
+   */
+  private adoptStored(): void {
+    const current: Session | null = this.session;
+    const stored: Session | null = this.storedSession();
+    if (
+      current !== null &&
+      stored !== null &&
+      stored.user.id === current.user.id &&
+      stored.refresh_token !== current.refresh_token &&
+      stored.expires_at > current.expires_at
+    )
+      this.session = stored;
+  }
+
+  /** Whether the store now holds a valid session for a different account from the one in memory. */
+  private storedUserChanged(): boolean {
+    const current: Session | null = this.session;
+    const stored: Session | null = this.storedSession();
+    return current !== null && stored !== null && stored.user.id !== current.user.id;
+  }
+
+  private storedSession(): Session | null {
+    const saved: string | null = this.store.load();
+    if (saved === null) return null;
+    try {
+      const value: unknown = JSON.parse(saved);
+      return validateSession(value) ? value : null;
+    } catch {
+      return null;
     }
   }
 
@@ -1705,9 +1808,11 @@ export class AccountCloudBridge {
     if (value === null) return { error: "account_unavailable" };
     const next: Session | null = sessionFromTokens(value);
     if (next === null) return { error: "account_unavailable" };
-    if (generation !== this.generation) return { error: "account_cancelled" };
-    this.store.save(JSON.stringify(next));
+    if (generation !== this.generation || this.storedUserChanged())
+      return { error: "account_cancelled" };
+    // The service has already spent the old token, so memory takes the rotation even if the write below fails; refreshing the spent one again would revoke the session.
     this.session = next;
+    this.store.save(JSON.stringify(next));
     return { token: next.access_token };
   }
 
