@@ -5045,3 +5045,270 @@ fn vietnamese_uppercase_comes_through() {
     let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
     assert_eq!(space.commit.as_deref(), Some("Việt"));
 }
+
+const CANTONESE_SCHEME: u8 = 5;
+
+/// A `cantonese.db` with a few Jyutping rows, written with the shipped schema.
+fn cantonese_dictionary(directory: &std::path::Path) -> String {
+    use msime_engine::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let path = directory.join("cantonese.db");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute_batch(SCHEMA).unwrap();
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('nei'),('hou'),('ngo'),('ngoi'),('oi'),('i');\
+             INSERT INTO entries VALUES ('nei hou','你好',900),('nei hou','妳好',40),('nei','你',5000),('nei','妳',300),('hou','好',4000),('hou','號',500),('ngo','我',6000),('oi','愛',2500),('ngoi','外',1000);",
+        )
+        .unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+/// A real Engine on the Cantonese scheme with learning on, so a learning path the scheme failed to skip would write. Focused.
+fn cantonese_runtime(directory: &std::path::Path) -> Runtime {
+    let mut options = real_engine_options(directory);
+    options.scheme = CANTONESE_SCHEME;
+    options.learning = true;
+    options.cantonese_dictionary = cantonese_dictionary(directory);
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+/// Types `keys` as plain characters, each one composing without a commit.
+fn compose_cantonese(runtime: &mut Runtime, keys: &str) -> Transition {
+    let mut last = None;
+    for value in keys.bytes() {
+        let transition = character(runtime, value);
+        assert!(
+            transition.handled && transition.commit.is_none(),
+            "{keys}: {}",
+            value as char
+        );
+        last = Some(transition);
+    }
+    last.unwrap()
+}
+
+/// Every table of each SQLite file under `root`, with its row count, to show that nothing was written.
+fn database_rows(root: &std::path::Path) -> Vec<(String, String, i64)> {
+    let mut rows = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if path.extension().and_then(|extension| extension.to_str()) != Some("db") {
+                continue;
+            }
+            let connection = rusqlite::Connection::open_with_flags(
+                &path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            let tables: Vec<String> = connection
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            for table in tables {
+                let count = connection
+                    .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |row| {
+                        row.get(0)
+                    })
+                    .unwrap();
+                rows.push((path.display().to_string(), table, count));
+            }
+        }
+    }
+    rows.sort();
+    rows
+}
+
+/// Digits 1–9 pick from the visible page, and `'` is a syllable boundary the Engine takes while a word composes, on the character route and on both punctuation routes. The scheme is Chinese but its text is Traditional as stored, so nothing is script-converted.
+#[test]
+fn cantonese_digits_select_and_the_apostrophe_reaches_the_engine() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = cantonese_runtime(directory.path());
+
+    let typed = compose_cantonese(&mut runtime, "neihou");
+    assert_eq!(typed.view.scheme, CANTONESE_SCHEME);
+    assert_eq!(typed.view.editing_text, "nei hou");
+    assert_eq!(texts(&typed.view), ["你好", "妳好", "你", "妳"]);
+    assert!(typed.view.chinese_text);
+    assert!(!typed.view.script_conversion);
+    assert!(!typed.view.candidate_list_open);
+    assert_eq!(typed.view.spelling_symbols, "'");
+
+    let picked = character(&mut runtime, b'2');
+    assert!(picked.handled);
+    assert_eq!(picked.commit.as_deref(), Some("妳好"));
+    let context = picked.commit_context.unwrap();
+    assert_eq!(context.scheme, CANTONESE_SCHEME);
+    assert!(!context.script_conversion);
+    assert_eq!(picked.view.editing_text, "");
+    assert!(picked.view.chinese_text);
+    assert!(!picked.view.script_conversion);
+
+    // A digit past the end of the page is swallowed rather than typed into the document.
+    compose_cantonese(&mut runtime, "ngo");
+    let beyond = character(&mut runtime, b'9');
+    assert!(beyond.handled && beyond.commit.is_none());
+    assert_eq!(beyond.view.editing_text, "ngo");
+    runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+
+    // `ngo'oi` keeps two syllables where the letters alone would read `ngoi` (外) first.
+    for (route, action) in [
+        (
+            "character",
+            Action::Character {
+                value: b'\'',
+                shift: false,
+            },
+        ),
+        ("punctuation", Action::Punctuation(b'\'')),
+        ("ascii punctuation", Action::PunctuationAscii(b'\'')),
+    ] {
+        compose_cantonese(&mut runtime, "ngo");
+        let boundary = runtime.dispatch(action).unwrap();
+        assert!(boundary.handled && boundary.commit.is_none(), "{route}");
+        let typed = compose_cantonese(&mut runtime, "oi");
+        assert_eq!(typed.view.editing_text, "ngo oi", "{route}");
+        assert_eq!(texts(&typed.view)[0], "我", "{route}");
+        let picked = character(&mut runtime, b'1');
+        assert_eq!(picked.commit.as_deref(), Some("我"), "{route}");
+        let rest = character(&mut runtime, b'1');
+        assert_eq!(rest.commit.as_deref(), Some("愛"), "{route}");
+        assert_eq!(rest.view.editing_text, "", "{route}");
+    }
+}
+
+/// A row covering only the leading syllables goes to the document at once, even for a host that draws held phrase pieces, and the rest keeps composing. Nothing the user picks is learned: the journal and the main dictionary keep their rows, and the same reading comes back in the same order.
+#[test]
+fn a_cantonese_partial_selection_commits_at_once_and_learns_nothing() {
+    let directory = tempfile::tempdir().unwrap();
+    let dictionaries = directory.path().join("dictionaries");
+    std::fs::create_dir_all(&dictionaries).unwrap();
+    rusqlite::Connection::open(dictionaries.join(msime_engine::assets::MAIN_DICTIONARY))
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE tbl_2_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);\
+             INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',1000),('ni''hao','nh','拟好',500);",
+        )
+        .unwrap();
+
+    // The control: the same pick under Quanpin with the same options writes the journal, so the comparison below would see a Cantonese write.
+    let initial = database_rows(directory.path());
+    let mut options = real_engine_options(directory.path());
+    options.learning = true;
+    let mut quanpin = Runtime::new(msime_engine::host::Session::new(&options).unwrap(), 5).unwrap();
+    quanpin.focus(true).unwrap();
+    for value in *b"nihao" {
+        character(&mut quanpin, value);
+    }
+    assert_eq!(
+        character(&mut quanpin, b'2').commit.as_deref(),
+        Some("拟好")
+    );
+    drop(quanpin);
+    msime_engine::flush_personal_learning();
+    assert_ne!(database_rows(directory.path()), initial);
+
+    let mut runtime = cantonese_runtime(directory.path());
+    runtime.set_phrase_preedit(true);
+    let before = database_rows(directory.path());
+    compose_cantonese(&mut runtime, "neihou");
+    let first = character(&mut runtime, b'3');
+    assert!(first.handled);
+    assert_eq!(first.commit.as_deref(), Some("你"));
+    assert_eq!(first.view.phrase_prefix, "");
+    assert_eq!(first.view.editing_text, "hou");
+    assert_eq!(texts(&first.view), ["好", "號"]);
+    let id = first.view.candidates[1].id;
+    let second = runtime.dispatch(Action::Select(id)).unwrap();
+    assert_eq!(second.commit.as_deref(), Some("號"));
+    assert_eq!(second.view.phrase_prefix, "");
+    assert_eq!(second.view.editing_text, "");
+
+    // Picking the second row again and again does not lift it.
+    for _ in 0..3 {
+        compose_cantonese(&mut runtime, "neihou");
+        assert_eq!(
+            character(&mut runtime, b'2').commit.as_deref(),
+            Some("妳好")
+        );
+    }
+    let again = compose_cantonese(&mut runtime, "neihou");
+    assert_eq!(texts(&again.view), ["你好", "妳好", "你", "妳"]);
+    runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+
+    drop(runtime);
+    msime_engine::flush_personal_learning();
+    assert_eq!(database_rows(directory.path()), before);
+}
+
+/// The sentence model and the runner-up demotion reorder Chinese lattice readings; a Cantonese list comes from its own dictionary in its own order, so neither touches it.
+#[test]
+fn cantonese_lists_are_never_reranked_or_demoted() {
+    let reordered = |scheme: u8, words: &[&str], sources: Vec<u8>, model: Option<SentenceModel>| {
+        let mut runtime = Runtime::new(
+            Fixture {
+                scheme,
+                local_mode: "none".into(),
+                words: words.iter().map(|word| (*word).to_owned()).collect(),
+                codes: vec!["neihou".into(); words.len()],
+                sources,
+                ..Fixture::default()
+            },
+            5,
+        )
+        .unwrap();
+        if let Some(model) = model {
+            runtime.set_reranker(Some(Reranker::new(std::sync::Arc::new(model))));
+        }
+        runtime.focus(true).unwrap();
+        runtime
+            .dispatch(Action::Character {
+                value: b'n',
+                shift: false,
+            })
+            .unwrap();
+        texts(&runtime.view())
+    };
+    let rows = ["你", "妳", "尼"];
+    let favours = || Some(favouring_model(&['你', '妳', '尼'], &['尼']));
+    // The same rows under a pinyin scheme are reranked, so the model would move 尼 up if Cantonese let it.
+    assert_eq!(
+        reordered(0, &rows, vec![LATTICE_SOURCE; 3], favours()),
+        ["尼", "你", "妳"]
+    );
+    assert_eq!(
+        reordered(CANTONESE_SCHEME, &rows, vec![LATTICE_SOURCE; 3], favours()),
+        rows
+    );
+    let sentences = ["你好嗎", "妳好嗎", "尼好嗎", "你號嗎", "妳號嗎", "你", "好"];
+    let sources = || {
+        let mut sources = vec![LATTICE_SOURCE; 5];
+        sources.extend([0, 0]);
+        sources
+    };
+    assert_eq!(
+        reordered(0, &sentences, sources(), None),
+        ["你好嗎", "妳好嗎", "尼好嗎", "你", "好"]
+    );
+    assert_eq!(
+        reordered(CANTONESE_SCHEME, &sentences, sources(), None),
+        sentences[..5]
+    );
+}

@@ -2882,6 +2882,7 @@ dependencies = [
  "chinese-ime-lm",
  "msime-client-core",
  "msime-engine",
+ "rusqlite",
  "rustix",
  "serde",
  "serde_json",
