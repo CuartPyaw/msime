@@ -53,3 +53,32 @@ test("a credential test already in progress ignores a second trigger", async () 
     message: "连接成功",
   });
 });
+
+test("a credential save from a replaced client is ignored", async () => {
+  let resolve!: (value: never) => void;
+  const pending = new Promise<never>((accept) => {
+    resolve = accept;
+  });
+  const oldClient = {
+    providerCredentials: { status: vi.fn().mockResolvedValue(undefined) } as never,
+  };
+  const nextClient = {
+    providerCredentials: { status: vi.fn().mockResolvedValue(undefined) } as never,
+  };
+  const { result, rerender } = renderHook(({ client }) => useProviderCredentials({ client }), {
+    initialProps: { client: oldClient },
+  });
+
+  let operation!: Promise<void>;
+  act(() => {
+    operation = result.current.runProviderCredential("ai", async () => pending, "已保存");
+  });
+  await waitFor(() => expect(result.current.providerCredentialBusy).toBe("ai"));
+  rerender({ client: nextClient });
+  resolve({} as never);
+  await act(async () => operation);
+
+  expect(result.current.providerCredentialBusy).toBeUndefined();
+  expect(result.current.providerCredentials).toBeUndefined();
+  expect(result.current.providerCredentialMessages.ai).toBeUndefined();
+});
