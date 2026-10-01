@@ -381,6 +381,12 @@ impl VerifiedMarker {
     /// A marker that is absent, unreadable or not the shape this version writes is simply a miss:
     /// the caller hashes, and writes a fresh one.
     pub fn read(path: &Path) -> Option<Self> {
+        if path
+            .parent()
+            .is_some_and(|parent| crate::storage::reject_symlink(parent).is_err())
+        {
+            return None;
+        }
         let metadata = fs::symlink_metadata(path).ok()?;
         if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
             return None;
@@ -404,11 +410,21 @@ impl VerifiedMarker {
                 )));
             }
         }
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        if !crate::storage::create_directory_and_check(parent)? {
+            return Err(ResourceError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "marker parent is not a real directory",
+            )));
         }
         let encoded = serde_json::to_vec(self).map_err(|_| ResourceError::InvalidManifest)?;
-        fs::write(path, encoded)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        temporary.write_all(&encoded)?;
+        temporary.as_file().sync_all()?;
+        temporary
+            .persist(path)
+            .map(|_| ())
+            .map_err(|error| error.error)?;
         Ok(())
     }
 }
@@ -791,6 +807,52 @@ mod tests {
             VerifiedMarker::read(&path),
             None,
             "oversized markers are cache misses"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn marker_write_rejects_a_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let resources = root.path().join("resources");
+        fs::create_dir(&resources).unwrap();
+        fs::write(resources.join("msime.db"), b"fixture").unwrap();
+        let marker = VerifiedMarker::describe(&resources, &specification())
+            .unwrap()
+            .unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let linked = root.path().join("linked");
+        symlink(outside.path(), &linked).unwrap();
+
+        assert!(marker
+            .write(&linked.join("verified-resources.json"))
+            .is_err());
+        assert!(!outside.path().join("verified-resources.json").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn marker_read_ignores_a_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let resources = root.path().join("resources");
+        fs::create_dir(&resources).unwrap();
+        fs::write(resources.join("msime.db"), b"fixture").unwrap();
+        let marker = VerifiedMarker::describe(&resources, &specification())
+            .unwrap()
+            .unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_path = outside.path().join("verified-resources.json");
+        marker.write(&outside_path).unwrap();
+        let linked = root.path().join("linked");
+        symlink(outside.path(), &linked).unwrap();
+
+        assert_eq!(
+            VerifiedMarker::read(&linked.join("verified-resources.json")),
+            None
         );
     }
 }

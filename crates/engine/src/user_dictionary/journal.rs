@@ -122,6 +122,7 @@ impl Drop for JournalConnection {
 
 /// `sqlite3_open_v2` with the reference's flags plus the 5 s busy timeout every engine connection uses (J:65-76). Without CREATE a missing file stays missing.
 pub(crate) fn open_database(path: &Path, flags: OpenFlags) -> Result<Connection> {
+    reject_database_parent(path)?;
     if let Ok(metadata) = std::fs::symlink_metadata(path) {
         if !metadata.file_type().is_file() {
             return Err(std::io::Error::new(
@@ -134,6 +135,51 @@ pub(crate) fn open_database(path: &Path, flags: OpenFlags) -> Result<Connection>
     let connection = Connection::open_with_flags(path, flags | OpenFlags::SQLITE_OPEN_FULL_MUTEX)?;
     connection.busy_timeout(Duration::from_millis(BUSY_TIMEOUT_MS))?;
     Ok(connection)
+}
+
+fn reject_database_parent(path: &Path) -> std::io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "database path has no parent directory",
+        )
+    })?;
+    let mut current = PathBuf::new();
+    for component in parent.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                if !is_system_path_alias(&current) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "database path has a symbolic-link parent",
+                    ));
+                }
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    "database path parent is not a directory",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn is_system_path_alias(path: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        path == Path::new("/var") || path == Path::new("/tmp")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        false
+    }
 }
 
 /// A dictionary (`msime.db`, `english.db`) opened for writing; a missing dictionary is an error, never a new empty file.
@@ -512,6 +558,21 @@ mod tests {
 
         assert!(open_journal(&linked).is_err());
         assert!(!external.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_a_journal_rejects_a_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let linked = root.path().join("user");
+        symlink(external.path(), &linked).unwrap();
+        let journal = linked.join("msime_user.db");
+
+        assert!(open_journal(&journal).is_err());
+        assert!(!external.path().join("msime_user.db").exists());
     }
 
     #[test]

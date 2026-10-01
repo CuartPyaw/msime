@@ -243,12 +243,14 @@ int main()
                     enabledSources.empty(),
                 "A recorded mode the user removed was enabled again.");
 
-        // A Japanese mode the user removed before any record existed is not brought back either.
+        // A Japanese or Korean mode the user removed before any record existed is not brought back either.
         alreadyEnabledSources = {appParentSource, hansModeSource};
         enabledSources.clear();
         offered = MSIMEEnableNewInputModes(appBundle, nil, CopyInputSources, GetInputSourceProperty, EnableInputSource);
-        require(std::find(enabledSources.begin(), enabledSources.end(), japaneseModeSource) == enabledSources.end(),
-                "A Japanese mode removed before the first record was enabled again.");
+        require(std::find(enabledSources.begin(), enabledSources.end(), japaneseModeSource) == enabledSources.end() &&
+                    std::find(enabledSources.begin(), enabledSources.end(), koreanModeSource) == enabledSources.end() &&
+                    [offered containsObject:MSIMEKoreanInputModeID],
+                "A previously offered Japanese or Korean mode removed before the first record was enabled again.");
 
         // A new mode that is already on is only recorded, and one the system refuses stays unrecorded so the next launch retries it.
         alreadyEnabledSources = {appParentSource, hansModeSource, japaneseModeSource, koreanModeSource};

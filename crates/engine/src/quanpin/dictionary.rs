@@ -1,6 +1,8 @@
 //! `QuanpinDictionary` (`R/quanpin/quanpin_dictionary.cpp`, quanpin.md §4, §6, §7.5-§7.7, §9.9, §11, §13, §14): the query pipeline and its caches, plus the canonical-pinyin phrase writer learning uses (pins, removals and frequency learning go through `user_dictionary` directly, see `ime::registry`).
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::assets::{
@@ -64,6 +66,12 @@ const TYPO_EDGE_TYPES: u32 = autocorrect_type::TRANSPOSITION
     | autocorrect_type::NEIGHBOR
     | autocorrect_type::MISSING_OR_EXTRA;
 
+#[derive(Clone)]
+struct CachedResolution {
+    key: String,
+    resolution: SeriesResolution,
+}
+
 /// The reference answered a failed write with `ERROR_CODE` and no message; callers map any failure to their own diagnostic.
 const DICTIONARY_UNAVAILABLE: &str = "Pinyin dictionary is unavailable";
 const ENTRY_REJECTED: &str = "Pinyin does not spell the word one syllable per character";
@@ -85,7 +93,7 @@ pub struct QuanpinDictionary {
     series_cache: FifoCache<String, Vec<WordItem>>,
     segmentation_cache: FifoCache<String, Vec<String>>,
     /// Survives `reset_cache`: a resolution depends only on the input and the static correction tables, never on dictionary rows.
-    resolution_cache: FifoCache<String, SeriesResolution>,
+    resolution_cache: FifoCache<u64, CachedResolution>,
     /// Rows of typo-variant span keys, empty answers included. Dictionary rows only, so it is cleared with the other caches.
     typo_span_cache: FifoCache<String, Vec<DictRow>>,
     rerankers: Vec<NeuralReranker>,
@@ -771,12 +779,21 @@ impl QuanpinDictionary {
         segments: &[String],
         types: u32,
     ) -> SeriesResolution {
-        let key = format!("{types}\u{1f}{raw}\u{1f}{segmentation}");
-        if let Some(cached) = self.resolution_cache.get(&key) {
-            return cached;
+        let hash = resolution_cache_hash(types, raw, segmentation);
+        if let Some(cached) = self.resolution_cache.get_ref(&hash) {
+            if resolution_cache_key_matches(&cached.key, types, raw, segmentation) {
+                return cached.resolution.clone();
+            }
         }
         let resolution = resolve_series_query(raw, segments, types);
-        self.resolution_cache.insert(key, resolution.clone());
+        let key = format!("{types}\u{1f}{raw}\u{1f}{segmentation}");
+        self.resolution_cache.insert(
+            hash,
+            CachedResolution {
+                key,
+                resolution: resolution.clone(),
+            },
+        );
         resolution
     }
 
@@ -840,6 +857,22 @@ fn lookup_cached_segments(
     key: &String,
 ) -> Option<Vec<String>> {
     cache.get_ref(key).cloned()
+}
+
+fn resolution_cache_hash(types: u32, raw: &str, segmentation: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    types.hash(&mut hasher);
+    raw.hash(&mut hasher);
+    segmentation.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn resolution_cache_key_matches(key: &str, types: u32, raw: &str, segmentation: &str) -> bool {
+    let mut parts = key.split('\u{1f}');
+    parts.next().and_then(|part| part.parse().ok()) == Some(types)
+        && parts.next() == Some(raw)
+        && parts.next() == Some(segmentation)
+        && parts.next().is_none()
 }
 
 /// The readings that compete with the primary one (QD:394-443): with a mask, the same-cost corrections and then every correction-mode cut; for a short all-complete input, every complete segmentation of the letters. Deduplicated against the primary and the costlier cuts, at most 32.

@@ -1,7 +1,7 @@
 //! `EngineOptions` and its mapping onto `SessionOptions` (api-contract §2, bridge.cpp:306-407, 698-734).
 
 use std::fs::File;
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use crate::assets;
@@ -190,6 +190,11 @@ pub fn prepare_translation_sidecar(options: &EngineOptions) -> Result<()> {
     // A relative root would resolve against the host's working directory, so nothing is written until the roots are known to be absolute; the session refuses them with this same error right after.
     paths.validate()?;
     let target = paths.dictionary(assets::TRANSLATIONS);
+    let parent = target
+        .parent()
+        .ok_or_else(|| EngineError::failed(diagnostics::TRANSLATION_SIDECAR_FAILED))?;
+    reject_storage_ancestors(parent)
+        .map_err(|_| EngineError::failed(diagnostics::TRANSLATION_SIDECAR_FAILED))?;
     let user = paths.user(assets::TRANSLATIONS);
     let source = if is_real_file(&user) {
         user
@@ -225,14 +230,58 @@ pub fn prepare_translation_sidecar(options: &EngineOptions) -> Result<()> {
     {
         return Err(EngineError::failed(diagnostics::TRANSLATION_SIDECAR_FAILED));
     }
-    let copied = match target.parent() {
-        Some(parent) => std::fs::create_dir_all(parent)
-            .and_then(|()| std::fs::write(&target, &contents).map(|()| contents.len() as u64)),
-        None => Err(std::io::ErrorKind::NotFound.into()),
-    };
+    let copied = std::fs::create_dir_all(parent).and_then(|()| {
+        let metadata = std::fs::symlink_metadata(parent)?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "translation sidecar parent is not a real directory",
+            ));
+        }
+        std::fs::write(&target, &contents).map(|()| contents.len() as u64)
+    });
     copied
         .map(|_| ())
         .map_err(|_| EngineError::failed(diagnostics::TRANSLATION_SIDECAR_FAILED))
+}
+
+fn reject_storage_ancestors(path: &Path) -> io::Result<()> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                if !is_system_path_alias(&current) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "translation sidecar path has a symbolic-link ancestor",
+                    ));
+                }
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotADirectory,
+                    "translation sidecar parent is not a directory",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn is_system_path_alias(path: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        path == Path::new("/var") || path == Path::new("/tmp")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        false
+    }
 }
 
 fn is_real_file(path: &Path) -> bool {

@@ -188,7 +188,7 @@ impl InputSession {
                     base.raw_input[..raw_length_for_effective_prefix(&base.raw_input, base_length)]
                         .to_owned()
                 } else {
-                    base.raw_input.clone()
+                    base.raw_input.clone().into_owned()
                 };
                 if self.has_active_helpcode() {
                     return state;

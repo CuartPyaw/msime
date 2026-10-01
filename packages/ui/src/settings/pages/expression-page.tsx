@@ -7,7 +7,7 @@ import { FuzzyPinyinSection } from "../fuzzy-pinyin-section";
 import { InputLanguageOptionsSection } from "../input-language-options-section";
 import { PunctuationSection } from "../punctuation-section";
 import { TranslationSettingsContent } from "../translation-settings-content";
-import { createTranslationProviderSettings } from "../translation-provider-settings";
+import { createTranslationSettingsBindings } from "../translation-settings-bindings";
 
 /**
  * The 表达 page: how what is typed comes out -- punctuation, spelling tolerance, the candidates in other languages and the mixed-in English, emoji and kaomoji -- and the AI features that rewrite it, which open as pages of their own from here.
@@ -99,70 +99,48 @@ export function ExpressionSettingsPage() {
           }
         />
         <TranslationSettingsContent
-          candidate={{
+          {...createTranslationSettingsBindings({
             grouped: true,
-            enabled: candidateTranslations,
-            targetLanguage: translationTargetLanguage,
-            secondaryLanguage: draft.translation_secondary_language ?? "",
+            client,
+            candidateTranslations,
+            mobile: mobilePlatform,
+            linux: linuxPlatform,
+            windows: windowsPlatform,
+            macos: macosPlatform,
+            customTranslation,
+            tencentTranslation,
+            niutrans,
+            translationProvider,
+            providerCredentials,
+            tencentCredentialInput,
+            updateTencentCredentialInput,
+            providerCredentialBusy,
+            providerCredentialMessages,
+            runProviderCredential,
+            credentialTestControl,
+            customTranslationsText,
+            customTranslationsPlaceholder,
+            customTranslationsNotice,
+            customTranslationsSummary,
+            customTranslationsSaveState,
+            customTranslationsSaveError,
+            onCustomTranslationsChange: setCustomTranslationsText,
+            onFlushCustomTranslations: () => void flushCustomTranslations(),
+            onPreferencesChange,
+            setTranslationProvider,
+            android: androidPlatform,
+            ios: iosPlatform,
+            harmony: harmonyPlatform,
+            translationAccount: draft.translation_account ?? false,
+            translationTargetLanguage,
+            translationSecondaryLanguage: draft.translation_secondary_language,
             candidateGlossLanguagesEnabled,
-            visibleLanguages: visibleTranslationLanguages,
+            visibleTranslationLanguages,
             visibleSecondaryLanguages,
-            showSecondaryLanguage:
-              androidPlatform || iosPlatform || macosPlatform || harmonyPlatform,
-            showAccountTranslation: androidPlatform,
-            accountTranslation: draft.translation_account ?? false,
-            onEnabledChange: (candidate_translations) =>
-              onPreferencesChange({ candidate_translations }),
-            onTargetLanguageChange: (translation_target_language) =>
-              onPreferencesChange({ translation_target_language }),
-            onSecondaryLanguageChange: (value) =>
-              onPreferencesChange({ translation_secondary_language: value === "" ? null : value }),
-            onAccountTranslationChange: (enabled) =>
-              enabled
-                ? setTranslationProvider("account")
-                : onPreferencesChange({ translation_account: undefined }),
-            onDeviceMissingLanguages: onDeviceMissingLanguages.map(([, label]) => label),
+            onDeviceMissingLanguages,
             openSettings: client.onDeviceTranslation?.openSettings,
             onError: setError,
-            showTranslationService: !androidPlatform,
-            translationProvider,
-            showAccountProvider: macosPlatform || linuxPlatform,
-            onTranslationProviderChange: setTranslationProvider,
-          }}
-          providers={
-            !androidPlatform
-              ? createTranslationProviderSettings({
-                  grouped: true,
-                  client,
-                  candidateTranslations,
-                  mobile: mobilePlatform,
-                  linux: linuxPlatform,
-                  windows: windowsPlatform,
-                  macos: macosPlatform,
-                  customTranslation,
-                  tencentTranslation,
-                  niutrans,
-                  translationProvider,
-                  providerCredentials,
-                  tencentCredentialInput,
-                  updateTencentCredentialInput,
-                  providerCredentialBusy,
-                  providerCredentialMessages,
-                  runProviderCredential,
-                  credentialTestControl,
-                  customTranslationsText,
-                  customTranslationsPlaceholder,
-                  customTranslationsNotice,
-                  customTranslationsSummary,
-                  customTranslationsSaveState,
-                  customTranslationsSaveError,
-                  onCustomTranslationsChange: setCustomTranslationsText,
-                  onFlushCustomTranslations: () => void flushCustomTranslations(),
-                  onPreferencesChange,
-                  setTranslationProvider,
-                })
-              : undefined
-          }
+          })}
         />
         {mobilePlatform && (
           <GroupList title="高情商回复">

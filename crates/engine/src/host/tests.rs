@@ -1315,6 +1315,32 @@ fn translation_sidecar_copy_rejects_a_symlinked_target() {
     assert_eq!(std::fs::read_to_string(external).unwrap(), "keep\n");
 }
 
+#[cfg(unix)]
+#[test]
+fn translation_sidecar_copy_rejects_a_symlinked_target_parent() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let dictionaries = Path::new(&value.dictionaries).to_path_buf();
+    std::fs::remove_dir(&dictionaries).unwrap();
+    symlink(outside.path(), &dictionaries).unwrap();
+    std::fs::write(
+        Path::new(&value.resources).join("custom_translations.txt"),
+        "天\tpackaged\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        super::options::prepare_translation_sidecar(&value)
+            .unwrap_err()
+            .to_string(),
+        "Unable to prepare custom translation sidecar"
+    );
+    assert!(!outside.path().join("custom_translations.txt").exists());
+}
+
 #[test]
 fn english_completions_validate_and_lowercase_the_prefix() {
     let dir = tempfile::tempdir().unwrap();

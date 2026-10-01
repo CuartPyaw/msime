@@ -122,7 +122,7 @@ NSArray<NSString *> *MSIMEEnableNewInputModes(NSString *bundleIdentifier, NSArra
                                               MSIMEInputSourceEnabler enabler) {
     // Without a record this is the first launch that keeps one. The modes every install before it registered and enabled count as offered, so a user who removed one of those keeps it removed; the modes added since are the ones an update that did not re-register left off.
     NSMutableOrderedSet<NSString *> *record = [NSMutableOrderedSet orderedSetWithArray:offered ?: @[
-        MSIMEChineseInputModeID, MSIMEEnglishInputModeID, MSIMEJapaneseInputModeID
+        MSIMEChineseInputModeID, MSIMEEnglishInputModeID, MSIMEJapaneseInputModeID, MSIMEKoreanInputModeID
     ]];
     if (!bundleIdentifier.length || !lister || !propertyGetter || !enabler) return record.array;
     NSDictionary *filter = @{(__bridge NSString *)kTISPropertyBundleID: bundleIdentifier,

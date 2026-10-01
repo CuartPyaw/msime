@@ -1,5 +1,6 @@
 //! `InputSession` (core-session.md §5): the platform-neutral composition and commit policy. Three mutually exclusive views drive every getter: dedicated English, a local mode, or the scheme composition. Its behaviour is split over this module's sibling files by concern; this file holds the state and the key, command and punctuation dispatch.
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -672,12 +673,12 @@ impl InputSession {
     }
 
     /// The pinyin context pins and the personal rerank are keyed on.
-    pub(super) fn pinyin_ranking_context(&self) -> String {
+    pub(super) fn pinyin_ranking_context(&self) -> Cow<'_, str> {
         let request = self.engine.request();
         if request.normalized_segmentation.is_empty() {
-            request.segmentation.clone()
+            Cow::Owned(request.segmentation.clone())
         } else {
-            request.normalized_segmentation.clone()
+            Cow::Borrowed(&request.normalized_segmentation)
         }
     }
 

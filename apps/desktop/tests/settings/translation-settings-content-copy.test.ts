@@ -24,8 +24,11 @@ test("expression page and input panel share translation settings composition", (
   );
   expect(page).toContain("<TranslationSettingsContent");
   expect(panel).toContain("<TranslationSettingsContent");
+  expect(page).toContain("createTranslationSettingsBindings");
+  expect(panel).toContain("createTranslationSettingsBindings");
   for (const source of [page, panel]) {
     expect(source).not.toContain("<CandidateTranslationSettingsSection");
     expect(source).not.toContain("<TranslationProviderSettingsSection");
+    expect(source).not.toContain("candidate={{");
   }
 });
