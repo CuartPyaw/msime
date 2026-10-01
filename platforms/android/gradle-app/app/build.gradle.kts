@@ -6,6 +6,13 @@ plugins { id("com.android.application") }
 // only the build. Nothing is copied or generated into it.
 val hostRoot = rootDir.parentFile
 
+// The release version: platforms/android/version.txt, or -PmsimeVersion from build-apk.sh when the release workflow is dispatched with another one. Usage reports, 关于 and 反馈 all read versionName, so a fixed value here made every release report the same version.
+val releaseVersion = (findProperty("msimeVersion") as String?)?.trim()?.takeIf { it.isNotEmpty() }
+    ?: hostRoot.resolve("version.txt").readText().trim()
+val releaseVersionParts = Regex("""^(\d{1,3})\.(\d{1,3})\.(\d{1,3})$""").matchEntire(releaseVersion)
+    ?.groupValues?.drop(1)?.map { it.toInt() }
+    ?: error("Android release version must be major.minor.patch, got '$releaseVersion'")
+
 android {
     namespace = "app.msime.android"
     compileSdk = 36
@@ -14,8 +21,9 @@ android {
         applicationId = "app.msime.android"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-dev"
+        // Grows with every release, as the platform requires for an update to install: 0.1.0 is 1000, 1.2.3 is 1002003.
+        versionCode = releaseVersionParts[0] * 1_000_000 + releaseVersionParts[1] * 1_000 + releaseVersionParts[2]
+        versionName = releaseVersion
     }
 
     sourceSets.getByName("main") {
