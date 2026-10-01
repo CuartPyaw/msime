@@ -16,11 +16,11 @@ import org.json.JSONObject;
 public final class BackendTranslationClient implements CandidateTranslationStore.Service {
     private static final String ORIGIN = "https://api.msime.app";
     private static final int MAX_RESPONSE_BYTES = 256 * 1024;
-    private final AndroidAccountSessionStorage storage;
+    private final BackendAccount account;
     private final BackendAnonymousAccount anonymous;
 
     public BackendTranslationClient(Context context) {
-        storage = new AndroidAccountSessionStorage(context);
+        account = new BackendAccount(context);
         anonymous = new BackendAnonymousAccount(context);
     }
 
@@ -73,15 +73,8 @@ public final class BackendTranslationClient implements CandidateTranslationStore
     }
 
     private String accessToken() throws Exception {
-        String encoded = storage.load();
-        if (encoded != null) {
-            JSONObject saved = new JSONObject(encoded);
-            JSONObject tokens = saved.getJSONObject("tokens");
-            String token = tokens.getString("access_token");
-            long expiry = saved.optLong("expires_at_unix_ms", Long.MAX_VALUE);
-            if (token.matches("[0-9a-fA-F]{64}") && expiry > System.currentTimeMillis() + 30_000L) return token;
-        }
-        return anonymous.accessToken();
+        String token = account.accessToken();
+        return token.isEmpty() ? anonymous.accessToken() : token;
     }
 
     private static byte[] readBounded(InputStream input) throws Exception {
