@@ -4031,6 +4031,8 @@ static void TestControlOptionSpace() {
     prefs.englishMode = NO;
     client.committed = nil;
     client.marked = @"拼音";
+    // The controller clears marked text only where it knows it wrote some (MSIMEApplyTransitionTrackingMarkedText), so the composition set on the fake client is recorded as its own.
+    [controller setValue:@YES forKey:@"clientHasMarkedText"];
     session.lastCommand = UINT32_MAX;
     session.nextTransition = @{@"handled":@YES,
         @"view":@{@"editing_text":@"", @"caret_position":@0, @"candidates":@[]}};
