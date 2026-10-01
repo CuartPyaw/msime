@@ -8,12 +8,29 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("candidate page size reports the selected preset", () => {
+test("candidate page size is a ticked 3-9 slider that reports the chosen size", () => {
   const onChange = vi.fn();
-  render(<CandidatePageSizeSection value={5} fixed={false} onChange={onChange} />);
+  const { container } = render(
+    <CandidatePageSizeSection value={5} fixed={false} onChange={onChange} />,
+  );
 
-  fireEvent.change(screen.getByLabelText("每页候选项数量"), { target: { value: "7" } });
+  const slider = screen.getByRole("slider", { name: "每页候选项数量" }) as HTMLInputElement;
+  expect([slider.min, slider.max, slider.step, slider.value]).toEqual(["3", "9", "1", "5"]);
+  // One mark per size, and the value read out after the track.
+  expect(container.querySelectorAll(".platform-slider-ticks > [aria-hidden] > span")).toHaveLength(
+    7,
+  );
+  expect(slider.closest("span.flex")?.textContent).toBe("5");
+
+  fireEvent.change(slider, { target: { value: "7" } });
   expect(onChange).toHaveBeenCalledWith(7);
+});
+
+test("a stored size below the offered range widens the slider instead of being rewritten", () => {
+  render(<CandidatePageSizeSection value={1} fixed={false} onChange={vi.fn()} />);
+
+  const slider = screen.getByRole("slider", { name: "每页候选项数量" }) as HTMLInputElement;
+  expect([slider.min, slider.max, slider.value]).toEqual(["1", "9", "1"]);
 });
 
 test("candidate page size hides when the host fixes the page", () => {

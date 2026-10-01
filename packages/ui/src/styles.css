@@ -538,6 +538,34 @@
   }
 }
 
+/* The marks a ticked Slider draws under its track, one per step. A thumb's centre runs from half its width in from one end to half its width in from the other, so the marks are laid out over that span rather than the full width. */
+@utility platform-slider-ticks {
+  position: relative;
+  display: block;
+
+  & > span {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  & > span > span {
+    position: absolute;
+    top: 50%;
+    left: calc(var(--p-slider-knob-w) / 2 + (100% - var(--p-slider-knob-w)) * var(--tick));
+    width: 1px;
+    height: calc(var(--p-slider-track-h) + 8px);
+    translate: -50% -50%;
+    background: currentColor;
+    opacity: 0.25;
+  }
+
+  & > input {
+    position: relative;
+    display: block;
+  }
+}
+
 /*
  * The last of the settings-page pieces. Utilities rather than markup-side strings for the same reason
  * as the primitives above: `input-option-divider` alone appears at 27 call sites, and the combobox and

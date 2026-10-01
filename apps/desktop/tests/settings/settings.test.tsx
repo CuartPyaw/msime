@@ -7238,7 +7238,7 @@ test("saves edited preferences against the loaded revision", async () => {
     })),
   };
   render(<SettingsPage client={client} />);
-  const size = await screen.findByRole("combobox", { name: "每页候选项数量" });
+  const size = await screen.findByRole("slider", { name: "每页候选项数量" });
   fireEvent.change(size, { target: { value: "9" } });
   // Nothing is written until the edits pause for the autosave delay.
   expect(client.save).not.toHaveBeenCalled();
@@ -7259,7 +7259,7 @@ test("a late preference save is ignored after settings unmounts", async () => {
     ),
   };
   const view = render(<SettingsPage client={client} />);
-  const size = await screen.findByRole("combobox", { name: "每页候选项数量" });
+  const size = await screen.findByRole("slider", { name: "每页候选项数量" });
   fireEvent.change(size, { target: { value: "9" } });
   saveSettingsNow();
   view.unmount();
@@ -7286,18 +7286,10 @@ test("macOS offers the same candidate page sizes as every other host and keeps t
     host: { platform: "macos" } as HostCapabilities,
   };
   render(<SettingsPage client={client} />);
-  const size = (await screen.findByRole("combobox", {
+  const size = (await screen.findByRole("slider", {
     name: "每页候选项数量",
-  })) as HTMLSelectElement;
-  expect(Array.from(size.options).map((option) => option.value)).toEqual([
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-  ]);
+  })) as HTMLInputElement;
+  expect([size.min, size.max, size.step]).toEqual(["3", "9", "1"]);
   expect(size.value).toBe("6");
   fireEvent.change(size, { target: { value: "4" } });
   saveSettingsNow();
@@ -7305,7 +7297,7 @@ test("macOS offers the same candidate page sizes as every other host and keeps t
   expect(save).toHaveBeenCalledWith(7, { ...preferences, candidate_page_size: 4 });
 });
 
-test("a saved page size below the reference's three stays listed and selected", async () => {
+test("a saved page size below the reference's three stays in range and selected", async () => {
   // The shared preference accepts one and two; the page offers the reference's three through nine. A
   // document carrying two must not display as three, or saving any other change would rewrite it.
   const preferences = { ...initial.preferences, candidate_page_size: 2 };
@@ -7315,19 +7307,10 @@ test("a saved page size below the reference's three stays listed and selected", 
     host: { platform: "windows" } as HostCapabilities,
   };
   render(<SettingsPage client={client} />);
-  const size = (await screen.findByRole("combobox", {
+  const size = (await screen.findByRole("slider", {
     name: "每页候选项数量",
-  })) as HTMLSelectElement;
-  expect(Array.from(size.options).map((option) => option.value)).toEqual([
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-  ]);
+  })) as HTMLInputElement;
+  expect([size.min, size.max]).toEqual(["2", "9"]);
   expect(size.value).toBe("2");
 });
 
@@ -7378,7 +7361,7 @@ test("an edit made while a save is in flight is kept and saved after it", async 
     ),
   };
   render(<SettingsPage client={client} />);
-  const size = (await screen.findByLabelText("每页候选项数量")) as HTMLSelectElement;
+  const size = (await screen.findByLabelText("每页候选项数量")) as HTMLInputElement;
   fireEvent.change(size, { target: { value: "9" } });
   saveSettingsNow();
   expect(client.save).toHaveBeenCalledTimes(1);
@@ -7440,7 +7423,7 @@ test("a failed save keeps the edit and 重试 saves it again", async () => {
       })),
   };
   render(<SettingsPage client={client} />);
-  const size = (await screen.findByLabelText("每页候选项数量")) as HTMLSelectElement;
+  const size = (await screen.findByLabelText("每页候选项数量")) as HTMLInputElement;
   fireEvent.change(size, { target: { value: "9" } });
   saveSettingsNow();
   expect((await screen.findByRole("button", { name: "重试" })).className).toBe("secondary");
@@ -7463,17 +7446,17 @@ test("a conflict that keeps recurring preserves edits and offers an explicit rel
     save: vi.fn().mockRejectedValue({ code: "conflict" }),
   };
   render(<SettingsPage client={client} />);
-  const size = await screen.findByRole("combobox", { name: "每页候选项数量" });
+  const size = await screen.findByRole("slider", { name: "每页候选项数量" });
   fireEvent.change(size, { target: { value: "9" } });
   saveSettingsNow();
   expect((await screen.findByRole("alert")).textContent).toContain("其他窗口");
-  expect(size.textContent).toContain("9");
+  expect((size as HTMLInputElement).value).toBe("9");
   // Each conflict reads the newer revision and tries again, a bounded number of times, before giving up.
   expect(client.load).toHaveBeenCalledTimes(4);
   expect(client.save).toHaveBeenCalledTimes(4);
   fireEvent.click(screen.getByRole("button", { name: "重新读取" }));
   await answerConfirm("confirm");
-  await waitFor(() => expect(size.textContent).toContain("5"));
+  await waitFor(() => expect((size as HTMLInputElement).value).toBe("5"));
 });
 
 test.each(["windows", "macos", "linux"])(
@@ -7496,9 +7479,9 @@ test.each(["windows", "macos", "linux"])(
       host: { platform } as never,
     };
     render(<SettingsPage client={client} />);
-    const size = (await screen.findByRole("combobox", {
+    const size = (await screen.findByRole("slider", {
       name: "每页候选项数量",
-    })) as HTMLSelectElement;
+    })) as HTMLInputElement;
     await waitFor(() => expect(changed).toBeDefined());
     changed?.({
       ...initial,
@@ -7549,9 +7532,9 @@ test("this window's own save echoed back by the monitor is not reported as anoth
     host: { platform: "linux" } as never,
   };
   render(<SettingsPage client={client} />);
-  const size = (await screen.findByRole("combobox", {
+  const size = (await screen.findByRole("slider", {
     name: "每页候选项数量",
-  })) as HTMLSelectElement;
+  })) as HTMLInputElement;
   await waitFor(() => expect(changed).toBeDefined());
   fireEvent.change(size, { target: { value: "9" } });
   saveSettingsNow();
@@ -7615,14 +7598,16 @@ test("category navigation preserves one draft and saves edits across pages", asy
   render(<SettingsPage client={client} />);
   const appearance = screen.getByRole("button", { name: "候选窗口" });
   expect(appearance.getAttribute("aria-current")).toBe("page");
-  const pageSize = await screen.findByRole("combobox", { name: "每页候选项数量" });
+  const pageSize = await screen.findByRole("slider", { name: "每页候选项数量" });
   fireEvent.change(pageSize, { target: { value: "9" } });
   fireEvent.click(screen.getByRole("button", { name: "输入" }));
   expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("输入");
-  expect(screen.queryByRole("combobox", { name: "每页候选项数量" })).toBeNull();
+  expect(screen.queryByRole("slider", { name: "每页候选项数量" })).toBeNull();
   fireEvent.click(screen.getByRole("switch", { name: "全拼辅助码" }));
   fireEvent.click(appearance);
-  expect(screen.getByRole("combobox", { name: "每页候选项数量" }).textContent).toContain("9");
+  expect((screen.getByRole("slider", { name: "每页候选项数量" }) as HTMLInputElement).value).toBe(
+    "9",
+  );
   saveSettingsNow();
   await screen.findByText("已保存");
   expect(client.save).toHaveBeenCalledWith(7, {
