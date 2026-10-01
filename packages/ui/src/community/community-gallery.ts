@@ -105,7 +105,6 @@ export function useCommunityGallery<T extends { id: string }>({
       if (clientGeneration.current === currentClient) clientGeneration.current++;
       listGeneration.current += 1;
       detailGeneration.current += 1;
-      actionBusyRef.current = false;
     };
   }, [client, requestList]);
 
@@ -144,7 +143,8 @@ export function useCommunityGallery<T extends { id: string }>({
   }, [actionBusy]);
 
   const beginAction = useCallback(() => {
-    if (!selected || actionBusy || actionBusyRef.current) return null;
+    if (!selected || actionBusy) return null;
+    if (actionBusyRef.current) return null;
     actionBusyRef.current = true;
     setActionBusy(true);
     return clientGeneration.current;
@@ -157,10 +157,8 @@ export function useCommunityGallery<T extends { id: string }>({
 
   const endAction = useCallback(
     (generation: number) => {
-      if (isCurrent(generation)) {
-        actionBusyRef.current = false;
-        setActionBusy(false);
-      }
+      if (isCurrent(generation)) setActionBusy(false);
+      if (isCurrent(generation)) actionBusyRef.current = false;
     },
     [isCurrent],
   );
@@ -170,7 +168,7 @@ export function useCommunityGallery<T extends { id: string }>({
       action: (generation: number) => Promise<void>,
       options: CommunityGalleryActionOptions = {},
     ) => {
-      if (actionBusy || actionBusyRef.current) return Promise.resolve();
+      if (actionBusyRef.current || actionBusy) return Promise.resolve();
       const generation = clientGeneration.current;
       actionBusyRef.current = true;
       setSignInRequired(false);
@@ -178,10 +176,7 @@ export function useCommunityGallery<T extends { id: string }>({
         {
           busy: actionBusy,
           isCurrent: () => isCurrent(generation),
-          setBusy: (busy) => {
-            actionBusyRef.current = busy;
-            setActionBusy(busy);
-          },
+          setBusy: setActionBusy,
           setError,
           setNotice: options.clearNotice ? setActionNotice : undefined,
         },

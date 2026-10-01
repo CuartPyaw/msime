@@ -373,9 +373,12 @@ function ResourceDetail({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const mounted = useRef(true);
   const clientGeneration = useRef(0);
+  const actionBusyRef = useRef(false);
   const renderGeneration = clientGeneration.current;
   const run = async (action: (generation: number) => Promise<void>) => {
+    if (actionBusyRef.current || busy) return;
     const generation = clientGeneration.current;
+    actionBusyRef.current = true;
     await runAsyncAction(
       {
         busy,
@@ -387,11 +390,13 @@ function ResourceDetail({
       () => action(generation),
       { formatError: resourceMessage },
     );
+    if (mounted.current && generation === clientGeneration.current) actionBusyRef.current = false;
   };
   useEffect(() => {
     let active = true;
     const generation = ++clientGeneration.current;
     mounted.current = true;
+    actionBusyRef.current = false;
     setBusy(false);
     void client
       .detail(initial.id)
