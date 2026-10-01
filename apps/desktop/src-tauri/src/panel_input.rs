@@ -1000,15 +1000,20 @@ pub(crate) async fn send_panel_text(
     text: String,
     source: TypingSource,
 ) -> Result<(), HostActionError> {
-    if text.is_empty()
-        || text.len() > 4096
-        || msime_client_core::has_disallowed_control_with_options(&text, true)
-    {
-        return Err(HostActionError {
-            code: "invalid_text",
-        });
-    }
+    validate_panel_text(&text)?;
     let target = panel_input_target(state, &label)?;
+    deliver_panel_text(app, target, typing_statistics, text, source).await
+}
+
+/// Sends text the caller has already validated to one target, off the main thread, and counts it once it arrived.
+#[cfg(target_os = "linux")]
+async fn deliver_panel_text(
+    app: tauri::AppHandle,
+    target: PanelInputTarget,
+    typing_statistics: &tauri::State<'_, TypingStatisticsState>,
+    text: String,
+    source: TypingSource,
+) -> Result<(), HostActionError> {
     let typing_statistics = typing_statistics.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let result = send_panel_text_to_target(&app, &target, &text);
@@ -1021,6 +1026,33 @@ pub(crate) async fn send_panel_text(
     .map_err(|_| HostActionError {
         code: "unavailable",
     })?
+}
+
+#[cfg(target_os = "linux")]
+fn validate_panel_text(text: &str) -> Result<(), HostActionError> {
+    if text.is_empty()
+        || text.len() > 4096
+        || msime_client_core::has_disallowed_control_with_options(text, true)
+    {
+        return Err(HostActionError {
+            code: "invalid_text",
+        });
+    }
+    Ok(())
+}
+
+/// Sends text from the cloud clipboard panel to the editor captured when this open of the panel began, never to a target another panel or an earlier open left behind.
+#[cfg(target_os = "linux")]
+pub(crate) async fn send_cloud_clipboard_text(
+    app: tauri::AppHandle,
+    typing_statistics: &tauri::State<'_, TypingStatisticsState>,
+    text: String,
+) -> Result<(), HostActionError> {
+    validate_panel_text(&text)?;
+    let target = cloud_clipboard_input_target(&app).ok_or(HostActionError {
+        code: "unavailable",
+    })?;
+    deliver_panel_text(app, target, typing_statistics, text, TypingSource::Unknown).await
 }
 
 #[cfg(target_os = "linux")]
@@ -1121,6 +1153,11 @@ fn focused_panel_target(state: &tauri::State<'_, PanelInputState>) -> Result<(),
         .ok_or(HostActionError {
             code: "unavailable",
         })?;
+    focus_panel_target(target)
+}
+
+#[cfg(target_os = "windows")]
+fn focus_panel_target(target: PanelInputTarget) -> Result<(), HostActionError> {
     msime_host_windows::focus(target.0)
         .then_some(())
         .ok_or(HostActionError {
@@ -1182,6 +1219,28 @@ pub(crate) fn send_panel_text_windows(
         })
 }
 
+/// Sends text from the cloud clipboard panel to the editor captured when this open of the panel began, never to the target another panel or an earlier open left in [`PanelInputState`].
+#[cfg(target_os = "windows")]
+pub(crate) fn send_cloud_clipboard_text_windows(
+    app: &tauri::AppHandle,
+    text: &str,
+) -> Result<(), HostActionError> {
+    if !msime_host_windows::valid_text(text) {
+        return Err(HostActionError {
+            code: "invalid_text",
+        });
+    }
+    let target = cloud_clipboard_input_target(app).ok_or(HostActionError {
+        code: "unavailable",
+    })?;
+    focus_panel_target(target)?;
+    msime_host_windows::send_text(text)
+        .then_some(())
+        .ok_or(HostActionError {
+            code: "invalid_text",
+        })
+}
+
 // Panels sit where the native ones did: bottom-centred on the work area, or centred for the panels the shipped product centred.
 #[cfg(target_os = "windows")]
 pub(crate) fn windows_panel_position(
@@ -1200,4 +1259,119 @@ pub(crate) fn windows_panel_position(
             y.round() as i32,
         ))
     })
+}
+
+// ---- Cloud clipboard input target ----
+//
+// The cloud clipboard panel types text that came from another device, so it must only ever reach an editor the user was in when they opened it. The shared [`PanelInputState`] cannot promise that: on Windows it is one slot every panel overwrites and that a failed capture leaves as it was, and on Linux a failed capture keeps whatever an earlier open stored for the label. On both, opening the panel from the settings window finds our own window focused, so the slot still names whatever editor some earlier panel captured. The panel therefore keeps its own target, captured for each open and dropped when it closes; without one it can only copy.
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) const CLOUD_CLIPBOARD_PANEL: &str = "cloud-clipboard-panel";
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[derive(Default)]
+pub(crate) struct CloudClipboardInputState(Mutex<FreshInputTarget<PanelInputTarget>>);
+
+/// The editor this open of the cloud clipboard panel may type into, if one was captured.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) fn cloud_clipboard_input_target(app: &tauri::AppHandle) -> Option<PanelInputTarget> {
+    app.state::<CloudClipboardInputState>()
+        .0
+        .lock()
+        .ok()?
+        .target()
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) fn forget_cloud_clipboard_input_target(app: &tauri::AppHandle) {
+    if let Ok(mut slot) = app.state::<CloudClipboardInputState>().0.lock() {
+        slot.close();
+    }
+}
+
+/// Remembers the editor a panel that is about to open should type into. Every panel but the cloud clipboard keeps the shared behaviour; the cloud clipboard also captures its own target for this open, keeping it only when it is verifiably another application's window.
+#[cfg(target_os = "linux")]
+pub(crate) fn remember_opening_panel_target(
+    app: &tauri::AppHandle,
+    state: &tauri::State<'_, PanelInputState>,
+    label: &str,
+) {
+    if label != CLOUD_CLIPBOARD_PANEL {
+        let _ = remember_panel_input_target(state, label, true);
+        return;
+    }
+    let cloud = app.state::<CloudClipboardInputState>();
+    let Ok(open) = cloud.0.lock().map(|mut slot| slot.begin_open()) else {
+        return;
+    };
+    // A failed capture leaves the label's previous entry in place, so drop it first: the panel must not be positioned over, or type into, an editor from an earlier open.
+    if let Ok(mut targets) = state.0.lock() {
+        targets.remove(label);
+    }
+    let _ = remember_panel_input_target(state, label, true);
+    let captured = panel_input_target(state, label)
+        .ok()
+        .filter(linux_target_is_external);
+    let Ok(mut slot) = cloud.0.lock() else {
+        return;
+    };
+    slot.record(open, captured);
+}
+
+/// Whether a captured target is provably a window of another process. Only X11 and sway name a window whose owner can be checked; ydotool, wtype and the input method type into whatever holds focus when the text is sent, which from a panel opened in the settings window is that window, so they are never treated as an external editor.
+#[cfg(target_os = "linux")]
+fn linux_target_is_external(target: &PanelInputTarget) -> bool {
+    let read = |program: &str, arguments: &[&str], limit: usize| {
+        linux_process::read_text(program, arguments, limit, std::time::Duration::from_secs(1))
+    };
+    let owner = match target {
+        PanelInputTarget::X11(window) => read("xdotool", &["getwindowpid", window], 64)
+            .and_then(|output| output.trim().parse::<u32>().ok()),
+        PanelInputTarget::Sway(id) => read("swaymsg", &["-t", "get_tree", "-r"], 1024 * 1024)
+            .and_then(|output| serde_json::from_str::<serde_json::Value>(&output).ok())
+            .and_then(|tree| sway_pid_for_container(&tree, *id)),
+        PanelInputTarget::Ydotool | PanelInputTarget::Wayland | PanelInputTarget::InputMethod => {
+            None
+        }
+    };
+    owner.is_some_and(|pid| pid != std::process::id())
+}
+
+/// The process that owns a sway container, from the `pid` sway reports for each view.
+#[cfg(target_os = "linux")]
+pub(crate) fn sway_pid_for_container(value: &serde_json::Value, id: u64) -> Option<u32> {
+    if value.get("id").and_then(serde_json::Value::as_u64) == Some(id) {
+        return value
+            .get("pid")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|pid| u32::try_from(pid).ok());
+    }
+    ["nodes", "floating_nodes"]
+        .into_iter()
+        .filter_map(|key| value.get(key).and_then(serde_json::Value::as_array))
+        .flatten()
+        .find_map(|node| sway_pid_for_container(node, id))
+}
+
+/// Remembers the editor a panel that is about to open should type into. Every panel keeps the shared behaviour; the cloud clipboard also captures its own target for this open, and only when the foreground window belongs to another process.
+#[cfg(target_os = "windows")]
+pub(crate) fn remember_opening_panel_target(
+    app: &tauri::AppHandle,
+    state: &tauri::State<'_, PanelInputState>,
+    label: &str,
+) {
+    let _ = remember_panel_input_target(state);
+    if label != CLOUD_CLIPBOARD_PANEL {
+        return;
+    }
+    let cloud = app.state::<CloudClipboardInputState>();
+    let Ok(mut slot) = cloud.0.lock() else {
+        return;
+    };
+    let open = slot.begin_open();
+    let target = msime_host_windows::foreground_is_external()
+        .then(msime_host_windows::foreground_window)
+        .flatten()
+        .map(PanelInputTarget);
+    slot.record(open, target);
 }

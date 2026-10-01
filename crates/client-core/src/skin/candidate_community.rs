@@ -1039,6 +1039,100 @@ pub fn add_preview(root: &Path, id: &str, bytes: &[u8]) -> Result<String, &'stat
     }
 }
 
+/// Give the installed package `id` under `root`, which declares no asset license, the asset license `assets` (an SPDX id such as `CC-BY-4.0`, or the author's own words), so it can be published. The line goes under the manifest's `[license]` header when it has one, and a new `[license]` table is appended when it has none, leaving every other line as the author wrote it.
+///
+/// A license the manifest declares some other way (an inline table, dotted keys, an empty `assets`) is refused rather than rewritten: the page then points the author at the file, as it did before.
+pub fn add_license(root: &Path, id: &str, assets: &str) -> Result<(), &'static str> {
+    let assets = assets.trim();
+    if assets.is_empty() || !crate::text::is_bounded_text(assets, 120) {
+        return Err(PACKAGE);
+    }
+    let summary = catalog::load_package(root, id).map_err(|_| PACKAGE)?;
+    if SERVER_BUILTIN_IDS.contains(&id)
+        || summary
+            .license
+            .is_some_and(|license| license.assets.is_some())
+    {
+        return Err(PACKAGE);
+    }
+    let manifest_path = root.join(id).join(MANIFEST_FILE);
+    let input = fs::File::open(&manifest_path).map_err(|_| PACKAGE)?;
+    let original = crate::bounded_io::read_bounded_file_with(
+        input,
+        MAX_MANIFEST_BYTES as u64,
+        || TOO_LARGE,
+        |_| PACKAGE,
+    )?;
+    let text = std::str::from_utf8(&original).map_err(|_| PACKAGE)?;
+    let line = format!("assets = {}\n", toml::Value::String(assets.to_owned()));
+    let manifest = match license_header_end(text) {
+        Some(end) if text[..end].ends_with('\n') => {
+            format!("{}{line}{}", &text[..end], &text[end..])
+        }
+        Some(end) => format!("{}\n{line}{}", &text[..end], &text[end..]),
+        None => {
+            let separator = if text.is_empty() || text.ends_with('\n') {
+                ""
+            } else {
+                "\n"
+            };
+            format!("{text}{separator}\n[license]\n{line}")
+        }
+    };
+    if manifest.len() > MAX_MANIFEST_BYTES {
+        return Err(TOO_LARGE);
+    }
+    // The header search is textual, so the result is parsed before it is written: a header inside a multi-line string, or a license defined elsewhere as well, leaves the file alone.
+    let written = toml::from_str::<toml::Table>(manifest.trim_start_matches('\u{feff}'))
+        .ok()
+        .and_then(|table| {
+            table
+                .get("license")?
+                .get("assets")?
+                .as_str()
+                .map(str::to_owned)
+        });
+    if written.as_deref() != Some(assets) {
+        return Err(PACKAGE);
+    }
+    let staged = root.join(id).join(".skin.toml.license");
+    if fs::write(&staged, &manifest)
+        .and_then(|()| fs::rename(&staged, &manifest_path))
+        .is_err()
+    {
+        let _ = fs::remove_file(&staged);
+        return Err(STORAGE);
+    }
+    match catalog::load_package(root, id) {
+        Ok(updated)
+            if updated
+                .license
+                .as_ref()
+                .and_then(|license| license.assets.as_deref())
+                == Some(assets) =>
+        {
+            Ok(())
+        }
+        _ => {
+            let _ = fs::write(&manifest_path, &original);
+            Err(PACKAGE)
+        }
+    }
+}
+
+/// The byte offset just past the line holding the manifest's `[license]` header, a trailing comment allowed; `None` when no line is that header.
+fn license_header_end(text: &str) -> Option<usize> {
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        offset += line.len();
+        let rest = line.trim().strip_prefix("[license]").map(str::trim_start);
+        if rest.is_some_and(|rest| rest.is_empty() || rest.starts_with('#')) {
+            return Some(offset);
+        }
+    }
+    None
+}
+
 /// Server `candidateRequestDigest`: SHA-256 over the name, description and manifest, each followed by a NUL, then for each file in byte order of its path the path, a NUL, the hex SHA-256 of its original bytes and a newline. It identifies content by what was uploaded, so it survives the server re-encoding every image. `files` are in standard base64, as a request carries them.
 pub fn request_digest(
     name: &str,

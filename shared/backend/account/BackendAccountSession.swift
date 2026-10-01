@@ -33,10 +33,29 @@ protocol BackendSessionStorage: Sendable {
   func clear() throws
 }
 struct BackendKeychain: BackendSessionStorage {
-  private var query: [String: Any] {
+  /// On iOS the session lives in the App Group's keychain access group, which the app and the keyboard extension both already hold as an entitlement, so the keyboard can reach the signed-in account (cloud clipboard) without the token ever being written to a file. Other platforms keep the item in the process's default access group, exactly as before.
+  #if os(iOS)
+  static let defaultAccessGroup: String? = "group.app.msime.ios"
+  #else
+  static let defaultAccessGroup: String? = nil
+  #endif
+  private let accessGroup: String?
+  private let service: String
+
+  init(accessGroup: String? = BackendKeychain.defaultAccessGroup, service: String = "app.msime.backend.account") {
+    self.accessGroup = accessGroup
+    self.service = service
+  }
+  /// Matches the item in every access group the process holds, which is what clearing and the pre-group lookup need.
+  private var anyGroupQuery: [String: Any] {
     [kSecClass as String: kSecClassGenericPassword,
-     kSecAttrService as String: "app.msime.backend.account",
+     kSecAttrService as String: service,
      kSecAttrAccount as String: "https://api.msime.app"]
+  }
+  private var query: [String: Any] {
+    var query = anyGroupQuery
+    if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
+    return query
   }
   func load() throws -> BackendSavedSession? {
     var query = query
@@ -44,7 +63,10 @@ struct BackendKeychain: BackendSessionStorage {
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
     let status = SecItemCopyMatching(query as CFDictionary, &result)
-    if status == errSecItemNotFound { return try migrateCommunitySession() }
+    if status == errSecItemNotFound {
+      if let moved = try migrateDefaultGroupSession() { return moved }
+      return try migrateCommunitySession()
+    }
     // A keychain we cannot read is not a session we have. An unsigned simulator build answers
     // -34018 (errSecMissingEntitlement) here, and a device can answer errSecInteractionNotAllowed
     // while locked; treating either as a hard failure took every screen that asks "am I signed in"
@@ -54,6 +76,29 @@ struct BackendKeychain: BackendSessionStorage {
     guard status == errSecSuccess, let data = result as? Data else { return nil }
     do { return try BackendSavedSession.validated(JSONDecoder().decode(BackendSavedSession.self, from: data)) }
     catch { throw BackendAccountClient.Failure(status: 0) }
+  }
+  /// Sessions saved before the App Group access group was used sit in the app's default access group, where the keyboard cannot see them. The app moves such an item into the shared group the first time it reads it; the keyboard finds nothing here and reports signed out until then.
+  private func migrateDefaultGroupSession() throws -> BackendSavedSession? {
+    guard accessGroup != nil else { return nil }
+    var lookup = anyGroupQuery
+    lookup[kSecReturnData as String] = true
+    lookup[kSecReturnAttributes as String] = true
+    lookup[kSecMatchLimit as String] = kSecMatchLimitOne
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(lookup as CFDictionary, &result)
+    // Absent or unreadable: nothing to move, for the same reason `load` treats both as signed out.
+    guard status == errSecSuccess, let found = result as? [String: Any],
+          let data = found[kSecValueData as String] as? Data,
+          let group = found[kSecAttrAccessGroup as String] as? String else { return nil }
+    let session: BackendSavedSession
+    do { session = try BackendSavedSession.validated(JSONDecoder().decode(BackendSavedSession.self, from: data)) }
+    catch { throw BackendAccountClient.Failure(status: 0) }
+    try save(session)
+    // Delete by the old item's own group: a query without one would take the copy just saved with it.
+    var old = anyGroupQuery
+    old[kSecAttrAccessGroup as String] = group
+    if group != accessGroup { SecItemDelete(old as CFDictionary) }
+    return session
   }
   private func migrateCommunitySession() throws -> BackendSavedSession? {
     let legacy: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
@@ -100,8 +145,51 @@ struct BackendKeychain: BackendSessionStorage {
   }
   func clear() throws {
     try clearLegacy()
-    let status = SecItemDelete(query as CFDictionary)
+    // Every group: a sign-out must also remove a copy that predates the shared access group, or the next read would move it back.
+    let status = SecItemDelete(anyGroupQuery as CFDictionary)
     guard status == errSecSuccess || status == errSecItemNotFound else { throw BackendAccountClient.Failure(status: 0) }
+  }
+}
+
+/// Serializes every write to a stored session that several processes share: sign-in, refresh, profile updates and sign-out. The server rotates the refresh token on every refresh and revokes the whole session when a used one is presented again, so two processes refreshing from the same stored token sign the user out, and a refresh that finishes after another process signed out or switched accounts must not write its tokens back. Whoever holds this lock re-reads the store before writing.
+protocol BackendRefreshLock: Sendable {
+  /// Whether other processes read and write the same store. Such a store, not this process's memory, says who is signed in.
+  var sharedAcrossProcesses: Bool { get }
+  func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T
+}
+
+/// For a session no other process shares.
+struct BackendProcessRefreshLock: BackendRefreshLock {
+  var sharedAcrossProcesses: Bool { false }
+  func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T { try await body() }
+}
+
+/// An exclusive `flock` on a file in a directory every sharing process can open. It is waited for by polling, so a cooperative thread is never blocked, and it is held only for the one refresh request: iOS ends a suspended process that keeps a lock in an App Group container.
+struct BackendFileRefreshLock: BackendRefreshLock {
+  let url: URL?
+  var timeout: TimeInterval = 20
+  var sharedAcrossProcesses: Bool { true }
+
+  /// iOS: the App Group container, opened by both the app and the keyboard extension.
+  static var appGroup: BackendFileRefreshLock {
+    BackendFileRefreshLock(url: FileManager.default
+      .containerURL(forSecurityApplicationGroupIdentifier: "group.app.msime.ios")?
+      .appendingPathComponent("backend-account-refresh.lock", isDirectory: false))
+  }
+
+  func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+    // No shared directory means no way to keep another process out, and refreshing anyway risks the revocation this lock exists to prevent.
+    guard let url else { throw BackendAccountClient.Failure(status: 0) }
+    let descriptor = open(url.path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
+    guard descriptor >= 0 else { throw BackendAccountClient.Failure(status: 0) }
+    defer { close(descriptor) }
+    let deadline = Date().addingTimeInterval(timeout)
+    while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+      guard errno == EWOULDBLOCK || errno == EINTR, Date() < deadline else { throw BackendAccountClient.Failure(status: 0) }
+      try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    defer { flock(descriptor, LOCK_UN) }
+    return try await body()
   }
 }
 
@@ -114,16 +202,27 @@ actor BackendAccountSession {
   private var loaded = false
   private var generation = 0
   private var refreshing: Task<String, Error>?
+  private let refreshLock: any BackendRefreshLock
 
-  init(api: any BackendSessionAPI = BackendAccountClient(), storage: any BackendSessionStorage = BackendKeychain()) {
-    self.api = api; self.storage = storage
+  /// On iOS the app and the keyboard extension share the stored sessions, so refreshes take the App Group lock there.
+  #if os(iOS)
+  static var defaultRefreshLock: any BackendRefreshLock { BackendFileRefreshLock.appGroup }
+  #else
+  static var defaultRefreshLock: any BackendRefreshLock { BackendProcessRefreshLock() }
+  #endif
+
+  init(api: any BackendSessionAPI = BackendAccountClient(), storage: any BackendSessionStorage = BackendKeychain(),
+       refreshLock: any BackendRefreshLock = BackendAccountSession.defaultRefreshLock) {
+    self.api = api; self.storage = storage; self.refreshLock = refreshLock
   }
   func user() throws -> BackendAccountClient.User? {
     try load()
     return saved?.tokens.user
   }
+  private var sharesStore: Bool { refreshLock.sharedAcrossProcesses }
+  /// A store other processes share is read every time: the other process may have signed out or switched accounts, and an empty store then means signed out here too rather than a cue to keep using the session held in memory.
   private func load() throws {
-    if !loaded {
+    if !loaded || sharesStore {
       saved = try storage.load().map { try BackendSavedSession.validated($0) }
       loaded = true
     }
@@ -134,8 +233,10 @@ actor BackendAccountSession {
     let version = generation
     let tokens = try await api.login(challenge: challenge, credential: credential, linkToken: nil)
     try Task.checkCancellation()
-    guard version == generation else { throw CancellationError() }
-    try install(tokens)
+    try await refreshLock.run {
+      guard await self.generation == version else { throw CancellationError() }
+      try await self.install(tokens)
+    }
   }
   private func install(_ tokens: BackendAccountClient.Tokens) throws {
     let value = try BackendSavedSession.forTokens(tokens)
@@ -159,15 +260,46 @@ actor BackendAccountSession {
     let refreshToken = current.tokens.refresh_token
     let version = generation
     let task = Task<String, Error> {
-      let tokens = try await self.api.refresh(refreshToken)
-      guard self.generation == version else { throw CancellationError() }
-      try self.install(tokens)
-      return tokens.access_token
+      try await self.refreshLock.run {
+        try await self.refreshHoldingLock(refreshToken, rejectedToken: rejectedToken, version: version)
+      }
     }
     refreshing = task
     defer { if version == generation { refreshing = nil } }
-    do { return try await task.value }
-    catch {
+    return try await task.value
+  }
+  /// Runs with the refresh lock held, so no other process can rotate the stored session between the read below and the save after the refresh.
+  private func refreshHoldingLock(_ expected: String, rejectedToken: String?, version: Int) async throws -> String {
+    var refreshToken = expected
+    let before = try? storage.load().map({ try BackendSavedSession.validated($0) })
+    // Another process signed out while this one waited for the lock.
+    if sharesStore && before == nil {
+      saved = nil
+      throw BackendAccountClient.Failure(status: 401)
+    }
+    // Another process may have rotated the session while this one waited for the lock; refreshing from the token it already used would revoke the session.
+    if let stored = before, stored.tokens.refresh_token != expected {
+      guard generation == version else { throw CancellationError() }
+      saved = stored
+      if stored.expiresAt.timeIntervalSinceNow > 30 && rejectedToken != stored.tokens.access_token { return stored.tokens.access_token }
+      refreshToken = stored.tokens.refresh_token
+    }
+    do {
+      let tokens = try await api.refresh(refreshToken)
+      guard generation == version else { throw CancellationError() }
+      // Writers that do not take the lock (another host's own keychain code) can still change the store; tokens for a session that is no longer the stored one are discarded instead of resurrecting it.
+      let current = try? storage.load().map({ try BackendSavedSession.validated($0) })
+      if let current, current.tokens.refresh_token != refreshToken || current.tokens.user.id != tokens.user.id {
+        saved = current
+        throw CancellationError()
+      }
+      if sharesStore && current == nil {
+        saved = nil
+        throw BackendAccountClient.Failure(status: 401)
+      }
+      try install(tokens)
+      return tokens.access_token
+    } catch {
       if version == generation, let failure = error as? BackendAccountClient.Failure, failure.status == 401 {
         // Clear only the session that was rejected; a rotation saved meanwhile elsewhere is adopted.
         // A nil read may be an unreadable keychain rather than an absent item, so it is not cleared.
@@ -183,7 +315,10 @@ actor BackendAccountSession {
       throw error
     }
   }
-  func updateUser(_ user: BackendAccountClient.User, matching token: String) throws {
+  func updateUser(_ user: BackendAccountClient.User, matching token: String) async throws {
+    try await refreshLock.run { try await self.updateUserHoldingLock(user, matching: token) }
+  }
+  private func updateUserHoldingLock(_ user: BackendAccountClient.User, matching token: String) throws {
     try load()
     guard let current = saved, current.tokens.access_token == token, current.tokens.user.id == user.id else {
       throw CancellationError()
@@ -202,17 +337,23 @@ actor BackendAccountSession {
           expected == nil || saved.tokens.user.id == expected else { throw CancellationError() }
     return (saved.tokens.user.id, token)
   }
-  func forget() throws {
+  func forget() async throws {
     generation += 1
     refreshing?.cancel(); refreshing = nil
     saved = nil; loaded = true
-    try storage.clear()
+    // Under the lock, so a refresh another process has in flight cannot write its tokens back after this clear.
+    do { try await refreshLock.run { try await self.clearStorage() } }
+    catch let failure as BackendAccountClient.Failure where failure.status == 0 {
+      // The lock could not be taken. Clearing can only remove the session, so it still happens rather than leaving the user signed in.
+      try storage.clear()
+    }
   }
+  private func clearStorage() throws { try storage.clear() }
   func logout(all: Bool = false) async throws {
     let token: String
     do { token = try await accessToken() }
-    catch { try forget(); throw error }
-    try forget()
+    catch { try await forget(); throw error }
+    try await forget()
     try await api.logout(token: token, all: all)
   }
 }

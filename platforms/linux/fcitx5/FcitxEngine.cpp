@@ -2151,7 +2151,7 @@ public:
         {
           cloud_clipboard_enabled_ = result.value("enabled", true);
           cloud_clipboard_items_ = cloud_clipboard_enabled_
-              ? result.value("entries", Json::array())
+              ? result.value("items", Json::array())
               : Json::array();
         }
       }
@@ -4780,7 +4780,9 @@ public:
   FcitxCloudClipboardItemAction(fcitx::FactoryFor<FcitxState> *factory, size_t index)
       : factory_(factory), index_(index) {}
   std::string shortText(fcitx::InputContext *ic) const override {
-    if (ic && index_ < ic->propertyFor(factory_)->cloud_clipboard_items_.size()) {
+    // Cloud text is never previewed in a password or private field, even when it was fetched before the field changed.
+    if (ic && !ic->propertyFor(factory_)->restricted() && !ic->propertyFor(factory_)->privateInput() &&
+        index_ < ic->propertyFor(factory_)->cloud_clipboard_items_.size()) {
       const auto &item = ic->propertyFor(factory_)->cloud_clipboard_items_.at(index_);
       const auto text = item.is_string() ? item.get<std::string>() : item.value("text", std::string{});
       if (!text.empty()) {

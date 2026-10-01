@@ -167,6 +167,7 @@ targets:
       - path: ../../../../../shared/backend/account/BackendAnonymousAccount.swift
       - path: ../../../../../shared/backend/storage/BackendLocalStore.swift
       - path: ../../../../../shared/backend/clients/BackendSnapshotClient.swift
+      - path: ../../../../../shared/backend/clients/BackendClipboardClient.swift
       - path: ../../../../../platforms/ios/App/Services/KeyboardAIService.swift
       - path: ../../../../../platforms/ios/KeyboardExtension/Sources/keyboard/KeyboardServiceFallback.swift
       - path: ../../../../../target/ios/EngineResources

@@ -48,6 +48,8 @@ struct MacEmojiClipboardRow: View {
   let deleting: Bool
   let copy: () -> Void
   let remove: () -> Void
+  /// Uploads this entry to the account's cloud clipboard; nil leaves the row without that action.
+  var sendToCloud: (() -> Void)? = nil
   @State private var hovered = false
   @State private var deleteHovered = false
   @FocusState private var deleteFocused: Bool
@@ -65,6 +67,9 @@ struct MacEmojiClipboardRow: View {
     }
     .buttonStyle(MacClipboardRowStyle(palette: palette, selected: selected, hovered: hovered))
     .accessibilityLabel(text)
+    .contextMenu {
+      if let sendToCloud { Button("发到云剪贴板", action: sendToCloud) }
+    }
     .anchorPreference(key: MacClipboardTooltipPreference.self, value: .bounds) {
       hovered && !deleteHovered ? [MacClipboardTooltipAnchor(text: text, bounds: $0)] : []
     }

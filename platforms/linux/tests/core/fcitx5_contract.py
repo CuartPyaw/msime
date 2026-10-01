@@ -184,6 +184,9 @@ assert 'restoreInputMode' in source
 assert 'result.value("_socket", std::string{}) == cloud_clipboard_socket_' in source
 assert 'result.value("_generation", uint64_t{}) == cloud_clipboard_generation_' in source
 assert 'cloud_clipboard_enabled_ = result.value("enabled", true)' in source
+# The provider relays the account API page as is, so the list is `items` ([{id,text,updated_at}]) like the shared panel reads it; `entries` is the cloud dictionary's shape.
+assert 'result.value("items", Json::array())' in source
+assert 'result.value("entries", Json::array())' not in source[source.index('void refreshCloudClipboard()'):source.index('bool pasteCloudClipboard(')]
 assert 'if (!cloud_clipboard_enabled_) return false;' in source
 assert 'emoji_generation_' in source
 assert 'result.value("_generation", uint64_t{}) == emoji_generation_' in source

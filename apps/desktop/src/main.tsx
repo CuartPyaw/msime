@@ -208,6 +208,7 @@ const vocabularyReview: VocabularyReviewClient = {
 const inputSourceStartup: NonNullable<SettingsClient["inputSourceStartup"]> = {
   status: () => invoke("input_source_startup_status"),
   openSettings: () => invoke("open_input_source_settings"),
+  enable: () => invoke("enable_input_source"),
 };
 const client: SettingsClient = {
   readAppVersion: getVersion,
@@ -251,6 +252,7 @@ const client: SettingsClient = {
   openVoice: () => invoke("open_voice_panel"),
   openVocabulary: () => invoke("open_vocabulary_panel"),
   openCloudClipboard: () => invoke("open_cloud_clipboard_panel"),
+  cloudClipboardRequest: (action) => invoke("cloud_clipboard_request", { action }),
   openCloudDictionary: () => invoke("open_cloud_dictionary_panel"),
   restartInputMethod: () => invoke("restart_input_method"),
   installInputSource: () => invoke("install_input_source"),

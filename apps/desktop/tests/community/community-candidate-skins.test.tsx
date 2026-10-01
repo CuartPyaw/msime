@@ -97,6 +97,7 @@ function client(
       size: 1572864,
     }),
     addPreview: vi.fn().mockResolvedValue(catalog(["ink-wash"])),
+    addLicense: vi.fn().mockResolvedValue(catalog(["ink-wash"])),
     publish: vi.fn().mockResolvedValue(first),
     rate: vi.fn().mockResolvedValue({ stars: 4 }),
     unpublish: vi.fn().mockResolvedValue({ deleted: true }),
@@ -391,11 +392,18 @@ test("non-owners rate and owners unpublish after a confirmation", async () => {
   await waitFor(() => expect(ownerClient.list).toHaveBeenCalledTimes(2));
 });
 
-test("publish dialog: a missing license shows only the sentence and 打开目录", async () => {
+test("publish dialog: a missing license is chosen in the dialog and written for the author", async () => {
   const openSkinDirectory = vi.fn().mockResolvedValue(undefined);
-  const communityClient = client({
-    packPreview: vi.fn().mockRejectedValue({ code: "candidate_skin_license_required" }),
-  });
+  const packPreview = vi
+    .fn()
+    .mockRejectedValueOnce({ code: "candidate_skin_license_required" })
+    .mockResolvedValue({
+      suggestedName: "水墨",
+      license: { code: null, assets: "CC-BY-4.0", source: null },
+      fileCount: 2,
+      size: 2048,
+    });
+  const communityClient = client({ packPreview });
   render(
     <CandidateSkinPublishDialog
       client={communityClient}
@@ -405,15 +413,49 @@ test("publish dialog: a missing license shows only the sentence and 打开目录
       onPublished={vi.fn()}
     />,
   );
-  expect(
-    await screen.findByText("发布前请在 skin.toml 的 [license] 中填写素材授权 assets。"),
-  ).not.toBeNull();
-  expect(communityClient.packPreview).toHaveBeenCalledWith("ink-wash", "public");
+  expect(await screen.findByText(/公开发布需要说明别人可以怎样使用/)).not.toBeNull();
+  expect(packPreview).toHaveBeenCalledWith("ink-wash", "public");
   expect(screen.queryByRole("textbox", { name: "发布皮肤名称" })).toBeNull();
-  expect(screen.queryByRole("checkbox", { name: "确认拥有发布素材权利" })).toBeNull();
   expect(screen.queryByRole("button", { name: "公开发布" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
   expect(openSkinDirectory).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "使用此授权" }));
+  await waitFor(() =>
+    expect(communityClient.addLicense).toHaveBeenCalledWith("ink-wash", "CC-BY-4.0"),
+  );
+  expect(await screen.findByRole("textbox", { name: "发布皮肤名称" })).not.toBeNull();
+  expect(screen.getByLabelText("皮肤授权").textContent).toBe("素材授权 CC-BY-4.0");
+  expect(packPreview).toHaveBeenCalledTimes(2);
+});
+
+test("publish dialog: a license of the author's own is trimmed, bounded, and a failed write says so", async () => {
+  const communityClient = client({
+    packPreview: vi.fn().mockRejectedValue({ code: "candidate_skin_license_required" }),
+    addLicense: vi.fn().mockRejectedValue({ code: "candidate_skin_package_invalid" }),
+  });
+  render(
+    <CandidateSkinPublishDialog
+      client={communityClient}
+      initialSkinId="ink-wash"
+      onClose={vi.fn()}
+      onPublished={vi.fn()}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("radio", { name: "其他" }));
+  const write = screen.getByRole("button", { name: "使用此授权" }) as HTMLButtonElement;
+  expect(write.disabled).toBe(true);
+  const custom = screen.getByRole("textbox", { name: "其他素材授权" });
+  fireEvent.change(custom, { target: { value: "猫".repeat(41) } });
+  expect(screen.getByText(/授权说明太长/)).not.toBeNull();
+  expect(write.disabled).toBe(true);
+  fireEvent.change(custom, { target: { value: "  仅限个人使用  " } });
+  expect(write.disabled).toBe(false);
+  fireEvent.click(write);
+  await waitFor(() =>
+    expect(communityClient.addLicense).toHaveBeenCalledWith("ink-wash", "仅限个人使用"),
+  );
+  expect(await screen.findByText(/写入授权失败/)).not.toBeNull();
+  expect(screen.queryByRole("textbox", { name: "发布皮肤名称" })).toBeNull();
 });
 
 test("publish dialog: a package without a preview can have one drawn and saved", async () => {

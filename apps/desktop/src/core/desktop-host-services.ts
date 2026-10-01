@@ -38,6 +38,8 @@ export function createDesktopCandidateSkinCommunity(invoke: Invoke): CandidateSk
       }),
     addPreview: (skinId, bytes) =>
       invoke<SkinCatalog>("candidate_skin_community_add_preview", { skinId, bytes }),
+    addLicense: (skinId, assets) =>
+      invoke<SkinCatalog>("candidate_skin_community_add_license", { skinId, assets }),
     publish: (skinId, id, name, description, visibility) =>
       invoke<CommunityCandidateSkin>("candidate_skin_community_publish", {
         skinId,

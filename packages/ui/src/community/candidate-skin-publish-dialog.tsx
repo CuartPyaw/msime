@@ -30,6 +30,13 @@ const packageLimit = "2 MB";
 const publishWarning =
   "仅上传 skin.toml 与 PNG/JPEG 图片（需包含预览图）；单个文件不超过 1 MB、合计不超过 2 MB、每边不超过 2048 像素。服务器会重新编码图片并去除元数据。登录期间修改本地皮肤，会自动同步到这款作品。";
 
+/** Asset licenses offered when a public package names none; the host bounds the manifest value to this many UTF-8 bytes. */
+const assetLicenses = [
+  { value: "CC-BY-4.0", label: "CC BY 4.0（推荐：可自由使用，需署名作者）" },
+  { value: "CC0-1.0", label: "CC0 1.0（放弃权利，任何人可随意使用）" },
+] as const;
+const assetLicenseLimit = 120;
+
 function licenseLines(license: CandidateSkinPackPreview["license"]): string[] {
   return [
     license.assets?.trim() ? `素材授权 ${license.assets.trim()}` : "",
@@ -78,6 +85,10 @@ export function CandidateSkinPublishDialog({
   const [packRevision, setPackRevision] = useState(0);
   const [drawing, setDrawing] = useState(false);
   const [drawFailed, setDrawFailed] = useState(false);
+  const [licenseChoice, setLicenseChoice] = useState<string>(assetLicenses[0].value);
+  const [customLicense, setCustomLicense] = useState("");
+  const [writingLicense, setWritingLicense] = useState(false);
+  const [licenseFailed, setLicenseFailed] = useState(false);
   const [packLoading, setPackLoading] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -128,6 +139,7 @@ export function CandidateSkinPublishDialog({
     setPackError("");
     setPackCode(undefined);
     setDrawFailed(false);
+    setLicenseFailed(false);
     setAgreed(false);
     setPublicationId(randomUuid());
     if (!skinId) {
@@ -181,6 +193,27 @@ export function CandidateSkinPublishDialog({
       if (generation === packGeneration.current) setDrawFailed(true);
     } finally {
       setDrawing(false);
+    }
+  };
+
+  // Only a public package needs an asset license; the host writes the chosen one into skin.toml, so the author never edits the manifest by hand.
+  const licenseless = packCode === "candidate_skin_license_required" && skinId !== "";
+  const licenseValue = licenseChoice === "other" ? customLicense.trim() : licenseChoice;
+  const licenseValid =
+    licenseValue.length > 0 && new TextEncoder().encode(licenseValue).length <= assetLicenseLimit;
+  const writeLicense = async () => {
+    if (!licenseless || !licenseValid || writingLicense) return;
+    const generation = packGeneration.current;
+    setWritingLicense(true);
+    setLicenseFailed(false);
+    try {
+      const catalog = await client.addLicense(skinId, licenseValue);
+      setPackages(catalog.packages);
+      setPackRevision((revision) => revision + 1);
+    } catch {
+      if (generation === packGeneration.current) setLicenseFailed(true);
+    } finally {
+      setWritingLicense(false);
     }
   };
 
@@ -335,7 +368,74 @@ export function CandidateSkinPublishDialog({
             {openFailed && <p>无法打开皮肤目录，请重试。</p>}
           </div>
         )}
-        {packError && !(previewless && readImage) && (
+        {packError && licenseless && (
+          <div className={style.confirmation} role="alert">
+            <p>
+              公开发布需要说明别人可以怎样使用这款皮肤的图片素材。选择一种授权，会写入皮肤的
+              skin.toml 后继续发布。
+            </p>
+            <fieldset className={style.field} disabled={writingLicense}>
+              <legend>素材授权</legend>
+              {assetLicenses.map((item) => (
+                <label key={item.value}>
+                  <input
+                    type="radio"
+                    name="candidate-skin-asset-license"
+                    checked={licenseChoice === item.value}
+                    onChange={() => setLicenseChoice(item.value)}
+                  />{" "}
+                  {item.label}
+                </label>
+              ))}
+              <label>
+                <input
+                  type="radio"
+                  name="candidate-skin-asset-license"
+                  checked={licenseChoice === "other"}
+                  onChange={() => setLicenseChoice("other")}
+                />{" "}
+                其他
+              </label>
+              {licenseChoice === "other" && (
+                <input
+                  className={style.fieldControl}
+                  aria-label="其他素材授权"
+                  placeholder="例如：仅限个人使用，不得转售"
+                  value={customLicense}
+                  onChange={(event) => setCustomLicense(event.target.value)}
+                />
+              )}
+            </fieldset>
+            {licenseChoice === "other" && customLicense.trim() !== "" && !licenseValid && (
+              <p>授权说明太长，请控制在 40 个汉字以内。</p>
+            )}
+            {licenseFailed && (
+              <p>写入授权失败，请重试，或在 skin.toml 的 [license] 中自己填写 assets。</p>
+            )}
+            <div className={style.confirmationActions}>
+              {openSkinDirectory && (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={writingLicense}
+                  onClick={() => void openFolder()}
+                >
+                  打开目录
+                </button>
+              )}
+              <button
+                type="button"
+                className="primary"
+                disabled={writingLicense || !licenseValid}
+                onClick={() => void writeLicense()}
+              >
+                {writingLicense ? "正在写入…" : "使用此授权"}
+              </button>
+            </div>
+            {openFailed && <p>无法打开皮肤目录，请重试。</p>}
+          </div>
+        )}
+        {packError && !(previewless && readImage) && !licenseless && (
           <div className={style.confirmation} role="alert">
             <p>{packError}</p>
             {openSkinDirectory && (

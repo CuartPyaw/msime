@@ -1,21 +1,21 @@
-import type { Dispatch, SetStateAction } from "react";
-import type { InputSourceStartupStatus } from "./input-source-startup-notice";
-
 export interface CreateSettingsStatusActionsOptions {
   recoverPreferences: () => Promise<void>;
-  inputSourceStartup?: { openSettings: () => Promise<void> };
-  setInputSourceStartup: Dispatch<SetStateAction<InputSourceStartupStatus | null>>;
+  inputSourceStartup?: { openSettings: () => Promise<void>; enable?: () => Promise<void> };
+  /** Hides the startup notice for the rest of this window, including later focus refreshes. */
+  dismissInputSourceStartup: () => void;
 }
 
 /** Creates recovery and startup-notice actions for the settings status surface. */
 export function createSettingsStatusActions({
   recoverPreferences,
   inputSourceStartup,
-  setInputSourceStartup,
+  dismissInputSourceStartup,
 }: CreateSettingsStatusActionsOptions) {
+  const enable = inputSourceStartup?.enable;
   return {
     onRecover: () => void recoverPreferences(),
     onOpenSettings: () => inputSourceStartup?.openSettings(),
-    onDismiss: () => setInputSourceStartup(null),
+    onEnable: enable ? () => enable() : undefined,
+    onDismiss: dismissInputSourceStartup,
   } as const;
 }

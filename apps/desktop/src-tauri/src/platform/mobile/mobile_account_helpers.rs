@@ -1,5 +1,5 @@
 pub(crate) use crate::platform::account_helpers::{
-    account_command_error, call_session, cleanup_stale_snapshot_previews,
+    account_command_error, account_value, call_session, cleanup_stale_snapshot_previews,
     snapshot_text_within_limit,
 };
 use crate::shared::account_dto::{
@@ -14,10 +14,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
-
-pub(crate) fn account_value<T: Serialize>(value: T) -> Result<Value, AccountError> {
-    serde_json::to_value(value).map_err(|_| AccountError::Unavailable)
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

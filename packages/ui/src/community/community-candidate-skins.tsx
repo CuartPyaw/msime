@@ -81,6 +81,8 @@ export interface CandidateSkinCommunityClient {
   ): Promise<CandidateSkinPackPreview>;
   /** Saves `bytes`, a PNG or JPEG preview the page drew, into the installed package `skinId`, which has none, and answers with the rescanned catalog. */
   addPreview(skinId: string, bytes: number[]): Promise<SkinCatalog>;
+  /** Writes `assets`, the asset license the user chose, into the manifest of the installed package `skinId`, which has none, and answers with the rescanned catalog. */
+  addLicense(skinId: string, assets: string): Promise<SkinCatalog>;
   /** A package sync already keeps in the library is updated in place, so publishing never leaves a second copy. */
   publish(
     skinId: string,

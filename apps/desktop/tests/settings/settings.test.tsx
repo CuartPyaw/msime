@@ -1804,10 +1804,13 @@ test("macOS reports the start-time input method refresh and a source that still 
     />,
   );
   const banner = await screen.findByRole("status", { name: "水杉输入法安装状态" });
-  expect(within(banner).getByText("水杉输入法已更新到 0.51.0 (7300)。")).toBeDefined();
+  expect(within(banner).getByText("水杉输入法还没有加入输入法列表")).toBeDefined();
+  expect(within(banner).getByText(/^已更新到 0\.51\.0 \(7300\)。加入后才能/)).toBeDefined();
   expect(
-    within(banner).getByText(/系统设置 > 键盘 > 文字输入 > 输入法 中点「编辑…」添加水杉输入法/),
+    within(banner).getByText(/「系统设置 › 键盘 › 文字输入 › 输入法」中点「编辑…」添加水杉输入法/),
   ).toBeDefined();
+  // Without an enable action the host only offers the manual route.
+  expect(within(banner).queryByRole("button", { name: "启用水杉输入法" })).toBeNull();
   fireEvent.click(within(banner).getByRole("button", { name: "打开键盘设置" }));
   await waitFor(() => expect(openSettings).toHaveBeenCalledOnce());
   fireEvent.click(within(banner).getByRole("button", { name: "知道了" }));
@@ -1906,6 +1909,122 @@ test("macOS asks for a new login when a first install waits for the input source
   const banner = await screen.findByRole("status", { name: "水杉输入法安装状态" });
   expect(within(banner).getByText(/请注销并重新登录/)).toBeDefined();
   expect(within(banner).queryByRole("button", { name: "打开键盘设置" })).toBeNull();
+});
+
+test("macOS enables the input method from the notice and reports the result", async () => {
+  const enable = vi.fn().mockResolvedValue(undefined);
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(initial),
+        save: vi.fn(),
+        inputSourceStartup: {
+          status: vi.fn().mockResolvedValue({
+            action: "up_to_date",
+            enabled: false,
+            bundled_version: "0.51.0 (7300)",
+            installed_version: "0.51.0 (7300)",
+          }),
+          openSettings: vi.fn(),
+          enable,
+        },
+        host: { platform: "macos" } as HostCapabilities,
+      }}
+    />,
+  );
+  const banner = await screen.findByRole("status", { name: "水杉输入法安装状态" });
+  fireEvent.click(within(banner).getByRole("button", { name: "启用水杉输入法" }));
+  expect(enable).toHaveBeenCalledOnce();
+  expect(await within(banner).findByText("水杉输入法已启用")).toBeDefined();
+  expect(within(banner).queryByRole("button", { name: "启用水杉输入法" })).toBeNull();
+  expect(within(banner).queryByRole("button", { name: "打开键盘设置" })).toBeNull();
+});
+
+test("macOS falls back to the manual route when the system refuses to enable the input method", async () => {
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(initial),
+        save: vi.fn(),
+        inputSourceStartup: {
+          status: vi.fn().mockResolvedValue({
+            action: "up_to_date",
+            enabled: false,
+            bundled_version: "0.51.0 (7300)",
+            installed_version: "0.51.0 (7300)",
+          }),
+          openSettings: vi.fn(),
+          enable: vi.fn().mockRejectedValue({ code: "registration_failed" }),
+        },
+        host: { platform: "macos" } as HostCapabilities,
+      }}
+    />,
+  );
+  const banner = await screen.findByRole("status", { name: "水杉输入法安装状态" });
+  fireEvent.click(within(banner).getByRole("button", { name: "启用水杉输入法" }));
+  expect(
+    await screen.findByText(
+      /系统没有接受自动添加，请在「系统设置 › 键盘 › 文字输入 › 输入法」中点「编辑…」/,
+    ),
+  ).toBeDefined();
+  expect(within(banner).getByRole("button", { name: "打开键盘设置" })).toBeDefined();
+});
+
+test("macOS reads the input source again when the window regains focus, but not after a dismissal", async () => {
+  const status = vi
+    .fn()
+    .mockResolvedValueOnce({
+      action: "up_to_date",
+      enabled: false,
+      bundled_version: "0.51.0 (7300)",
+      installed_version: "0.51.0 (7300)",
+    })
+    .mockResolvedValue({
+      action: "up_to_date",
+      enabled: true,
+      bundled_version: "0.51.0 (7300)",
+      installed_version: "0.51.0 (7300)",
+    });
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(initial),
+        save: vi.fn(),
+        inputSourceStartup: { status, openSettings: vi.fn() },
+        host: { platform: "macos" } as HostCapabilities,
+      }}
+    />,
+  );
+  await screen.findByRole("status", { name: "水杉输入法安装状态" });
+  // The user added the source in System Settings and came back.
+  fireEvent.focus(window);
+  await waitFor(() => expect(screen.queryByLabelText("水杉输入法安装状态")).toBeNull());
+  expect(status).toHaveBeenCalledTimes(2);
+});
+
+test("macOS keeps a dismissed input source notice hidden on later focus", async () => {
+  const status = vi.fn().mockResolvedValue({
+    action: "up_to_date",
+    enabled: false,
+    bundled_version: "0.51.0 (7300)",
+    installed_version: "0.51.0 (7300)",
+  });
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(initial),
+        save: vi.fn(),
+        inputSourceStartup: { status, openSettings: vi.fn() },
+        host: { platform: "macos" } as HostCapabilities,
+      }}
+    />,
+  );
+  const banner = await screen.findByRole("status", { name: "水杉输入法安装状态" });
+  fireEvent.click(within(banner).getByRole("button", { name: "知道了" }));
+  fireEvent.focus(window);
+  await settingsReady();
+  expect(screen.queryByLabelText("水杉输入法安装状态")).toBeNull();
+  expect(status).toHaveBeenCalledOnce();
 });
 
 test("the start-time input method report is macOS only", async () => {
@@ -6581,12 +6700,51 @@ test("macOS routes input-session panels through the native input-method process"
   expect(screen.queryByRole("button", { name: "打开" })).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "云剪贴板" }));
-  expect(await screen.findByText(/云剪贴板和云词典需要当前输入法进程提供输入会话/)).toBeDefined();
+  expect(await screen.findByText(/请从输入法菜单中的「云剪贴板…」打开云剪贴板/)).toBeDefined();
   expect(screen.queryByRole("button", { name: "打开云剪贴板" })).toBeNull();
   expect(screen.queryByRole("button", { name: "打开云词典" })).toBeNull();
   expect(client.openHandwriting).not.toHaveBeenCalled();
   expect(client.openCloudClipboard).not.toHaveBeenCalled();
   expect(client.openCloudDictionary).not.toHaveBeenCalled();
+});
+
+test("the 云剪贴板 page sends a history entry through the host's cloud clipboard, macOS included", async () => {
+  const snapshot = { ...initial, preferences: { ...initial.preferences, clipboard_history: true } };
+  const cloudClipboardRequest = vi
+    .fn()
+    .mockResolvedValueOnce({ enabled: true, items: [] })
+    .mockResolvedValueOnce({ items: [] });
+  const client: SettingsClient = {
+    load: vi.fn().mockResolvedValue(snapshot),
+    save: vi.fn(),
+    host: { platform: "macos" } as HostCapabilities,
+    clipboard: {
+      clear: vi.fn(),
+      list: vi
+        .fn()
+        .mockResolvedValue([
+          { text: "synthetic cloud", timestampMs: 1_700_000_000_000, pinned: false },
+        ]),
+    },
+    cloudClipboardRequest,
+  };
+  render(<SettingsPage client={client} />);
+  await settingsReady();
+  expect(cloudClipboardRequest).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "云剪贴板" }));
+  expect(await screen.findByText("synthetic cloud")).toBeDefined();
+  const send = screen.getByRole("button", { name: "发到云剪贴板" });
+  await waitFor(() => expect(send.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(send);
+
+  await waitFor(() =>
+    expect(cloudClipboardRequest).toHaveBeenLastCalledWith({
+      operation: "add",
+      text: "synthetic cloud",
+    }),
+  );
+  expect(await screen.findByText("已发到云剪贴板")).toBeDefined();
 });
 
 test("native panel views support close, modifier, drawing and undo interactions", async () => {

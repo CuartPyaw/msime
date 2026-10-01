@@ -65,6 +65,10 @@ import { KeyboardFormFactor } from './KeyboardFormFactor';
 import { DesktopSurface } from './DesktopSurface';
 import { SurfaceRoutingPolicy } from './SurfaceRoutingPolicy';
 import { ClipboardHistoryItem, ClipboardFailure } from './clipboard/ClipboardHistoryStore';
+import {
+  CLOUD_CLIPBOARD_SEND, CLOUD_CLIPBOARD_TAB, CloudClipboardItem, CloudClipboardListing, CloudClipboardPolicy,
+  CloudClipboardSendOutcome, CloudClipboardState
+} from './clipboard/CloudClipboardPolicy';
 import componentSnapshot from '@ohos.arkui.componentSnapshot';
 import { image } from '@kit.ImageKit';
 import { textRecognition } from '@kit.CoreVisionKit';
@@ -263,6 +267,9 @@ const KAOMOJI_PANEL: string = 'kaomoji';
 const SYMBOLS_PANEL: string = 'symbols';
 // The Windows emoji panel's last page (`EmojiPanel::Page::Clipboard`). Only a 2in1 draws it as a tab: the phone reaches clipboard history from its own tools face.
 const CLIPBOARD_PANEL: string = 'clipboard';
+// The clipboard surface's two sections: this device's history, and the account's cloud clipboard.
+const CLIPBOARD_TAB_LOCAL: string = 'local';
+const CLIPBOARD_TAB_CLOUD: string = 'cloud';
 // Enough results to scroll through; a one-letter search would otherwise lay out the whole catalog.
 const EMOJI_SEARCH_LIMIT: number = 512;
 
@@ -362,6 +369,10 @@ struct KeyboardView {
   @State emojiResults: string[] = [];
   private emojiGridScroller: Scroller = new Scroller();
   private clipListScroller: Scroller = new Scroller();
+  /** Bumped by every cloud fetch and every drop, so only the newest answer is applied. */
+  private cloudRequest: number = 0;
+  /** The editor the cloud listing on screen was fetched for. */
+  private cloudEditor: number = -1;
   // Every item of a panel with its keywords, read once per panel the first time it is searched.
   private emojiSearchIndex: Map<string, EmojiItem[]> = new Map<string, EmojiItem[]>();
   // The keywords of every item the panel has read, so a 2in1 hover can name it; recents that were never read show no name.
@@ -386,6 +397,18 @@ struct KeyboardView {
   @State clips: ClipboardHistoryItem[] = [];
   @State clipboardNotice: string = '';
   @State confirmingClear: boolean = false;
+  /** Which section of the clipboard surface is showing; the cloud one is never offered in a password field. */
+  @State clipboardTab: string = CLIPBOARD_TAB_LOCAL;
+  /** Whether the focused editor may see cloud items, mirrored from the session so the builders redraw when the field changes. */
+  @State cloudVisible: boolean = false;
+  @State cloudClips: CloudClipboardItem[] = [];
+  /** What the last cloud listing said; meaningless until cloudStateKnown. */
+  @State cloudState: CloudClipboardState = CloudClipboardState.FAILED;
+  @State cloudStateKnown: boolean = false;
+  @State cloudLoading: boolean = false;
+  @State cloudSending: boolean = false;
+  /** The local history entry a long press offered to send to the cloud clipboard, or empty. */
+  @State clipSendTarget: string = '';
   @State expanded: ExpandedCandidate[] = [];
   /** Which row of the expanded panel is showing its gloss, or -1. Its own index space. */
   @State expandedGloss: number = -1;
@@ -562,6 +585,7 @@ struct KeyboardView {
       this.english = KeyboardSession.shared.isEnglish();
       this.applyEditorFace();
       this.applyAutomaticCase();
+      this.syncCloudClipboardEditor();
     };
     KeyboardSession.shared.onViewPreferencesReloaded = (): void => {
       // The settings page saved while this view was alive; draw what it saved instead of what the view read when it appeared.
@@ -1045,7 +1069,10 @@ struct KeyboardView {
   /** A hardware key offered to the open 2in1 panel; false leaves it to the editor. */
   private panelKey(key: EmojiPanelKey): boolean {
     const clipboard: boolean = this.emojiPanel === CLIPBOARD_PANEL;
-    const clips: ClipboardHistoryItem[] = clipboard ? this.visibleClips() : [];
+    const cloud: boolean = clipboard && this.cloudTabActive();
+    const clips: string[] = !clipboard ? []
+      : cloud ? this.visibleCloudClips().map((entry: CloudClipboardItem): string => entry.text)
+        : this.visibleClips().map((entry: ClipboardHistoryItem): string => entry.text);
     const items: string[] = clipboard ? [] : this.visibleEmojiItems();
     const decision: EmojiPanelKeyDecision = EmojiPanelKeyPolicy.decide(key,
       clipboard ? clips.length : items.length, clipboard ? 1 : EMOJI_COLUMNS, this.emojiSelected,
@@ -1059,8 +1086,10 @@ struct KeyboardView {
       this.searchEmoji(decision.query);
       this.revealEmojiSelection(clipboard);
     } else if (decision.action === EmojiPanelKeyAction.ACTIVATE) {
-      if (clipboard) {
-        KeyboardSession.shared.insert(clips[decision.index].text);
+      if (cloud) {
+        this.insertCloudClip(clips[decision.index]);
+      } else if (clipboard) {
+        KeyboardSession.shared.insert(clips[decision.index]);
       } else {
         this.selectEmoji(items[decision.index]);
       }
@@ -1087,6 +1116,7 @@ struct KeyboardView {
       this.clips = this.clipboardEnabled ? KeyboardSession.shared.clipboardHistory() : [];
       this.clipboardNotice = this.clipboardEnabled ? '' : '剪贴板历史已在设置中关闭';
       this.confirmingClear = false;
+      this.openCloudClipboard();
       return;
     }
     if (panel === EMOJI_PANEL) {
@@ -2907,6 +2937,171 @@ struct KeyboardView {
     this.clips = KeyboardSession.shared.clipboardHistory();
     this.clipboardNotice = '';
     this.confirmingClear = false;
+    this.openCloudClipboard();
+  }
+
+  /** Whether the clipboard surface is on screen, as the phone's own face or as the 2in1 emoji surface's clipboard tab. */
+  private clipboardShowing(): boolean {
+    return this.surface === SURFACE_CLIPBOARD
+      || (this.desktop === DesktopSurface.EMOJI && this.emojiPanel === CLIPBOARD_PANEL);
+  }
+
+  private cloudTabActive(): boolean {
+    return this.clipboardTab === CLIPBOARD_TAB_CLOUD && this.cloudVisible;
+  }
+
+  /**
+   * Fetches the cloud clipboard as the panel opens.
+   *
+   * This and the refresh button are the only times the keyboard asks: there is no polling, nothing is uploaded on copy, and a signed-out keyboard answers from the session file without a request.
+   */
+  private openCloudClipboard(): void {
+    this.clipSendTarget = '';
+    this.cloudVisible = KeyboardSession.shared.cloudClipboardVisible();
+    this.cloudEditor = KeyboardSession.shared.cloudClipboardEditor();
+    if (!this.cloudVisible) {
+      this.clipboardTab = CLIPBOARD_TAB_LOCAL;
+      this.dropCloudClipboard();
+      return;
+    }
+    this.refreshCloudClipboard();
+  }
+
+  private refreshCloudClipboard(): void {
+    if (!this.cloudVisible) {
+      return;
+    }
+    const request: number = ++this.cloudRequest;
+    this.cloudEditor = KeyboardSession.shared.cloudClipboardEditor();
+    this.cloudLoading = true;
+    KeyboardSession.shared.cloudClipboardItems().then((listing: CloudClipboardListing | null): void => {
+      if (request !== this.cloudRequest) {
+        return;
+      }
+      this.cloudLoading = false;
+      if (listing === null) {
+        // The field changed while the request was out; what came back was fetched for another one.
+        this.cloudClips = [];
+        this.cloudStateKnown = false;
+        return;
+      }
+      this.cloudClips = listing.items;
+      this.cloudState = listing.state;
+      this.cloudStateKnown = true;
+    });
+  }
+
+  /** Forgets the listing on screen and any answer still on its way. */
+  private dropCloudClipboard(): void {
+    this.cloudRequest++;
+    this.cloudClips = [];
+    this.cloudStateKnown = false;
+    this.cloudLoading = false;
+  }
+
+  /**
+   * Follows a focus change into the clipboard surface.
+   *
+   * The editor callback also fires for every text edit, so only a different field, or one whose attributes have just said it is a password field, drops the listing. A listing fetched for the previous field is not this one's, and the cloud section disappears outright from a field that may not see it.
+   */
+  private syncCloudClipboardEditor(): void {
+    const visible: boolean = KeyboardSession.shared.cloudClipboardVisible();
+    const editor: number = KeyboardSession.shared.cloudClipboardEditor();
+    if (visible === this.cloudVisible && editor === this.cloudEditor) {
+      return;
+    }
+    this.cloudVisible = visible;
+    this.cloudEditor = editor;
+    this.clipSendTarget = '';
+    this.dropCloudClipboard();
+    if (!visible) {
+      this.clipboardTab = CLIPBOARD_TAB_LOCAL;
+      return;
+    }
+    if (this.clipboardShowing()) {
+      this.refreshCloudClipboard();
+    }
+  }
+
+  private selectClipboardTab(tab: string): void {
+    if (tab === this.clipboardTab) {
+      return;
+    }
+    this.clipboardTab = tab;
+    this.clipSendTarget = '';
+    this.confirmingClear = false;
+    this.emojiSelected = 0;
+    if (tab === CLIPBOARD_TAB_CLOUD && !this.cloudStateKnown && !this.cloudLoading) {
+      this.refreshCloudClipboard();
+    }
+  }
+
+  /** The cloud items the 2in1 search leaves, matched the way local entries are. */
+  private visibleCloudClips(): CloudClipboardItem[] {
+    if (this.emojiQuery.length === 0) {
+      return this.cloudClips;
+    }
+    return this.cloudClips.filter((entry: CloudClipboardItem): boolean =>
+      EmojiPanelKeyPolicy.matches(entry.text, entry.text, this.emojiQuery));
+  }
+
+  private cloudNotice(): string {
+    return CloudClipboardPolicy.notice(this.cloudStateKnown ? this.cloudState : null, this.cloudLoading,
+      this.cloudClips.length);
+  }
+
+  private insertCloudClip(text: string): void {
+    if (KeyboardSession.shared.insertCloudClipboard(text, this.cloudEditor)) {
+      return;
+    }
+    // The listing was fetched for a field that no longer has focus; fetch again for this one rather than paste into it.
+    this.cloudVisible = KeyboardSession.shared.cloudClipboardVisible();
+    this.dropCloudClipboard();
+    if (this.cloudVisible) {
+      this.refreshCloudClipboard();
+    } else {
+      this.clipboardTab = CLIPBOARD_TAB_LOCAL;
+    }
+  }
+
+  /** A long press on a local entry offers it to the cloud clipboard; nothing is sent until the user taps the action. */
+  private offerCloudSend(text: string): void {
+    if (!this.cloudVisible) {
+      return;
+    }
+    this.clipSendTarget = text;
+  }
+
+  /** Why the offered entry cannot be sent right now, or null when it can. */
+  private cloudSendBlock(): string | null {
+    if (this.cloudLoading) {
+      return CloudClipboardPolicy.sendBlock(null, this.clipSendTarget);
+    }
+    return CloudClipboardPolicy.sendBlock(this.cloudStateKnown ? this.cloudState : null, this.clipSendTarget);
+  }
+
+  private cloudSendHint(): string {
+    const block: string | null = this.cloudSendBlock();
+    return block === null ? this.clipSendTarget : block;
+  }
+
+  private sendClipToCloud(): void {
+    const text: string = this.clipSendTarget;
+    if (this.cloudSending || text.length === 0 || this.cloudSendBlock() !== null) {
+      return;
+    }
+    this.cloudSending = true;
+    KeyboardSession.shared.sendToCloudClipboard(text).then((outcome: CloudClipboardSendOutcome): void => {
+      this.cloudSending = false;
+      if (this.clipSendTarget === text) {
+        this.clipSendTarget = '';
+      }
+      this.clipboardNotice = CloudClipboardPolicy.sendNotice(outcome);
+      // Read the cloud again so its section shows the new item, or the state that refused it.
+      if (this.clipboardShowing()) {
+        this.refreshCloudClipboard();
+      }
+    });
   }
 
   /**
@@ -4905,16 +5100,19 @@ struct KeyboardView {
           .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
           .fontColor(this.skin.keyForeground)
           .layoutWeight(1)
-        Text('保存当前')
-          .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-          .fontColor(this.skin.accent)
-          .padding({ right: 12 })
-          .onClick(() => this.captureClipboard())
-        Text(this.confirmingClear ? '确认清空' : '清空')
-          .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-          .fontColor(this.skin.accent)
-          .padding({ right: 12 })
-          .onClick(() => this.clearClipboard())
+        // Saving and clearing act on this device's history, so the cloud section does not offer them.
+        if (!this.cloudTabActive()) {
+          Text('保存当前')
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.skin.accent)
+            .padding({ right: 12 })
+            .onClick(() => this.captureClipboard())
+          Text(this.confirmingClear ? '确认清空' : '清空')
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.skin.accent)
+            .padding({ right: 12 })
+            .onClick(() => this.clearClipboard())
+        }
         Text('返回')
           .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
           .fontColor(this.skin.accent)
@@ -4933,70 +5131,177 @@ struct KeyboardView {
     .height(this.surfaceHeight())
   }
 
-  /** The notice and the saved entries, shared by the phone's clipboard surface and the 2in1 emoji surface's clipboard tab. */
+  /** The section tabs, the notice and the entries, shared by the phone's clipboard surface and the 2in1 emoji surface's clipboard tab. */
   @Builder
   clipboardEntries() {
-      if (this.clipboardNotice.length > 0) {
-        Text(this.clipboardNotice)
-          .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-          .fontColor(this.clipboardSkin().secondary)
-          .maxLines(2)
-          .width('100%')
-          .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
-            right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+      // 本机 and 云端. A password field gets no tabs at all: the cloud section is the only other one, and it is never offered there.
+      if (this.cloudVisible) {
+        Row() {
+          Text('本机')
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.cloudTabActive() ? this.clipboardSkin().keyForeground : this.clipboardSkin().accent)
+            .padding({ right: 16 })
+            .onClick(() => this.selectClipboardTab(CLIPBOARD_TAB_LOCAL))
+          Text(CLOUD_CLIPBOARD_TAB)
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.cloudTabActive() ? this.clipboardSkin().accent : this.clipboardSkin().keyForeground)
+            .onClick(() => this.selectClipboardTab(CLIPBOARD_TAB_CLOUD))
+          Blank()
+          if (this.cloudTabActive()) {
+            Text('刷新')
+              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+              .fontColor(this.clipboardSkin().accent)
+              .opacity(this.cloudLoading ? 0.4 : 1)
+              .onClick(() => {
+                if (!this.cloudLoading) {
+                  this.refreshCloudClipboard();
+                }
+              })
+          }
+        }
+        .width('100%')
+        .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+          right: KeyboardMetrics.CANDIDATE_PADDING_VP, top: 4, bottom: 4 })
       }
 
-      if (this.emojiQuery.length > 0 && this.visibleClips().length === 0) {
-        Text('没有匹配的剪贴板记录')
-          .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-          .fontColor(this.clipboardSkin().secondary)
-          .width('100%')
-          .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
-            right: KeyboardMetrics.CANDIDATE_PADDING_VP })
-      }
-
-      // A List rather than a Column in a Scroll so the 2in1 arrows can bring the selected entry into view.
-      List({ space: KeyboardMetrics.KEY_SPACING_VP, scroller: this.clipListScroller }) {
-          ForEach(this.visibleClips(), (entry: ClipboardHistoryItem, index: number) => {
-            ListItem() {
-            Row() {
-              Text(entry.text)
-                .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
-                .fontColor(this.clipboardSkin().keyForeground)
-                .maxLines(2)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .layoutWeight(1)
-                .onClick(() => KeyboardSession.shared.insert(entry.text))
-                .onHover((isHover: boolean): void => this.hoverItem(`clip:${entry.text}`,
-                  EmojiPanelTooltipPolicy.clipboardText(entry.text), isHover))
-                .bindPopup(this.hoverTipKey === `clip:${entry.text}`, this.hoverTipOptions(`clip:${entry.text}`))
-              Text(entry.pinned ? '已固定' : '固定')
-                .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-                .fontColor(entry.pinned ? this.clipboardSkin().accent : this.clipboardSkin().keyForeground)
-                .opacity(entry.pinned ? 1 : 0.55)
-                .padding({ left: 8, right: 8 })
-                .onClick(() => this.applyClipboardMutation(
-                  KeyboardSession.shared.setClipboardPinned(entry.text, !entry.pinned)))
-              Text('删除')
-                .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-                .fontColor(this.clipboardSkin().keyForeground)
-                .opacity(0.55)
-                .onClick(() => this.applyClipboardMutation(
-                  KeyboardSession.shared.removeClipboardHistory(entry.text)))
-            }
+      if (this.cloudTabActive()) {
+        if (this.cloudNotice().length > 0) {
+          Text(this.cloudNotice())
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.clipboardSkin().secondary)
+            .maxLines(2)
             .width('100%')
             .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
-              right: KeyboardMetrics.CANDIDATE_PADDING_VP, top: 6, bottom: 6 })
-            .backgroundColor(this.clipboardSkin().keyBackground)
-            .borderRadius(KeyboardMetrics.KEY_CORNER_VP)
-            .border({ width: this.panelKeySelected(index) ? 2 : 0, color: this.clipboardSkin().accent,
-              radius: KeyboardMetrics.KEY_CORNER_VP })
+              right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+        }
+
+        if (this.emojiQuery.length > 0 && this.cloudClips.length > 0 && this.visibleCloudClips().length === 0) {
+          Text('没有匹配的剪贴板记录')
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.clipboardSkin().secondary)
+            .width('100%')
+            .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+              right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+        }
+
+        List({ space: KeyboardMetrics.KEY_SPACING_VP, scroller: this.clipListScroller }) {
+          ForEach(this.visibleCloudClips(), (entry: CloudClipboardItem, index: number) => {
+            ListItem() {
+              Row() {
+                Text(entry.text)
+                  .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
+                  .fontColor(this.clipboardSkin().keyForeground)
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+              }
+              .width('100%')
+              .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+                right: KeyboardMetrics.CANDIDATE_PADDING_VP, top: 6, bottom: 6 })
+              .backgroundColor(this.clipboardSkin().keyBackground)
+              .borderRadius(KeyboardMetrics.KEY_CORNER_VP)
+              .border({ width: this.panelKeySelected(index) ? 2 : 0, color: this.clipboardSkin().accent,
+                radius: KeyboardMetrics.KEY_CORNER_VP })
+              .onClick(() => this.insertCloudClip(entry.text))
             }
-          })
+          }, (entry: CloudClipboardItem, index: number): string => `${entry.id}:${index}`)
+        }
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .layoutWeight(1)
+      } else {
+        if (this.clipboardNotice.length > 0) {
+          Text(this.clipboardNotice)
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.clipboardSkin().secondary)
+            .maxLines(2)
+            .width('100%')
+            .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+              right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+        }
+
+        if (this.emojiQuery.length > 0 && this.visibleClips().length === 0) {
+          Text('没有匹配的剪贴板记录')
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.clipboardSkin().secondary)
+            .width('100%')
+            .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+              right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+        }
+
+        // A long press on an entry offers it to the cloud clipboard here, in the panel: bindContextMenu does not show inside an input method panel.
+        if (this.clipSendTarget.length > 0 && this.cloudVisible) {
+          Row() {
+            Text(CLOUD_CLIPBOARD_SEND)
+              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+              .fontColor(this.clipboardSkin().accent)
+              .opacity(this.cloudSendBlock() === null && !this.cloudSending ? 1 : 0.4)
+              .padding({ right: 12 })
+              .onClick(() => this.sendClipToCloud())
+            Text(this.cloudSendHint())
+              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+              .fontColor(this.clipboardSkin().secondary)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+            Text('取消')
+              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+              .fontColor(this.clipboardSkin().keyForeground)
+              .opacity(0.55)
+              .padding({ left: 12 })
+              .onClick(() => {
+                this.clipSendTarget = '';
+              })
+          }
+          .width('100%')
+          .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+            right: KeyboardMetrics.CANDIDATE_PADDING_VP, top: 4, bottom: 4 })
+        }
+
+        // A List rather than a Column in a Scroll so the 2in1 arrows can bring the selected entry into view.
+        List({ space: KeyboardMetrics.KEY_SPACING_VP, scroller: this.clipListScroller }) {
+            ForEach(this.visibleClips(), (entry: ClipboardHistoryItem, index: number) => {
+              ListItem() {
+              Row() {
+                Text(entry.text)
+                  .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
+                  .fontColor(this.clipboardSkin().keyForeground)
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+                  .onClick(() => KeyboardSession.shared.insert(entry.text))
+                  .gesture(LongPressGesture().onAction(() => this.offerCloudSend(entry.text)))
+                  .onHover((isHover: boolean): void => this.hoverItem(`clip:${entry.text}`,
+                    EmojiPanelTooltipPolicy.clipboardText(entry.text), isHover))
+                  .bindPopup(this.hoverTipKey === `clip:${entry.text}`, this.hoverTipOptions(`clip:${entry.text}`))
+                Text(entry.pinned ? '已固定' : '固定')
+                  .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+                  .fontColor(entry.pinned ? this.clipboardSkin().accent : this.clipboardSkin().keyForeground)
+                  .opacity(entry.pinned ? 1 : 0.55)
+                  .padding({ left: 8, right: 8 })
+                  .onClick(() => this.applyClipboardMutation(
+                    KeyboardSession.shared.setClipboardPinned(entry.text, !entry.pinned)))
+                Text('删除')
+                  .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+                  .fontColor(this.clipboardSkin().keyForeground)
+                  .opacity(0.55)
+                  .onClick(() => this.applyClipboardMutation(
+                    KeyboardSession.shared.removeClipboardHistory(entry.text)))
+              }
+              .width('100%')
+              .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+                right: KeyboardMetrics.CANDIDATE_PADDING_VP, top: 6, bottom: 6 })
+              .backgroundColor(this.clipboardSkin().keyBackground)
+              .borderRadius(KeyboardMetrics.KEY_CORNER_VP)
+              .border({ width: this.panelKeySelected(index) ? 2 : 0, color: this.clipboardSkin().accent,
+                radius: KeyboardMetrics.KEY_CORNER_VP })
+              }
+            })
+        }
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .layoutWeight(1)
       }
-      .scrollBar(BarState.Off)
-      .width('100%')
-      .layoutWeight(1)
   }
 
   /** The hover tooltip itself, in the Windows tooltip's dark plate whatever the panel's theme. */
@@ -5133,21 +5438,24 @@ struct KeyboardView {
                 .onClick(() => this.loadEmojiCatalog(KAOMOJI_PANEL, group))
             }, (group: string) => `${group}:${this.emojiGroup}`)
           } else if (this.emojiPanel === CLIPBOARD_PANEL) {
-            // Nothing is captured in the background (see captureClipboard), so saving is a button here too.
-            Text('保存当前')
-              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-              .fontColor(this.emojiSkin.accent)
-              .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
-                right: KeyboardMetrics.CANDIDATE_PADDING_VP })
-              .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
-              .onClick(() => this.captureClipboard())
-            Text(this.confirmingClear ? '确认清空' : '清空')
-              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-              .fontColor(this.emojiSkin.accent)
-              .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
-                right: KeyboardMetrics.CANDIDATE_PADDING_VP })
-              .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
-              .onClick(() => this.clearClipboard())
+            // Saving and clearing act on this device's history, so the cloud section does not offer them.
+            if (!this.cloudTabActive()) {
+              // Nothing is captured in the background (see captureClipboard), so saving is a button here too.
+              Text('保存当前')
+                .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+                .fontColor(this.emojiSkin.accent)
+                .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+                  right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+                .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
+                .onClick(() => this.captureClipboard())
+              Text(this.confirmingClear ? '确认清空' : '清空')
+                .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+                .fontColor(this.emojiSkin.accent)
+                .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+                  right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+                .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
+                .onClick(() => this.clearClipboard())
+            }
           } else {
             ForEach(this.emojiSymbolGroups, (group: EmojiSymbolGroup) => {
               Text(group.title)

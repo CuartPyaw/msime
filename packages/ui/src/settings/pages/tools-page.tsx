@@ -1,6 +1,7 @@
 import * as settings from "../settings-style";
 import { useSettingsForm } from "../settings-form-context";
 import { ClipboardHistorySection } from "../clipboard-history-section";
+import { CLOUD_PANEL_SESSION_NOTE } from "../cloud-panel-session-notice";
 import { GroupList, Row } from "../../core/platform-controls";
 
 /** The 云剪贴板 page of the settings form (route id `tools`): the clipboard history kept on this device and the cloud panels. */
@@ -29,13 +30,12 @@ export function ToolsSettingsPage() {
           ios={iosPlatform}
           onToggle={toggleClipboardHistory}
           onError={setError}
+          cloudRequest={page === "tools" ? client.cloudClipboardRequest : undefined}
         />
         {(macosPlatform || client.openCloudClipboard || client.openCloudDictionary) && (
           <GroupList title="云端面板">
             {macosPlatform ? (
-              <p className={settings.groupNote}>
-                云剪贴板和云词典需要当前输入法进程提供输入会话；请从输入法悬浮工具栏或输入法菜单打开对应面板。
-              </p>
+              <p className={settings.groupNote}>{CLOUD_PANEL_SESSION_NOTE}</p>
             ) : (
               <>
                 {client.openCloudClipboard && (
