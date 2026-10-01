@@ -26,6 +26,7 @@ mod product;
 mod sources;
 mod sqlite;
 mod text;
+mod zhuyin;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;

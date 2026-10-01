@@ -1,4 +1,4 @@
-//! `languages`: the dictionaries that ship beside the resource set rather than inside it (`cantonese.db`), each with its licence text, plus `language-dictionaries-SHA256SUMS` over everything written. None of this touches the desktop dictionary product (`STAGES`, `product::SHIPPING_ARTIFACTS`, the manifest): a host ships these files only for the schemes it offers.
+//! `languages`: the dictionaries that ship beside the resource set rather than inside it (`cantonese.db`, `zhuyin.db`), each with its licence text, plus `language-dictionaries-SHA256SUMS` over everything written. None of this touches the desktop dictionary product (`STAGES`, `product::SHIPPING_ARTIFACTS`, the manifest): a host ships these files only for the schemes it offers.
 
 use std::path::Path;
 
@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use crate::cantonese;
 use crate::sources::{sha256_file, Sources};
 use crate::text;
+use crate::zhuyin;
 
 pub const SUMS: &str = "language-dictionaries-SHA256SUMS";
 
@@ -16,12 +17,7 @@ pub fn build(sources: &Sources, licenses: &Path, out: &Path) -> Result<Vec<Strin
     let mut written = Vec::new();
     let mut summaries = Vec::new();
 
-    let commit = &sources
-        .lock
-        .references
-        .get(cantonese::REFERENCE)
-        .with_context(|| format!("{} is not pinned in the sources lock", cantonese::REFERENCE))?
-        .commit;
+    let commit = reference_commit(sources, cantonese::REFERENCE)?;
     let characters = text::read(&sources.pinned(cantonese::CHARACTERS)?)?;
     let words = text::read(&sources.pinned(cantonese::WORDS)?)?;
     let essay = text::read(&sources.pinned(cantonese::ESSAY)?)?;
@@ -49,8 +45,40 @@ pub fn build(sources: &Sources, licenses: &Path, out: &Path) -> Result<Vec<Strin
         dictionary.essay_words
     ));
 
+    let commit = reference_commit(sources, zhuyin::REFERENCE)?;
+    let mut rows = zhuyin::parse(
+        zhuyin::PHRASES,
+        &text::read(&sources.pinned(zhuyin::PHRASES)?)?,
+    )?;
+    rows.extend(zhuyin::parse(
+        zhuyin::CHARACTERS,
+        &text::read(&sources.pinned(zhuyin::CHARACTERS)?)?,
+    )?);
+    let database = out.join(zhuyin::DATABASE);
+    zhuyin::write(&zhuyin::build(&rows), &database, commit)?;
+    let counts = zhuyin::verify(&database, zhuyin::FLOORS, &zhuyin::EXPECTED)?;
+    copy_license(licenses, zhuyin::LICENSE_SOURCE, out, zhuyin::LICENSE_NAME)?;
+    written.extend([zhuyin::DATABASE, zhuyin::LICENSE_NAME]);
+    summaries.push(format!(
+        "{}: {} syllables, {} character and {} phrase entries",
+        zhuyin::DATABASE,
+        counts.syllables,
+        counts.characters,
+        counts.phrases
+    ));
+
     write_sums(out, &written)?;
     Ok(summaries)
+}
+
+/// The commit the sources lock pins `reference` at, recorded as a database's `source_commit`.
+fn reference_commit<'a>(sources: &'a Sources, reference: &str) -> Result<&'a str> {
+    Ok(&sources
+        .lock
+        .references
+        .get(reference)
+        .with_context(|| format!("{reference} is not pinned in the sources lock"))?
+        .commit)
 }
 
 fn copy_license(licenses: &Path, source: &str, out: &Path, name: &str) -> Result<()> {
@@ -91,9 +119,9 @@ mod tests {
         );
     }
 
-    /// The full build from the pinned sources, cached in the repository's `target/dict-cache` (downloaded on first use, about 6 MB).
+    /// The full build from the pinned sources, cached in the repository's `target/dict-cache` (downloaded on first use, about 12 MB).
     #[test]
-    #[ignore = "downloads the pinned rime-cantonese files on first use"]
+    #[ignore = "downloads the pinned rime-cantonese and libchewing-data files on first use"]
     fn builds_from_the_pinned_sources() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let sources = Sources {
@@ -104,17 +132,24 @@ mod tests {
         };
         let out = tempfile::tempdir().unwrap();
         let summaries = build(&sources, &root.join("resources/licenses"), out.path()).unwrap();
-        assert_eq!(summaries.len(), 1, "{summaries:?}");
+        assert_eq!(summaries.len(), 2, "{summaries:?}");
         let sums = std::fs::read_to_string(out.path().join(SUMS)).unwrap();
-        assert!(
-            sums.ends_with(&format!("  {}\n", cantonese::LICENSE_NAME)),
-            "{sums}"
-        );
-        assert!(
-            sums.contains(&format!("  {}\n", cantonese::DATABASE)),
-            "{sums}"
+        let names: Vec<&str> = sums
+            .lines()
+            .map(|line| line.split_once("  ").unwrap().1)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                cantonese::DATABASE,
+                zhuyin::LICENSE_NAME,
+                cantonese::LICENSE_NAME,
+                zhuyin::DATABASE
+            ]
         );
         let license = std::fs::read_to_string(out.path().join(cantonese::LICENSE_NAME)).unwrap();
         assert!(license.contains("Attribution 4.0 International"));
+        let license = std::fs::read_to_string(out.path().join(zhuyin::LICENSE_NAME)).unwrap();
+        assert!(license.contains("GNU LESSER GENERAL PUBLIC LICENSE"));
     }
 }
