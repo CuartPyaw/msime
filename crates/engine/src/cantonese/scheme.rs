@@ -155,7 +155,12 @@ impl CantoneseScheme {
             && input[reading.end()..].bytes().all(|byte| byte == b'\'');
         let mut seen = HashSet::new();
         let mut candidates = Vec::new();
-        let mut push = |key: String, text: String, weight: i64, syllables: usize| {
+        let push = |seen: &mut HashSet<(String, usize)>,
+                    candidates: &mut Vec<CantoneseCandidate>,
+                    key: String,
+                    text: String,
+                    weight: i64,
+                    syllables: usize| {
             if seen.insert((text.clone(), syllables)) {
                 candidates.push(CantoneseCandidate {
                     text,
@@ -170,17 +175,47 @@ impl CantoneseScheme {
         if full {
             let whole = reading.key(input, count);
             if reading.ends_in_prefix() {
-                for (key, entry) in dictionary.lookup_completions(&whole, COMPLETION_LIMIT)? {
-                    push(key, entry.text, entry.weight, count);
+                let completions = dictionary.lookup_completions(&whole, COMPLETION_LIMIT)?;
+                seen.reserve(completions.len());
+                candidates.reserve_exact(completions.len());
+                for (key, entry) in completions {
+                    push(
+                        &mut seen,
+                        &mut candidates,
+                        key,
+                        entry.text,
+                        entry.weight,
+                        count,
+                    );
                 }
             } else {
-                for entry in dictionary.lookup(&whole, SPAN_LIMIT)? {
-                    push(whole.clone(), entry.text, entry.weight, count);
+                let entries = dictionary.lookup(&whole, SPAN_LIMIT)?;
+                seen.reserve(entries.len());
+                candidates.reserve_exact(entries.len());
+                for entry in entries {
+                    push(
+                        &mut seen,
+                        &mut candidates,
+                        whole.clone(),
+                        entry.text,
+                        entry.weight,
+                        count,
+                    );
                 }
                 let last = reading.texts(input).last().unwrap_or_default();
                 if self.inventory.is_prefix(last) {
-                    for (key, entry) in dictionary.lookup_completions(&whole, COMPLETION_LIMIT)? {
-                        push(key, entry.text, entry.weight, count);
+                    let completions = dictionary.lookup_completions(&whole, COMPLETION_LIMIT)?;
+                    seen.reserve(completions.len());
+                    candidates.reserve_exact(completions.len());
+                    for (key, entry) in completions {
+                        push(
+                            &mut seen,
+                            &mut candidates,
+                            key,
+                            entry.text,
+                            entry.weight,
+                            count,
+                        );
                     }
                 }
             }
@@ -188,8 +223,18 @@ impl CantoneseScheme {
         }
         for length in (1..=spans).rev() {
             let key = reading.key(input, length);
-            for entry in dictionary.lookup(&key, SPAN_LIMIT)? {
-                push(key.clone(), entry.text, entry.weight, length);
+            let entries = dictionary.lookup(&key, SPAN_LIMIT)?;
+            seen.reserve(entries.len());
+            candidates.reserve_exact(entries.len());
+            for entry in entries {
+                push(
+                    &mut seen,
+                    &mut candidates,
+                    key.clone(),
+                    entry.text,
+                    entry.weight,
+                    length,
+                );
             }
         }
         Ok(candidates)
@@ -320,6 +365,29 @@ mod tests {
             listed(&scheme, &fixture.dictionary),
             ["廣東話/3", "光/3", "廣東/2", "光/1", "廣/1"]
         );
+    }
+
+    #[test]
+    fn candidates_reserve_each_dictionary_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cantonese.db");
+        build(&path);
+        let connection = Connection::open(&path).unwrap();
+        connection.execute("DELETE FROM entries", []).unwrap();
+        for index in 0..23 {
+            connection
+                .execute(
+                    "INSERT INTO entries VALUES (?1, ?2, ?3)",
+                    ("nei haa", format!("字{index:02}"), index),
+                )
+                .unwrap();
+        }
+        drop(connection);
+        let dictionary = open_read_only(&path).unwrap();
+
+        let candidates = typed("neih").candidates(&dictionary).unwrap();
+        assert_eq!(candidates.len(), 23);
+        assert_eq!(candidates.capacity(), candidates.len());
     }
 
     #[test]
