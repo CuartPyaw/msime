@@ -78,7 +78,13 @@ pub fn enumerate_complete_segmentations(
     if path_limit == 0 || graph.input_length == 0 || graph.edges.len() != graph.input_length + 1 {
         return result;
     }
-    visit(graph, 0, path_limit, &mut Vec::new(), &mut result);
+    visit(
+        graph,
+        0,
+        path_limit,
+        &mut Vec::with_capacity(graph.input_length),
+        &mut result,
+    );
     result
 }
 
