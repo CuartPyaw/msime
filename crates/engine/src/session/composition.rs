@@ -173,6 +173,30 @@ pub(super) fn fold_autocorrect_letters(text: &str) -> String {
         .collect()
 }
 
+fn folded_autocorrect_byte(byte: u8) -> Option<u8> {
+    if byte == b'\'' {
+        None
+    } else {
+        Some(match byte.to_ascii_lowercase() {
+            b'v' => b'u',
+            lower => lower,
+        })
+    }
+}
+
+fn folded_letters_equal(left: &str, right: &str) -> bool {
+    left.bytes()
+        .filter_map(folded_autocorrect_byte)
+        .eq(right.bytes().filter_map(folded_autocorrect_byte))
+}
+
+fn folded_segments_equal(segments: &[String], text: &str) -> bool {
+    segments
+        .iter()
+        .flat_map(|segment| segment.bytes().filter_map(folded_autocorrect_byte))
+        .eq(text.bytes().filter_map(folded_autocorrect_byte))
+}
+
 /// The preedit must always show the letters the user typed. Two layers can rewrite them into canonical pinyin: the scheme's alias table (sahng -> shang, baked into raw_segmentation) and the dictionary's correction search (shabg -> shang, which only re-separates). Both are redrawn here from the raw letters with separators at the cut positions; when the search cannot explain a rewrite (length-changing aliases such as mihng -> ming) the raw letters are shown without separators (input_session_composition.cpp:286-333).
 pub(super) fn build_quanpin_autocorrect_display(request: &QueryRequest) -> String {
     let cased = if request.raw_input_with_cases.is_empty() {
@@ -192,9 +216,7 @@ pub(super) fn build_quanpin_autocorrect_display(request: &QueryRequest) -> Strin
         request.enable_quanpin_autocorrect_transposition,
         request.enable_quanpin_autocorrect_neighbor,
     );
-    let folded_input = fold_autocorrect_letters(cased);
-    let folded_base = fold_autocorrect_letters(base);
-    let letters_rewritten = folded_base != folded_input;
+    let letters_rewritten = !folded_letters_equal(base, cased);
     // The scheme kept the typed letters and no correction can apply, so there are no other separators to draw.
     if !letters_rewritten && (types == 0 || is_complete_pinyin_input(&request.raw_input)) {
         return base.clone();
@@ -203,11 +225,12 @@ pub(super) fn build_quanpin_autocorrect_display(request: &QueryRequest) -> Strin
     if looks_like_syllable_with_jianpin_tail(&request.raw_input) {
         return base.clone();
     }
+    let folded_input = fold_autocorrect_letters(cased);
     let cut = autocorrect_cut_detail(&folded_input, types).filter(|cut| !cut.is_empty());
     if let Some(cut) = cut {
         // When the scheme rewrote the letters, the query went through the alias reading, so separators may only come from the cut when both layers read the letters the same way (sahnghao -> shang'hao).
-        let cut_letters = fold_autocorrect_letters(&cut.syllables().concat());
-        if !letters_rewritten || cut_letters == folded_base {
+        let cut_syllables = cut.syllables();
+        if !letters_rewritten || folded_segments_equal(&cut_syllables, base) {
             let boundary_count = cut.segments.len() - 1;
             let mut display = String::with_capacity(cased.len() + cut.segments.len());
             let mut letter_index = 0;
@@ -638,6 +661,23 @@ mod tests {
         assert_eq!(fold_autocorrect_letters("Nv'E"), "nue");
         assert_eq!(fold_autocorrect_letters("sa'Hng"), "sahng");
         assert_eq!(fold_autocorrect_letters("Nv'e"), "nue");
+    }
+
+    #[test]
+    fn folded_letter_comparison_matches_owned_folding() {
+        for (left, right, equal) in [
+            ("Nv'E", "nue", true),
+            ("sa'Hng", "sahng", true),
+            ("sahng", "shang", false),
+            ("", "'", true),
+        ] {
+            assert_eq!(folded_letters_equal(left, right), equal, "{left}/{right}");
+            assert_eq!(
+                fold_autocorrect_letters(left) == fold_autocorrect_letters(right),
+                equal,
+                "owned {left}/{right}"
+            );
+        }
     }
 
     /// The request a quanpin session builds for `typed` under the two user switches (test_pinyin.cpp P38).
