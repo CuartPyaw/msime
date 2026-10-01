@@ -74,7 +74,7 @@ pub fn convert(
                 if pins.iter().any(|pin| pin.overlaps(start, end)) {
                     break;
                 }
-                let key = syllables[start..end].join(" ");
+                let key = build_dictionary_key(&syllables[start..end]);
                 let span = match best(&key)? {
                     Some(entry) => (
                         score.add(end - start, entry.weight),
@@ -121,6 +121,22 @@ pub fn convert(
     Ok(spans)
 }
 
+fn build_dictionary_key(syllables: &[&str]) -> String {
+    let capacity = syllables
+        .iter()
+        .map(|syllable| syllable.len())
+        .sum::<usize>()
+        .saturating_add(syllables.len().saturating_sub(1));
+    let mut key = String::with_capacity(capacity);
+    for (index, syllable) in syllables.iter().enumerate() {
+        if index > 0 {
+            key.push(' ');
+        }
+        key.push_str(syllable);
+    }
+    key
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -151,6 +167,11 @@ mod tests {
     fn run(syllables: &[&str], pins: &[Span], entries: &[(&str, &str, i64)]) -> Vec<Span> {
         let best = dictionary(entries);
         convert(syllables, pins, |key| Ok(best.get(key).cloned())).unwrap()
+    }
+
+    #[test]
+    fn dictionary_key_joins_syllables_in_order() {
+        assert_eq!(build_dictionary_key(&["ㄋㄧˇ", "ㄏㄠˇ"]), "ㄋㄧˇ ㄏㄠˇ");
     }
 
     const ENTRIES: [(&str, &str, i64); 7] = [
