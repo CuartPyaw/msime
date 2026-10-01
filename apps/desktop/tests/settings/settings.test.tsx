@@ -53,6 +53,14 @@ async function settingsReady() {
   await settingsFormReady();
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
 test("macOS voice shortcuts use native key names and space-lock semantics", async () => {
   render(
     <SettingsPage
@@ -4323,6 +4331,74 @@ test("Android AI skin draw prepares artwork, saves a proposal and continues edit
   );
   fireEvent.click(screen.getAllByRole("button", { name: "使用并继续编辑" })[0]);
   expect(screen.queryByRole("dialog", { name: "AI 皮肤抽卡" })).toBeNull();
+});
+
+test("AI skin publish ignores a same-tick duplicate submission", async () => {
+  const pendingPublish = deferred<void>();
+  const publish = vi.fn().mockReturnValue(pendingPublish.promise);
+  const aiSkins = {
+    generate: vi.fn().mockResolvedValue([
+      {
+        name: "AI 重复测试",
+        description: "合成设计说明",
+        artworkPrompt: "原创背景场景，中央留白",
+        design: savedSkinDesign(),
+        artwork: {
+          b64_json:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+          mime_type: "image/png" as const,
+          width: 1,
+          height: 1,
+        },
+      },
+    ]),
+    cancel: vi.fn().mockResolvedValue(undefined),
+  };
+  const saved = {
+    id: "44444444-4444-4444-8444-444444444444",
+    name: "AI 重复测试",
+    design: savedSkinDesign(),
+  };
+  const client = {
+    customSkinLibrary: {
+      load: vi.fn().mockResolvedValue([]),
+      mutate: vi.fn().mockResolvedValue([saved]),
+    },
+    aiSkins,
+    communitySkins: { publish } as never,
+  };
+  render(
+    <SettingsPage
+      client={{
+        ...client,
+        load: async () => initial,
+        save: vi.fn(),
+        customTouchKeyboardSkins: true,
+      }}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "主题" }));
+  fireEvent.click(screen.getByRole("button", { name: "设计我的皮肤" }));
+  const editor = screen.getByLabelText("自定义皮肤编辑器");
+  await waitFor(() =>
+    expect(
+      (within(editor).getByRole("button", { name: "AI 皮肤抽卡" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(within(editor).getByRole("button", { name: "AI 皮肤抽卡" }));
+  fireEvent.click(screen.getByRole("button", { name: "抽三张皮肤" }));
+  await screen.findByRole("heading", { name: "AI 重复测试" });
+  fireEvent.click(screen.getByRole("button", { name: "发布到社区" }));
+  await screen.findByRole("dialog", { name: "发布 AI 皮肤" });
+  fireEvent.click(screen.getByRole("checkbox", { name: /拥有发布所用素材/ }));
+  const submit = screen.getByRole("button", { name: "公开发布" });
+  act(() => {
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+  });
+  expect(publish).toHaveBeenCalledOnce();
+  pendingPublish.resolve();
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "发布 AI 皮肤" })).toBeNull());
 });
 
 test("toolbar theme loads, previews independently, saves and reloads", async () => {
