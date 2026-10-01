@@ -151,6 +151,16 @@ pub fn fold_reading(text: &str) -> String {
         .collect()
 }
 
+fn folded_reading_equal(left: &str, right: &str) -> bool {
+    left.chars()
+        .filter(|&character| character != '\'')
+        .map(|character| character.to_ascii_lowercase())
+        .eq(right
+            .chars()
+            .filter(|&character| character != '\'')
+            .map(|character| character.to_ascii_lowercase()))
+}
+
 /// QD:1006-1054: rows read from a corrected cut get `corrected_from = fold(raw)`.
 pub fn mark_autocorrect_candidates(
     candidates: &mut [WordItem],
@@ -159,25 +169,22 @@ pub fn mark_autocorrect_candidates(
     corrected_cuts: &[String],
 ) {
     // A row comes from a corrected reading exactly when its letters equal some correction cut's letters while those differ from the typed letters. Comparing letters alone would also sweep up prefix rows the user spelled correctly (keneng -> ke, single-letter jianpin expansions); both rules together keep those unmarked.
-    let letter_sets: Vec<String> = std::iter::once(primary_segmentation)
-        .chain(corrected_cuts.iter().map(String::as_str))
-        .map(fold_reading)
-        .filter(|letters| !letters.is_empty())
-        .collect();
+    let cuts =
+        || std::iter::once(primary_segmentation).chain(corrected_cuts.iter().map(String::as_str));
     let raw_letters = fold_reading(raw);
-    if letter_sets.iter().all(|letters| *letters == raw_letters) {
+    if cuts().all(|cut| cut.is_empty() || folded_reading_equal(cut, raw)) {
         return;
     }
     for item in candidates
         .iter_mut()
         .filter(|item| item.corrected_from.is_empty())
     {
-        let item_letters = fold_reading(&item.pinyin);
         // A cut can fold back to exactly the typed letters; matching that set would label a row the user spelled correctly, so only the sets that differ count.
-        if letter_sets
-            .iter()
-            .any(|letters| *letters != raw_letters && *letters == item_letters)
-        {
+        if cuts().any(|cut| {
+            !cut.is_empty()
+                && !folded_reading_equal(cut, raw)
+                && folded_reading_equal(cut, &item.pinyin)
+        }) {
             item.corrected_from = raw_letters.clone();
         }
     }
@@ -329,6 +336,17 @@ mod tests {
         assert_eq!(fold_reading("Sa'Hng"), "sahng");
         assert_eq!(fold_reading("nve"), "nve");
         assert_ne!(fold_reading("nve"), fold_reading("nue"));
+    }
+
+    #[test]
+    fn folded_reading_comparison_matches_owned_folding() {
+        for (left, right) in [("Sa'Hng", "sahng"), ("nve", "nue"), ("", "'")] {
+            assert_eq!(
+                folded_reading_equal(left, right),
+                fold_reading(left) == fold_reading(right),
+                "{left}/{right}"
+            );
+        }
     }
 
     #[test]
