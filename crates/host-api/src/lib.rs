@@ -888,6 +888,30 @@ fn outdated_resources(error: Box<dyn std::error::Error>) -> Box<dyn std::error::
     }
 }
 
+fn reject_symlinked_options_parent(path: &Path) -> std::io::Result<()> {
+    let mut current = path.parent();
+    while let Some(candidate) = current {
+        match std::fs::symlink_metadata(candidate) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                #[cfg(target_os = "macos")]
+                if candidate == Path::new("/tmp") || candidate == Path::new("/var") {
+                    current = candidate.parent();
+                    continue;
+                }
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "options path has a symbolic-link parent",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        current = candidate.parent();
+    }
+    Ok(())
+}
+
 /// Bring a published HostOptions file up to the installed dictionary generation.
 ///
 /// A package upgrade replaces the resource bundle in place but leaves each user's options pointing at working dictionaries copied from the previous bundle, so the new dictionary never reaches the Engine and the user-dictionary replay the Windows installer runs after an upgrade never happens. When the recorded dictionaries directory is not the generation the installed lock describes, this prepares that generation (the Engine copies the new dictionaries and replays the user journal into them) and rewrites only `resources` and `dictionaries`, keeping every other key a setup or the settings app wrote. A current file is only read.
@@ -895,6 +919,7 @@ fn outdated_resources(error: Box<dyn std::error::Error>) -> Box<dyn std::error::
 /// Returns whether the file was rewritten. Run it before the caller's own sessions exist. The previous generation is never modified, so a host still using it keeps working until it restarts. A symlink, or a document whose paths do not follow the layout `prepare_host_configuration` produces, is left alone rather than guessed at. When the recorded resources do not match the compiled lock the error is [`DictionaryOutdated`] and the file is left as it was.
 pub fn refresh_host_options(path: &std::path::Path) -> Result<bool, Box<dyn std::error::Error>> {
     use std::io::Write as _;
+    reject_symlinked_options_parent(path)?;
     let metadata = std::fs::symlink_metadata(path)?;
     if !metadata.is_file() {
         return Ok(false);
