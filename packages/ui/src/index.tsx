@@ -1907,6 +1907,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showPluginTriggers,
     showTypingEffects,
     showTypingEffectStyles,
+    showTypingEffectPacks,
   } = capabilities;
   const {
     fullwidthChord,
@@ -2457,6 +2458,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showPluginTriggers,
     showTypingEffects,
     showTypingEffectStyles,
+    showTypingEffectPacks,
     snapshot,
     draft,
     setDraft,
