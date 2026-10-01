@@ -75,7 +75,7 @@ pub fn read_emoji_catalog_slice(
         EMOJI_SQL
     };
     let mut statement = prepare(&connection, sql)?;
-    let pattern = format!("%{search}%");
+    let pattern = search_pattern(search);
     let sql_limit = limit as i64;
     let bound = if kaomoji || symbols {
         bind(&mut statement, 1, search)
@@ -144,6 +144,14 @@ pub fn read_emoji_catalog_slice(
 
 fn contains_catalog_text(items: &[EmojiCatalogItem], text: &str) -> bool {
     items.iter().any(|item| item.text == text)
+}
+
+fn search_pattern(search: &str) -> String {
+    let mut pattern = String::with_capacity(search.len() + 2);
+    pattern.push('%');
+    pattern.push_str(search);
+    pattern.push('%');
+    pattern
 }
 
 /// The groups of a category in first-appearance order.
@@ -259,6 +267,13 @@ mod tests {
         }];
         assert!(contains_catalog_text(&items, "😀"));
         assert!(!contains_catalog_text(&items, "😄"));
+    }
+
+    #[test]
+    fn search_pattern_allocates_only_result_bytes() {
+        let pattern = search_pattern("arrow");
+        assert_eq!(pattern, "%arrow%");
+        assert_eq!(pattern.capacity(), pattern.len());
     }
 
     #[test]
