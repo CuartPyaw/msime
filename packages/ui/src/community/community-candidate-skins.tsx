@@ -273,6 +273,8 @@ export function CommunityCandidateSkinsPage({
 }) {
   // 分页 hook 只认 offset、搜索词和范围；分类通过 ref 随请求带上，这样「加载更多」追加的页沿用第一页的分类。
   const categoryFilter = useRef<CandidateSkinCategory | null>(null);
+  // 只有第一页请求成功后，分类才与当前列表建立关系；请求中的分类不能作为失败回退目标。
+  const activeCategory = useRef<CandidateSkinCategory | null>(null);
   const galleryClient = useMemo<CommunityGalleryClient<CommunityCandidateSkin>>(
     () => ({
       list: async (offset, search, mine) => {
@@ -324,13 +326,15 @@ export function CommunityCandidateSkinsPage({
   const [category, setCategory] = useState<CandidateSkinCategory | null>(null);
 
   const changeCategory = async (next: CandidateSkinCategory | null) => {
-    const previous = categoryFilter.current;
+    const previous = activeCategory.current;
     if (next === previous) return;
     categoryFilter.current = next;
     setCategory(next);
     // 新分类从第一页读起；第一页失败时列表和 offset 仍是旧分类的，分类也跟着退回，否则「加载更多」会在旧分类的 offset 上追加新分类的页。
     const listed = await requestList(activeSearch, false);
-    if (!listed && categoryFilter.current === next) {
+    if (listed && categoryFilter.current === next) {
+      activeCategory.current = next;
+    } else if (!listed && categoryFilter.current === next) {
       categoryFilter.current = previous;
       setCategory(previous);
     }
