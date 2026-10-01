@@ -16,6 +16,7 @@
 - 输入运行时统一处理焦点、候选翻页、代次选择与全半角转换，并接入固定版本的整句重排模型。
 - macOS 与 Windows 各有一层宿主支持 crate：macOS 提供面板会话、云剪贴板与云词典桥接；Windows 提供语音控制器、语音上屏策略与 Windows Ink 手写。桌面 shell 禁用 `unsafe`，平台 API 调用集中在这两个 crate 里做安全封装。
 - Rust workspace 统一 GPL-3.0-only、`edition 2021` 与 `unsafe_code = "deny"`，工具链由 `rust-toolchain.toml` 钉死。
+- 韩语（Dubeolsik）方案可以把正在组字的那一个音节转换成汉字：宿主接口新增 `MSIME_CONVERT_HANJA`（16），打开后候选是该音节的汉字，有训音（훈음）的附在注释里；选择后提交汉字，Esc 和退格只关闭列表、保留音节，输入字母关闭列表并继续组字，标点、失焦和结束组字提交的是韩文。已经上屏的音节和词级转换不在本次范围内。汉字表由 `msime-dict-build hanja` 从 libhangul 的 `data/hanja/hanja.txt`（BSD-3-Clause，固定提交）生成，只收单音节，编进引擎；各平台宿主的触发键另行接入。
 
 #### 共享设置界面
 
