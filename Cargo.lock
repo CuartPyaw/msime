@@ -2909,6 +2909,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "msime-pack-tool"
+version = "0.1.0"
+dependencies = [
+ "msime-client-core",
+ "tempfile",
+]
+
+[[package]]
 name = "msime-tauri-mobile-platform"
 version = "0.1.0"
 dependencies = [
