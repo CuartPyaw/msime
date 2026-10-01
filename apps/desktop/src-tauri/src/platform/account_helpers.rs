@@ -45,6 +45,13 @@ pub(crate) fn account_command_error(error: AccountError) -> crate::CommandError 
     crate::CommandError { code: error.code() }
 }
 
+/// Serializes an account response for the page. A value that cannot be serialized is reported as the service being unavailable, the code the page already handles for a failed call.
+pub(crate) fn account_value<T: serde::Serialize>(
+    value: T,
+) -> Result<serde_json::Value, AccountError> {
+    serde_json::to_value(value).map_err(|_| AccountError::Unavailable)
+}
+
 /// Maps an account error from a community service to the `community_*` codes the community pages translate. It is the mapping `mobile_community` uses, so a page reads the same code on every host.
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub(crate) fn community_error(error: AccountError) -> crate::CommandError {

@@ -2145,3 +2145,59 @@ fn input_source_status_is_absent_when_no_start_time_check_ran() {
     );
     assert!(status.is_none());
 }
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[test]
+fn cloud_clipboard_route_keeps_providers_ahead_of_the_account() {
+    use super::{cloud_clipboard_route, CloudClipboardRoute};
+    use std::path::PathBuf;
+
+    let never_native = || -> Option<&'static str> { panic!("native session consulted") };
+    let never_discover = || -> Option<PathBuf> { panic!("discovery consulted") };
+
+    // A configured socket wins over the native session and discovery.
+    assert_eq!(
+        cloud_clipboard_route(
+            Some("/run/synthetic/cloud-clipboard.sock".into()),
+            never_native,
+            never_discover,
+        )
+        .unwrap(),
+        CloudClipboardRoute::Provider(PathBuf::from("/run/synthetic/cloud-clipboard.sock"))
+    );
+    // A configured socket that is not absolute is refused rather than quietly answered by the account.
+    assert_eq!(
+        cloud_clipboard_route(Some("relative.sock".into()), never_native, never_discover)
+            .unwrap_err()
+            .code,
+        "unavailable"
+    );
+    // The input method's own session comes before a discovered socket.
+    assert_eq!(
+        cloud_clipboard_route(None, || Some("native"), never_discover).unwrap(),
+        CloudClipboardRoute::Native("native")
+    );
+    assert_eq!(
+        cloud_clipboard_route(
+            None,
+            || None::<&str>,
+            || Some(PathBuf::from("/run/synthetic/discovered.sock")),
+        )
+        .unwrap(),
+        CloudClipboardRoute::Provider(PathBuf::from("/run/synthetic/discovered.sock"))
+    );
+    // With no provider at all, and for a discovered path that is not absolute, the signed-in account serves the request.
+    assert_eq!(
+        cloud_clipboard_route(None, || None::<&str>, || None).unwrap(),
+        CloudClipboardRoute::Account
+    );
+    assert_eq!(
+        cloud_clipboard_route(
+            None,
+            || None::<&str>,
+            || Some(PathBuf::from("relative.sock")),
+        )
+        .unwrap(),
+        CloudClipboardRoute::Account
+    );
+}
