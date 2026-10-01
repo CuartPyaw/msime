@@ -211,6 +211,22 @@ test("writing adds the entry and a different one is replaced only after confirmi
   expect(group.textContent).toContain("（已连接）");
 });
 
+test("ignores a same-tick duplicate MCP install", async () => {
+  const pending = deferred<McpInstallOutcome>();
+  const install = vi.fn().mockReturnValue(pending.promise);
+  render(<McpConnectSection status={() => Promise.resolve(status())} install={install} />);
+  const group = await screen.findByRole("group", { name: "连接 AI 助手" });
+  fireEvent.click(within(group).getByRole("radio", { name: "Cursor" }));
+  const write = within(group).getByRole("button", { name: "写入 Cursor" });
+  act(() => {
+    fireEvent.click(write);
+    fireEvent.click(write);
+  });
+  expect(install).toHaveBeenCalledOnce();
+  pending.resolve("added");
+  await within(group).findByText("已写入 Cursor 的配置。重新启动 Cursor 后生效。");
+});
+
 test("a write response from a replaced host cannot update the new MCP section", async () => {
   const pending = deferred<McpInstallOutcome>();
   const oldInstall = vi.fn(() => pending.promise);
