@@ -11,9 +11,6 @@ use crate::language_dictionary::{LanguageDictionary, LanguageEntry};
 /// The non-letter keys the editor still claims while the list is open: the phonetic keys that are not selection digits. Digits 1–9 and Space go to selection.
 pub const LIST_OPEN_SYMBOLS: &str = "0,./;-";
 
-/// The most entries the list shows for one span.
-const LIST_ENTRIES_PER_SPAN: usize = 100;
-
 /// A key as the editor sees it. The session maps host keys and command 16 (`Command::ConvertHanja`, "open the candidate list") onto these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZhuyinKey {
@@ -53,7 +50,7 @@ pub struct ZhuyinScheme {
     list: Vec<ListCandidate>,
     /// Text the last key committed, waiting for the session to hand it to the host.
     committed: String,
-    /// The heaviest entry per key, for the composition in progress. The dictionary is read-only, so entries stay valid; the cache is dropped when the composition ends so it cannot grow without bound.
+    /// The heaviest entry per key, for the composition in progress. The dictionary is read-only, so entries stay valid; the cache is dropped when the composition ends and on every auto-shift, so it holds at most the keys of `MAX_SYLLABLES` syllables.
     best: HashMap<String, Option<LanguageEntry>>,
 }
 
@@ -259,6 +256,7 @@ impl ZhuyinScheme {
         let end = word.end;
         self.committed.push_str(&word.text);
         self.syllables.drain(..end);
+        self.best.clear();
         self.pins.retain(|pin| pin.start >= end);
         for pin in &mut self.pins {
             pin.start -= end;
@@ -266,13 +264,13 @@ impl ZhuyinScheme {
         }
     }
 
-    /// Lists every suffix span of the syllables, longest first, each span's entries by weight. The list stays closed when it would be empty.
+    /// Lists every suffix span of the syllables, longest first, each span's entries by weight. Every entry is listed, since the list is the only way to choose a character; common syllables such as ㄧˋ have over 200. The list stays closed when it would be empty.
     fn open_list(&mut self) -> Result<()> {
         let count = self.syllables.len();
         let mut list = Vec::new();
         for start in 0..count {
             let key = self.key(start, count);
-            for entry in self.dictionary.lookup(&key, LIST_ENTRIES_PER_SPAN)? {
+            for entry in self.dictionary.lookup(&key, usize::MAX)? {
                 list.push(ListCandidate {
                     text: entry.text,
                     start,
@@ -354,6 +352,10 @@ mod tests {
     ];
 
     fn scheme() -> (tempfile::TempDir, ZhuyinScheme) {
+        scheme_with(&ENTRIES)
+    }
+
+    fn scheme_with(entries: &[(&str, &str, i64)]) -> (tempfile::TempDir, ZhuyinScheme) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("zhuyin.db");
         let connection = Connection::open(&path).unwrap();
@@ -364,7 +366,7 @@ mod tests {
                 (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
             )
             .unwrap();
-        for (key, text, weight) in ENTRIES {
+        for &(key, text, weight) in entries {
             connection
                 .execute(
                     "INSERT INTO entries VALUES (?1, ?2, ?3)",
@@ -492,6 +494,24 @@ mod tests {
     }
 
     #[test]
+    fn the_list_holds_every_entry_of_a_span() {
+        // ㄧˋ has 215 single characters in the real data; the list must not cut off the light ones.
+        let texts: Vec<String> = (0..215u32)
+            .map(|index| char::from_u32(0x4E00 + index).unwrap().to_string())
+            .collect();
+        let entries: Vec<(&str, &str, i64)> = texts
+            .iter()
+            .zip((1..=215i64).rev())
+            .map(|(text, weight)| ("ㄧˋ", text.as_str(), weight))
+            .collect();
+        let (_dir, mut scheme) = scheme_with(&entries);
+        type_keys(&mut scheme, "u4");
+        assert!(scheme.handle_key(ZhuyinKey::OpenList).unwrap());
+        assert_eq!(scheme.candidates().len(), 215);
+        assert_eq!(scheme.candidates()[214].text, texts[214]);
+    }
+
+    #[test]
     fn select_pins_without_committing_and_pins_survive_reconversion() {
         let (_dir, mut scheme) = scheme();
         type_keys(&mut scheme, "su3 ");
@@ -608,6 +628,9 @@ mod tests {
         assert_eq!(scheme.take_committed(), "你好");
         assert_eq!(scheme.converted_text(), format!("{}你", "你好".repeat(9)));
         assert_eq!(scheme.editing_text(), format!("{}su3", "su3cl3".repeat(9)));
+        // The lookup cache keeps no key longer than the syllables that are left.
+        let longest = scheme.best.keys().map(|key| key.split(' ').count()).max();
+        assert_eq!(longest, Some(scheme.syllables.len()));
 
         // A pin to the right of the shifted word moves with its syllables.
         scheme.reset();
