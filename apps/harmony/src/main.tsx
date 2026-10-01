@@ -440,8 +440,14 @@ function communitySkinClient(native: NativeBridge): CommunitySkinClient {
       JSON.stringify({ operation: "community_skin", ...action }),
     ).then(unwrap<T>);
   return {
-    list: (offset, search) =>
-      request<CommunitySkinPage>({ community_operation: "list", offset, search }),
+    // 我的作品 asks the host for scope "mine", which it sends with the session and fields=moderation so a removed skin carries its 已下架 badge.
+    list: (offset, search, mine) =>
+      request<CommunitySkinPage>({
+        community_operation: "list",
+        offset,
+        search,
+        ...(mine ? { scope: "mine" } : {}),
+      }),
     detail: (id) => request<CommunitySkin>({ community_operation: "detail", id }),
     download: (id, name) =>
       request<CommunitySkinDownload>({ community_operation: "download", id, name }),
@@ -456,6 +462,9 @@ function communitySkinClient(native: NativeBridge): CommunitySkinClient {
     },
     finishTrial: async (id, keep) => {
       await request({ community_operation: "finish_trial", id, keep });
+    },
+    report: async (id, reason, detail) => {
+      await request({ community_operation: "report", id, reason, detail });
     },
   };
 }
@@ -519,6 +528,9 @@ function communityResourceClient(native: NativeBridge): CommunityResourceClient 
     },
     removeReply: async (id) => {
       await request({ resource_operation: "remove_reply", id });
+    },
+    report: async (kind, id, reason, detail) => {
+      await request({ resource_operation: "report", kind, id, reason, detail });
     },
   };
 }

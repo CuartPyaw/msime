@@ -33,7 +33,24 @@ public final class CommunityRequestSmoke {
             "a request that never reached the server says so");
         check(!CommunityRequest.message("something new", 599).isEmpty(),
             "an unknown failure still says something");
-        System.out.println("Android community requests: paths, query encoding and failures passed");
+
+        check("skins".equals(CommunityRequest.reportKind(Kind.SKIN))
+            && "dictionaries".equals(CommunityRequest.reportKind(Kind.DICTIONARY))
+            && "replies".equals(CommunityRequest.reportKind(Kind.REPLY)),
+            "reports name each kind the way the server does");
+        check(CommunityRequest.REPORT_REASONS.equals(java.util.List.of(
+            "侵权/抄袭", "色情低俗", "违法违规", "垃圾广告", "恶意插件", "其他")),
+            "the fixed report reasons, in order");
+        check(CommunityRequest.validReport("其他", null) && CommunityRequest.validReport("其他", "😀".repeat(1000)),
+            "a detail of up to 1000 characters is accepted");
+        check(!CommunityRequest.validReport("其他", "a".repeat(1001)), "a longer detail is refused");
+        check(!CommunityRequest.validReport("不喜欢", ""), "only the fixed reasons are sent");
+        check("内容包含不允许发布的词语，请修改后再提交".equals(CommunityRequest.message("blocked_content", 422)),
+            "a refused word asks for an edit");
+        check("审核服务暂时不可用，请稍后重试".equals(CommunityRequest.message("screening_unavailable", 503)),
+            "screening outage asks for a retry");
+        check(CommunityRequest.message("account_banned", 403).contains("封禁"), "a ban is named");
+        System.out.println("Android community requests: paths, query encoding, reports and failures passed");
     }
 
     private static void check(boolean condition, String message) {

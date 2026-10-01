@@ -77,7 +77,7 @@ struct SkinCommunityView: View {
     let id = UUID()
     requestID = id
     let page: CommunityPage
-    do { page = try await api.list(offset: append ? skins.count : 0, search: search) }
+    do { page = try await api.list(offset: append ? skins.count : 0, search: search, mine: onlyMine) }
     catch {
       guard requestID == id else { return }
       throw error
@@ -99,7 +99,10 @@ private struct CommunitySkinCard: View {
     VStack(alignment: .leading, spacing: 9) {
       CommunityDesignPreview(design: skin.design)
       Text(skin.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-      CommunityAuthorLabel(name: skin.owned ? "我的作品" : skin.author)
+      HStack(spacing: 4) {
+        CommunityAuthorLabel(name: skin.owned ? "我的作品" : skin.author)
+        if skin.removed { CommunityRemovedBadge() }
+      }
       HStack(spacing: 3) {
         Label("\(skin.downloads)", systemImage: "arrow.down.to.line")
         Spacer(minLength: 2)
@@ -124,7 +127,10 @@ struct CommunitySkinDetail: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
         CommunityDesignPreview(design: skin.design)
-        Text(skin.name).font(.title2.bold())
+        HStack {
+          Text(skin.name).font(.title2.bold())
+          if skin.removed { CommunityRemovedBadge() }
+        }
         Text(skin.author).foregroundStyle(.secondary)
         Text(skin.description)
         Text("\(skin.downloads) 人下载 · \(skin.rating_average, specifier: "%.1f") 分 · \(skin.rating_count) 人评分")
@@ -154,6 +160,7 @@ struct CommunitySkinDetail: View {
                 .accessibilityLabel("评 \(stars) 星").disabled(busy)
             }
           }
+          CommunityReportButton(kind: "skins", itemID: skin.id)
         } else {
           Button("下架这款皮肤", role: .destructive) { confirmsRemoval = true }.disabled(busy)
         }

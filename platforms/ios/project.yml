@@ -80,6 +80,11 @@ targets:
       # The input engine in libmsime_host_api, linked into this app and into the keyboard extension it embeds, carries the Korean Hanja table from libhangul's data/hanja/hanja.txt, whose BSD-3-Clause licence requires the notice in binary distributions.
       - path: ../../resources/licenses/libhangul-hanja-BSD-3-Clause.txt
         buildPhase: resources
+      # The same engine's Cantonese and Zhuyin schemes take their syllables and words from data derived from rime-cantonese (CC BY 4.0) and libchewing-data (LGPL-2.1-or-later); their notices travel with every engine build even where those schemes are not offered.
+      - path: ../../resources/licenses/rime-cantonese-CC-BY-4.0.txt
+        buildPhase: resources
+      - path: ../../resources/licenses/libchewing-data-LGPL-2.1.txt
+        buildPhase: resources
       - path: SharedResources/PrivacyInfo.xcprivacy
         buildPhase: resources
     settings:

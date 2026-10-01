@@ -373,7 +373,8 @@ export function applyAccountPreferences(
   const preferences: Document = { ...local };
 
   const scheme = reader.text("input.schema");
-  if (scheme !== null) preferences.scheme = choose(scheme, SCHEMES);
+  // A scheme this host does not offer (a newer device's Cantonese, Zhuyin or Vietnamese) keeps the local one rather than refusing the whole sync, so the rest of the document still applies.
+  if (scheme !== null && SCHEMES.includes(scheme)) preferences.scheme = scheme;
   const characterSet = reader.text("input.character_set");
   if (characterSet !== null) {
     preferences.traditional_chinese_output =

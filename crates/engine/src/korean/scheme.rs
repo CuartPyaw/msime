@@ -44,6 +44,7 @@ impl KoreanScheme {
             | SchemeKey::Apostrophe
             | SchemeKey::Semicolon
             | SchemeKey::Minus
+            | SchemeKey::Symbol(_)
             | SchemeKey::Requery => {}
         }
     }
@@ -185,6 +186,8 @@ mod tests {
             SchemeKey::Minus,
             SchemeKey::Requery,
             SchemeKey::Letter(b'1'),
+            SchemeKey::Symbol(b';'),
+            SchemeKey::Symbol(b' '),
         ] {
             scheme.handle_key(key);
         }

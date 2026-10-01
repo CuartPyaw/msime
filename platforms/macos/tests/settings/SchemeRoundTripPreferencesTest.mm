@@ -45,6 +45,21 @@ int main(void)
         merged = [preferences sharedPreferencesByMerging:@{}];
         assert([merged[@"last_chinese_scheme"] isEqual:@"quanpin"]);
 
+        // Vietnamese is not a Chinese scheme either; Cantonese and Zhuyin are, so they become the way back.
+        preferences.inputScheme = @"cantonese";
+        merged = [preferences sharedPreferencesByMerging:@{}];
+        assert([merged[@"scheme"] isEqual:@"cantonese"]);
+        assert([merged[@"last_chinese_scheme"] isEqual:@"cantonese"]);
+        preferences.inputScheme = @"vietnamese";
+        merged = [preferences sharedPreferencesByMerging:@{@"last_chinese_scheme": @"quanpin"}];
+        assert([merged[@"scheme"] isEqual:@"vietnamese"]);
+        assert([merged[@"last_chinese_scheme"] isEqual:@"cantonese"]);
+        assert([preferences.lastChineseScheme isEqual:@"cantonese"]);
+        preferences.inputScheme = @"zhuyin";
+        assert([preferences.inputScheme isEqual:@"zhuyin"]);
+        assert([preferences.lastChineseScheme isEqual:@"zhuyin"]);
+        preferences.inputScheme = @"quanpin";
+
         // removePersistentDomainForName: empties the domain and leaves the plist on disk, so every
         // run left one behind: 185 of them had piled up on the machine this was found on.
         MSIMERemoveTestPreferenceSuite(defaults, suite);

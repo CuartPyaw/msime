@@ -32,6 +32,14 @@ int main() {
     NSDictionary *koreanNativeSnapshot = MSIMECloudAppearanceSnapshot(defaults);
     assert([koreanNativeSnapshot[@"platform.macos.input_scheme"] isEqual:@0]);
     assert(MSIMEValidateCloudAppearance(koreanNativeSnapshot));
+
+    // The schemes added after the contract was fixed export the same quanpin fallback and still validate.
+    for (NSString *scheme in @[@"cantonese", @"zhuyin", @"vietnamese"]) {
+        [defaults setObject:scheme forKey:@"MSIMEClientInputScheme"];
+        NSDictionary *snapshot = MSIMECloudAppearanceSnapshot(defaults);
+        assert([snapshot[@"platform.macos.input_scheme"] isEqual:@0]);
+        assert(MSIMEValidateCloudAppearance(snapshot));
+    }
     NSMutableDictionary *values = [initial mutableCopy];
     values[@"platform.macos.global_theme"] = @"custom";
     values[@"platform.macos.custom_theme_base"] = @"night";

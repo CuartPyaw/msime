@@ -423,37 +423,60 @@ fn english_suggestions_default_on_and_legacy_documents_preserve_it() {
     );
 }
 
-// Telemetry is opt-in on every host that reads this switch: a fresh profile, and a document written before the switch existed, must both say off, so upgrading never turns reporting on behind the user.
+// Usage reporting is on by default and can be turned off. A document written before the switch existed reads on, and the retired opt-in `telemetry_enabled` key is dropped instead of being read or failing the document.
 #[test]
-fn telemetry_is_opt_in_and_survives_a_save() {
+fn usage_reporting_defaults_on_and_survives_a_save() {
     let defaults = Preferences::default();
-    assert!(!defaults.telemetry_enabled);
+    assert!(defaults.usage_reporting);
+    // Left out while on, so older strict parsers keep reading the document; absent reads as on.
     let serialized = serde_json::to_value(&defaults).unwrap();
-    assert_eq!(
-        serialized["telemetry_enabled"],
-        serde_json::Value::Bool(false)
-    );
-    let mut legacy = serialized.clone();
-    legacy.as_object_mut().unwrap().remove("telemetry_enabled");
+    assert!(serialized.get("usage_reporting").is_none());
+    assert!(serialized.get("telemetry_enabled").is_none());
     assert!(
-        !serde_json::from_value::<Preferences>(legacy)
+        serde_json::from_value::<Preferences>(serialized.clone())
             .unwrap()
-            .telemetry_enabled
+            .usage_reporting
     );
+    let off = serde_json::to_value(Preferences {
+        usage_reporting: false,
+        ..Preferences::default()
+    })
+    .unwrap();
+    assert_eq!(off["usage_reporting"], serde_json::Value::Bool(false));
     let mut malformed = serialized;
-    malformed["telemetry_enabled"] = "yes".into();
+    malformed["usage_reporting"] = "yes".into();
     assert!(serde_json::from_value::<Preferences>(malformed).is_err());
 
     let dir = tempfile::tempdir().unwrap();
     let store = PreferencesStore::new(dir.path());
-    let enabled = Preferences {
-        telemetry_enabled: true,
+    let disabled = Preferences {
+        usage_reporting: false,
         ..defaults
     };
-    assert!(enabled.validate().is_ok());
-    let saved = store.save(0, enabled).unwrap();
-    assert!(saved.preferences.telemetry_enabled);
-    assert!(store.load().unwrap().preferences.telemetry_enabled);
+    assert!(disabled.validate().is_ok());
+    let saved = store.save(0, disabled).unwrap();
+    assert!(!saved.preferences.usage_reporting);
+    assert!(!store.load().unwrap().preferences.usage_reporting);
+}
+
+#[test]
+fn a_stored_telemetry_enabled_key_is_dropped_on_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    store.save(0, Preferences::default()).unwrap();
+    let path = dir.path().join("preferences.json");
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    document["preferences"]
+        .as_object_mut()
+        .unwrap()
+        .remove("usage_reporting");
+    // Neither value of the retired opt-in carries over: reporting follows the new default.
+    for old in [false, true] {
+        document["preferences"]["telemetry_enabled"] = old.into();
+        std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        assert!(store.load().unwrap().preferences.usage_reporting);
+    }
 }
 
 #[test]
@@ -1729,6 +1752,124 @@ fn remembered_chinese_scheme_roundtrips_without_changing_legacy_files() {
     fs::write(store.path(), &bytes).unwrap();
     assert!(store.save(3, Preferences::default()).is_err());
     assert_eq!(fs::read(store.path()).unwrap(), bytes);
+}
+
+#[test]
+fn cantonese_zhuyin_and_vietnamese_schemes_round_trip_under_their_wire_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    for (revision, (scheme, name)) in [
+        (InputScheme::Cantonese, "cantonese"),
+        (InputScheme::Zhuyin, "zhuyin"),
+        (InputScheme::Vietnamese, "vietnamese"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let saved = store
+            .save(
+                revision as u64,
+                Preferences {
+                    scheme,
+                    ..Preferences::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(store.load().unwrap(), saved);
+        assert_eq!(
+            serde_json::to_value(&saved.preferences).unwrap()["scheme"],
+            name
+        );
+    }
+    // Cantonese and Zhuyin are Chinese schemes to return to; Vietnamese is not.
+    for (revision, (scheme, name)) in [
+        (ChineseScheme::Cantonese, "cantonese"),
+        (ChineseScheme::Zhuyin, "zhuyin"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let saved = store
+            .save(
+                revision as u64 + 3,
+                Preferences {
+                    scheme: InputScheme::Vietnamese,
+                    last_chinese_scheme: Some(scheme),
+                    ..Preferences::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(store.load().unwrap(), saved);
+        assert_eq!(
+            serde_json::to_value(&saved.preferences).unwrap()["last_chinese_scheme"],
+            name
+        );
+    }
+    assert!(serde_json::from_value::<ChineseScheme>("vietnamese".into()).is_err());
+    assert_eq!(
+        InputScheme::from(ChineseScheme::Cantonese),
+        InputScheme::Cantonese
+    );
+    assert_eq!(
+        InputScheme::from(ChineseScheme::Zhuyin),
+        InputScheme::Zhuyin
+    );
+}
+
+#[test]
+fn vietnamese_preferences_default_and_stay_out_of_an_untouched_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let defaults = serde_json::to_value(PreferencesSnapshot::default()).unwrap();
+    assert!(defaults["preferences"].get("vietnamese").is_none());
+    let bytes = serde_json::to_vec(&defaults).unwrap();
+    fs::write(store.path(), &bytes).unwrap();
+    let loaded = store.load().unwrap();
+    assert_eq!(
+        loaded.preferences.vietnamese,
+        VietnamesePreferences {
+            input_method: VietnameseInputMethod::Telex,
+            tone_style: VietnameseToneStyle::Modern,
+        }
+    );
+    assert_eq!(fs::read(store.path()).unwrap(), bytes);
+    // A saved document that leaves Vietnamese alone is written without the key.
+    let saved = store.save(0, loaded.preferences).unwrap();
+    assert!(serde_json::to_value(&saved).unwrap()["preferences"]
+        .get("vietnamese")
+        .is_none());
+    let preferences = Preferences {
+        vietnamese: VietnamesePreferences {
+            input_method: VietnameseInputMethod::Vni,
+            tone_style: VietnameseToneStyle::Classic,
+        },
+        ..Preferences::default()
+    };
+    let saved = store.save(saved.revision, preferences).unwrap();
+    assert_eq!(store.load().unwrap(), saved);
+    assert_eq!(
+        serde_json::to_value(&saved.preferences).unwrap()["vietnamese"],
+        serde_json::json!({ "input_method": "vni", "tone_style": "classic" })
+    );
+    // One member set leaves the other at its default.
+    let partial: VietnamesePreferences =
+        serde_json::from_value(serde_json::json!({ "tone_style": "classic" })).unwrap();
+    assert_eq!(partial.input_method, VietnameseInputMethod::Telex);
+    assert_eq!(partial.tone_style, VietnameseToneStyle::Classic);
+}
+
+#[test]
+fn vietnamese_preferences_reject_unknown_members_and_values() {
+    for invalid in [
+        serde_json::json!({ "input_method": "telex", "layout": "us" }),
+        serde_json::json!({ "input_method": "viqr" }),
+        serde_json::json!({ "tone_style": "old" }),
+    ] {
+        assert!(serde_json::from_value::<VietnamesePreferences>(invalid.clone()).is_err());
+        let mut document = serde_json::to_value(Preferences::default()).unwrap();
+        document["vietnamese"] = invalid;
+        assert!(serde_json::from_value::<Preferences>(document).is_err());
+    }
 }
 
 #[test]
@@ -3348,7 +3489,7 @@ fn saving_unchanged_preferences_keeps_the_revision_and_the_file() {
     ));
 
     let mut changed = Preferences::default();
-    changed.telemetry_enabled = !changed.telemetry_enabled;
+    changed.usage_reporting = !changed.usage_reporting;
     assert_eq!(store.save(1, changed).unwrap().revision, 2);
 }
 

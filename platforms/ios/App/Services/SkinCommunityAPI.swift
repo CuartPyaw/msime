@@ -11,6 +11,10 @@ struct CommunitySkin: Codable, Identifiable, Sendable {
   let rating_average: Double
   let owned: Bool
   let my_rating: Int
+  /// "approved", "pending" or "removed" on the user's own skins when the request asked for fields=moderation.
+  var moderation: String? = nil
+  /// Post-moderation: only a removal is shown to the author, never a pending state or a reason.
+  var removed: Bool { owned && moderation == "removed" }
 }
 struct CommunityPage: Decodable, Sendable { let skins: [CommunitySkin]; let has_more: Bool }
 struct CommunityChallenge: Decodable, Sendable { let challenge_id: String; let nonce: String }
@@ -132,13 +136,13 @@ actor SkinCommunityAPI {
         data = try await client.request(method, path, token: fresh.token, body: body, maximumResponseBytes: maximumResponseBytes)
       }
       guard try await account.user()?.id == identity?.userID else { throw CancellationError() }
-    } catch let error as BackendAccountClient.Failure { throw Self.failure(Data(), status: error.status) }
+    } catch let error as BackendAccountClient.Failure { throw Self.failure(error) }
     try Task.checkCancellation()
     return try JSONDecoder().decode(T.self, from: data.isEmpty ? Data("{}".utf8) : data)
   }
-  private static func failure(_ data: Data, status: Int) -> CommunityFailure {
-    let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    let code = (root?["error"] as? [String: String])?["code"] ?? ""
+  private static func failure(_ error: BackendAccountClient.Failure) -> CommunityFailure {
+    if let moderation = error.moderationMessage { return CommunityFailure(message: moderation) }
+    let code = error.code ?? "", status = error.status
     let message: String
     switch code {
     case "provider_disabled", "user_auth_disabled": message = "社区登录尚未启用，请稍后重试。"
@@ -192,15 +196,17 @@ actor SkinCommunityAPI {
     } else { try await account.logout(all: all) }
   }
   func clearExpiredLogin() async throws { try await account.forget() }
-  func list(offset: Int = 0, search: String = "") async throws -> CommunityPage {
+  func list(offset: Int = 0, search: String = "", mine: Bool = false) async throws -> CommunityPage {
     #if DEBUG && targetEnvironment(simulator)
     if CommunityPreviewFixtures.enabled { return CommunityPage(skins: CommunityPreviewFixtures.skins, has_more: false) }
     #endif
     var parts = URLComponents()
     parts.path = "/v1/community/skins"
     parts.queryItems = [.init(name: "offset", value: String(offset)), .init(name: "q", value: search)]
+    // The author's own list, with each skin's moderation state so a removed one can be marked.
+    if mine { parts.queryItems! += [.init(name: "scope", value: "mine"), .init(name: "fields", value: "moderation")] }
     parts.percentEncodedQuery = parts.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
-    let page: CommunityPage = try await request(parts.string!)
+    let page: CommunityPage = try await request(parts.string!, authenticated: mine)
     guard Self.validPage(page.skins, hasMore: page.has_more),
           page.skins.allSatisfy(CommunityResponseValidation.validSkin) else {
       throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
@@ -214,7 +220,7 @@ actor SkinCommunityAPI {
     guard CommunityResponseValidation.validID(id) else {
       throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
     }
-    let skin: CommunitySkin = try await request("/v1/community/skins/\(id)")
+    let skin: CommunitySkin = try await request("/v1/community/skins/\(id)?fields=moderation")
     guard CommunityResponseValidation.validSkin(skin),
           CommunityResponseValidation.matchesID(skin.id, requested: id) else {
       throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
@@ -276,6 +282,7 @@ actor SkinCommunityAPI {
     var parts = URLComponents(); parts.path = "/v1/community/resources"
     parts.queryItems = [.init(name: "kind", value: kind.rawValue), .init(name: "scope", value: scope),
       .init(name: "q", value: search), .init(name: "offset", value: String(offset))]
+    if scope == "mine" { parts.queryItems!.append(.init(name: "fields", value: "moderation")) }
     parts.percentEncodedQuery = parts.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
     let page: ResourcePage = try await request(parts.string!, maximumResponseBytes: 48 * 1024 * 1024)
     guard Self.validPage(page.items, hasMore: page.has_more),
@@ -298,7 +305,7 @@ actor SkinCommunityAPI {
     guard CommunityResponseValidation.validID(id) else {
       throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
     }
-    let resource: CommunityResource = try await request("/v1/community/resources/\(id)", maximumResponseBytes: 3 * 1024 * 1024)
+    let resource: CommunityResource = try await request("/v1/community/resources/\(id)?fields=moderation", maximumResponseBytes: 3 * 1024 * 1024)
     guard CommunityResponseValidation.validResource(resource, expectedKind: resource.kind),
           CommunityResponseValidation.matchesID(resource.id, requested: id) else {
       throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
@@ -342,6 +349,32 @@ actor SkinCommunityAPI {
     guard result.stars == stars else {
       throw CommunityFailure(message: "社区暂时不可用，请稍后重试。")
     }
+  }
+  /// Report another user's work. Signed in or not: without a signed-in account the device's anonymous account sends it.
+  func report(kind: String, itemID: String, reason: String, detail: String) async throws {
+    let detail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard CommunityResponseValidation.validID(itemID), BackendAccountClient.reportReasons.contains(reason),
+          CommunityResponseValidation.validText(detail, minimum: 0, maximum: 1_000, multiline: true) else {
+      throw CommunityFailure(message: "请选择举报原因，补充说明不超过 1000 字。")
+    }
+    guard let id = UUID(uuidString: itemID) else { throw CommunityFailure(message: "作品不存在或已下架。") }
+    do {
+      if try await account.user() != nil {
+        let token = try await account.accessToken()
+        try await client.reportContent(kind: kind, itemID: id, reason: reason, detail: detail, token: token)
+        return
+      }
+      let anonymous = BackendAnonymousAccount.session
+      if (try? await anonymous.accessToken()) == nil {
+        _ = try await BackendAnonymousAccount.ensureSignedIn(session: anonymous, client: client)
+      }
+      let token = try await anonymous.accessToken()
+      do { try await client.reportContent(kind: kind, itemID: id, reason: reason, detail: detail, token: token) }
+      catch let error as BackendAccountClient.Failure where error.status == 401 {
+        let fresh = try await anonymous.accessToken(retrying: token)
+        try await client.reportContent(kind: kind, itemID: id, reason: reason, detail: detail, token: fresh)
+      }
+    } catch let error as BackendAccountClient.Failure { throw Self.failure(error) }
   }
   func unpublishResource(_ id: String) async throws {
     struct Result: Decodable { let deleted: Bool }

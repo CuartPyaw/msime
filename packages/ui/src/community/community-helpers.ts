@@ -4,7 +4,25 @@ import type { CommunityResourceKind, CommunityResourceScope } from "./community-
 
 export type Identified = { id: string };
 
+/** The sentences for the server's refusals the user has to act on, the same on every community page and on every host: the content screening rejected the text (`422 blocked_content`, the service itself is up), the screening could not run (`503 screening_unavailable`) or the account is banned (`403 account_banned`). */
+export function communityModerationMessage(error: unknown): string | undefined {
+  switch (errorCode(error)) {
+    case "community_blocked_content":
+    case "account_blocked_content":
+      return "内容包含不允许发布的词语，请修改后再提交";
+    case "community_screening_unavailable":
+    case "account_screening_unavailable":
+      return "审核服务暂时不可用，请稍后重试";
+    case "community_account_banned":
+    case "account_banned":
+      return "该账号已被封禁，暂时无法使用账号相关功能";
+  }
+  return undefined;
+}
+
 export function resourceMessage(error: unknown): string {
+  const moderation = communityModerationMessage(error);
+  if (moderation) return moderation;
   switch (errorCode(error)) {
     case "community_invalid":
       return "内容无效，请修改后重试。";
@@ -37,6 +55,8 @@ export function resourceScopeTitle(scope: CommunityResourceScope): string {
 }
 
 export function communitySkinMessage(error: unknown): string {
+  const moderation = communityModerationMessage(error);
+  if (moderation) return moderation;
   switch (errorCode(error)) {
     case "community_invalid":
       return "搜索内容无效，请修改后重试。";
@@ -67,6 +87,8 @@ export function communitySkinMessage(error: unknown): string {
 }
 
 export function communitySkinPublishMessage(error: unknown): string {
+  const moderation = communityModerationMessage(error);
+  if (moderation) return moderation;
   switch (errorCode(error)) {
     case "community_unauthorized":
       return "请先登录后再发布皮肤。";
@@ -90,6 +112,8 @@ export function communitySkinPublishMessage(error: unknown): string {
  * Fixed sentences for the candidate-skin gallery and its publish dialog. The host maps every server rejection to an HTTP-status code (`community_invalid`, `community_conflict`, …), so the specific wording comes from the local package codes the host checks before anything is uploaded; backend text is never shown. `publishing` picks the sentence for a `community_invalid` publish, where the server has rejected something only it can check.
  */
 export function candidateSkinMessage(error: unknown, publishing = false): string {
+  const moderation = communityModerationMessage(error);
+  if (moderation) return moderation;
   switch (errorCode(error)) {
     case "candidate_skin_package":
       return "皮肤包未通过校验，无法分享或安装。";
@@ -135,6 +159,8 @@ export function candidateSkinMessage(error: unknown, publishing = false): string
  * Fixed sentences for the plugin gallery and its publish dialog. Pack failures come back with client-core's `plugin_*` codes, which read as they do on the 插件 page, and the community ones with the host's HTTP-status `community_*` codes; backend text is never shown. `publishing` picks the sentence for a `community_invalid` or `community_conflict` publish, where the server has rejected something only it can check.
  */
 export function communityPluginMessage(error: unknown, publishing = false): string {
+  const moderation = communityModerationMessage(error);
+  if (moderation) return moderation;
   switch (errorCode(error)) {
     case "plugin_community_kind":
       return "特效包暂不支持分享。";

@@ -145,6 +145,7 @@ export function InputSharedSettingsSection({
       {outputExtra}
       <TraditionalChineseOutputSection
         value={preferences.traditional_chinese_output}
+        scheme={preferences.scheme}
         onChange={(traditional_chinese_output) =>
           onPreferencesChange({ traditional_chinese_output })
         }
@@ -158,6 +159,7 @@ export function InputSharedSettingsSection({
     <>
       <TraditionalChineseOutputSection
         value={preferences.traditional_chinese_output}
+        scheme={preferences.scheme}
         onChange={(traditional_chinese_output) =>
           onPreferencesChange({ traditional_chinese_output })
         }

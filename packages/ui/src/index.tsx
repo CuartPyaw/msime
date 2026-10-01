@@ -97,6 +97,7 @@ import { SettingsFormFooter } from "./settings/settings-form-footer";
 import { SettingsPageStatus } from "./settings/settings-page-status";
 import type { InputSourceStartupStatus } from "./settings/input-source-startup-notice";
 import { SettingsFormFrame } from "./settings/settings-form-frame";
+import { NoticeBanner, type NoticesClient } from "./settings/notice-banner";
 import { WindowTitlebar } from "./settings/window-titlebar";
 import { useProviderCredentials } from "./settings/use-provider-credentials";
 import { useFeedbackReport } from "./settings/use-feedback-report";
@@ -202,6 +203,12 @@ export {
   type UseSettingsDictionaryStateOptions,
 } from "./settings/use-settings-dictionary-state";
 export { SettingsFormFrame, type SettingsFormFrameProps } from "./settings/settings-form-frame";
+export {
+  NoticeBanner,
+  noticeBodyHtml,
+  type AppNotice,
+  type NoticesClient,
+} from "./settings/notice-banner";
 export { SettingsInputPage, type SettingsInputPageProps } from "./settings/settings-input-page";
 export {
   settingsPageCatalog,
@@ -769,7 +776,11 @@ export {
   CloudCandidatesSection,
   type CloudCandidatesSectionProps,
 } from "./settings/cloud-candidates-section";
-export { TelemetrySection, type TelemetrySectionProps } from "./settings/telemetry-section";
+export {
+  TelemetrySection,
+  usageReportingDescription,
+  type TelemetrySectionProps,
+} from "./settings/telemetry-section";
 export { WubiSection, type WubiPreferences, type WubiSectionProps } from "./settings/wubi-section";
 export {
   InputModeSection,
@@ -994,6 +1005,12 @@ export {
 export { CredentialActions, type CredentialActionsProps } from "./settings/credential-actions";
 export { SettingToggle, type SettingToggleProps } from "./settings/setting-toggle";
 export { SettingField, type SettingFieldProps } from "./settings/setting-field";
+export {
+  SettingActionHeader,
+  type SettingActionHeaderProps,
+  SettingSectionHeader,
+  type SettingSectionHeaderProps,
+} from "./settings/setting-action-header";
 export { SettingTextarea, type SettingTextareaProps } from "./settings/setting-textarea";
 export { ModelSelect, type ModelSelectProps } from "./settings/model-select";
 export {
@@ -1071,6 +1088,17 @@ export {
   type CommunityGalleryOptions,
   type CommunityGalleryPage,
 } from "./community/community-gallery";
+export {
+  CommunityRemovedBadge,
+  CommunityReportSection,
+  communityReportDetailLimit,
+  communityReportReasons,
+  communityReportedNotice,
+  type CommunityModeration,
+  type CommunityReportKind,
+  type CommunityReportReason,
+  type CommunityReportSectionProps,
+} from "./community/community-report";
 export {
   CommunityErrorAlert,
   type CommunityErrorAlertProps,
@@ -1272,6 +1300,23 @@ export type KeybindingPreferences = {
   toggle_fullwidth_option_shift_h: boolean;
 };
 export type HostPlatform = "windows" | "macos" | "linux" | "android" | "ios" | "harmony";
+/** Mirrors `client-core::preferences::InputScheme`. */
+export type InputScheme =
+  | "quanpin"
+  | "shuangpin"
+  | "wubi"
+  | "japanese"
+  | "korean"
+  | "cantonese"
+  | "zhuyin"
+  | "vietnamese";
+/** Mirrors `client-core::preferences::ChineseScheme`: the schemes a Japanese, Korean or Vietnamese selection returns to. */
+export type ChineseScheme = "quanpin" | "shuangpin" | "wubi" | "cantonese" | "zhuyin";
+/** Mirrors `client-core::preferences::VietnamesePreferences`. Absent from a document left at its defaults: Telex with modern tone placement. */
+export type VietnamesePreferences = {
+  input_method?: "telex" | "vni";
+  tone_style?: "modern" | "classic";
+};
 /** Mirrors `client-core::host_surface::HostCapabilities`. */
 export interface HostCapabilities {
   platform: HostPlatform;
@@ -1349,6 +1394,8 @@ export interface HostCapabilities {
   music?: boolean;
   /** The host draws the typing effects and the combo count `msime_client_typing_effect` answers with. Absent on a host older than the field. */
   typing_effects?: boolean;
+  /** The input schemes this host offers; the others are shown disabled. Absent on a host older than the field, which offers 全拼, 双拼, 五笔, 日文 and 韩文. */
+  input_schemes?: InputScheme[];
 }
 
 export { useCandidatePreviewTheme } from "./candidate/candidate-preview-theme";
@@ -1388,8 +1435,8 @@ export type Preferences = {
   translation_secondary_language?: "en" | "fr" | "ja" | "es" | "ru" | "de" | "ko" | null;
   /** The user explicitly chose the MSIME account (api.msime.app) for candidate translations; absent means not chosen. */
   translation_account?: boolean;
-  /** Anonymous start and crash events; off by default and honoured only by the Windows Server. */
-  telemetry_enabled?: boolean;
+  /** Anonymous usage reporting (daily activity, session ends, crash summaries) read by every host; absent means on, the default. */
+  usage_reporting?: boolean;
   floating_toolbar?: FloatingToolbarPreferences;
   mixed_input?: MixedInputPreferences;
   fuzzy_pinyin?: FuzzyPinyinPreferences;
@@ -1397,7 +1444,7 @@ export type Preferences = {
   word_character?: { enabled: boolean; keys: "brackets" | "minus_equal" };
   navigation?: NavigationPreferences;
   keybindings?: KeybindingPreferences;
-  scheme: "quanpin" | "shuangpin" | "wubi" | "japanese" | "korean";
+  scheme: InputScheme;
   /** Width used when desktop hosts commit printable ASCII characters. */
   character_width?: "halfwidth" | "fullwidth";
   wubi_code_hint?: boolean;
@@ -1410,10 +1457,11 @@ export type Preferences = {
   touch_toolbar?: Partial<TouchToolbarPreferences>;
   default_ime_mode?: "chinese" | "english";
   ime_mode_scope?: "app" | "global";
-  last_chinese_scheme?: "quanpin" | "shuangpin" | "wubi" | null;
+  last_chinese_scheme?: ChineseScheme | null;
   shuangpin_profile: "xiaohe" | "ziranma" | "shoudao" | "microsoft";
   /** macOS exposes the native shuangpin preedit presentation in the appearance page. */
   shuangpin_preedit_uses_raw?: boolean;
+  vietnamese?: VietnamesePreferences;
   wubi_mixed_pinyin?: boolean;
   candidate_page_size: number;
   number_row_selection?: boolean;
@@ -1771,6 +1819,8 @@ export interface SettingsClient {
   openPreferencesDirectory?: () => Promise<void>;
   readAppVersion?: () => Promise<string>;
   openExternalUrl?: (url: string) => Promise<void>;
+  /** The console's app notices; the host fetches and caches the feed and remembers dismissals. Absent shows none. */
+  notices?: NoticesClient;
   /** macOS opens the versioned third-party notices shipped with the app bundle. */
   openThirdPartyLicenses?: () => Promise<void>;
   /** macOS keeps the native shuangpin keymap panel preference outside shared Engine preferences. */
@@ -3039,6 +3089,9 @@ export function SettingsPage(props: SettingsPageProps) {
               onOpenSettings={statusActions.onOpenSettings}
               onDismiss={statusActions.onDismiss}
             />
+            {client.notices && (
+              <NoticeBanner client={client.notices} openExternalUrl={openExternalUrl} />
+            )}
             {client.home && draft && page === "home" && (
               <HomePage
                 preferences={draft}

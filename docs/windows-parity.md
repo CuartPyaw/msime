@@ -135,7 +135,7 @@
 - **安装器**：完整安装器提供数据目录选择页，拒绝系统 / 用户关键目录的父级、受保护目录内部、路径穿越与未标记的非空目录，并在就绪页展示迁移源与目标；`config.toml` 只 `onlyifdoesntexist`，升级不覆盖用户数据；light 包固定原目录。安装前在第一屏之前查注册表确认 WebView2 与 VC 运行库（要求 14.20 以上而非只看 `Installed=1`），静默安装默认继续并把缺失写进日志。
 - **云候选的首次同意（macOS）**：来源安装器的「联网功能」页在全新安装时说明云候选会把正在输入的拼写发给 inputtools.google.com，默认勾选、可取消，升级时跳过，只写 `cloud_candidates = false`。macOS 没有每个用户都会经过的安装步骤，输入法也可以在从未打开设置应用的情况下使用，所以由 IME 进程自己问：`AppearancePreferences.mm` 的 `resolveCloudCandidatesConsentWithPreferencesDirectory:userDataDirectory:` 在建立会话之前判断一次——宿主偏好里已有云候选选择、`preferences.json` 已存在或 Engine 用户数据目录（会话选项 `user_data`）已有内容即视为升级，不问、原值不动；否则记为待确认，结果存进 `MSIMEClientCloudCandidatesConsent`。待确认期间不发任何云候选请求，`InputController.mm` 的 `activateServer:` 在激活之后异步弹出不阻塞输入的「联网功能」对话框，文案沿用来源安装器页和 Linux 首次配置页，末句按来源的「设置 → 输入」指向共享设置输入页的「云候选」，按钮为「启用云候选」（默认，对应来源的默认勾选）与「不启用」；答案经 `answerCloudCandidates:` 写入共享 `cloud_candidates`，与 Windows、Linux 同一个字段。原生设置里改动云候选开关也算作答复。`shortcut` 测试的 `TestCloudCandidateConsent` 覆盖全新、升级（已有选择、已有 `preferences.json`、只有 Engine 用户数据）、空的用户数据目录、之后才出现的 `preferences.json`、拒绝与接受。
 - **安装后的首次准备**：完整安装器在提升权限下写入词库、出厂配置和所有权标记，但不以安装器身份替用户执行 Host API 准备。Server 的生产首次启动因此除全新目录外，也接受已有且带 `.metasequoiaime-data` 所有权标记、尚无 `runtime-options.json` 的目录，在用户上下文中完成准备；普通已有目录、已有运行时配置、文件和符号链接不会被接管或重建，准备失败保留现有数据。独立的 `msime-client-prepare` 仍只接受全新目录。
-- **升级后的用户词库回放**：来源 `installer/msime_setup.iss` 的 `ReplayUserDictionary` 在每次升级时以 `--data-dir` 运行随 Server 安装的 `MetasequoiaImeDictionaryReplay.exe`（源码在 `server/src/user-dictionary-replay`），失败就中止安装。Windows 安装器原样保留这一步，工具由 `crates/engine-bridge/src/bin/MetasequoiaImeDictionaryReplay.rs` 构建。没有按用户安装步骤的平台改用共享的 `msime_host_api::refresh_host_options`（导出为 `msime_client_refresh_host`）：比较运行时配置的词库代次与编译进去的词库锁，不一致时准备新代次、回放用户词库日志并原子改写 `resources` / `dictionaries`。Linux 由 IBus 与 Fcitx5 宿主在建立会话前调用，macOS 由 IMK 宿主启动时（`RuntimeOptionsRefresh.h`）和设置应用启动时（`macos_launch.rs`）调用。刻意的差异：macOS 与 Linux 没有按用户执行的安装步骤可以中止，失败时保留旧代次继续输入，下次启动再试。
+- **升级后的用户词库回放**：来源 `installer/msime_setup.iss` 的 `ReplayUserDictionary` 在每次升级时以 `--data-dir` 运行随 Server 安装的 `MetasequoiaImeDictionaryReplay.exe`（源码在 `server/src/user-dictionary-replay`），失败就中止安装。Windows 安装器原样保留这一步，工具由 `crates/engine-bridge/src/bin/MetasequoiaImeDictionaryReplay.rs` 构建。没有按用户安装步骤的平台改用共享的 `msime_host_api::refresh_host_options`（导出为 `msime_client_refresh_host`）：比较运行时配置的词库代次与编译进去的词库锁，不一致时准备新代次、回放用户词库日志并原子改写 `resources` / `dictionaries`。Linux 由 IBus 与 Fcitx5 宿主在建立会话前调用，macOS 由 IMK 宿主启动时（`RuntimeOptionsRefresh.h`）和设置应用启动时（`macos_launch.rs`）调用。宿主自己调用的导出 `msime_client_refresh_host`（`refresh_host_options_with_language_dictionaries`）另外让 `language_dictionaries` 跟上资源目录旁安装的粤语与注音词库，不论代次；设置应用不写这个键，以免仍在运行的旧版本 IMK 因不认识它而拒绝配置。刻意的差异：macOS 与 Linux 没有按用户执行的安装步骤可以中止，失败时保留旧代次继续输入，下次启动再试。
 - **检查更新**：各平台由 `.github/workflows/release-*.yml` 独立发布到同一个仓库、标签带平台前缀，所以读的是发行版列表而不是 `releases/latest`——后者返回的通常是别的平台那一个。只取本平台前缀、非草稿、非预发布的发行版，按版本号而不是列表顺序取最新，没有则显示「暂无可用发行版」。Server 遥测上报的版本号由 CMake 从 `platforms/windows/version.txt` 读入，`Build-Client.ps1` 的 `-TargetVersion` 把同一个版本号同时传给 Tauri 和 Server。
 - **外部链接**：走 `msime_host_windows::open_url`，用 `ShellExecuteW` 把 https URL 直接交给默认浏览器，非 https 一律拒绝，与已有的 `open_directory` 共用同一段调用；不经 `cmd /C start`，不闪控制台窗口，URL 也不过 cmd 解析。
 
@@ -2032,6 +2032,21 @@ Windows 的安装位置、资源目录和用户状态目录可能包含中文、
 - 托盘菜单与悬浮工具栏的配色：来源的原生托盘菜单（`TrayMenuPresenter::ApplyTheme`）和悬浮工具栏（`FloatingToolbarPresenter::ApplyTheme`）使用固定的中性色，只随各自的深浅色偏好切换，不跟随候选皮肤。本仓是有意的分歧：两者跟随全局主题，由 `CandidatePalette.h` 的 `toolbar_palette(CandidatePalette)` 和 `tray_menu_palette(CandidatePalette)` 从解析后的候选窗调色板派生（工具栏取底色、正文、悬停、描边与选中色，托盘取菜单的底色、正文、悬停与描边）。来源行尾的开关在本仓画成工具格（`TrayMenuWindow.cpp` 的 `TrayMenuRowKind::Tool`）：开启时整格填主题的 accent，图标与说明取 `candidate_on_accent`（按亮度取黑或白，所以 ink 的白色 accent 上仍然可读）；关闭时和普通行一样，只在悬停时填 hover。托盘中能力缺失的行用 `number` 色变暗而不是隐藏；来源的菜单没有这种行，所以这是本仓自己的取值。`windows-candidate-palette` 覆盖这些颜色。
 - 打字统计的 30 天明细表和永久保留由 PR #652 处理，这一批没有改动。
 - 验证层级：TypeScript 部分在本机跑了 vitest 和 typecheck；`msime-client-core` 在本机跑了 cargo test；配色头文件测试在本机用 clang 编译并运行；Windows 窗口和面板定位代码经 `build-cross.sh x64` 和 `cargo check --target x86_64-pc-windows-gnu` 交叉编译。以上都没有在 Windows 桌面上实际操作过。
+
+### Windows：使用上报改走共享上报器，默认开启（2026-10-02）
+
+- 取代下面 2026-09-24 那一节的开关与事件：`telemetry_enabled` 不再读取，改读共享偏好 `usage_reporting`，默认开启，用户可以关闭。`TelemetryConsent.h` 的 `usage_reporting_enabled` 把缺省读作开启、显式 `false` 读作关闭，读不出布尔值时按关闭处理。
+- 事件：`platforms/common/Telemetry.cpp` 改成 Host API `msime_client_telemetry_*` 的薄封装，Server 不再自己用 libcurl 发送，也不再每次启动发 `download`。一个 Server 进程就是一次会话：启动时开始（只做文件 I/O，目录仍是 `%LOCALAPPDATA%\MSIME`，旧队列由 Host API 迁移），每天最多排一条 `active`，消息循环正常结束时排一条 `session`。投递在不等待的后台线程里进行，启动时一次，之后每 30 分钟一次。
+- 崩溃：`std::set_terminate` 回调写入异常类型和第一行说明（JSON 异常只保留类型和编号）以及 `CaptureStackBackTrace` 的调用栈；新增 `SetUnhandledExceptionFilter`，在不分配堆内存的前提下写入异常代码、出错模块和偏移，x64 上再用 `RtlVirtualUnwind` 沿 CONTEXT 回溯。两条路径都只写这次会话的崩溃记录，不联网；下次启动时变成 `crash` 和 `session_crash`，模块只保留文件名。只留下会话标记（注销、关机、被结束进程）不算崩溃。
+- 开关随偏好发布立即生效：关闭时清空队列、会话标记和崩溃记录，并停止记录崩溃；重新开启时像 Server 启动一样开始新会话。
+- 文案：设置页「匿名使用统计」和安装器「联网功能」页改为默认开启，并逐项写出发送内容。
+- 证据：`windows-telemetry-consent` 改为覆盖新的默认值和旧键；共享封装的会话、信号、terminate 和开关路径由 Linux 构建门禁里的 `common-telemetry` 在真实进程中验证。Windows 专有代码（异常过滤器、回溯、Server 接线、设置页、安装器）只能交给 Windows CI，本机没有编译或运行。
+
+### Windows：使用上报改为默认开启的 usage_reporting，走共享 Host API（2026-10-02）
+
+- 偏好：Server 和原生设置窗口都改读写共享偏好 `usage_reporting`（默认开启，开着时共享层不写进文档），不再读 `telemetry_enabled`；`TelemetryConsent.h` 的 `usage_reporting_enabled` 把缺省读作开启、显式 `false` 读作关闭、读不懂的值读作关闭。设置窗口「数据与隐私」和安装器「联网功能」页的文案逐项写出现在发送的内容。
+- Server：`platforms/common/Telemetry.cpp` 成为 Host API `msime_client_telemetry_*` 的薄封装，队列、安装 id、每日 `active`、会话和投递都在 Rust 里，不再用 libcurl 发遥测。每个 Server 进程一次会话，消息循环退出时排进 `session`；`std::set_terminate` 和 `SetUnhandledExceptionFilter` 只把崩溃记录（异常摘要加 `模块文件名+偏移` 的调用栈）写到 `%LOCALAPPDATA%\MSIME\telemetry-crashes`，下次启动才变成 `crash` 和 `session_crash`。投递在不等待的后台线程里进行，每 30 分钟一轮。偏好发布时开关立即生效：关闭清空队列并解除崩溃捕获。
+- 证据：`windows-telemetry-consent` 改为覆盖新语义；SEH 路径、Server 的实际投递和设置窗口文案只能在 Windows CI 和真机上看。
 
 ### Windows：启动与崩溃上报改为用户开启，默认关闭（2026-09-24）
 

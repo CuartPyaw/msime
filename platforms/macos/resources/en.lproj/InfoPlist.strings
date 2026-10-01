@@ -7,5 +7,8 @@
 "app.msime.inputmethod.MetasequoiaIME.Roman" = "Metasequoia · EN";
 "app.msime.inputmethod.MetasequoiaIME.Japanese" = "Metasequoia · JA";
 "app.msime.inputmethod.MetasequoiaIME.Korean" = "Metasequoia · KO";
+"app.msime.inputmethod.MetasequoiaIME.Cantonese" = "Metasequoia · YUE";
+"app.msime.inputmethod.MetasequoiaIME.Zhuyin" = "Metasequoia · Zhuyin";
+"app.msime.inputmethod.MetasequoiaIME.Vietnamese" = "Metasequoia · VI";
 "NSMicrophoneUsageDescription" = "Record speech only when voice input is started, to transcribe and insert your words.";
 "NSSpeechRecognitionUsageDescription" = "Send the recording to macOS speech recognition when the system recogniser is selected, to transcribe your words.";

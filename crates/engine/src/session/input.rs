@@ -11,6 +11,7 @@ use super::editing::temporary_japanese_preedit;
 use super::online::OnlineRequestGuard;
 use super::options::SessionOptions;
 use crate::assets;
+use crate::cantonese;
 use crate::diagnostics;
 use crate::error::{EngineError, Result};
 use crate::helpcode::{is_supported_helpcode_schema, load_helpcode_keymap, SharedKeymap};
@@ -31,6 +32,8 @@ use crate::types::{
 use crate::user_dictionary::ngram_store::PersonalNgramStore;
 use crate::user_dictionary::removal::learn_entered_english_word;
 use crate::user_dictionary::typo_profile::PersonalTypoProfile;
+use crate::zhuyin;
+use crate::zhuyin::scheme::ZhuyinKey;
 
 /// The weight an English word typed out and committed raw enters `english.db` with (user_dictionary_journal.h:137).
 const ENTERED_ENGLISH_WORD_WEIGHT: i64 = 10;
@@ -98,10 +101,20 @@ impl InputSession {
     pub fn new(options: &SessionOptions) -> Result<Self> {
         let paths = options.paths.clone();
         let journal = paths.user(assets::USER_JOURNAL);
-        let mut engine = ImeSession::new(options.scheme, options.shuangpin_profile, &paths);
+        let mut engine = ImeSession::new(
+            options.scheme,
+            options.shuangpin_profile,
+            &paths,
+            options.cantonese_dictionary.clone(),
+            options.zhuyin_dictionary.clone(),
+        )?;
         engine.set_autocorrect_types(0);
         engine.set_quanpin_helpcode_enabled(true);
         engine.set_shuangpin_helpcode_enabled(true);
+        engine.set_vietnamese_options(
+            options.vietnamese_input_method,
+            options.vietnamese_tone_style,
+        );
         let mut session = Self {
             queries: CandidateQueries::new(&paths, options.shuangpin_profile),
             engine,
@@ -211,7 +224,13 @@ impl InputSession {
         if self.is_korean() {
             return self.handle_korean_character(value);
         }
-        if !self.has_composition() && self.scheme().is_pinyin() {
+        if self.is_vietnamese() {
+            return self.handle_vietnamese_character(value);
+        }
+        if self.is_zhuyin() {
+            return self.handle_zhuyin_character(value);
+        }
+        if !self.has_composition() && self.scheme().opens_local_modes() {
             let entry = if shift_only {
                 self.local_mode_for_entry(value)
             } else {
@@ -264,8 +283,11 @@ impl InputSession {
             SchemeKey::Semicolon
         } else if japanese_long_vowel {
             SchemeKey::Minus
-        } else {
+        } else if value.is_ascii_alphabetic() {
             SchemeKey::Letter(value)
+        } else {
+            // Only a key the scheme claims gets past the filter above; none of the current schemes claims one here.
+            SchemeKey::Symbol(value)
         };
         self.engine.handle_key(key);
         self.update_mixed_candidates();
@@ -375,12 +397,154 @@ impl InputSession {
         }
     }
 
+    /// Vietnamese keys: a letter always spells, and a VNI digit spells while a word is composing; both are handled. With nothing composing any other key goes to the host. With a word composing, punctuation stays unhandled without touching it, because the punctuation route commits the word ahead of the mark; any other key commits the word and stays unhandled, so the host inserts the key after the commit.
+    fn handle_vietnamese_character(&mut self, value: u8) -> KeyResult {
+        let spells = value.is_ascii_alphabetic()
+            || self
+                .engine
+                .vietnamese_spelling_symbols()
+                .as_bytes()
+                .contains(&value);
+        if !spells {
+            if !self.has_composition() {
+                self.reset_commit_context();
+                return KeyResult::unhandled();
+            }
+            if value.is_ascii_punctuation() {
+                return KeyResult::unhandled();
+            }
+            return self.commit_vietnamese_composition();
+        }
+        // A long pause before a new word usually means the user moved to another field or application.
+        if !self.has_composition()
+            && self.chain.previous.is_some()
+            && self.chain.paused(self.steady_now())
+        {
+            self.chain.reset();
+        }
+        let key = if value.is_ascii_alphabetic() {
+            SchemeKey::Letter(value)
+        } else {
+            SchemeKey::Symbol(value)
+        };
+        self.engine.handle_key(key);
+        self.update_mixed_candidates();
+        self.online_requests.invalidate();
+        KeyResult::handled()
+    }
+
+    /// The Vietnamese word goes to the host as displayed, and the key that ended it does not: the result is unhandled, so Space, Enter, a caret key or Tab still does its own work after the commit. Nothing is learned.
+    fn commit_vietnamese_composition(&mut self) -> KeyResult {
+        let text = self.preedit();
+        self.reset_composition();
+        self.chain.reset();
+        KeyResult {
+            handled: false,
+            commit: Some(text),
+            diagnostic: None,
+        }
+    }
+
+    /// Zhuyin keys go to the bopomofo editor, which claims its phonetic keys, the tone keys while composing and the Shift punctuation keys; a claimed key is handled and carries whatever it committed (the Shift marks, an auto-shift). An unclaimed key leaves the editor alone when nothing is composing, when it is a selection key (a digit 1-9 or Space) with the list open, so the runtime's page selection picks the row, and when it is punctuation, because the punctuation route commits the conversion ahead of the mark; any other unclaimed key commits the conversion and stays unhandled, so the host inserts the key after the commit.
+    fn handle_zhuyin_character(&mut self, value: u8) -> KeyResult {
+        // A long pause before a new composition usually means the user moved to another field or application.
+        if !self.has_composition()
+            && self.chain.previous.is_some()
+            && self.chain.paused(self.steady_now())
+        {
+            self.chain.reset();
+        }
+        let claimed = self.engine.handle_zhuyin_key(ZhuyinKey::Char(value));
+        let committed = self.engine.take_zhuyin_committed();
+        self.update_mixed_candidates();
+        let claimed = match claimed {
+            Ok(claimed) => claimed,
+            Err(error) => return KeyResult::handled().with_diagnostic(Some(error.to_string())),
+        };
+        if claimed {
+            self.online_requests.invalidate();
+            if !self.has_composition() {
+                self.reset_composition();
+            }
+            if committed.is_empty() {
+                return KeyResult::handled();
+            }
+            self.chain.reset();
+            return KeyResult::committed(committed);
+        }
+        if !self.has_composition() {
+            self.reset_commit_context();
+            return KeyResult::unhandled();
+        }
+        let selects =
+            self.engine.zhuyin_list_open() && (value == b' ' || (b'1'..=b'9').contains(&value));
+        if selects || value.is_ascii_punctuation() {
+            return KeyResult::unhandled();
+        }
+        self.commit_zhuyin_composition()
+    }
+
+    /// The Zhuyin conversion goes to the host and the key that ended it does not: the result is unhandled, so a caret key, a capital or Tab still does its own work after the commit. The pending syllable is dropped and nothing is learned; a composition that converted nothing yet commits nothing.
+    fn commit_zhuyin_composition(&mut self) -> KeyResult {
+        let text = self.engine.take_zhuyin_text();
+        self.reset_composition();
+        self.chain.reset();
+        KeyResult {
+            handled: false,
+            commit: (!text.is_empty()).then_some(text),
+            diagnostic: None,
+        }
+    }
+
+    /// The Zhuyin editor's commands. ConvertHanja (command 16) opens the candidate list or closes it; Cancel closes an open list, else clears the composition; Backspace closes an open list, else removes the last key or syllable; CommitRaw commits the converted text; CommitCandidate chooses the first row with the list open and commits the converted text otherwise. The conversion has no caret inside it, so the caret commands commit it and hand the key back. `None` leaves the command (CommitReading, CycleKanaVariant) to the shared paths, which do nothing for Zhuyin.
+    fn handle_zhuyin_command(&mut self, command: Command) -> Option<KeyResult> {
+        let key = match command {
+            Command::ConvertHanja => ZhuyinKey::OpenList,
+            Command::Cancel => ZhuyinKey::Escape,
+            Command::Backspace => ZhuyinKey::Backspace,
+            Command::CommitRaw => ZhuyinKey::Enter,
+            Command::CommitCandidate if self.engine.zhuyin_list_open() => {
+                return Some(self.select_candidate(0));
+            }
+            Command::CommitCandidate => ZhuyinKey::Enter,
+            Command::MoveLeft
+            | Command::MoveRight
+            | Command::MoveHome
+            | Command::MoveEnd
+            | Command::DeleteForward => return Some(self.commit_zhuyin_composition()),
+            Command::CommitReading | Command::CycleKanaVariant => return None,
+        };
+        let claimed = self.engine.handle_zhuyin_key(key);
+        let committed = self.engine.take_zhuyin_committed();
+        self.update_mixed_candidates();
+        if let Err(error) = claimed {
+            return Some(KeyResult::handled().with_diagnostic(Some(error.to_string())));
+        }
+        self.online_requests.invalidate();
+        if !self.has_composition() {
+            // Nothing reached the host on Cancel or Backspace, so the chain still ends where it did; only the composition is over.
+            self.reset_composition();
+            self.chain.same_composition = false;
+        }
+        // Enter on a pending syllable alone converted nothing, so it commits nothing.
+        if key != ZhuyinKey::Enter || committed.is_empty() {
+            return Some(KeyResult::handled());
+        }
+        self.chain.reset();
+        Some(KeyResult::committed(committed))
+    }
+
     /// input_session.cpp:294-406.
     pub fn handle_command(&mut self, command: Command) -> KeyResult {
         if !self.has_composition() {
             // With nothing composed every command is left to the host, which edits the text, moves the caret or inserts a newline, so the chain no longer ends where the host's text does.
             self.chain.reset();
             return KeyResult::unhandled();
+        }
+        if self.zhuyin_rules_apply() {
+            if let Some(result) = self.handle_zhuyin_command(command) {
+                return result;
+            }
         }
         if self.korean_rules_apply() {
             if let Some(result) = self.handle_korean_hanja_command(command) {
@@ -402,6 +566,24 @@ impl InputSession {
             )
         {
             return self.commit_korean_composition();
+        }
+        // A Vietnamese word has no caret inside it and no list: the commit and caret commands end it as displayed and hand the key back. The first Cancel shows the raw keystrokes instead of the transformed word, and the second takes the shared path and discards it. Backspace removes one keystroke through the shared path.
+        if self.vietnamese_rules_apply() {
+            match command {
+                Command::CommitCandidate
+                | Command::CommitRaw
+                | Command::CommitReading
+                | Command::MoveLeft
+                | Command::MoveRight
+                | Command::MoveHome
+                | Command::MoveEnd
+                | Command::DeleteForward => return self.commit_vietnamese_composition(),
+                Command::Cancel if self.engine.restore_vietnamese_raw() => {
+                    self.update_mixed_candidates();
+                    return KeyResult::handled();
+                }
+                _ => {}
+            }
         }
         match command {
             Command::MoveLeft
@@ -438,7 +620,7 @@ impl InputSession {
                 self.chain.same_composition = false;
                 KeyResult::handled()
             }
-            // Only a Korean syllable converts to Hanja; the host keeps the key.
+            // Only a Korean syllable converts to Hanja and only a Zhuyin conversion opens its list; the host keeps the key.
             Command::ConvertHanja => KeyResult::unhandled(),
         }
     }
@@ -475,6 +657,26 @@ impl InputSession {
 
     /// input_session.cpp:247-258.
     pub fn handle_candidate_key(&mut self, value: u8) -> KeyResult {
+        // A VNI digit spells the composing word; there is no list to select from.
+        if self.vietnamese_rules_apply()
+            && self
+                .engine
+                .vietnamese_spelling_symbols()
+                .as_bytes()
+                .contains(&value)
+        {
+            return self.handle_character(value, false);
+        }
+        // A Zhuyin tone digit or phonetic digit spells while the editor claims it; with the list open the editor leaves 1-9 to selection.
+        if self.zhuyin_rules_apply()
+            && self
+                .engine
+                .zhuyin_spelling_symbols()
+                .as_bytes()
+                .contains(&value)
+        {
+            return self.handle_character(value, false);
+        }
         if !self.has_composition() || !(b'1'..=b'9').contains(&value) {
             // The host inserts the key itself, so the next word no longer follows the last one.
             if !self.has_composition() {
@@ -507,8 +709,24 @@ impl InputSession {
         {
             return self.handle_character(value, false);
         }
-        // Korean writes half-width ASCII punctuation whatever the Chinese punctuation switches say. With a syllable open the mark follows it in one commit; with nothing open the host inserts the key itself.
-        if self.is_korean() && !self.dedicated_english && self.local_mode == LocalInputMode::None {
+        // A Zhuyin phonetic key (`,` `.` `/` `;` `-`) spells, and a Shift punctuation key (`<` `?` `[` ...) commits the conversion with its full-width mark through the editor, whatever the Chinese punctuation switches say.
+        if self.zhuyin_rules_apply()
+            && (self
+                .engine
+                .zhuyin_spelling_symbols()
+                .as_bytes()
+                .contains(&value)
+                || zhuyin::layout::SHIFT_PUNCTUATION
+                    .iter()
+                    .any(|(key, _)| *key == value))
+        {
+            return self.handle_character(value, false);
+        }
+        // A scheme without Chinese punctuation (Korean) writes half-width ASCII punctuation whatever the Chinese punctuation switches say. With a syllable open the mark follows it in one commit; with nothing open the host inserts the key itself.
+        if !self.engine.current_scheme_type().uses_chinese_punctuation()
+            && !self.dedicated_english
+            && self.local_mode == LocalInputMode::None
+        {
             if !self.has_composition() {
                 self.reset_commit_context();
                 return KeyResult::unhandled();
@@ -591,7 +809,21 @@ impl InputSession {
         if self.local_mode != LocalInputMode::None {
             return self.local_mode.spelling_symbols().to_owned();
         }
-        if self.has_composition() || !self.scheme().is_pinyin() {
+        if self.vietnamese_rules_apply() {
+            return self.engine.vietnamese_spelling_symbols().to_owned();
+        }
+        if self.zhuyin_rules_apply() {
+            return self.engine.zhuyin_spelling_symbols().to_owned();
+        }
+        // `'` is a Jyutping syllable boundary only inside a composition; idle it is punctuation.
+        if self.cantonese_rules_apply() {
+            return if self.has_composition() {
+                cantonese::SPELLING_SYMBOLS_COMPOSING.to_owned()
+            } else {
+                String::new()
+            };
+        }
+        if self.has_composition() || !self.scheme().opens_local_modes() {
             return String::new();
         }
         (*b"/@")
@@ -682,12 +914,15 @@ impl InputSession {
         &self.mixed_candidates
     }
 
-    /// Discards the composition.
-    pub fn switch_scheme(&mut self, scheme: SchemeType) {
+    /// Discards the composition. A scheme whose dictionary cannot be opened is unavailable: the error is returned and the session stays in its scheme with its composition untouched.
+    pub fn switch_scheme(&mut self, scheme: SchemeType) -> Result<()> {
+        // Opening the dictionary first leaves nothing changed when it fails; the switch after it then cannot fail. Resetting must come before the switch, because leaving temporary Japanese switches back to the scheme it was entered from.
+        self.engine.activate(scheme)?;
         self.reset_composition();
         self.chain.reset();
-        self.engine.switch_scheme(scheme);
+        self.engine.switch_scheme(scheme)?;
         self.update_mixed_candidates();
+        Ok(())
     }
 
     pub fn set_dedicated_english_mode(&mut self, enabled: bool) {
@@ -755,7 +990,9 @@ impl InputSession {
         self.engine.reset();
         if let Some(original) = original_scheme {
             if self.engine.current_scheme_type() != original {
-                self.engine.switch_scheme(original);
+                // Temporary Japanese is entered only from a scheme that opens local modes, and none of those reads a language dictionary, so returning to it cannot fail.
+                let returned = self.engine.switch_scheme(original);
+                debug_assert!(returned.is_ok());
             }
         }
     }
@@ -837,12 +1074,53 @@ impl InputSession {
         self.is_korean() && self.local_mode == LocalInputMode::None && !self.dedicated_english
     }
 
+    pub(super) fn is_vietnamese(&self) -> bool {
+        self.engine.current_scheme_type() == SchemeType::Vietnamese
+    }
+
+    /// The Vietnamese scheme's own rules are in force: dedicated English and the local modes keep theirs inside it.
+    pub(super) fn vietnamese_rules_apply(&self) -> bool {
+        self.is_vietnamese() && self.local_mode == LocalInputMode::None && !self.dedicated_english
+    }
+
+    pub(super) fn is_cantonese(&self) -> bool {
+        self.engine.current_scheme_type() == SchemeType::Cantonese
+    }
+
+    /// The Cantonese scheme's own rules are in force: dedicated English keeps its own inside it.
+    pub(super) fn cantonese_rules_apply(&self) -> bool {
+        self.is_cantonese() && self.local_mode == LocalInputMode::None && !self.dedicated_english
+    }
+
+    pub(super) fn is_zhuyin(&self) -> bool {
+        self.engine.current_scheme_type() == SchemeType::Zhuyin
+    }
+
+    /// The Zhuyin scheme's own rules are in force: dedicated English and the local modes keep theirs inside it.
+    pub(super) fn zhuyin_rules_apply(&self) -> bool {
+        self.is_zhuyin() && self.local_mode == LocalInputMode::None && !self.dedicated_english
+    }
+
+    /// The scheme's openable candidate list is showing: the composing syllable's Hanja in Korean, the list the user opened over the conversion in Zhuyin.
+    pub(super) fn candidate_list_open(&self) -> bool {
+        self.engine
+            .current_scheme_type()
+            .has_openable_candidate_list()
+            && ((self.korean_rules_apply() && self.engine.korean_hanja_open())
+                || (self.zhuyin_rules_apply() && self.engine.zhuyin_list_open()))
+    }
+
     /// The helpcode switch of the session's scheme; other schemes have none.
     pub(super) fn helpcode_enabled(&self) -> bool {
         match self.scheme() {
             SchemeType::Quanpin => self.quanpin_helpcode_enabled,
             SchemeType::Shuangpin => self.shuangpin_helpcode_enabled,
-            SchemeType::Wubi | SchemeType::JapaneseRomaji | SchemeType::Korean => false,
+            SchemeType::Wubi
+            | SchemeType::JapaneseRomaji
+            | SchemeType::Korean
+            | SchemeType::Cantonese
+            | SchemeType::Zhuyin
+            | SchemeType::Vietnamese => false,
         }
     }
 
@@ -960,7 +1238,9 @@ impl InputSession {
     fn enter_local_mode(&mut self, mode: LocalInputMode, letter: u8) -> Option<String> {
         if mode == LocalInputMode::TemporaryJapanese {
             self.temporary_original_scheme = Some(self.scheme());
-            self.engine.switch_scheme(SchemeType::JapaneseRomaji);
+            // Japanese reads no language dictionary, so the switch cannot fail.
+            let switched = self.engine.switch_scheme(SchemeType::JapaneseRomaji);
+            debug_assert!(switched.is_ok());
         }
         self.local_mode = mode;
         self.local_preedit = (letter as char).to_string();
@@ -1047,13 +1327,16 @@ impl InputSession {
         item.scheme == SchemeType::Wubi
     }
 
-    /// Whether a row came from a dictionary a pin, fixed position or removal can write to. Japanese rows come from a read-only model and Korean Hanja rows from the embedded table; keyed by their letters, either would land in the pinyin user dictionary.
+    /// Whether a row came from a dictionary a pin, fixed position or removal can write to. Japanese rows come from a read-only model, Korean Hanja rows from the embedded table, Cantonese rows from the read-only `cantonese.db` and Zhuyin rows from the read-only `zhuyin.db`; keyed by their letters, any of them would land in the pinyin user dictionary.
     pub(super) fn is_editable_source(&self, item: &WordItem) -> bool {
         item.source == CandidateSource::EnglishDictionary
             || (item.source.is_dictionary()
                 && !matches!(
                     self.scheme(),
-                    SchemeType::JapaneseRomaji | SchemeType::Korean
+                    SchemeType::JapaneseRomaji
+                        | SchemeType::Korean
+                        | SchemeType::Cantonese
+                        | SchemeType::Zhuyin
                 ))
     }
 }

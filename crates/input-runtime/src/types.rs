@@ -77,6 +77,10 @@ pub enum CharacterWidth {
 #[derive(Clone, Debug, Serialize)]
 pub struct View {
     pub scheme: u8,
+    /// The active scheme writes Chinese (`SchemeType::is_chinese`): what 中文 returns to and what the Chinese statistics count. Hosts branch on this rather than on scheme ordinals.
+    pub chinese_text: bool,
+    /// The host's Simplified-to-Traditional conversion applies to this view's preedit and to its commits: a scheme it applies to (`SchemeType::script_conversion_applies`) outside the `unicode` and `temporary_japanese` modes, whose text is not Chinese to convert.
+    pub script_conversion: bool,
     /// Engine-owned mobile layout mode. Digits are input, never candidate shortcuts, while active.
     pub nine_key: bool,
     pub nine_key_spellings: Vec<String>,
@@ -114,6 +118,8 @@ pub struct View {
     pub page: usize,
     pub page_size: usize,
     pub page_count: usize,
+    /// The scheme's openable candidate list (the Korean Hanja list) is showing. Hosts read this instead of inferring it from the scheme and a non-empty candidate list.
+    pub candidate_list_open: bool,
     pub candidates: Vec<Candidate>,
 }
 
@@ -121,6 +127,8 @@ pub struct View {
 pub struct OutputContext {
     pub scheme: u8,
     pub local_mode: String,
+    /// Whether the host's Simplified-to-Traditional conversion applies to this commit, decided by the mode the commit was made in ([`View::script_conversion`]).
+    pub script_conversion: bool,
     /// Whether the host counts this commit in typing statistics. False for text the Engine generated in the expression, command and mention modes, which the user did not type out.
     pub typing_statistics: bool,
 }

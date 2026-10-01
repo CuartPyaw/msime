@@ -651,6 +651,7 @@ impl InputEngine for Fixture {
             },
             candidate_corrected: vec![false; self.words.len()],
             candidate_answers_key: vec![true; self.words.len()],
+            candidate_list_open: false,
             microsoft_shuangpin: false,
             shuangpin_profile: "xiaohe".into(),
             answered_by_pinyin_fallback: false,
@@ -1416,6 +1417,7 @@ impl InputEngine for PhraseEngine {
             candidate_positions: vec![0; self.words.len()],
             candidate_corrected: vec![false; self.words.len()],
             candidate_answers_key: vec![true; self.words.len()],
+            candidate_list_open: false,
             microsoft_shuangpin: false,
             shuangpin_profile: "xiaohe".into(),
             answered_by_pinyin_fallback: false,
@@ -2973,6 +2975,10 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine::host::EngineOpti
         },
         rescoring_context: String::new(),
         sentence_alternatives: true,
+        vietnamese_input_method: 0,
+        vietnamese_tone_style: 0,
+        cantonese_dictionary: String::new(),
+        zhuyin_dictionary: String::new(),
     }
 }
 
@@ -3446,6 +3452,7 @@ impl InputEngine for DigitCommitsEngine {
             candidate_positions: vec![0; count],
             candidate_corrected: vec![false; count],
             candidate_answers_key: vec![true; count],
+            candidate_list_open: false,
             microsoft_shuangpin: false,
             shuangpin_profile: "xiaohe".into(),
             answered_by_pinyin_fallback: false,
@@ -3528,6 +3535,48 @@ fn a_digit_that_already_committed_is_not_also_a_selection() {
     assert!(!digit.handled);
     assert_eq!(digit.commit.as_deref(), Some("x"));
     assert!(digit.view.candidates.is_empty());
+}
+
+/// A digit the scheme spells with is never a page selection, even when the Engine lets it go with candidates showing; outside a local mode the spelling symbols are the scheme's own keys (a Zhuyin tone or phonetic key, a VNI mark).
+#[test]
+fn a_spelling_digit_the_engine_let_go_is_not_a_selection() {
+    let mut runtime = runtime();
+    runtime.focus(true).unwrap();
+    runtime.engine.spelling_symbols = "0123456789".into();
+    for value in *b"ab" {
+        runtime
+            .dispatch(Action::Character {
+                value,
+                shift: false,
+            })
+            .unwrap();
+    }
+    assert!(!runtime.view().candidates.is_empty());
+    let digit = runtime
+        .dispatch(Action::Character {
+            value: b'2',
+            shift: false,
+        })
+        .unwrap();
+    assert!(!digit.handled);
+    assert!(digit.commit.is_none());
+    assert_eq!(digit.view.editing_text, "ab");
+
+    // The same digit picks the row once the scheme no longer spells with it; the next key's snapshot is where the runtime learns that.
+    runtime.engine.spelling_symbols.clear();
+    runtime
+        .dispatch(Action::Character {
+            value: b'c',
+            shift: false,
+        })
+        .unwrap();
+    let picked = runtime
+        .dispatch(Action::Character {
+            value: b'2',
+            shift: false,
+        })
+        .unwrap();
+    assert_eq!(picked.commit.as_deref(), Some("candidate-1"));
 }
 
 fn generated_mode_runtime(directory: &std::path::Path) -> Runtime {
@@ -4020,6 +4069,7 @@ impl InputEngine for WubiMixedEngine {
             candidate_positions: vec![0; count],
             candidate_corrected: [false, false, true].into_iter().take(count).collect(),
             candidate_answers_key: vec![true; count],
+            candidate_list_open: false,
             microsoft_shuangpin: false,
             shuangpin_profile: "xiaohe".into(),
             answered_by_pinyin_fallback: self.answered_by_pinyin_fallback && count > 0,
@@ -4585,4 +4635,1051 @@ fn a_busy_provider_keeps_only_the_newest_completed_result() {
     assert_eq!(answered, Some("nihao".to_owned()));
     assert!(worker.try_recv().is_none());
     worker.shutdown();
+}
+
+/// The scheme predicates the runtime reads give, for every existing scheme, exactly what the ordinal comparisons they replaced gave.
+#[test]
+fn scheme_predicates_reproduce_the_ordinal_rules_they_replace() {
+    use super::runtime::{runtime_reorders_candidates, script_conversion};
+    use msime_engine::SchemeType;
+    for ordinal in 0..=4u8 {
+        let scheme = SchemeType::from_u8(ordinal).unwrap();
+        // Smart punctuation: neither Japanese nor Korean.
+        assert_eq!(
+            scheme.host_smart_punctuation(),
+            ordinal != 3 && ordinal != KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        // Nine-key: quanpin only.
+        assert_eq!(scheme.nine_key(), ordinal == 0, "{ordinal}");
+        // Phrase holding, reranking and runner-up demotion: everything but Korean.
+        assert_eq!(
+            scheme.holds_phrase_progress(),
+            ordinal != KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        assert_eq!(
+            runtime_reorders_candidates(ordinal),
+            ordinal != KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        // Committing on blur and the double Cancel of an open list: Korean only.
+        assert_eq!(
+            scheme.commits_on_blur(),
+            ordinal == KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        assert_eq!(
+            scheme.has_openable_candidate_list(),
+            ordinal == KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        // The cloud gate refused Korean; Wubi never had a query the Engine called eligible.
+        assert_eq!(
+            scheme.cloud_eligible(),
+            ordinal != 2 && ordinal != KOREAN_SCHEME,
+            "{ordinal}"
+        );
+        // Only the schemes that open local modes listed idle spelling symbols (`/`, `@`).
+        assert_eq!(scheme.opens_local_modes(), ordinal <= 1, "{ordinal}");
+        assert_eq!(
+            script_conversion(ordinal, "none"),
+            ordinal <= 2,
+            "{ordinal}"
+        );
+    }
+    // The placeholder snapshot of a failed refresh names no scheme and keeps the treatment the ordinal comparisons gave it.
+    assert!(runtime_reorders_candidates(255));
+    assert!(!script_conversion(255, "none"));
+
+    // The cloud gate reads the predicate: a Wubi query claiming eligibility is refused like a Korean one, and so is a query naming no scheme.
+    let query = |scheme: u8| OnlineQuery {
+        scheme,
+        generation: 1,
+        identity: "x".into(),
+        query_text: "ni".into(),
+        cache_key: "x".into(),
+        pinyin_segments: vec![],
+        cloud_eligible: true,
+        ai_eligible: false,
+        cloud_candidates: true,
+        session_id: 1,
+        ai_context: String::new(),
+        ai_assistant: None,
+        ai_cache_only: false,
+    };
+    for scheme in [0, 1, 3] {
+        assert!(cloud_request_url(&query(scheme)).is_some(), "{scheme}");
+    }
+    for scheme in [2, KOREAN_SCHEME, 255] {
+        assert!(cloud_request_url(&query(scheme)).is_none(), "{scheme}");
+    }
+}
+
+fn scheme_runtime(scheme: u8, local_mode: &str) -> Runtime<Fixture> {
+    let mut runtime = Runtime::new(
+        Fixture {
+            scheme,
+            local_mode: local_mode.into(),
+            words: vec!["甲".into(), "乙".into()],
+            ..Fixture::default()
+        },
+        5,
+    )
+    .unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+/// `chinese_text`, `script_conversion` and `candidate_list_open` for the existing schemes, and the host-facing checks that now read predicates.
+#[test]
+fn views_carry_the_scheme_traits_of_existing_schemes() {
+    for scheme in 0..=4u8 {
+        let mut runtime = scheme_runtime(scheme, "none");
+        let view = runtime.view();
+        assert_eq!(view.chinese_text, scheme <= 2, "{scheme}");
+        assert_eq!(view.script_conversion, scheme <= 2, "{scheme}");
+        assert!(!view.candidate_list_open, "{scheme}");
+        assert_eq!(
+            runtime.punctuation_host_context_available(false),
+            scheme <= 2,
+            "{scheme}"
+        );
+        assert!(!runtime.punctuation_host_context_available(true));
+        assert_eq!(
+            matches!(
+                runtime.set_nine_key_enabled(true),
+                Err(RuntimeError::InvalidNineKeyScheme)
+            ),
+            scheme != 0,
+            "{scheme}"
+        );
+        if scheme == 0 {
+            runtime.set_nine_key_enabled(false).unwrap();
+        }
+
+        type_key(&mut runtime);
+        let committed = runtime.dispatch(Action::SelectHighlighted).unwrap();
+        assert_eq!(committed.commit.as_deref(), Some("甲"));
+        let context = committed.commit_context.unwrap();
+        assert_eq!(context.scheme, scheme);
+        assert_eq!(context.script_conversion, scheme <= 2, "{scheme}");
+    }
+}
+
+/// A Chinese scheme's text is not converted inside the modes whose text is not Chinese, and a commit carries the mode it was made in even when committing leaves that mode.
+#[test]
+fn script_conversion_stays_off_in_unicode_and_temporary_japanese_modes() {
+    for local_mode in ["unicode", "temporary_japanese"] {
+        let mut runtime = scheme_runtime(0, local_mode);
+        let typed = type_key(&mut runtime);
+        assert!(typed.view.chinese_text);
+        assert!(!typed.view.script_conversion, "{local_mode}");
+        let committed = runtime.dispatch(Action::SelectHighlighted).unwrap();
+        assert!(
+            !committed.commit_context.unwrap().script_conversion,
+            "{local_mode}"
+        );
+        // Selecting returned the fixture to no local mode.
+        assert!(committed.view.script_conversion);
+    }
+    let typed = type_key(&mut scheme_runtime(0, "emoji"));
+    assert!(typed.view.script_conversion);
+}
+
+/// The view reports an open Hanja list from the Engine rather than leaving hosts to infer it, and discarding the composition with the list open still takes two Cancels: the first closes the list.
+#[test]
+fn an_open_korean_hanja_list_is_reported_and_discarded_with_two_cancels() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = korean_runtime(directory.path());
+    let typed = character(&mut runtime, b'g');
+    assert!(!typed.view.candidate_list_open);
+    assert!(!typed.view.chinese_text && !typed.view.script_conversion);
+    let opened = open_korean_hanja(&mut runtime, "ks");
+    assert!(opened.view.candidate_list_open);
+    assert!(!opened.view.candidates.is_empty());
+
+    // Escape only closes the list.
+    let closed = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(!closed.view.candidate_list_open);
+    assert_eq!(closed.view.preedit, "한");
+
+    // Leaving the client with the list open commits the Hangul (commits on blur), whatever is highlighted.
+    open_korean_hanja(&mut runtime, "");
+    runtime.dispatch(Action::NextCandidate).unwrap();
+    let left = runtime.focus(false).unwrap();
+    assert_eq!(left.commit.as_deref(), Some("한"));
+    assert!(!left.view.candidate_list_open);
+
+    // Attaching a client discards: the first Cancel closes the list and the second takes the syllable.
+    runtime.focus(true).unwrap();
+    open_korean_hanja(&mut runtime, "gks");
+    let attached = runtime.focus(true).unwrap();
+    assert!(attached.commit.is_none());
+    assert_eq!(attached.view.editing_text, "");
+    assert!(!attached.view.candidate_list_open);
+}
+
+/// An Engine that spells with punctuation marks it lists in `spelling_symbols`, as Zhuyin's bopomofo keys are, recording every mark it is handed as a character.
+struct SpellingMarksEngine {
+    scheme: u8,
+    symbols: String,
+    text: String,
+}
+
+impl InputEngine for SpellingMarksEngine {
+    fn snapshot(&self) -> Result<EngineSnapshot, RuntimeError> {
+        Ok(EngineSnapshot {
+            scheme: self.scheme,
+            nine_key: false,
+            nine_key_spellings: Vec::new(),
+            candidate_codes: Vec::new(),
+            candidate_annotations: Vec::new(),
+            candidate_sources: Vec::new(),
+            candidate_positions: Vec::new(),
+            candidate_corrected: Vec::new(),
+            candidate_answers_key: Vec::new(),
+            candidate_list_open: false,
+            microsoft_shuangpin: false,
+            shuangpin_profile: "xiaohe".into(),
+            answered_by_pinyin_fallback: false,
+            wubi_unique_four_code: false,
+            local_mode: "none".into(),
+            spelling_symbols: self.symbols.clone(),
+            dedicated_english: false,
+            preedit: self.text.clone(),
+            reading: String::new(),
+            editing_text: self.text.clone(),
+            caret_position: self.text.len(),
+            segment_raw_boundaries: Vec::new(),
+            candidates: Vec::new(),
+        })
+    }
+    fn character(&mut self, value: u8, _shift: bool) -> Result<EngineResult, RuntimeError> {
+        if !self.symbols.as_bytes().contains(&value) {
+            return Ok(empty_result(false));
+        }
+        self.text.push(char::from(value));
+        Ok(empty_result(true))
+    }
+    fn command(&mut self, _command: Command) -> Result<EngineResult, RuntimeError> {
+        self.text.clear();
+        Ok(empty_result(true))
+    }
+    fn select(&mut self, _index: usize) -> Result<EngineResult, RuntimeError> {
+        Ok(empty_result(false))
+    }
+    fn finish(&mut self, _index: usize) -> Result<EngineResult, RuntimeError> {
+        Ok(EngineResult {
+            handled: !self.text.is_empty(),
+            has_commit: !self.text.is_empty(),
+            commit: std::mem::take(&mut self.text),
+            diagnostic: String::new(),
+        })
+    }
+    fn punctuation(&mut self, _value: u8) -> Result<EngineResult, RuntimeError> {
+        Ok(empty_result(false))
+    }
+    fn select_edge(
+        &mut self,
+        index: usize,
+        _edge: CandidateEdge,
+    ) -> Result<EngineResult, RuntimeError> {
+        self.select(index)
+    }
+}
+
+/// The literal-mark route gives a scheme the marks it spells with, as the punctuation route does, while the keys that open a local mode with nothing composed stay literal.
+#[test]
+fn ascii_punctuation_reaches_a_scheme_that_spells_with_marks() {
+    // A scheme that opens no local mode: its listed marks are spelling, idle or composing.
+    let mut runtime = Runtime::new(
+        SpellingMarksEngine {
+            scheme: 3,
+            symbols: ",.".into(),
+            text: String::new(),
+        },
+        5,
+    )
+    .unwrap();
+    runtime.focus(true).unwrap();
+    let idle = runtime.dispatch(Action::PunctuationAscii(b',')).unwrap();
+    assert!(idle.handled && idle.commit.is_none());
+    assert_eq!(idle.view.editing_text, ",");
+    let composing = runtime.dispatch(Action::PunctuationAscii(b'.')).unwrap();
+    assert!(composing.handled && composing.commit.is_none());
+    assert_eq!(composing.view.editing_text, ",.");
+    // A mark the scheme does not list still ends the composition with the literal mark.
+    let ended = runtime.dispatch(Action::PunctuationAscii(b'!')).unwrap();
+    assert_eq!(ended.commit.as_deref(), Some(",.!"));
+
+    // A scheme whose idle symbols open modes: the literal route never opens one.
+    let mut runtime = Runtime::new(
+        SpellingMarksEngine {
+            scheme: 0,
+            symbols: "/".into(),
+            text: String::new(),
+        },
+        5,
+    )
+    .unwrap();
+    runtime.focus(true).unwrap();
+    let literal = runtime.dispatch(Action::PunctuationAscii(b'/')).unwrap();
+    assert!(literal.commit.is_none());
+    assert_eq!(literal.view.editing_text, "");
+}
+
+const VIETNAMESE_SCHEME: u8 = 7;
+
+/// A real Engine on the Vietnamese scheme with the given input method (0 Telex, 1 VNI), focused.
+fn vietnamese_runtime(directory: &std::path::Path, input_method: u8) -> Runtime {
+    let mut options = real_engine_options(directory);
+    options.scheme = VIETNAMESE_SCHEME;
+    options.vietnamese_input_method = input_method;
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+/// Types `keys` as plain characters, each one composing without a commit.
+fn compose_vietnamese(runtime: &mut Runtime, keys: &str) -> Transition {
+    let mut last = None;
+    for value in keys.bytes() {
+        let transition = character(runtime, value);
+        assert!(
+            transition.handled && transition.commit.is_none(),
+            "{keys}: {}",
+            value as char
+        );
+        last = Some(transition);
+    }
+    last.unwrap()
+}
+
+/// A Telex word is shown with its diacritics and no candidates, and Space commits the word and then leaves the space itself to the host, so the text reads `việt ` in that order. The scheme is not Chinese: nothing is script-converted and the host has no smart punctuation to apply.
+#[test]
+fn a_telex_word_commits_before_the_space_that_ends_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = vietnamese_runtime(directory.path(), 0);
+    assert!(!runtime.punctuation_host_context_available(false));
+
+    let typed = compose_vietnamese(&mut runtime, "vieejt");
+    assert_eq!(typed.view.scheme, VIETNAMESE_SCHEME);
+    assert_eq!(typed.view.editing_text, "việt");
+    assert_eq!(typed.view.caret_position, "việt".len());
+    assert_eq!(typed.view.reading, "");
+    assert!(typed.view.candidates.is_empty());
+    assert!(!typed.view.candidate_list_open);
+    assert!(!typed.view.chinese_text);
+    assert!(!typed.view.script_conversion);
+    assert!(!runtime.punctuation_host_context_available(false));
+    assert!(runtime.online_query().unwrap().is_none());
+
+    // Space commits the word and passes through, so the host inserts the space after it.
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(!space.handled);
+    assert_eq!(space.commit.as_deref(), Some("việt"));
+    let context = space.commit_context.unwrap();
+    assert_eq!(context.scheme, VIETNAMESE_SCHEME);
+    assert!(!context.script_conversion);
+    assert_eq!(space.view.editing_text, "");
+
+    // Punctuation ends the word and stays ASCII after it.
+    compose_vietnamese(&mut runtime, "nam");
+    let period = character(&mut runtime, b'.');
+    assert!(period.handled);
+    assert_eq!(period.commit.as_deref(), Some("nam."));
+    compose_vietnamese(&mut runtime, "nam");
+    let comma = runtime.dispatch(Action::Punctuation(b',')).unwrap();
+    assert_eq!(comma.commit.as_deref(), Some("nam,"));
+    let idle = runtime.dispatch(Action::Punctuation(b',')).unwrap();
+    assert!(!idle.handled && idle.commit.is_none());
+
+    // Enter commits the word and passes through.
+    compose_vietnamese(&mut runtime, "xin");
+    let enter = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert!(!enter.handled);
+    assert_eq!(enter.commit.as_deref(), Some("xin"));
+}
+
+/// While a VNI word composes, a digit is a tone or vowel key and composes rather than picking a candidate; with nothing composing, a digit is the host's to type.
+#[test]
+fn vni_digits_compose_while_a_word_is_open() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = vietnamese_runtime(directory.path(), 1);
+
+    let idle = character(&mut runtime, b'1');
+    assert!(!idle.handled && idle.commit.is_none());
+    assert_eq!(idle.view.editing_text, "");
+
+    compose_vietnamese(&mut runtime, "a");
+    assert_eq!(runtime.view().spelling_symbols, "0123456789");
+    let digit = character(&mut runtime, b'1');
+    assert!(digit.handled && digit.commit.is_none());
+    assert_eq!(digit.view.editing_text, "á");
+
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(!space.handled);
+    assert_eq!(space.commit.as_deref(), Some("á"));
+
+    let word = compose_vietnamese(&mut runtime, "vie65t");
+    assert_eq!(word.view.editing_text, "việt");
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(space.commit.as_deref(), Some("việt"));
+    assert_eq!(runtime.view().spelling_symbols, "");
+}
+
+/// Leaving the client commits the word as shown. The first Escape shows the raw keys again and keeps composing; the second drops the composition and commits nothing.
+#[test]
+fn vietnamese_blur_commits_and_escape_restores_then_cancels() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = vietnamese_runtime(directory.path(), 0);
+
+    compose_vietnamese(&mut runtime, "vieejt");
+    let left = runtime.focus(false).unwrap();
+    assert_eq!(left.commit.as_deref(), Some("việt"));
+    assert_eq!(left.view.editing_text, "");
+    runtime.focus(true).unwrap();
+    assert!(runtime.focus(false).unwrap().commit.is_none());
+
+    // Attaching a new client discards a word left open in the previous one.
+    runtime.focus(true).unwrap();
+    compose_vietnamese(&mut runtime, "vieejt");
+    let attached = runtime.focus(true).unwrap();
+    assert!(attached.commit.is_none());
+    assert_eq!(attached.view.editing_text, "");
+
+    let typed = compose_vietnamese(&mut runtime, "coffee");
+    assert_ne!(typed.view.editing_text, "coffee");
+    let restored = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(restored.handled && restored.commit.is_none());
+    assert_eq!(restored.view.editing_text, "coffee");
+    let cancelled = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(cancelled.handled && cancelled.commit.is_none());
+    assert_eq!(cancelled.view.editing_text, "");
+    assert_eq!(runtime.view().editing_text, "");
+}
+
+/// Caps Lock (uppercase without Shift) and Shift both reach the word as uppercase, with the tone still placed on the right vowel; there is no case folding as in Korean.
+#[test]
+fn vietnamese_uppercase_comes_through() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = vietnamese_runtime(directory.path(), 0);
+
+    for value in *b"VIEEJT" {
+        let transition = runtime
+            .dispatch(Action::Character {
+                value,
+                shift: false,
+            })
+            .unwrap();
+        assert!(transition.handled && transition.commit.is_none());
+    }
+    assert_eq!(runtime.view().editing_text, "VIỆT");
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(space.commit.as_deref(), Some("VIỆT"));
+
+    let typed = compose_vietnamese(&mut runtime, "Vieejt");
+    assert_eq!(typed.view.editing_text, "Việt");
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(space.commit.as_deref(), Some("Việt"));
+}
+
+const CANTONESE_SCHEME: u8 = 5;
+
+/// A `cantonese.db` with a few Jyutping rows, written with the shipped schema.
+fn cantonese_dictionary(directory: &std::path::Path) -> String {
+    use msime_engine::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let path = directory.join("cantonese.db");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute_batch(SCHEMA).unwrap();
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('nei'),('hou'),('ngo'),('ngoi'),('oi'),('i');\
+             INSERT INTO entries VALUES ('nei hou','你好',900),('nei hou','妳好',40),('nei','你',5000),('nei','妳',300),('hou','好',4000),('hou','號',500),('ngo','我',6000),('oi','愛',2500),('ngoi','外',1000);",
+        )
+        .unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+/// A real Engine on the Cantonese scheme with learning on, so a learning path the scheme failed to skip would write. Focused.
+fn cantonese_runtime(directory: &std::path::Path) -> Runtime {
+    let mut options = real_engine_options(directory);
+    options.scheme = CANTONESE_SCHEME;
+    options.learning = true;
+    options.cantonese_dictionary = cantonese_dictionary(directory);
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+/// Types `keys` as plain characters, each one composing without a commit.
+fn compose_cantonese(runtime: &mut Runtime, keys: &str) -> Transition {
+    let mut last = None;
+    for value in keys.bytes() {
+        let transition = character(runtime, value);
+        assert!(
+            transition.handled && transition.commit.is_none(),
+            "{keys}: {}",
+            value as char
+        );
+        last = Some(transition);
+    }
+    last.unwrap()
+}
+
+/// Every table of each SQLite file under `root`, with its row count, to show that nothing was written.
+fn database_rows(root: &std::path::Path) -> Vec<(String, String, i64)> {
+    let mut rows = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if path.extension().and_then(|extension| extension.to_str()) != Some("db") {
+                continue;
+            }
+            let connection = rusqlite::Connection::open_with_flags(
+                &path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            let tables: Vec<String> = connection
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            for table in tables {
+                let count = connection
+                    .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |row| {
+                        row.get(0)
+                    })
+                    .unwrap();
+                rows.push((path.display().to_string(), table, count));
+            }
+        }
+    }
+    rows.sort();
+    rows
+}
+
+/// Digits 1–9 pick from the visible page, and `'` is a syllable boundary the Engine takes while a word composes, on the character route and on both punctuation routes. The scheme is Chinese but its text is Traditional as stored, so nothing is script-converted.
+#[test]
+fn cantonese_digits_select_and_the_apostrophe_reaches_the_engine() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = cantonese_runtime(directory.path());
+
+    let typed = compose_cantonese(&mut runtime, "neihou");
+    assert_eq!(typed.view.scheme, CANTONESE_SCHEME);
+    assert_eq!(typed.view.editing_text, "nei hou");
+    assert_eq!(texts(&typed.view), ["你好", "妳好", "你", "妳"]);
+    assert!(typed.view.chinese_text);
+    assert!(!typed.view.script_conversion);
+    assert!(!typed.view.candidate_list_open);
+    assert_eq!(typed.view.spelling_symbols, "'");
+
+    let picked = character(&mut runtime, b'2');
+    assert!(picked.handled);
+    assert_eq!(picked.commit.as_deref(), Some("妳好"));
+    let context = picked.commit_context.unwrap();
+    assert_eq!(context.scheme, CANTONESE_SCHEME);
+    assert!(!context.script_conversion);
+    assert_eq!(picked.view.editing_text, "");
+    assert!(picked.view.chinese_text);
+    assert!(!picked.view.script_conversion);
+
+    // A digit past the end of the page is swallowed rather than typed into the document.
+    compose_cantonese(&mut runtime, "ngo");
+    let beyond = character(&mut runtime, b'9');
+    assert!(beyond.handled && beyond.commit.is_none());
+    assert_eq!(beyond.view.editing_text, "ngo");
+    runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+
+    // `ngo'oi` keeps two syllables where the letters alone would read `ngoi` (外) first.
+    for (route, action) in [
+        (
+            "character",
+            Action::Character {
+                value: b'\'',
+                shift: false,
+            },
+        ),
+        ("punctuation", Action::Punctuation(b'\'')),
+        ("ascii punctuation", Action::PunctuationAscii(b'\'')),
+    ] {
+        compose_cantonese(&mut runtime, "ngo");
+        let boundary = runtime.dispatch(action).unwrap();
+        assert!(boundary.handled && boundary.commit.is_none(), "{route}");
+        let typed = compose_cantonese(&mut runtime, "oi");
+        assert_eq!(typed.view.editing_text, "ngo oi", "{route}");
+        assert_eq!(texts(&typed.view)[0], "我", "{route}");
+        let picked = character(&mut runtime, b'1');
+        assert_eq!(picked.commit.as_deref(), Some("我"), "{route}");
+        let rest = character(&mut runtime, b'1');
+        assert_eq!(rest.commit.as_deref(), Some("愛"), "{route}");
+        assert_eq!(rest.view.editing_text, "", "{route}");
+    }
+}
+
+/// A row covering only the leading syllables goes to the document at once, even for a host that draws held phrase pieces, and the rest keeps composing. Nothing the user picks is learned: the journal and the main dictionary keep their rows, and the same reading comes back in the same order.
+#[test]
+fn a_cantonese_partial_selection_commits_at_once_and_learns_nothing() {
+    let directory = tempfile::tempdir().unwrap();
+    let dictionaries = directory.path().join("dictionaries");
+    std::fs::create_dir_all(&dictionaries).unwrap();
+    rusqlite::Connection::open(dictionaries.join(msime_engine::assets::MAIN_DICTIONARY))
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE tbl_2_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);\
+             INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',1000),('ni''hao','nh','拟好',500);",
+        )
+        .unwrap();
+
+    // The control: the same pick under Quanpin with the same options writes the journal, so the comparison below would see a Cantonese write. The baseline is taken after composing, because reading candidates can already create the journal with empty tables, so only the pick itself can change the counts.
+    let mut options = real_engine_options(directory.path());
+    options.learning = true;
+    let mut quanpin = Runtime::new(msime_engine::host::Session::new(&options).unwrap(), 5).unwrap();
+    quanpin.focus(true).unwrap();
+    for value in *b"nihao" {
+        character(&mut quanpin, value);
+    }
+    let initial = database_rows(directory.path());
+    assert_eq!(
+        character(&mut quanpin, b'2').commit.as_deref(),
+        Some("拟好")
+    );
+    drop(quanpin);
+    msime_engine::flush_personal_learning();
+    // Some table must gain rows; a journal created with empty tables does not count as a write.
+    let learned = database_rows(directory.path());
+    assert!(
+        learned.iter().any(|(file, table, count)| {
+            let previous = initial
+                .iter()
+                .find(|(before_file, before_table, _)| before_file == file && before_table == table)
+                .map_or(0, |(_, _, before)| *before);
+            *count > previous
+        }),
+        "the Quanpin pick wrote no rows: {initial:?} -> {learned:?}"
+    );
+
+    let mut runtime = cantonese_runtime(directory.path());
+    runtime.set_phrase_preedit(true);
+    let before = database_rows(directory.path());
+    compose_cantonese(&mut runtime, "neihou");
+    let first = character(&mut runtime, b'3');
+    assert!(first.handled);
+    assert_eq!(first.commit.as_deref(), Some("你"));
+    assert_eq!(first.view.phrase_prefix, "");
+    assert_eq!(first.view.editing_text, "hou");
+    assert_eq!(texts(&first.view), ["好", "號"]);
+    let id = first.view.candidates[1].id;
+    let second = runtime.dispatch(Action::Select(id)).unwrap();
+    assert_eq!(second.commit.as_deref(), Some("號"));
+    assert_eq!(second.view.phrase_prefix, "");
+    assert_eq!(second.view.editing_text, "");
+
+    // Picking the second row again and again does not lift it.
+    for _ in 0..3 {
+        compose_cantonese(&mut runtime, "neihou");
+        assert_eq!(
+            character(&mut runtime, b'2').commit.as_deref(),
+            Some("妳好")
+        );
+    }
+    let again = compose_cantonese(&mut runtime, "neihou");
+    assert_eq!(texts(&again.view), ["你好", "妳好", "你", "妳"]);
+    runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+
+    drop(runtime);
+    msime_engine::flush_personal_learning();
+    assert_eq!(database_rows(directory.path()), before);
+}
+
+/// The sentence model and the runner-up demotion reorder Chinese lattice readings; a Cantonese list comes from its own dictionary in its own order, so neither touches it.
+#[test]
+fn cantonese_lists_are_never_reranked_or_demoted() {
+    let reordered = |scheme: u8, words: &[&str], sources: Vec<u8>, model: Option<SentenceModel>| {
+        let mut runtime = Runtime::new(
+            Fixture {
+                scheme,
+                local_mode: "none".into(),
+                words: words.iter().map(|word| (*word).to_owned()).collect(),
+                codes: vec!["neihou".into(); words.len()],
+                sources,
+                ..Fixture::default()
+            },
+            5,
+        )
+        .unwrap();
+        if let Some(model) = model {
+            runtime.set_reranker(Some(Reranker::new(std::sync::Arc::new(model))));
+        }
+        runtime.focus(true).unwrap();
+        runtime
+            .dispatch(Action::Character {
+                value: b'n',
+                shift: false,
+            })
+            .unwrap();
+        texts(&runtime.view())
+    };
+    let rows = ["你", "妳", "尼"];
+    let favours = || Some(favouring_model(&['你', '妳', '尼'], &['尼']));
+    // The same rows under a pinyin scheme are reranked, so the model would move 尼 up if Cantonese let it.
+    assert_eq!(
+        reordered(0, &rows, vec![LATTICE_SOURCE; 3], favours()),
+        ["尼", "你", "妳"]
+    );
+    assert_eq!(
+        reordered(CANTONESE_SCHEME, &rows, vec![LATTICE_SOURCE; 3], favours()),
+        rows
+    );
+    let sentences = ["你好嗎", "妳好嗎", "尼好嗎", "你號嗎", "妳號嗎", "你", "好"];
+    let sources = || {
+        let mut sources = vec![LATTICE_SOURCE; 5];
+        sources.extend([0, 0]);
+        sources
+    };
+    assert_eq!(
+        reordered(0, &sentences, sources(), None),
+        ["你好嗎", "妳好嗎", "尼好嗎", "你", "好"]
+    );
+    assert_eq!(
+        reordered(CANTONESE_SCHEME, &sentences, sources(), None),
+        sentences[..5]
+    );
+}
+
+const ZHUYIN_SCHEME: u8 = 6;
+
+/// A `zhuyin.db` with a few bopomofo rows, written with the shipped schema.
+fn zhuyin_dictionary(directory: &std::path::Path) -> String {
+    use msime_engine::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let path = directory.join("zhuyin.db");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute_batch(SCHEMA).unwrap();
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('ㄋㄧˇ'),('ㄏㄠˇ'),('ㄊㄞˊ'),('ㄨㄢ'),('ㄇㄚ˙'),('ㄇㄚ'),('ㄝ');\
+             INSERT INTO entries VALUES ('ㄋㄧˇ','你',1000),('ㄋㄧˇ','妳',300),('ㄏㄠˇ','好',2000),('ㄏㄠˇ','郝',10),('ㄋㄧˇ ㄏㄠˇ','你好',500),('ㄊㄞˊ','台',900),('ㄊㄞˊ','臺',400),('ㄨㄢ','彎',500),('ㄨㄢ','灣',300),('ㄊㄞˊ ㄨㄢ','臺灣',800),('ㄊㄞˊ ㄨㄢ','台灣',600),('ㄇㄚ˙','嗎',800),('ㄇㄚ','媽',700),('ㄝ','欸',50);",
+        )
+        .unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+/// A real Engine on the Zhuyin scheme, focused.
+fn zhuyin_runtime(directory: &std::path::Path) -> Runtime {
+    let mut options = real_engine_options(directory);
+    options.scheme = ZHUYIN_SCHEME;
+    options.zhuyin_dictionary = zhuyin_dictionary(directory);
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+/// Types `keys` as plain characters, each one composing without a commit.
+fn compose_zhuyin(runtime: &mut Runtime, keys: &str) -> Transition {
+    let mut last = None;
+    for value in keys.bytes() {
+        let transition = character(runtime, value);
+        assert!(
+            transition.handled && transition.commit.is_none(),
+            "{keys}: {}",
+            value as char
+        );
+        last = Some(transition);
+    }
+    last.unwrap()
+}
+
+/// The Dachen keys that are digits and marks spell even with nothing composed, on the character route and on both punctuation routes, while a tone key with nothing to complete is the host's to type. The scheme is Chinese but writes Traditional as stored, and the bopomofo keys overlap the host's smart punctuation, so the host has none.
+#[test]
+fn zhuyin_idle_phonetic_keys_compose_and_idle_tone_keys_type_themselves() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+    assert!(!runtime.punctuation_host_context_available(false));
+    let idle = runtime.view();
+    assert_eq!(idle.scheme, ZHUYIN_SCHEME);
+    assert_eq!(idle.spelling_symbols, "125890,./;-");
+    assert!(idle.chinese_text);
+    assert!(!idle.script_conversion);
+
+    for (route, action) in [
+        (
+            "character 1",
+            Action::Character {
+                value: b'1',
+                shift: false,
+            },
+        ),
+        (
+            "character ,",
+            Action::Character {
+                value: b',',
+                shift: false,
+            },
+        ),
+        (
+            "character -",
+            Action::Character {
+                value: b'-',
+                shift: false,
+            },
+        ),
+        ("punctuation ,", Action::Punctuation(b',')),
+        ("punctuation -", Action::Punctuation(b'-')),
+        ("ascii punctuation ,", Action::PunctuationAscii(b',')),
+        ("ascii punctuation -", Action::PunctuationAscii(b'-')),
+    ] {
+        let typed = runtime.dispatch(action).unwrap();
+        assert!(typed.handled && typed.commit.is_none(), "{route}");
+        assert_eq!(typed.view.editing_text.len(), 1, "{route}");
+        assert!(!typed.view.preedit.is_empty(), "{route}");
+        assert!(typed.view.spelling_symbols.contains(' '), "{route}");
+        let cleared = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+        assert!(cleared.handled && cleared.commit.is_none(), "{route}");
+        assert_eq!(cleared.view.editing_text, "", "{route}");
+    }
+
+    for value in *b"3467" {
+        let typed = character(&mut runtime, value);
+        assert!(
+            !typed.handled && typed.commit.is_none(),
+            "{}",
+            value as char
+        );
+        assert_eq!(typed.view.editing_text, "", "{}", value as char);
+    }
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(!space.handled && space.commit.is_none());
+}
+
+/// `su3cl3` converts to 你好 with the caret held at the end, and Enter commits the conversion and keeps the key. Nothing is script-converted on the way out.
+#[test]
+fn zhuyin_enter_commits_the_conversion() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+
+    let typed = compose_zhuyin(&mut runtime, "su3cl3");
+    assert_eq!(typed.view.editing_text, "su3cl3");
+    assert_eq!(typed.view.caret_position, "su3cl3".len());
+    assert_eq!(typed.view.preedit, "你好");
+    assert!(typed.view.candidates.is_empty());
+    assert!(!typed.view.candidate_list_open);
+    assert_eq!(typed.view.spelling_symbols, "1234567890,./;- ");
+
+    let enter = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert!(enter.handled);
+    assert_eq!(enter.commit.as_deref(), Some("你好"));
+    let context = enter.commit_context.unwrap();
+    assert_eq!(context.scheme, ZHUYIN_SCHEME);
+    assert!(!context.script_conversion);
+    assert_eq!(enter.view.editing_text, "");
+    assert_eq!(enter.view.spelling_symbols, "125890,./;-");
+}
+
+/// Space is a spelling key while the Engine lists it: with a syllable pending it is the first tone, and with none pending it opens the list, whether the host sends it as a character or as its Space command. Once the list is open it takes the highlighted row on either route, and it never commits on its own.
+#[test]
+fn zhuyin_space_is_the_first_tone_and_opens_the_list() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+
+    for (route, space) in [
+        (
+            "character",
+            (|| Action::Character {
+                value: b' ',
+                shift: false,
+            }) as fn() -> Action,
+        ),
+        ("command", || Action::SelectHighlighted),
+    ] {
+        compose_zhuyin(&mut runtime, "j0");
+        let toned = runtime.dispatch(space()).unwrap();
+        assert!(toned.handled && toned.commit.is_none(), "{route}");
+        assert_eq!(toned.view.preedit, "彎", "{route}");
+        assert!(!toned.view.candidate_list_open, "{route}");
+        assert!(toned.view.candidates.is_empty(), "{route}");
+
+        let opened = runtime.dispatch(space()).unwrap();
+        assert!(opened.handled && opened.commit.is_none(), "{route}");
+        assert!(opened.view.candidate_list_open, "{route}");
+        assert_eq!(texts(&opened.view), ["彎", "灣"], "{route}");
+        assert_eq!(opened.view.spelling_symbols, "0,./;-", "{route}");
+        assert_eq!(opened.view.preedit, "彎", "{route}");
+
+        // With the list open Space takes the highlighted row into the conversion and commits nothing.
+        runtime.dispatch(Action::NextCandidate).unwrap();
+        let picked = runtime.dispatch(space()).unwrap();
+        assert!(picked.handled && picked.commit.is_none(), "{route}");
+        assert!(!picked.view.candidate_list_open, "{route}");
+        assert!(picked.view.candidates.is_empty(), "{route}");
+        assert_eq!(picked.view.preedit, "灣", "{route}");
+        let enter = runtime
+            .dispatch(Action::Command(Command::CommitRaw))
+            .unwrap();
+        assert_eq!(enter.commit.as_deref(), Some("灣"), "{route}");
+    }
+}
+
+/// The Down key's command opens the list over the conversion. A digit picks a row on the visible page without committing, `0` is the bopomofo ㄢ and closes the list rather than picking, and Escape closes the list before a second one clears the composition.
+#[test]
+fn zhuyin_list_digits_select_without_commit_and_escape_steps_back() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+
+    compose_zhuyin(&mut runtime, "w96");
+    let opened = runtime
+        .dispatch(Action::Command(Command::ConvertHanja))
+        .unwrap();
+    assert!(opened.handled && opened.commit.is_none());
+    assert!(opened.view.candidate_list_open);
+    assert_eq!(texts(&opened.view), ["台", "臺"]);
+
+    let picked = character(&mut runtime, b'2');
+    assert!(picked.handled && picked.commit.is_none());
+    assert!(!picked.view.candidate_list_open);
+    assert_eq!(picked.view.preedit, "臺");
+    assert_eq!(picked.view.editing_text, "w96");
+
+    // `0` with the list open spells ㄢ after the conversion instead of choosing a row.
+    runtime
+        .dispatch(Action::Command(Command::ConvertHanja))
+        .unwrap();
+    let zero = character(&mut runtime, b'0');
+    assert!(zero.handled && zero.commit.is_none());
+    assert!(!zero.view.candidate_list_open);
+    assert!(zero.view.candidates.is_empty());
+    assert_eq!(zero.view.preedit, "臺ㄢ");
+
+    // Space on a lone ㄢ is not a syllable: it is consumed and changes nothing.
+    let toned = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(toned.handled && toned.commit.is_none());
+    assert_eq!(toned.view.preedit, "臺ㄢ");
+
+    // A digit past the end of the open page is swallowed and leaves the list as it was.
+    let reopened = runtime
+        .dispatch(Action::Command(Command::ConvertHanja))
+        .unwrap();
+    assert!(reopened.view.candidate_list_open);
+    let beyond = character(&mut runtime, b'9');
+    assert!(beyond.handled && beyond.commit.is_none());
+    assert!(beyond.view.candidate_list_open);
+    assert_eq!(texts(&beyond.view), texts(&reopened.view));
+    assert_eq!(beyond.view.preedit, reopened.view.preedit);
+
+    let closed = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(closed.handled && closed.commit.is_none());
+    assert!(!closed.view.candidate_list_open);
+    assert!(!closed.view.editing_text.is_empty());
+    let cleared = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(cleared.handled && cleared.commit.is_none());
+    assert_eq!(cleared.view.editing_text, "");
+    assert_eq!(runtime.view().preedit, "");
+}
+
+/// A Shift punctuation key commits the conversion followed by its full-width mark, through the character route and the punctuation route alike, whatever the host's punctuation context.
+#[test]
+fn zhuyin_shift_punctuation_commits_then_inserts_the_full_width_mark() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+
+    compose_zhuyin(&mut runtime, "su3cl3");
+    let comma = runtime
+        .dispatch(Action::Character {
+            value: b'<',
+            shift: true,
+        })
+        .unwrap();
+    assert!(comma.handled);
+    assert_eq!(comma.commit.as_deref(), Some("你好，"));
+    assert_eq!(comma.view.editing_text, "");
+    assert!(!comma.commit_context.unwrap().script_conversion);
+
+    compose_zhuyin(&mut runtime, "su3");
+    let question = runtime.dispatch(Action::Punctuation(b'?')).unwrap();
+    assert!(question.handled);
+    assert_eq!(question.commit.as_deref(), Some("你？"));
+    assert_eq!(question.view.editing_text, "");
+}
+
+/// Leaving the client commits the conversion, and attaching a new one discards a conversion left open in the previous one.
+#[test]
+fn zhuyin_blur_commits_the_conversion() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+
+    compose_zhuyin(&mut runtime, "su3cl3");
+    let left = runtime.focus(false).unwrap();
+    assert_eq!(left.commit.as_deref(), Some("你好"));
+    assert_eq!(left.view.editing_text, "");
+    runtime.focus(true).unwrap();
+    assert!(runtime.focus(false).unwrap().commit.is_none());
+
+    runtime.focus(true).unwrap();
+    compose_zhuyin(&mut runtime, "su3");
+    runtime
+        .dispatch(Action::Command(Command::ConvertHanja))
+        .unwrap();
+    let attached = runtime.focus(true).unwrap();
+    assert!(attached.commit.is_none());
+    assert_eq!(attached.view.editing_text, "");
+    assert!(!attached.view.candidate_list_open);
+}
+
+/// A host that draws held phrase pieces still sees the Zhuyin spelling symbols: the View hides them only behind a held piece, and a Zhuyin pick from the open list joins the conversion rather than starting a phrase, so no piece is ever held.
+#[test]
+fn zhuyin_spelling_symbols_stay_visible_with_phrase_preedit() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = zhuyin_runtime(directory.path());
+    runtime.set_phrase_preedit(true);
+    assert_eq!(runtime.view().spelling_symbols, "125890,./;-");
+
+    let typed = compose_zhuyin(&mut runtime, "su3cl3");
+    assert_eq!(typed.view.spelling_symbols, "1234567890,./;- ");
+    let opened = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(opened.view.candidate_list_open);
+    assert_eq!(opened.view.spelling_symbols, "0,./;-");
+    assert_eq!(texts(&opened.view), ["你好", "好", "郝"]);
+
+    let picked = character(&mut runtime, b'3');
+    assert!(picked.handled && picked.commit.is_none());
+    assert_eq!(picked.view.phrase_prefix, "");
+    assert_eq!(picked.view.preedit, "你郝");
+    assert_eq!(picked.view.spelling_symbols, "1234567890,./;- ");
+
+    // A phonetic mark still spells on every route, where a held piece would have turned it into punctuation.
+    let mark = runtime.dispatch(Action::Punctuation(b',')).unwrap();
+    assert!(mark.handled && mark.commit.is_none());
+    assert_eq!(mark.view.phrase_prefix, "");
+    let enter = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert_eq!(enter.commit.as_deref(), Some("你郝"));
+    assert_eq!(enter.view.phrase_prefix, "");
 }

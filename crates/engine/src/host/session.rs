@@ -22,6 +22,13 @@ use crate::user_dictionary::removal::learn_entered_english_word;
 /// The weight an entered English word is learned at: the C++ default argument of `learn_entered_english_word` (user_dictionary_journal.h:136-137), which the bridge relied on.
 const ENTERED_ENGLISH_WORD_WEIGHT: i64 = 10;
 
+fn temporary_japanese_word(commit: &str) -> String {
+    let mut word = String::with_capacity(1 + commit.len());
+    word.push('R');
+    word.push_str(commit);
+    word
+}
+
 /// The host's command numbering. `CommitRawWithoutLearning` has no engine counterpart, and took 11 before the engine's `ConvertHanja` existed, so that one is 12 here and mapped by name rather than by ordinal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -39,7 +46,7 @@ pub enum Command {
     CommitReading = 10,
     /// Commit the letters as typed without learning them as an English word.
     CommitRawWithoutLearning = 11,
-    /// Korean only: open or close the composing syllable's Hanja list.
+    /// Open or close the active scheme's candidate list (the Korean Hanja list, the Zhuyin conversion list); unhandled in a scheme without one. Hosts may call it `MSIME_OPEN_CANDIDATE_LIST`.
     ConvertHanja = 12,
 }
 
@@ -56,7 +63,7 @@ pub struct EngineSnapshot {
     pub microsoft_shuangpin: bool,
     pub shuangpin_profile: String,
     pub preedit: String,
-    /// The kana reading in Japanese, the composed Hangul in Korean, else empty.
+    /// The kana reading in Japanese, the composed Hangul in Korean, the converted text plus the pending bopomofo in Zhuyin, else empty.
     pub reading: String,
     pub editing_text: String,
     pub caret_position: usize,
@@ -71,6 +78,8 @@ pub struct EngineSnapshot {
     pub candidate_positions: Vec<u8>,
     pub candidate_corrected: Vec<bool>,
     pub candidate_answers_key: Vec<bool>,
+    /// The scheme's openable candidate list is showing (the Korean Hanja list, the Zhuyin conversion list); candidates are its rows while it is.
+    pub candidate_list_open: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -145,11 +154,11 @@ impl Session {
     /// With the annotation rule of bridge.cpp:914-929.
     pub fn snapshot(&self) -> Result<EngineSnapshot> {
         let value = self.inner.snapshot();
-        let pinyin_scheme = value.scheme.is_pinyin();
+        let helpcode_scheme = value.scheme.helpcode();
         let uppercase_all = value.scheme == SchemeType::Quanpin;
         // Rows the engine generated in the expression, command and mention modes are not spelled by pinyin; their annotations are the engine's own.
         let keymap = self.helpcode_keymap.as_deref().filter(|_| {
-            self.helpcode_enabled && pinyin_scheme && !value.local_mode.generates_text()
+            self.helpcode_enabled && helpcode_scheme && !value.local_mode.generates_text()
         });
         let count = value.candidates.len();
         let mut output = EngineSnapshot {
@@ -161,10 +170,7 @@ impl Session {
             microsoft_shuangpin: self.microsoft_shuangpin,
             shuangpin_profile: self.shuangpin_profile.clone(),
             preedit: value.preedit,
-            reading: if matches!(
-                value.scheme,
-                SchemeType::JapaneseRomaji | SchemeType::Korean
-            ) {
+            reading: if value.scheme.draws_reading() {
                 value.normalized_segmentation
             } else {
                 String::new()
@@ -187,6 +193,7 @@ impl Session {
             candidate_positions: Vec::with_capacity(count),
             candidate_corrected: Vec::with_capacity(count),
             candidate_answers_key: Vec::with_capacity(count),
+            candidate_list_open: value.candidate_list_open,
         };
         for (index, candidate) in value.candidates.into_iter().enumerate() {
             let mut annotation = value
@@ -471,7 +478,7 @@ impl Session {
     /// Windows learns an entered word only on Enter: letters committed raw in dedicated English, a local mode, or pinyin that is not a complete syllable sequence are learned as an English word (bridge.cpp:1332-1359).
     fn commit_raw_with_policy(&mut self) -> EngineResult {
         let before = self.inner.snapshot();
-        let chinese_scheme = before.scheme.is_pinyin();
+        let chinese_scheme = before.scheme.learns_english_words();
         let complete_pure_pinyin = chinese_scheme && {
             let segmentation = if before.normalized_segmentation.is_empty() {
                 &before.raw_segmentation
@@ -489,7 +496,7 @@ impl Session {
         if let Some(commit) = result.commit.as_deref().filter(|_| should_learn) {
             if !commit.is_empty() {
                 let word = if before.local_mode == LocalInputMode::TemporaryJapanese {
-                    format!("R{commit}")
+                    temporary_japanese_word(commit)
                 } else {
                     commit.to_owned()
                 };
@@ -569,4 +576,16 @@ fn online_request(
         session_id: query.session_id,
     };
     Some((request, source))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::temporary_japanese_word;
+
+    #[test]
+    fn temporary_japanese_word_allocates_only_result_bytes() {
+        let word = temporary_japanese_word("かな");
+        assert_eq!(word, "Rかな");
+        assert_eq!(word.capacity(), word.len());
+    }
 }

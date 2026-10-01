@@ -97,7 +97,7 @@ test("settings expose community only with the Android capability and omit prefer
     />,
   );
   expect(await screen.findByRole("heading", { name: "社区" })).not.toBeNull();
-  await waitFor(() => expect(communitySkins.list).toHaveBeenCalledWith(0, ""));
+  await waitFor(() => expect(communitySkins.list).toHaveBeenCalledWith(0, "", false));
   expect(screen.queryByRole("form", { name: "设置" })).toBeNull();
   expect(screen.queryByRole("button", { name: "重新读取" })).toBeNull();
 });
@@ -105,12 +105,12 @@ test("settings expose community only with the Android capability and omit prefer
 test("initial load and submitted search preserve the exact query", async () => {
   const communitySkins = client();
   render(<CommunitySkinsPage client={communitySkins} theme="light" />);
-  await waitFor(() => expect(communitySkins.list).toHaveBeenCalledWith(0, ""));
+  await waitFor(() => expect(communitySkins.list).toHaveBeenCalledWith(0, "", false));
   fireEvent.change(screen.getByRole("textbox", { name: "搜索皮肤设计" }), {
     target: { value: " C++ 星 " },
   });
   fireEvent.click(screen.getByRole("button", { name: "搜索" }));
-  await waitFor(() => expect(communitySkins.list).toHaveBeenLastCalledWith(0, " C++ 星 "));
+  await waitFor(() => expect(communitySkins.list).toHaveBeenLastCalledWith(0, " C++ 星 ", false));
 });
 
 test("load more advances the transport offset and removes duplicate ids", async () => {
@@ -123,7 +123,7 @@ test("load more advances the transport offset and removes duplicate ids", async 
     .mockResolvedValueOnce({ skins: [second, third], has_more: false });
   render(<CommunitySkinsPage client={client({ list })} theme="dark" />);
   fireEvent.click(await screen.findByRole("button", { name: "加载更多" }));
-  await waitFor(() => expect(list).toHaveBeenLastCalledWith(2, ""));
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith(2, "", false));
   expect(await screen.findByRole("button", { name: "查看皮肤 第三款" })).not.toBeNull();
   expect(screen.getAllByRole("button", { name: /查看皮肤/ })).toHaveLength(3);
 });

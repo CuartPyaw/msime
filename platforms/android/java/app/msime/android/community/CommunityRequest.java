@@ -37,6 +37,13 @@ public final class CommunityRequest {
     /** One page of results. */
     public static final int PAGE_SIZE = 20;
 
+    /** The fixed report reasons, in dialog order, each the exact string the server accepts. The same list on every host. */
+    public static final List<String> REPORT_REASONS =
+        List.of("侵权/抄袭", "色情低俗", "违法违规", "垃圾广告", "恶意插件", "其他");
+    /** The longest optional detail a report may carry, in characters (code points). */
+    public static final int MAX_REPORT_DETAIL = 1000;
+    public static final String REPORT_PATH = "/v1/community/reports";
+
     private CommunityRequest() {}
 
     public static List<Kind> kinds() { return List.of(Kind.values()); }
@@ -51,6 +58,22 @@ public final class CommunityRequest {
         return "/v1/community/resources?kind=" + kind.id()
             + "&scope=" + encode(scope == null ? "" : scope)
             + "&q=" + encode(bounded) + "&offset=" + page;
+    }
+
+    /** The `kind` a report names this catalogue's items by. */
+    public static String reportKind(Kind kind) {
+        return switch (kind) {
+            case SKIN -> "skins";
+            case DICTIONARY -> "dictionaries";
+            case REPLY -> "replies";
+        };
+    }
+
+    /** Whether a report can be sent as written: one of the fixed reasons, and a detail within the limit. */
+    public static boolean validReport(String reason, String detail) {
+        if (reason == null || !REPORT_REASONS.contains(reason)) return false;
+        String text = detail == null ? "" : detail;
+        return text.codePointCount(0, text.length()) <= MAX_REPORT_DETAIL;
     }
 
     /**
@@ -92,6 +115,13 @@ public final class CommunityRequest {
             case "skin_publish_limit" -> "最多发布 50 款皮肤，请先下架部分作品。";
             case "recent_login_required" -> "请退出并重新登录后，再注销账号。";
             case "invalid_skin_design", "invalid_skin_metadata" -> "皮肤内容或名称不符合发布要求。";
+            // Content screening and moderation. A refused word is the text's problem, never a service that is down.
+            case "blocked_content" -> "内容包含不允许发布的词语，请修改后再提交";
+            case "screening_unavailable" -> "审核服务暂时不可用，请稍后重试";
+            case "account_banned" -> "该账号已被封禁，暂时无法使用账号相关功能";
+            case "item_not_found" -> "作品不存在或已下架。";
+            case "invalid_report_reason", "invalid_report_detail", "invalid_report_kind" ->
+                "举报内容不符合要求，请重新选择原因。";
             default -> "";
         };
         if (!named.isEmpty()) return named;

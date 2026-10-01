@@ -1,7 +1,8 @@
-import type { Preferences } from "../index";
+import type { InputScheme, Preferences } from "../index";
 import { GroupList } from "../core/platform-controls";
 import { InputModeSection } from "./input-mode-section";
 import { InputSchemeDetailsSection, type ShuangpinProfile } from "./input-scheme-details-section";
+import { baseInputSchemes, isChineseScheme } from "./input-scheme-options";
 import {
   InputSchemeSelectorSection,
   type InputSchemeSelectorValue,
@@ -20,6 +21,8 @@ export interface InputSchemeSettingsContentProps {
   touchKeyboardSchemes: { enabled: readonly TouchKeyboardScheme[] };
   selectedTouchKeyboardScheme: TouchKeyboardScheme;
   macos: boolean;
+  /** The schemes the host offers (`supportedInputSchemes(host)`); the others are shown disabled. Defaults to the five every host offers. */
+  inputSchemes?: readonly InputScheme[];
   macosShuangpinKeymap?: boolean;
   macosWubiAutoCommitUnique?: boolean;
   onPreferencesChange: (patch: Partial<Preferences>) => void;
@@ -37,6 +40,7 @@ export function InputSchemeSettingsContent({
   touchKeyboardSchemes,
   selectedTouchKeyboardScheme,
   macos,
+  inputSchemes = baseInputSchemes,
   macosShuangpinKeymap,
   macosWubiAutoCommitUnique,
   onPreferencesChange,
@@ -45,13 +49,14 @@ export function InputSchemeSettingsContent({
   onMacosShuangpinKeymapChange,
   onMacosWubiAutoCommitUniqueChange,
 }: InputSchemeSettingsContentProps) {
-  const chineseSchemes = preferences.scheme !== "japanese" && preferences.scheme !== "korean";
+  const chineseSchemes = isChineseScheme(preferences.scheme);
   const content = (
     <>
       {!grouped && !hasTouchKeyboardSchemes && (
         <InputModeSection
           scheme={preferences.scheme}
           lastChineseScheme={preferences.last_chinese_scheme}
+          supportedSchemes={inputSchemes}
           onChange={onPreferencesChange}
         />
       )}
@@ -59,6 +64,7 @@ export function InputSchemeSettingsContent({
         <InputModeSection
           scheme={preferences.scheme}
           lastChineseScheme={preferences.last_chinese_scheme}
+          supportedSchemes={inputSchemes}
           hidden={hasTouchKeyboardSchemes}
           onChange={onPreferencesChange}
         />
@@ -77,11 +83,9 @@ export function InputSchemeSettingsContent({
       <InputSchemeSelectorSection
         grouped={grouped}
         hidden={hasTouchKeyboardSchemes || !chineseSchemes}
-        value={
-          preferences.scheme === "shuangpin" || preferences.scheme === "wubi"
-            ? preferences.scheme
-            : "quanpin"
-        }
+        value={isChineseScheme(preferences.scheme) ? preferences.scheme : "quanpin"}
+        supportedSchemes={inputSchemes}
+        lastChineseScheme={preferences.last_chinese_scheme}
         onChange={(scheme: InputSchemeSelectorValue) =>
           onPreferencesChange({ scheme, last_chinese_scheme: scheme })
         }
@@ -97,6 +101,8 @@ export function InputSchemeSettingsContent({
           onPreferencesChange({ shuangpin_profile })
         }
         onMacosShuangpinKeymapChange={onMacosShuangpinKeymapChange}
+        vietnamese={preferences.vietnamese}
+        onVietnameseChange={(vietnamese) => onPreferencesChange({ vietnamese })}
       />
       {((hasTouchKeyboardSchemes && touchKeyboardSchemes.enabled.includes("wubi")) ||
         preferences.scheme === "wubi") && (

@@ -20,9 +20,12 @@ pub enum Scheme {
     Wubi,
     Japanese,
     Korean,
+    Cantonese,
+    Zhuyin,
+    Vietnamese,
 }
 
-/// The schemes an agent may switch to. Japanese and Korean are left to the user: Japanese needs its own dictionary, and both need a way back that the agent cannot see.
+/// The schemes an agent may switch to. Japanese, Korean, Cantonese, Zhuyin and Vietnamese are left to the user: Japanese, Cantonese and Zhuyin need their own dictionary, which a host may not have, and every one of them needs a way back that the agent cannot see.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[schemars(crate = "rmcp::schemars")]
 #[serde(rename_all = "snake_case")]
@@ -74,6 +77,9 @@ impl From<InputScheme> for Scheme {
             InputScheme::Wubi => Self::Wubi,
             InputScheme::Japanese => Self::Japanese,
             InputScheme::Korean => Self::Korean,
+            InputScheme::Cantonese => Self::Cantonese,
+            InputScheme::Zhuyin => Self::Zhuyin,
+            InputScheme::Vietnamese => Self::Vietnamese,
         }
     }
 }
@@ -413,9 +419,7 @@ pub fn update(
     if cfg!(target_os = "linux") {
         if let Err(error) = publish_to_runtime_options(options, &snapshot.preferences) {
             // A document the hosts could not read is refused along with the save that produced it, so the store and the hosts do not disagree. A concurrent writer wins over the rollback.
-            if error == TOO_LARGE {
-                let _ = store.save(snapshot.revision, previous.preferences);
-            }
+            let _ = store.save(snapshot.revision, previous.preferences);
             return Err(error);
         }
     }
@@ -481,6 +485,9 @@ mod tests {
             InputScheme::Wubi,
             InputScheme::Japanese,
             InputScheme::Korean,
+            InputScheme::Cantonese,
+            InputScheme::Zhuyin,
+            InputScheme::Vietnamese,
         ] {
             same(json!(Scheme::from(scheme)), json!(scheme));
         }
@@ -700,5 +707,23 @@ mod tests {
             publish_to_runtime_options(&options, &Preferences::default()).unwrap_err(),
             TOO_LARGE
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_unreadable_runtime_options_document_does_not_leave_preferences_saved() {
+        let directory = tempfile::tempdir().unwrap();
+        // 目录无法作为 runtime-options 文档打开，因此发布步骤会在偏好存储接受修改后失败。
+        let before = load(directory.path()).unwrap();
+        let change = PreferencesChange {
+            candidate_page_size: Some(7),
+            ..change(before.revision)
+        };
+
+        assert_eq!(
+            update(directory.path(), directory.path(), &change).unwrap_err(),
+            "cannot read the runtime options"
+        );
+        assert_eq!(load(directory.path()).unwrap(), before);
     }
 }

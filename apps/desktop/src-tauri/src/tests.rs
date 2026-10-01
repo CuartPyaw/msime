@@ -179,6 +179,54 @@ fn runtime_options_reader_rejects_oversized_documents_without_allocating_them() 
 }
 
 #[test]
+fn cantonese_and_zhuyin_are_offered_only_with_their_installed_dictionary() {
+    use msime_client_core::host_surface::{HostCapabilities, HostPlatform};
+    use msime_client_core::preferences::InputScheme;
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("language-dictionaries");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("zhuyin.db"), b"sqlite").unwrap();
+    let offered = |host_options: Option<&serde_json::Value>| {
+        let mut capabilities = HostCapabilities::for_platform(HostPlatform::Macos);
+        super::drop_uninstalled_language_schemes(&mut capabilities, host_options);
+        capabilities.input_schemes
+    };
+    let without_both = vec![
+        InputScheme::Quanpin,
+        InputScheme::Shuangpin,
+        InputScheme::Wubi,
+        InputScheme::Japanese,
+        InputScheme::Korean,
+        InputScheme::Vietnamese,
+    ];
+    assert_eq!(offered(None), without_both);
+    assert_eq!(offered(Some(&serde_json::json!({}))), without_both);
+    // A relative directory is not trusted to mean the installed one.
+    assert_eq!(
+        offered(Some(
+            &serde_json::json!({ "language_dictionaries": "language-dictionaries" })
+        )),
+        without_both
+    );
+    let named = serde_json::json!({ "language_dictionaries": directory });
+    let mut with_zhuyin = without_both.clone();
+    with_zhuyin.insert(5, InputScheme::Zhuyin);
+    assert_eq!(offered(Some(&named)), with_zhuyin);
+    std::fs::write(directory.join("cantonese.db"), b"sqlite").unwrap();
+    assert_eq!(
+        offered(Some(&named)),
+        HostCapabilities::for_platform(HostPlatform::Macos).input_schemes
+    );
+    // Hosts that never offer the schemes are left as they are.
+    let mut windows = HostCapabilities::for_platform(HostPlatform::Windows);
+    super::drop_uninstalled_language_schemes(&mut windows, None);
+    assert_eq!(
+        windows.input_schemes,
+        HostCapabilities::for_platform(HostPlatform::Windows).input_schemes
+    );
+}
+
+#[test]
 fn helpcode_catalog_reads_only_the_host_resource_directory() {
     let directory = tempfile::tempdir().unwrap();
     let resources = directory.path().join("resources");

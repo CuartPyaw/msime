@@ -217,8 +217,15 @@ import {
   AccountTransportResponse,
   MAX_DICTIONARY_EXPORT_BYTES,
   MAX_SNAPSHOT_DOWNLOAD_BYTES,
+  COMMUNITY_REPORT_REASONS,
   dictionaryChangePageChanged,
 } from "../entry/src/main/ets/account/AccountCloudBridge";
+import {
+  CrashDestination,
+  CrashReport,
+  TelemetryPolicy,
+} from "../entry/src/main/ets/telemetry/TelemetryPolicy";
+import { NoticePolicy } from "../entry/src/main/ets/notices/NoticePolicy";
 import {
   CLOUD_CLIPBOARD_EMPTY,
   CLOUD_CLIPBOARD_FAILED,
@@ -8419,7 +8426,7 @@ group("applying writes only what the schema declares", () => {
   try {
     applyAccountPreferences(
       local,
-      { revision: 1, settings: { "input.schema": "esperanto" } },
+      { revision: 1, settings: { "input.character_set": "esperanto" } },
       schema,
       syncFeedback,
     );
@@ -8427,6 +8434,21 @@ group("applying writes only what the schema declares", () => {
     refusedValue = error instanceof AccountPreferenceError && error.message === "account_invalid";
   }
   check(refusedValue, "a declared key carrying a value this host has no meaning for is refused");
+
+  // The one exception is the scheme: a newer device may name one this host does not offer, and refusing would stop every other setting from syncing.
+  for (const unknown of ["cantonese", "zhuyin", "vietnamese", "esperanto"]) {
+    const kept = applyAccountPreferences(
+      { ...local, scheme: "wubi" },
+      {
+        revision: 1,
+        settings: { "input.schema": unknown, "input.learning": false },
+      },
+      schema,
+      syncFeedback,
+    );
+    check(kept.preferences.scheme === "wubi", `an unknown scheme ${unknown} keeps the local one`);
+    check(kept.preferences.learning === false, `and the rest of the sync applies past ${unknown}`);
+  }
 
   let refusedMismatch = false;
   try {
@@ -12433,4 +12455,270 @@ group("a picked pack is copied for import only within client-core's bounds", () 
     PluginImportPolicy.ARCHIVE_NAME.endsWith(".zip"),
     "the staged archive keeps the extension client-core goes by, whatever the picked name",
   );
+});
+
+group("usage reporting reads HiAppEvent crash reports without leaking directories", () => {
+  const native = TelemetryPolicy.crashReport(
+    JSON.stringify({
+      time: 1760000000000,
+      crash_type: "NativeCrash",
+      pid: 4321,
+      exception: {
+        message: "",
+        signal: { signo: 11, code: 1, address: "0x0" },
+        thread_name: "msime",
+        frames: [
+          {
+            symbol: "msime_client_create+24",
+            file: "/data/storage/el1/bundle/libs/arm64/libmsimeclient.so",
+            pc: "000000000001a2b0",
+          },
+          { file: "/system/lib/ld-musl-aarch64.so.1", pc: "00000000000c4f10" },
+          {},
+        ],
+      },
+    }),
+  );
+  check(native !== null, "a native crash is read");
+  check(native?.message === "SIGSEGV (code 1)", "the signal is named; the address is left out");
+  check(
+    native?.stack === "libmsimeclient.so+0x1a2b0 msime_client_create+24\nld-musl-aarch64.so.1+0xc4f10",
+    "frames keep the file name and pc, never the directory, and an empty frame is skipped",
+  );
+  check(native?.pid === 4321 && native?.time === 1760000000000, "and it says which process crashed when");
+
+  const javascript = TelemetryPolicy.crashReport(
+    JSON.stringify({
+      time: 5,
+      crash_type: "JsError",
+      pid: 7,
+      exception: {
+        name: "TypeError",
+        message: "Cannot read property 'x' of undefined\nsecond line",
+        stack: "    at view (entry/src/main/ets/keyboard/KeyboardView.ts:10:3)\n",
+      },
+    }),
+  );
+  check(
+    javascript?.message === "TypeError: Cannot read property 'x' of undefined",
+    "a JavaScript crash keeps the error name and the first line of its message",
+  );
+  check(javascript?.stack.startsWith("at view") === true, "and its stack, trimmed");
+
+  check(TelemetryPolicy.crashReport("not json") === null, "an unreadable report is ignored");
+  check(
+    TelemetryPolicy.crashReport(JSON.stringify({ time: 1, pid: 1, crash_type: "AppFreeze", exception: {} })) === null,
+    "and so is anything other than a crash",
+  );
+  check(
+    TelemetryPolicy.crashReport(JSON.stringify({ time: 1, crash_type: "JsError", exception: {} })) === null,
+    "a report without a process id cannot be attributed and is ignored",
+  );
+});
+
+group("a crash belongs to the unfinished keyboard session only before this keyboard begins its own", () => {
+  const report: CrashReport = { pid: 99, time: 1, message: "SIGABRT", stack: "" };
+  check(
+    TelemetryPolicy.destination(report, 99, false) === CrashDestination.Session,
+    "the previous keyboard process's crash, before begin, is that session's crash",
+  );
+  check(
+    TelemetryPolicy.destination(report, 99, true) === CrashDestination.Standalone,
+    "after begin the marker is this run's, so the crash stands alone",
+  );
+  check(
+    TelemetryPolicy.destination(report, 12, false) === CrashDestination.Standalone,
+    "another process's crash (the settings application) never closes the keyboard session",
+  );
+  check(
+    TelemetryPolicy.destination(report, null, false) === CrashDestination.Standalone,
+    "with no remembered keyboard process nothing is attributed",
+  );
+  check(
+    TelemetryPolicy.standaloneRecordName(report) === "harmony-99-1.crash",
+    "a standalone record is named by process and time, so a report delivered twice is written once",
+  );
+  check(TelemetryPolicy.recordText(report) === "SIGABRT\n", "a record is the summary line, then the frames");
+  check(TelemetryPolicy.rememberedPid('{"pid":4321}') === 4321, "the remembered process id is read");
+  check(TelemetryPolicy.rememberedPid("{}") === null, "and a file without one is no process");
+});
+
+group("usage reporting is cleared only by a saved document that turns it off", () => {
+  const saved = '{"ok":true,"value":{"revision":3}}';
+  check(
+    TelemetryPolicy.reportingTurnedOff('{"format_version":1,"preferences":{"usage_reporting":false}}', saved),
+    "an explicit false that was saved turns reporting off",
+  );
+  check(
+    !TelemetryPolicy.reportingTurnedOff('{"format_version":1,"preferences":{}}', saved),
+    "an absent key is the default, which is on",
+  );
+  check(
+    !TelemetryPolicy.reportingTurnedOff(
+      '{"format_version":1,"preferences":{"usage_reporting":false}}',
+      '{"ok":false,"error":"conflict"}',
+    ),
+    "a save the store refused changed nothing",
+  );
+  check(TelemetryPolicy.flushDue(0, 1000), "a keyboard that has not sent yet sends");
+  check(!TelemetryPolicy.flushDue(1000, 1000 + 60 * 60 * 1000), "an hour later it waits");
+  check(TelemetryPolicy.flushDue(1000, 1000 + 6 * 60 * 60 * 1000), "six hours later it sends again");
+  check(TelemetryPolicy.flushDue(5000, 1000), "a clock that went back does not stop it for good");
+});
+
+group("notices are shown from client-core's answer and their links leave the application", () => {
+  const items = NoticePolicy.items(
+    JSON.stringify({
+      ok: true,
+      value: {
+        items: [
+          { id: "n2", title: "新版本", body: "**粗体**", html: "<p><strong>粗体</strong></p>" },
+          { id: "", title: "no id", html: "" },
+          { id: "n1", title: "维护", html: "<p>今晚维护</p>" },
+        ],
+      },
+    }),
+  );
+  check(items.length === 2 && items[0].id === "n2", "valid notices keep their order, newest first");
+  check(NoticePolicy.items('{"ok":false,"error":"x"}').length === 0, "a refusal shows nothing");
+  check(NoticePolicy.items("garbage").length === 0, "and so does an unreadable answer");
+  check(NoticePolicy.without(items, "n2").map((item) => item.id).join() === "n1", "a dismissed notice leaves the card");
+  check(NoticePolicy.accepted('{"ok":true,"value":true}'), "a saved dismissal is recognised");
+  check(!NoticePolicy.accepted('{"ok":false,"error":"x"}'), "and a refused one is not");
+  const page = NoticePolicy.page("<p>hi</p>");
+  check(page.includes("default-src 'none'"), "the card's page can load nothing and run nothing");
+  check(page.includes("<body><p>hi</p></body>"), "and carries the rendered body as given");
+  check(NoticePolicy.externalLink("https://msime.app/x") === "https://msime.app/x", "a web link opens outside");
+  check(NoticePolicy.externalLink("mailto:a@b.c") === "mailto:a@b.c", "and so does a mail link");
+  check(NoticePolicy.externalLink("javascript:alert(1)") === null, "anything else is not followed");
+  check(NoticePolicy.externalLink("file:///data/x") === null, "not even a local file");
+  check(NoticePolicy.ownPage("data:text/html;base64,AAAA"), "the card's own page loads in place");
+  check(NoticePolicy.ownPage("about:blank"), "as does its blank start");
+  check(!NoticePolicy.ownPage("https://msime.app"), "a link does not");
+});
+
+group("community reports, moderation state and refusals reach the page by name", () => {
+  let stored: string | null = null;
+  const store: AccountSessionStore = {
+    load: () => stored,
+    save: (value: string) => {
+      stored = value;
+    },
+    clear: () => {
+      stored = null;
+    },
+  };
+  const calls: { method: string; path: string; token?: string; body?: Record<string, unknown> }[] = [];
+  let reply: AccountTransportResponse = { status: 201, body: '{"reported":true}' };
+  const own = {
+    id: "10000000-0000-4000-8000-000000000002",
+    kind: "reply",
+    name: "回复",
+    description: "",
+    author: "我",
+    revision: 1,
+    saves: 0,
+    rating_count: 0,
+    rating_average: 0,
+    saved: false,
+    owned: true,
+    my_rating: 0,
+    content: { prompt: "你好" },
+  };
+  const transport: AccountTransport = {
+    request: async (method, path, token, body) => {
+      calls.push({ method, path, token, body });
+      if (path === "/v1/auth/login")
+        return {
+          status: 200,
+          body: JSON.stringify({
+            access_token: "a".repeat(64),
+            refresh_token: "b".repeat(64),
+            token_type: "Bearer",
+            expires_in: 3600,
+            user: { id: "u1", display_name: "Test", created_at: "2026-01-01" },
+          }),
+        };
+      return reply;
+    },
+  };
+  const bridge = new AccountCloudBridge(transport, store);
+  const skins = (action: Record<string, unknown>) =>
+    bridge.handle(JSON.stringify({ operation: "community_skin", ...action }));
+  const resources = (action: Record<string, unknown>) =>
+    bridge.handle(JSON.stringify({ operation: "community_resource", ...action }));
+  const id = "10000000-0000-4000-8000-000000000001";
+
+  check(COMMUNITY_REPORT_REASONS.join("|") === "侵权/抄袭|色情低俗|违法违规|垃圾广告|恶意插件|其他", "the fixed reasons, in order");
+  void skins({ community_operation: "report", id, reason: "其他" }).then((result) => {
+    check(JSON.parse(result).error === "community_unauthorized", "reporting needs a session");
+  });
+  void skins({ community_operation: "report", id, reason: "不喜欢" }).then((result) => {
+    check(JSON.parse(result).error === "community_invalid", "a reason off the list is refused");
+  });
+  void skins({ community_operation: "report", id, reason: "其他", detail: "x".repeat(1001) }).then((result) => {
+    check(JSON.parse(result).error === "community_invalid", "and a detail past 1000 characters");
+  });
+
+  void bridge
+    .handle('{"operation":"login","challenge_id":"challenge","credential":"123456"}')
+    .then(async () => {
+      reply = { status: 201, body: '{"reported":true}' };
+      let result = await skins({ community_operation: "report", id, reason: "垃圾广告" });
+      check(JSON.parse(result).ok === true, "a signed-in report is accepted");
+      let sent = calls[calls.length - 1];
+      check(
+        sent.method === "POST" && sent.path === "/v1/community/reports" && sent.token !== undefined,
+        "it is posted with the session",
+      );
+      check(
+        JSON.stringify(sent.body) === JSON.stringify({ kind: "skins", item_id: id, reason: "垃圾广告" }),
+        "carrying the kind, the item and the reason, and no empty detail",
+      );
+      reply = { status: 200, body: '{"reported":true}' };
+      result = await resources({ resource_operation: "report", kind: "dictionary", id, reason: "侵权/抄袭", detail: "抄的" });
+      sent = calls[calls.length - 1];
+      check(JSON.parse(result).ok === true, "reporting the same item again is still a success");
+      check(
+        sent.body?.kind === "dictionaries" && sent.body?.detail === "抄的",
+        "a shared dictionary is reported under the server's kind, with the detail",
+      );
+
+      reply = { status: 422, body: '{"error":{"code":"blocked_content","message":"blocked_content"}}' };
+      result = await skins({ community_operation: "rate", id, stars: 5 });
+      check(JSON.parse(result).error === "community_blocked_content", "screened-out text is named, not called an outage");
+      reply = { status: 503, body: '{"error":{"code":"screening_unavailable","message":"x"}}' };
+      result = await skins({ community_operation: "rate", id, stars: 5 });
+      check(JSON.parse(result).error === "community_screening_unavailable", "screening that is down is its own refusal");
+      reply = { status: 503, body: "" };
+      result = await skins({ community_operation: "rate", id, stars: 5 });
+      check(JSON.parse(result).error === "community_unavailable", "any other 503 is still the service being down");
+      const before = calls.length;
+      reply = { status: 403, body: '{"error":{"code":"account_banned","message":"account_banned"}}' };
+      result = await skins({ community_operation: "report", id, reason: "其他" });
+      check(JSON.parse(result).error === "community_account_banned", "a banned account is told so");
+      check(calls.length === before + 1, "without refreshing a token that is not the problem");
+      check(stored !== null, "and without signing the user out");
+
+      reply = { status: 200, body: JSON.stringify({ items: [{ ...own, moderation: "removed" }], has_more: false }) };
+      result = await resources({ resource_operation: "list", kind: "reply", scope: "mine", offset: 0, search: "" });
+      check(JSON.parse(result).value.items[0].moderation === "removed", "我的作品 carries the moderation state");
+      check(calls[calls.length - 1].path.includes("&fields=moderation"), "because it asks for it");
+      reply = { status: 200, body: JSON.stringify({ ...own, moderation: "approved" }) };
+      result = await resources({ resource_operation: "detail", id: own.id });
+      check(JSON.parse(result).ok === true, "a detail with its moderation state is accepted");
+      check(calls[calls.length - 1].path.endsWith(`${own.id}?fields=moderation`), "and the detail asks for it too");
+      reply = { status: 200, body: JSON.stringify({ ...own, moderation: "hidden" }) };
+      result = await resources({ resource_operation: "detail", id: own.id });
+      check(JSON.parse(result).error === "community_unavailable", "an unknown state is refused");
+      reply = { status: 200, body: '{"skins":[],"has_more":false}' };
+      result = await skins({ community_operation: "list", scope: "mine", offset: 0, search: "" });
+      check(JSON.parse(result).ok === true, "a skin author can list their own skins");
+      check(
+        calls[calls.length - 1].path.startsWith("/v1/community/skins?scope=mine&fields=moderation&"),
+        "with the moderation state",
+      );
+      result = await skins({ community_operation: "list", scope: "saved", offset: 0, search: "" });
+      check(JSON.parse(result).error === "community_invalid", "skins have no other scope");
+    });
 });

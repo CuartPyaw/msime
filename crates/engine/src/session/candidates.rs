@@ -150,7 +150,10 @@ impl InputSession {
             && !self.dedicated_english
             && !matches!(
                 self.scheme(),
-                SchemeType::JapaneseRomaji | SchemeType::Korean
+                SchemeType::JapaneseRomaji
+                    | SchemeType::Korean
+                    | SchemeType::Cantonese
+                    | SchemeType::Zhuyin
             );
         let include_missing = self.engine.request().raw_input.len() == 1;
         let keep_dynamic = self.has_active_helpcode();

@@ -294,8 +294,10 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
             let Some(candidates_view) = session.runtime.translation_candidates() else {
                 return Ok(Value::Null);
             };
-            // Windows does not request glosses for Japanese candidates. Use Engine's active mode, including temporary Japanese composition. Korean's Hanja rows are glossed like Chinese ones: their 훈음 is drawn by the host whatever this answers, and a translation or gloss goes on the line under it.
-            if candidates_view.scheme == 3 || candidates_view.local_mode == "temporary_japanese" {
+            // Only the schemes that show glosses ask for them: Windows does not request glosses for Japanese candidates, while Korean's Hanja rows are glossed like Chinese ones: their 훈음 is drawn by the host whatever this answers, and a translation or gloss goes on the line under it. Use Engine's active mode, including temporary Japanese composition.
+            if !SchemeType::from_u8(candidates_view.scheme).is_some_and(SchemeType::shows_glosses)
+                || candidates_view.local_mode == "temporary_japanese"
+            {
                 return Ok(Value::Null);
             }
             // Whether the online gloss endpoint may be asked about each candidate,

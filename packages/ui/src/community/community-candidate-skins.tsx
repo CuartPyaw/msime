@@ -11,6 +11,12 @@ import * as style from "./community-style";
 import { CommunitySearchForm } from "./community-search-form";
 import { CommunityScopeButtons } from "./community-scope-buttons";
 import { CommunitySkinModerationSection } from "./community-skin-moderation-section";
+import {
+  CommunityRemovedBadge,
+  CommunityReportSection,
+  type CommunityModeration,
+  type CommunityReportReason,
+} from "./community-report";
 import { CommunitySkinCardMetrics } from "./community-skin-card-metrics";
 
 /** The server's license columns; each is `""` when the manifest leaves it out. */
@@ -81,6 +87,8 @@ export type CommunityCandidateSkin = {
   created_at: string;
   visibility: CandidateSkinVisibility;
   updated_at: string;
+  /** Sent only on the user's own packages; `removed` shows 已下架. */
+  moderation?: CommunityModeration | null;
   /** 发布分类；早于分类功能的服务端不返回。 */
   category?: CandidateSkinCategory;
 };
@@ -154,6 +162,8 @@ export interface CandidateSkinCommunityClient {
   sync(): Promise<CandidateSkinSyncReport>;
   rate(id: string, stars: number): Promise<{ stars: number }>;
   unpublish(id: string): Promise<{ deleted: boolean }>;
+  /** Reports another user's package to the moderators. */
+  report?(id: string, reason: CommunityReportReason, detail: string): Promise<void>;
 }
 
 type PreviewLoader = (id: string) => Promise<string>;
@@ -237,6 +247,7 @@ function CommunityCandidateSkinCard({
         {categoryLabel(skin.category) && `${categoryLabel(skin.category)} · `}
         {skin.owned ? "我的作品" : skin.author}
         {skin.visibility === "private" && " · 私有"}
+        {skin.owned && skin.moderation === "removed" && " · 已下架"}
       </span>
       <CommunitySkinCardMetrics
         downloads={skin.downloads}
@@ -273,6 +284,8 @@ export function CommunityCandidateSkinsPage({
 }) {
   // 分页 hook 只认 offset、搜索词和范围；分类通过 ref 随请求带上，这样「加载更多」追加的页沿用第一页的分类。
   const categoryFilter = useRef<CandidateSkinCategory | null>(null);
+  // 只有第一页请求成功后，分类才与当前列表建立关系；请求中的分类不能作为失败回退目标。
+  const activeCategory = useRef<CandidateSkinCategory | null>(null);
   const galleryClient = useMemo<CommunityGalleryClient<CommunityCandidateSkin>>(
     () => ({
       list: async (offset, search, mine) => {
@@ -286,6 +299,10 @@ export function CommunityCandidateSkinsPage({
       unpublish: async (id) => {
         await client.unpublish(id);
       },
+      ...(client.report && {
+        report: (id: string, reason: CommunityReportReason, detail: string) =>
+          client.report!(id, reason, detail),
+      }),
     }),
     [client],
   );
@@ -315,6 +332,7 @@ export function CommunityCandidateSkinsPage({
     closeDetail: closeGalleryDetail,
     rateSelected,
     unpublishSelected,
+    reportSelected,
     runAction,
   } = gallery;
   const [search, setSearch] = useState("");
@@ -324,13 +342,15 @@ export function CommunityCandidateSkinsPage({
   const [category, setCategory] = useState<CandidateSkinCategory | null>(null);
 
   const changeCategory = async (next: CandidateSkinCategory | null) => {
-    const previous = categoryFilter.current;
+    const previous = activeCategory.current;
     if (next === previous) return;
     categoryFilter.current = next;
     setCategory(next);
     // 新分类从第一页读起；第一页失败时列表和 offset 仍是旧分类的，分类也跟着退回，否则「加载更多」会在旧分类的 offset 上追加新分类的页。
     const listed = await requestList(activeSearch, false);
-    if (!listed && categoryFilter.current === next) {
+    if (listed && categoryFilter.current === next) {
+      activeCategory.current = next;
+    } else if (!listed && categoryFilter.current === next) {
       categoryFilter.current = previous;
       setCategory(previous);
     }
@@ -480,6 +500,7 @@ export function CommunityCandidateSkinsPage({
                 {selected.visibility === "private" ? "私有" : "我的作品"}
               </span>
             )}
+            <CommunityRemovedBadge owned={selected.owned} moderation={selected.moderation} />
           </div>
           {selected.description && <p className={style.description}>{selected.description}</p>}
           {license && <p className={style.metrics}>{license}</p>}
@@ -585,6 +606,9 @@ export function CommunityCandidateSkinsPage({
             onCancelUnpublish={() => setConfirmUnpublish(false)}
             confirmationActionsClassName={style.confirmationActions}
           />
+          {!selected.owned && client.report && (
+            <CommunityReportSection actionBusy={actionBusy} onReport={reportSelected} />
+          )}
         </section>
       </div>
     );

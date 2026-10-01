@@ -33,8 +33,11 @@ impl QuanpinScheme {
             SchemeKey::Backspace => {
                 self.raw.pop();
             }
-            SchemeKey::Letter(_) | SchemeKey::Semicolon | SchemeKey::Minus | SchemeKey::Requery => {
-            }
+            SchemeKey::Letter(_)
+            | SchemeKey::Semicolon
+            | SchemeKey::Minus
+            | SchemeKey::Symbol(_)
+            | SchemeKey::Requery => {}
         }
     }
 
@@ -136,6 +139,8 @@ mod tests {
         scheme.handle_key(SchemeKey::Minus);
         scheme.handle_key(SchemeKey::Requery);
         scheme.handle_key(SchemeKey::Letter(b'1'));
+        scheme.handle_key(SchemeKey::Symbol(b'-'));
+        scheme.handle_key(SchemeKey::Symbol(b' '));
         assert_eq!(scheme.preedit(), "Ni'");
         scheme.handle_key(SchemeKey::Backspace);
         assert_eq!(scheme.preedit(), "Ni");

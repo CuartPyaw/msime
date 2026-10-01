@@ -74,7 +74,12 @@ class ProjectConfigurationTests(unittest.TestCase):
             accessed["NSPrivacyAccessedAPICategorySystemBootTime"], ["35F9.1"]
         )
         self.assertFalse(privacy["NSPrivacyTracking"])
-        self.assertEqual(privacy["NSPrivacyCollectedDataTypes"], [])
+        # Anonymous usage reporting: crash reports, keyboard sessions and daily activity, and the random install id, none linked to the user or used for tracking.
+        self.assertEqual(privacy["NSPrivacyCollectedDataTypes"], [
+            {"NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeCrashData", "NSPrivacyCollectedDataTypeLinked": False, "NSPrivacyCollectedDataTypeTracking": False, "NSPrivacyCollectedDataTypePurposes": ["NSPrivacyCollectedDataTypePurposeAnalytics", "NSPrivacyCollectedDataTypePurposeAppFunctionality"]},
+            {"NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeProductInteraction", "NSPrivacyCollectedDataTypeLinked": False, "NSPrivacyCollectedDataTypeTracking": False, "NSPrivacyCollectedDataTypePurposes": ["NSPrivacyCollectedDataTypePurposeAnalytics"]},
+            {"NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeDeviceID", "NSPrivacyCollectedDataTypeLinked": False, "NSPrivacyCollectedDataTypeTracking": False, "NSPrivacyCollectedDataTypePurposes": ["NSPrivacyCollectedDataTypePurposeAnalytics"]},
+        ])
         project = (IOS_ROOT / "project.yml").read_text()
         self.assertEqual(project.count("path: SharedResources/PrivacyInfo.xcprivacy"), 2)
         generated = (IOS_ROOT / "MSIMEClient.xcodeproj/project.pbxproj").read_text()
@@ -100,6 +105,17 @@ class ProjectConfigurationTests(unittest.TestCase):
         self.assertEqual(len(blocks), 1)
         self.assertIn("buildPhase: resources", blocks[0])
         self.assertIn("Choe Hwanjin", (IOS_ROOT / "../../resources/licenses/libhangul-hanja-BSD-3-Clause.txt").read_text())
+
+    def test_app_ships_the_licences_of_the_cantonese_and_zhuyin_data(self):
+        # The engine linked into the app and its keyboard extension has Cantonese and Zhuyin schemes whose data derives from rime-cantonese (CC BY 4.0) and libchewing-data (LGPL-2.1-or-later).
+        project = (IOS_ROOT / "project.yml").read_text()
+        app = dict(target_blocks(project))["MSIMEApp"]
+        for licence, holder in (("rime-cantonese-CC-BY-4.0.txt", "CanCLID"), ("libchewing-data-LGPL-2.1.txt", "libchewing Core Team")):
+            path = f"../../resources/licenses/{licence}"
+            blocks = source_path_blocks(app, path)
+            self.assertEqual(len(blocks), 1)
+            self.assertIn("buildPhase: resources", blocks[0])
+            self.assertIn(holder, (IOS_ROOT / path).read_text())
 
     def test_app_and_keyboard_share_the_declared_app_group(self):
         expected = "group.app.msime.ios"

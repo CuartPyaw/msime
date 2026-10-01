@@ -9,6 +9,7 @@ import {
 } from "./keyboard-heatmap";
 import { scopedBreakdown } from "./typing-breakdown";
 import { chartGradient } from "./typing-chart";
+import { SettingField } from "./setting-field";
 import {
   charactersPerMinute,
   readableCharacters,
@@ -180,6 +181,9 @@ const sources = [
   ["wubi", "86 五笔"],
   ["japanese", "日语"],
   ["korean", "韩语"],
+  ["cantonese", "粤拼"],
+  ["zhuyin", "注音"],
+  ["vietnamese", "越南语"],
   ["handwriting", "手写"],
   ["english", "英文键盘"],
   ["local", "本地输入"],
@@ -208,6 +212,9 @@ const sourceSymbols: Record<string, string> = {
   wubi: "五",
   japanese: "日",
   korean: "韩",
+  cantonese: "粤",
+  zhuyin: "注",
+  vietnamese: "越",
   handwriting: "手",
   english: "A",
   local: "本",
@@ -1434,6 +1441,8 @@ export function TypingStatisticsPage({
         "microsoft",
         "shoudao",
         "wubi",
+        "cantonese",
+        "zhuyin",
       ]),
       color: palette[0],
       symbol: "中",
@@ -1451,6 +1460,14 @@ export function TypingStatisticsPage({
       count: breakdown.sources.korean ?? 0,
       color: palette[6],
       symbol: "韩",
+    },
+    {
+      id: "vietnamese",
+      title: "越南语模式",
+      count: breakdown.sources.vietnamese ?? 0,
+      // Every palette colour already names a slice here, so this one has its own, as 高情商回复 does.
+      color: "#d0605e",
+      symbol: "越",
     },
     {
       id: "english",
@@ -1836,10 +1853,11 @@ export function TypingStatisticsPage({
         </section>
       ) : (
         <section className="section m-0">
-          <label className="section-header mb-4">
-            <span className="section-title">
-              记录打字统计<small>关闭后，新提交不会增加统计。</small>
-            </span>
+          <SettingField
+            label="记录打字统计"
+            description="关闭后，新提交不会增加统计。"
+            className="section-header mb-4"
+          >
             <input
               aria-label="记录打字统计"
               className="toggle"
@@ -1848,13 +1866,13 @@ export function TypingStatisticsPage({
               disabled={busy}
               onChange={(event) => void update(() => client.setEnabled(event.target.checked))}
             />
-          </label>
+          </SettingField>
           {client.setRetention && (
-            <label className="section-header mb-4">
-              <span className="section-title">
-                自动清理
-                <small>按保留策略删除超期的每日记录并从累计中扣除，跨天后首次记录时执行。</small>
-              </span>
+            <SettingField
+              label="自动清理"
+              description="按保留策略删除超期的每日记录并从累计中扣除，跨天后首次记录时执行。"
+              className="section-header mb-4"
+            >
               <select
                 aria-label="自动清理"
                 value={statistics.retention ?? "forever"}
@@ -1872,7 +1890,7 @@ export function TypingStatisticsPage({
                   </option>
                 ))}
               </select>
-            </label>
+            </SettingField>
           )}
           <div className="flex flex-wrap gap-[9px]">
             <button

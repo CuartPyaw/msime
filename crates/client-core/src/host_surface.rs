@@ -5,6 +5,7 @@
 //! from injected capabilities instead of sniffing the user agent. Both sides of
 //! that agreement live here so no host re-implements the strings.
 
+use crate::preferences::InputScheme;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -316,6 +317,43 @@ pub struct HostCapabilities {
     /// Why the desktop's candidate panel on this machine ignores the candidate font, colour and skin settings, when the running Linux host has found that it does. Filled in at runtime from what the host reports, the way `os_version` is; absent when the panel honours them or nothing has been reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub candidate_panel_limit: Option<CandidatePanelLimit>,
+    /// The input schemes this host offers; the settings page shows the others disabled. A host older than the field sends none and gets the five every host has always run. A host may narrow the list at runtime the way it fills `os_version`, for instance when the Cantonese or Zhuyin dictionary is not installed.
+    #[serde(default = "base_input_schemes")]
+    pub input_schemes: Vec<InputScheme>,
+}
+
+/// The schemes every host runs: 全拼, 双拼, 五笔, 日文 and 韩文.
+const BASE_INPUT_SCHEMES: [InputScheme; 5] = [
+    InputScheme::Quanpin,
+    InputScheme::Shuangpin,
+    InputScheme::Wubi,
+    InputScheme::Japanese,
+    InputScheme::Korean,
+];
+
+/// The base schemes plus Cantonese, Zhuyin and Vietnamese, which only the macOS host offers.
+const ALL_INPUT_SCHEMES: [InputScheme; 8] = [
+    InputScheme::Quanpin,
+    InputScheme::Shuangpin,
+    InputScheme::Wubi,
+    InputScheme::Japanese,
+    InputScheme::Korean,
+    InputScheme::Cantonese,
+    InputScheme::Zhuyin,
+    InputScheme::Vietnamese,
+];
+
+fn base_input_schemes() -> Vec<InputScheme> {
+    BASE_INPUT_SCHEMES.to_vec()
+}
+
+/// The schemes this build hands to its Engine. host-api falls back from any other scheme a preferences document names, so a host that never offers a scheme never runs it either. All eight on macOS, the one host that routes the Cantonese, Zhuyin and Vietnamese keys and stages their dictionaries; the base five everywhere else. Cantonese and Zhuyin still fall back on macOS when their dictionary is not installed.
+pub fn compiled_input_schemes() -> &'static [InputScheme] {
+    if cfg!(target_os = "macos") {
+        &ALL_INPUT_SCHEMES
+    } else {
+        &BASE_INPUT_SCHEMES
+    }
 }
 
 impl HostCapabilities {
@@ -568,6 +606,12 @@ impl HostCapabilities {
             typing_effects: platform.is_desktop() || platform == HostPlatform::Harmony,
             os_version: None,
             candidate_panel_limit: None,
+            // Only the macOS host routes the Cantonese, Zhuyin and Vietnamese keys and ships their dictionaries.
+            input_schemes: if platform == HostPlatform::Macos {
+                ALL_INPUT_SCHEMES.to_vec()
+            } else {
+                base_input_schemes()
+            },
         }
     }
 }

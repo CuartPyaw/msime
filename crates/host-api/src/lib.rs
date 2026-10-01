@@ -10,14 +10,16 @@
 
 use msime_client_core::ai::AiSuggestionRequest;
 use msime_client_core::dictionary::access::DictionaryAccess;
-use msime_client_core::host_surface::{HostCapabilities, HostPlatform, SurfaceRoute};
+use msime_client_core::host_surface::{
+    compiled_input_schemes, HostCapabilities, HostPlatform, SurfaceRoute,
+};
 pub mod cloud_clipboard;
 pub mod cloud_dictionary;
 pub mod mcp_clients;
 pub mod system_fonts;
 use msime_client_core::preferences::{
     InputScheme, Preferences, PreferencesSnapshot, PreferencesStore, ShuangpinProfile,
-    TouchKeyboardLayout,
+    TouchKeyboardLayout, VietnameseInputMethod, VietnamesePreferences, VietnameseToneStyle,
 };
 use msime_client_core::punctuation::{
     route as punctuation_route, PunctuationContext, PunctuationRoute,
@@ -29,13 +31,13 @@ use msime_client_core::voice::doubao_frame::{
 };
 use msime_client_core::voice::VoiceSessionState;
 use msime_engine::host::{CandidateEdge, Command, EngineOptions, Session};
+use msime_engine::SchemeType;
 use msime_input_runtime::HandwritingQuery;
 #[cfg(unix)]
 use msime_input_runtime::UnixSocketProvider;
 use msime_input_runtime::{
     Action, AiAssistantProviderConfig, CandidateId, CharacterWidth, NineKeySpellingId,
     OnlineCandidate, OnlineQuery, Reranker, Runtime, SentenceModel, Transition, TranslationService,
-    KOREAN_SCHEME,
 };
 #[cfg(unix)]
 use msime_input_runtime::{EmojiPanelQuery, TranslationQuery};
@@ -330,7 +332,8 @@ impl HostSession {
         let _ = TypingStatisticsStore::new(directory).record_selections(&batch);
     }
 
-    fn apply_pending(&mut self) -> Result<(), String> {
+    /// Rebuild the Engine for the requested preferences once the composition is idle. The `Ok` value is why the preferred scheme was not the one applied, when it was not.
+    fn apply_pending(&mut self) -> Result<Option<String>, String> {
         if self.runtime.is_idle() {
             if let Some(size) = self.page_size_override {
                 self.runtime
@@ -339,13 +342,21 @@ impl HostSession {
             }
         }
         let Some(snapshot) = &self.requested else {
-            return Ok(());
+            return Ok(None);
         };
         if !self.preferences_pending || !self.runtime.is_idle() {
-            return Ok(());
+            return Ok(None);
         }
         let mut options = self.options.clone();
-        options.scheme = scheme_code(snapshot.preferences.scheme);
+        let (scheme, fallback) = effective_scheme(
+            &snapshot.preferences,
+            compiled_input_schemes(),
+            &LanguageDictionaries::of_options(&self.options),
+        );
+        options.scheme = scheme_code(scheme);
+        options.vietnamese_input_method =
+            vietnamese_input_method_code(snapshot.preferences.vietnamese);
+        options.vietnamese_tone_style = vietnamese_tone_style_code(snapshot.preferences.vietnamese);
         options.shuangpin_profile = profile_code(snapshot.preferences.shuangpin_profile);
         options.shuangpin_preedit_uses_raw = snapshot.preferences.shuangpin_preedit_uses_raw;
         options.learning = snapshot.preferences.learning;
@@ -387,7 +398,7 @@ impl HostSession {
         // better than the one it makes when it searches without alternatives.
         options.sentence_alternatives = true;
         apply_local_mode_resource_gates(&mut options);
-        let helpcode = snapshot.preferences.active_helpcode();
+        let helpcode = helpcode_for_scheme(&snapshot.preferences, scheme);
         options.helpcode = helpcode.enabled;
         options.show_helpcode = helpcode.show_in_candidate_window;
         options.helpcode_schema = helpcode.schema.as_str().into();
@@ -421,12 +432,13 @@ impl HostSession {
         }
         let layout_changed =
             snapshot.preferences.touch_keyboard_layout != self.applied.touch_keyboard_layout;
-        let next_nine_key_override = if options.scheme == 0 && !layout_changed {
+        let nine_key_scheme = SchemeType::from_u8(options.scheme).is_some_and(SchemeType::nine_key);
+        let next_nine_key_override = if nine_key_scheme && !layout_changed {
             self.nine_key_override
         } else {
             None
         };
-        let nine_key_mode = options.scheme == 0
+        let nine_key_mode = nine_key_scheme
             && next_nine_key_override.unwrap_or(matches!(
                 snapshot.preferences.touch_keyboard_layout,
                 TouchKeyboardLayout::NineKey
@@ -458,7 +470,7 @@ impl HostSession {
         self.applied = snapshot.preferences.clone();
         self.preferences_pending = false;
         self.nine_key_override = next_nine_key_override;
-        Ok(())
+        Ok(fallback)
     }
 
     /// Bring the `/` command table and the `@` name list up to date with the plugins directory, for a field that just gained focus: the settings page may have imported a table or edited the names since. Reads nothing when no file moved.
@@ -489,19 +501,20 @@ impl HostSession {
 
     fn complete_transition(&mut self, mut result: Transition) -> Transition {
         let generation = self.runtime.generation();
-        if let Err(error) = self.apply_pending() {
+        let note = match self.apply_pending() {
+            Ok(fallback) => fallback,
+            Err(error) => Some(format!("Preferences update deferred: {error}")),
+        };
+        if let Some(note) = note {
             let prior = result.diagnostic.take().unwrap_or_default();
-            result.diagnostic = Some(
-                format!("{prior} Preferences update deferred: {error}")
-                    .trim()
-                    .to_owned(),
-            );
+            result.diagnostic = Some(format!("{prior} {note}").trim().to_owned());
         }
-        // A replacement changes the view generation, never the completed commit. Korean writes half-width ASCII punctuation and digits whatever the width switch says; the dedicated English mode keeps its own rules in every scheme, so its commits are widened as they are under a Chinese scheme.
-        let korean_text = result.view.scheme == KOREAN_SCHEME
+        // A replacement changes the view generation, never the completed commit. A scheme that does not widen (Korean) writes half-width ASCII punctuation and digits whatever the width switch says; the dedicated English mode keeps its own rules in every scheme, so its commits are widened as they are under a Chinese scheme.
+        let half_width_text = SchemeType::from_u8(result.view.scheme)
+            .is_some_and(|scheme| !scheme.widens_full_width())
             && !result.view.dedicated_english
             && result.view.local_mode == "none";
-        if result.view.character_width == CharacterWidth::Fullwidth && !korean_text {
+        if result.view.character_width == CharacterWidth::Fullwidth && !half_width_text {
             if let Some(c) = result.commit.as_mut() {
                 *c = c
                     .chars()
@@ -551,11 +564,14 @@ impl HostSession {
             &requested_preferences.plugins,
             &self.plugin_roots,
         ));
-        self.apply_pending()?;
+        let fallback = self.apply_pending()?;
         let snapshot = self.requested.as_ref().expect("requested snapshot exists");
-        Ok(
-            json!({ "revision": snapshot.revision, "deferred": snapshot.preferences != self.applied, "view": self.runtime.view(), "floating_toolbar": { "enabled": snapshot.preferences.floating_toolbar.enabled, "english_mode": snapshot.preferences.floating_toolbar.english_mode, "scale_percent": snapshot.preferences.floating_toolbar.scale_percent, "font_size": snapshot.preferences.floating_toolbar.font_size, "fullwidth": snapshot.preferences.floating_toolbar.fullwidth, "punctuation": snapshot.preferences.floating_toolbar.punctuation, "character_set": snapshot.preferences.floating_toolbar.character_set, "emoji": snapshot.preferences.floating_toolbar.emoji, "screen_keyboard": snapshot.preferences.floating_toolbar.screen_keyboard, "settings": snapshot.preferences.floating_toolbar.settings } }),
-        )
+        let mut response = json!({ "revision": snapshot.revision, "deferred": snapshot.preferences != self.applied, "view": self.runtime.view(), "floating_toolbar": { "enabled": snapshot.preferences.floating_toolbar.enabled, "english_mode": snapshot.preferences.floating_toolbar.english_mode, "scale_percent": snapshot.preferences.floating_toolbar.scale_percent, "font_size": snapshot.preferences.floating_toolbar.font_size, "fullwidth": snapshot.preferences.floating_toolbar.fullwidth, "punctuation": snapshot.preferences.floating_toolbar.punctuation, "character_set": snapshot.preferences.floating_toolbar.character_set, "emoji": snapshot.preferences.floating_toolbar.emoji, "screen_keyboard": snapshot.preferences.floating_toolbar.screen_keyboard, "settings": snapshot.preferences.floating_toolbar.settings } });
+        // Applied at once, so no transition will carry the reason the preferred scheme was replaced; a deferred change reports it from `complete_transition` instead.
+        if let Some(fallback) = fallback {
+            response["diagnostic"] = fallback.into();
+        }
+        Ok(response)
     }
 }
 
@@ -575,6 +591,111 @@ fn scheme_code(scheme: InputScheme) -> u8 {
         InputScheme::Wubi => 2,
         InputScheme::Japanese => 3,
         InputScheme::Korean => 4,
+        InputScheme::Cantonese => 5,
+        InputScheme::Zhuyin => 6,
+        InputScheme::Vietnamese => 7,
+    }
+}
+
+fn vietnamese_input_method_code(vietnamese: VietnamesePreferences) -> u8 {
+    match vietnamese.input_method {
+        VietnameseInputMethod::Telex => 0,
+        VietnameseInputMethod::Vni => 1,
+    }
+}
+
+fn vietnamese_tone_style_code(vietnamese: VietnamesePreferences) -> u8 {
+    match vietnamese.tone_style {
+        VietnameseToneStyle::Modern => 0,
+        VietnameseToneStyle::Classic => 1,
+    }
+}
+
+/// The Cantonese and Zhuyin dictionaries a host has installed. Each is its own artifact rather than part of the shared resource set, so either may be missing.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LanguageDictionaries {
+    pub(crate) cantonese: Option<std::path::PathBuf>,
+    pub(crate) zhuyin: Option<std::path::PathBuf>,
+}
+
+impl LanguageDictionaries {
+    /// `cantonese.db` and `zhuyin.db` in `directory`, each when it is a file.
+    fn in_directory(directory: &std::path::Path) -> Self {
+        let present = |name: &str| {
+            let path = directory.join(name);
+            path.is_file().then_some(path)
+        };
+        LanguageDictionaries {
+            cantonese: present("cantonese.db"),
+            zhuyin: present("zhuyin.db"),
+        }
+    }
+
+    /// The dictionaries an Engine was configured with, where an empty path means none.
+    fn of_options(options: &EngineOptions) -> Self {
+        let named = |path: &str| (!path.is_empty()).then(|| std::path::PathBuf::from(path));
+        LanguageDictionaries {
+            cantonese: named(&options.cantonese_dictionary),
+            zhuyin: named(&options.zhuyin_dictionary),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.cantonese.is_none() && self.zhuyin.is_none()
+    }
+
+    /// Whether `scheme` can run with these dictionaries: Cantonese and Zhuyin need their own, every other scheme reads only the shared resources.
+    fn serve(&self, scheme: InputScheme) -> bool {
+        match scheme {
+            InputScheme::Cantonese => self.cantonese.is_some(),
+            InputScheme::Zhuyin => self.zhuyin.is_some(),
+            _ => true,
+        }
+    }
+}
+
+/// The scheme to hand the Engine for `preferences`, and why it is not the preferred one when it is not. A scheme this build does not offer, or Cantonese or Zhuyin without its dictionary, falls back to the last Chinese scheme when that one can run and to 全拼 otherwise, so a document written on another host never leaves this one without a working scheme. The preferences themselves are left alone: once the dictionary is installed, the next session runs the scheme the user chose.
+pub(crate) fn effective_scheme(
+    preferences: &Preferences,
+    supported: &[InputScheme],
+    dictionaries: &LanguageDictionaries,
+) -> (InputScheme, Option<String>) {
+    let usable = |scheme: InputScheme| supported.contains(&scheme) && dictionaries.serve(scheme);
+    let preferred = preferences.scheme;
+    if usable(preferred) {
+        return (preferred, None);
+    }
+    let reason = if supported.contains(&preferred) {
+        "its dictionary is not installed"
+    } else {
+        "this host does not offer it"
+    };
+    let fallback = preferences
+        .last_chinese_scheme
+        .map(InputScheme::from)
+        .filter(|scheme| usable(*scheme))
+        .unwrap_or(InputScheme::Quanpin);
+    (
+        fallback,
+        Some(format!(
+            "Input scheme {preferred:?} unavailable because {reason}; using {fallback:?}."
+        )),
+    )
+}
+
+/// The helpcode settings for the scheme actually run, which differs from `Preferences::active_helpcode` only when `effective_scheme` fell back.
+fn helpcode_for_scheme(
+    preferences: &Preferences,
+    scheme: InputScheme,
+) -> msime_client_core::preferences::HelpcodePreferences {
+    if scheme == preferences.scheme {
+        preferences.active_helpcode()
+    } else {
+        Preferences {
+            scheme,
+            ..preferences.clone()
+        }
+        .active_helpcode()
     }
 }
 
@@ -629,17 +750,32 @@ struct HostOptions {
     /// Absolute path to the bundle's built-in sound packs (`resources/sound-packs` in the repository), for a host whose bundle does not put them in `sound-packs` beside `resources`, the directory used when this is absent. Installed packs, command tables and the `@` name list are read from `plugins` under `preferences_directory`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sound_packs: Option<String>,
+    /// Absolute path to the directory holding `cantonese.db` and `zhuyin.db`, for a host that installs either. Absent, or a directory missing one of them, means that scheme falls back as `effective_scheme` describes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    language_dictionaries: Option<String>,
 }
 
 impl HostOptions {
     fn into_engine_options(self) -> EngineOptions {
-        let helpcode = self.preferences.active_helpcode();
+        let dictionaries = self
+            .language_dictionaries
+            .as_deref()
+            .map(|directory| LanguageDictionaries::in_directory(std::path::Path::new(directory)))
+            .unwrap_or_default();
+        // Session creation has no diagnostic to carry the reason; the fallback itself is what matters here.
+        let (scheme, _) =
+            effective_scheme(&self.preferences, compiled_input_schemes(), &dictionaries);
+        let path_text = |path: Option<std::path::PathBuf>| {
+            path.and_then(|path| path.to_str().map(str::to_owned))
+                .unwrap_or_default()
+        };
+        let helpcode = helpcode_for_scheme(&self.preferences, scheme);
         let mut options = EngineOptions {
             resources: self.resources,
             user_data: self.user_data,
             cache: self.cache,
             dictionaries: self.dictionaries,
-            scheme: scheme_code(self.preferences.scheme),
+            scheme: scheme_code(scheme),
             shuangpin_profile: profile_code(self.preferences.shuangpin_profile),
             shuangpin_preedit_uses_raw: self.preferences.shuangpin_preedit_uses_raw,
             learning: self.preferences.learning,
@@ -672,6 +808,10 @@ impl HostOptions {
             ),
             rescoring_context: String::new(),
             sentence_alternatives: true,
+            vietnamese_input_method: vietnamese_input_method_code(self.preferences.vietnamese),
+            vietnamese_tone_style: vietnamese_tone_style_code(self.preferences.vietnamese),
+            cantonese_dictionary: path_text(dictionaries.cantonese),
+            zhuyin_dictionary: path_text(dictionaries.zhuyin),
             helpcode: helpcode.enabled,
             show_helpcode: helpcode.show_in_candidate_window,
             helpcode_schema: helpcode.schema.as_str().into(),
@@ -721,6 +861,26 @@ pub(crate) fn offline_glosses_beside(
         .join("offline-glosses")
         .join(format!("zh-{language}.db"));
     path.is_file().then_some(path)
+}
+
+/// The Cantonese and Zhuyin dictionaries installed beside a resource bundle: `language-dictionaries/cantonese.db` and `language-dictionaries/zhuyin.db`, built by `msime-dict-builder`. A sibling of `resources` for the same reason as `settled_model_beside`: the resource directory must match the shared dictionary lock exactly, and only the hosts that offer these schemes ship them. Absence is the normal case.
+pub(crate) fn language_dictionaries_beside(resources: &std::path::Path) -> LanguageDictionaries {
+    language_dictionaries_directory(resources)
+        .map(|directory| LanguageDictionaries::in_directory(&directory))
+        .unwrap_or_default()
+}
+
+fn language_dictionaries_directory(resources: &std::path::Path) -> Option<std::path::PathBuf> {
+    Some(resources.parent()?.join("language-dictionaries"))
+}
+
+/// The `language_dictionaries` value HostOptions records for `resources`: the directory beside them, only when it holds a dictionary, so a host without them writes the document it always did.
+fn installed_language_dictionaries(resources: &std::path::Path) -> Option<String> {
+    if language_dictionaries_beside(resources).is_empty() {
+        return None;
+    }
+    language_dictionaries_directory(resources)
+        .and_then(|directory| directory.to_str().map(str::to_owned))
 }
 
 /// The target languages an offline gloss dictionary can exist for; English is glossed from the packaged english.db instead.
@@ -850,6 +1010,7 @@ pub fn prepare_host_configuration(
         sentence_model: None,
         settled_model: settled_model_beside(&resources),
         sound_packs: None,
+        language_dictionaries: installed_language_dictionaries(&resources),
     })?)
 }
 
@@ -918,6 +1079,22 @@ fn reject_symlinked_options_parent(path: &Path) -> std::io::Result<()> {
 ///
 /// Returns whether the file was rewritten. Run it before the caller's own sessions exist. The previous generation is never modified, so a host still using it keeps working until it restarts. A symlink, or a document whose paths do not follow the layout `prepare_host_configuration` produces, is left alone rather than guessed at. When the recorded resources do not match the compiled lock the error is [`DictionaryOutdated`] and the file is left as it was.
 pub fn refresh_host_options(path: &std::path::Path) -> Result<bool, Box<dyn std::error::Error>> {
+    refresh_options_file(path, false)
+}
+
+/// [`refresh_host_options`], and also keep `language_dictionaries` in step with the Cantonese and Zhuyin dictionaries installed beside the resources, whatever the generation; otherwise a current file is only read.
+///
+/// Only the input method process itself calls this, at its start, before any session reads the file. Every input method session re-reads the document and `HostOptions` rejects unknown keys, so a key added to a document that an older running input method still reads would stop it from opening sessions. The settings app can be upgraded while the previous input method keeps running, which is why its own refresh is [`refresh_host_options`]; an input method running this code understands the key it writes.
+pub fn refresh_host_options_with_language_dictionaries(
+    path: &std::path::Path,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    refresh_options_file(path, true)
+}
+
+fn refresh_options_file(
+    path: &std::path::Path,
+    language_dictionaries: bool,
+) -> Result<bool, Box<dyn std::error::Error>> {
     use std::io::Write as _;
     reject_symlinked_options_parent(path)?;
     let metadata = std::fs::symlink_metadata(path)?;
@@ -941,7 +1118,7 @@ pub fn refresh_host_options(path: &std::path::Path) -> Result<bool, Box<dyn std:
     let specification: ResourceSet = serde_json::from_str(include_str!(
         "../../../resources/desktop-dictionary.lock.json"
     ))?;
-    let Some(refreshed) = refreshed_host_options(
+    let prepared = refreshed_host_options(
         &document,
         &specification.generation()?,
         |resources, state| {
@@ -949,8 +1126,13 @@ pub fn refresh_host_options(path: &std::path::Path) -> Result<bool, Box<dyn std:
                 &prepare_host_configuration(resources, state).map_err(outdated_resources)?,
             )?)
         },
-    )?
-    else {
+    )?;
+    let languages = if language_dictionaries {
+        with_installed_language_dictionaries(prepared.as_ref().unwrap_or(&document))?
+    } else {
+        None
+    };
+    let Some(refreshed) = languages.or(prepared) else {
         return Ok(false);
     };
     let parent = path.parent().ok_or("runtime options have no directory")?;
@@ -966,12 +1148,8 @@ pub fn refresh_host_options(path: &std::path::Path) -> Result<bool, Box<dyn std:
     Ok(true)
 }
 
-/// The options `refresh_host_options` would publish, or `None` when the document is current or not in the prepared layout.
-fn refreshed_host_options(
-    document: &Value,
-    generation: &str,
-    prepare: impl FnOnce(&Path, &Path) -> Result<Value, Box<dyn std::error::Error>>,
-) -> Result<Option<Value>, Box<dyn std::error::Error>> {
+/// The `resources`, `dictionaries` and state directory of a document in the layout `prepare_host_configuration` produces, or `None` for any other document.
+fn prepared_layout(document: &Value) -> Option<(&Path, &Path, &Path)> {
     let path = |key: &str| {
         document
             .get(key)
@@ -979,18 +1157,27 @@ fn refreshed_host_options(
             .map(Path::new)
             .filter(|path| path.is_absolute())
     };
-    let (Some(resources), Some(user_data), Some(dictionaries), Some(state)) = (
-        path("resources"),
-        path("user_data"),
-        path("dictionaries"),
-        path("preferences_directory"),
-    ) else {
+    let (resources, user_data, dictionaries, state) = (
+        path("resources")?,
+        path("user_data")?,
+        path("dictionaries")?,
+        path("preferences_directory")?,
+    );
+    (user_data == state.join("user")
+        && dictionaries.parent() == Some(user_data.join("dictionaries").as_path()))
+    .then_some((resources, dictionaries, state))
+}
+
+/// The options `refresh_host_options` would publish, or `None` when the document is current or not in the prepared layout.
+fn refreshed_host_options(
+    document: &Value,
+    generation: &str,
+    prepare: impl FnOnce(&Path, &Path) -> Result<Value, Box<dyn std::error::Error>>,
+) -> Result<Option<Value>, Box<dyn std::error::Error>> {
+    let Some((resources, dictionaries, state)) = prepared_layout(document) else {
         return Ok(None);
     };
-    if user_data != state.join("user")
-        || dictionaries.parent() != Some(user_data.join("dictionaries").as_path())
-        || dictionaries.file_name().and_then(|name| name.to_str()) == Some(generation)
-    {
+    if dictionaries.file_name().and_then(|name| name.to_str()) == Some(generation) {
         return Ok(None);
     }
     let prepared = prepare(resources, state)?;
@@ -1001,6 +1188,42 @@ fn refreshed_host_options(
             .filter(|value| value.is_string())
             .cloned()
             .ok_or("prepared options are incomplete")?;
+    }
+    Ok(Some(refreshed))
+}
+
+/// `document` with `language_dictionaries` naming what is installed beside its resources, or `None` when it already does or is not in the prepared layout.
+///
+/// The Cantonese and Zhuyin dictionaries arrive with a package, not with a dictionary generation, so options published by an older package are brought up to what is installed even when the generation is current, and lose the key once the dictionaries are gone. Only the directory `prepare_host_configuration` records is kept in step; a document naming another one keeps it.
+fn with_installed_language_dictionaries(
+    document: &Value,
+) -> Result<Option<Value>, Box<dyn std::error::Error>> {
+    let Some((resources, _, _)) = prepared_layout(document) else {
+        return Ok(None);
+    };
+    let beside = language_dictionaries_directory(resources)
+        .and_then(|directory| directory.to_str().map(str::to_owned));
+    let recorded = document
+        .get("language_dictionaries")
+        .and_then(Value::as_str);
+    if recorded.is_some() && recorded != beside.as_deref() {
+        return Ok(None);
+    }
+    let installed = installed_language_dictionaries(resources);
+    if recorded == installed.as_deref() {
+        return Ok(None);
+    }
+    let mut refreshed = document.clone();
+    let object = refreshed
+        .as_object_mut()
+        .ok_or("runtime options are not an object")?;
+    match installed {
+        Some(directory) => {
+            object.insert("language_dictionaries".to_owned(), Value::String(directory));
+        }
+        None => {
+            object.remove("language_dictionaries");
+        }
     }
     Ok(Some(refreshed))
 }

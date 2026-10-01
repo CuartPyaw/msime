@@ -9,6 +9,7 @@ mod clipboard_history;
 mod dictionary_import;
 // Only the two hosts that have to replay input into another window build this.
 // macOS delivers through the input method itself and needs none of it.
+mod notices;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 mod panel_input;
 mod panel_window;
@@ -42,8 +43,8 @@ use panel_input::{send_panel_key_windows, send_panel_text_windows, windows_panel
 use platform::android::android_account;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 use platform::desktop::{
-    desktop_account, desktop_candidate_skin_community, desktop_plugin_community, desktop_plugins,
-    desktop_preferences_monitor,
+    desktop_account, desktop_candidate_skin_community, desktop_community_report,
+    desktop_plugin_community, desktop_plugins, desktop_preferences_monitor,
 };
 #[cfg(target_os = "ios")]
 use platform::ios::ios_account;
@@ -185,13 +186,38 @@ fn requested_surface_route() -> Option<SurfaceRoute> {
 }
 
 #[tauri::command]
-fn host_capabilities() -> HostCapabilities {
+fn host_capabilities(app: tauri::AppHandle) -> HostCapabilities {
     let mut capabilities = HostCapabilities::for_platform(host_platform());
     // Font enumeration is a build-time capability, not a platform assumption.
     capabilities.system_fonts = font_catalog_supported();
     capabilities.os_version = macos_product_version();
     capabilities.candidate_panel_limit = linux_candidate_panel_limit();
+    let host_options = app
+        .try_state::<DictionaryHostOptions>()
+        .and_then(|options| options.snapshot().ok());
+    drop_uninstalled_language_schemes(&mut capabilities, host_options.as_ref());
     capabilities
+}
+
+/// Cantonese and Zhuyin each read a dictionary the package installs beside the Engine resources, which the HostOptions document names in `language_dictionaries` only when one is there. Without its dictionary host-api falls back from the scheme, so the page shows it unavailable instead of offering a choice that never takes effect. Every other scheme needs nothing beyond the resources.
+fn drop_uninstalled_language_schemes(
+    capabilities: &mut HostCapabilities,
+    host_options: Option<&Value>,
+) {
+    use msime_client_core::preferences::InputScheme;
+    let directory = host_options
+        .and_then(|document| document.get("language_dictionaries"))
+        .and_then(Value::as_str)
+        .map(std::path::Path::new)
+        .filter(|directory| directory.is_absolute());
+    capabilities.input_schemes.retain(|scheme| {
+        let dictionary = match scheme {
+            InputScheme::Cantonese => "cantonese.db",
+            InputScheme::Zhuyin => "zhuyin.db",
+            _ => return true,
+        };
+        directory.is_some_and(|directory| directory.join(dictionary).is_file())
+    });
 }
 
 /// What the running Linux host found about the desktop's candidate panel. Only the host knows which panel draws its list - GNOME Shell's popup, a Fcitx5 theme the user picked, the desktop's Kimpanel - so it writes that finding to a per-session file and the page reads it here instead of guessing from the desktop name.
@@ -4698,6 +4724,7 @@ pub fn run() {
             }
             app.manage(TypingStatisticsState(typing_statistics));
             app.manage(DiagnosticLogState(directory.clone()));
+            app.manage(notices::NoticesState(directory.clone()));
             // The staging root, not the Engine resource directory inside it: `wordbooks/` is a
             // sibling of `EngineResources/` because `ResourceStore::verify` requires that
             // directory to hold exactly the pinned dictionary artifacts, and one extra entry
@@ -4992,6 +5019,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             host_capabilities,
+            notices::notices_list,
+            notices::notice_dismiss,
             list_voice_capture_devices,
             capture_voice_pcm,
             supports_font_catalog,
@@ -5249,6 +5278,8 @@ pub fn run() {
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             desktop_candidate_skin_community::candidate_skin_community_sync,
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            desktop_community_report::community_report,
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             desktop_plugin_community::plugin_community_list,
             #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
             desktop_plugin_community::plugin_community_detail,
@@ -5332,6 +5363,8 @@ pub fn run() {
             android_account::account_preferences_upload,
             #[cfg(target_os = "android")]
             android_account::account_preferences_apply,
+            #[cfg(any(target_os = "ios", target_os = "android"))]
+            mobile_community::community_report,
             #[cfg(any(target_os = "ios", target_os = "android"))]
             mobile_community::community_skin_list,
             #[cfg(any(target_os = "ios", target_os = "android"))]

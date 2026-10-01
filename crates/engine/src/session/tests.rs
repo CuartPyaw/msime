@@ -1391,7 +1391,7 @@ fn backspace_commit_raw_cancel_and_scheme_switch() {
     assert!(cancelled.handled && cancelled.commit.is_none());
     assert!(session.snapshot().preedit.is_empty());
     type_text(&mut session, "nihao");
-    session.switch_scheme(SchemeType::Shuangpin);
+    session.switch_scheme(SchemeType::Shuangpin).unwrap();
     assert!(session.snapshot().preedit.is_empty());
     assert_eq!(session.snapshot().scheme, SchemeType::Shuangpin);
 }
@@ -1717,8 +1717,8 @@ fn sessions_on_different_roots_stay_isolated() {
         session.command(Command::Cancel);
     }
 
-    a.switch_scheme(SchemeType::JapaneseRomaji);
-    b.switch_scheme(SchemeType::JapaneseRomaji);
+    a.switch_scheme(SchemeType::JapaneseRomaji).unwrap();
+    b.switch_scheme(SchemeType::JapaneseRomaji).unwrap();
     type_text(&mut a, "kana");
     type_text(&mut b, "kana");
     assert_eq!(words(&a)[0], "甲");
@@ -2172,7 +2172,7 @@ fn korean_ignores_the_caret_and_switching_to_it_starts_empty() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = fixture.session();
     type_text(&mut session, "ni");
-    session.switch_scheme(SchemeType::Korean);
+    session.switch_scheme(SchemeType::Korean).unwrap();
     assert_eq!(session.snapshot().preedit, "");
     type_korean(&mut session, "gks");
     session.set_caret(Some(1));
@@ -2181,7 +2181,7 @@ fn korean_ignores_the_caret_and_switching_to_it_starts_empty() {
     assert_eq!(snapshot.preedit, "한");
     assert_eq!(session.prefix_end(), 3);
     assert_eq!(session.pending_suffix(), "");
-    session.switch_scheme(SchemeType::Quanpin);
+    session.switch_scheme(SchemeType::Quanpin).unwrap();
     assert_eq!(session.snapshot().preedit, "");
     type_text(&mut session, "ni");
     assert!(words(&session).contains(&"你".to_owned()));
@@ -2601,7 +2601,7 @@ fn expression_mode_needs_a_pinyin_scheme_and_an_empty_composition() {
     session.character(b'V', true);
     assert_eq!(session.snapshot().local_mode, LocalInputMode::None);
     session.command(Command::Cancel);
-    session.switch_scheme(SchemeType::Wubi);
+    session.switch_scheme(SchemeType::Wubi).unwrap();
     assert!(!session.character(b'V', true).handled);
     assert!(!session.character(b'/', false).handled);
     assert!(session.snapshot().spelling_symbols.is_empty());
@@ -2938,4 +2938,458 @@ fn the_translate_command_asks_for_its_english_and_commits_the_answer() {
     session.character(b'x', false);
     assert!(!session.apply_command_translation(&query, "你好"));
     assert_eq!(words(&session), ["hellox"]);
+}
+
+// ---- Vietnamese ----
+
+#[test]
+fn vietnamese_vni_digits_are_spelling_symbols_only_while_a_word_composes() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Vietnamese;
+        options.vietnamese_input_method = crate::vietnamese::InputMethod::Vni;
+    });
+    assert!(session.snapshot().spelling_symbols.is_empty());
+    type_text(&mut session, "a");
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.spelling_symbols, "0123456789");
+    assert!(!snapshot.candidate_list_open);
+    assert!(snapshot.candidates.is_empty());
+    // A blur or scheme switch finishes through `finish`, which commits the word as displayed.
+    session.character(b'1', false);
+    assert_eq!(session.finish(0).commit.as_deref(), Some("á"));
+    assert!(session.snapshot().spelling_symbols.is_empty());
+}
+
+#[test]
+fn vietnamese_dedicated_english_keeps_its_own_rules() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Vietnamese);
+    session.set_dedicated_english(true);
+    type_text(&mut session, "hoaf");
+    assert_eq!(session.snapshot().preedit, "hoaf");
+    // The English composition is discarded at once: no raw-restore step in between.
+    assert!(session.command(Command::Cancel).handled);
+    assert!(session.snapshot().preedit.is_empty());
+}
+
+#[test]
+fn vietnamese_option_change_keeps_the_raw_key_display() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Vietnamese);
+    type_text(&mut session, "hoaf");
+    assert_eq!(session.snapshot().preedit, "hoà");
+    assert!(session.command(Command::Cancel).handled);
+    assert_eq!(session.snapshot().preedit, "hoaf");
+    session.input.engine.set_vietnamese_options(
+        crate::vietnamese::InputMethod::Telex,
+        crate::vietnamese::ToneStyle::Classic,
+    );
+    assert_eq!(session.snapshot().preedit, "hoaf");
+    // The second Esc still clears rather than taking the raw-restore step again.
+    assert!(session.command(Command::Cancel).handled);
+    assert!(session.snapshot().preedit.is_empty());
+}
+
+/// A `cantonese.db` with the rows the Cantonese session tests read, written with the shipped schema.
+fn cantonese_dictionary(directory: &Path) -> PathBuf {
+    use crate::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let path = directory.join("cantonese.db");
+    let connection = Connection::open(&path).expect("cantonese.db");
+    connection.execute_batch(SCHEMA).expect("cantonese schema");
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .expect("cantonese metadata");
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('nei'),('hou'),('ngo'),('ngoi'),('oi'),('i');\
+             INSERT INTO entries VALUES ('nei hou','你好',900),('nei hou','妳好',40),('nei','你',5000),('nei','妳',300),('hou','好',4000),('hou','號',500),('ngo','我',6000),('oi','愛',2500),('ngoi','外',1000);",
+        )
+        .expect("cantonese rows");
+    path
+}
+
+/// Every table of a database with its row count, to show that nothing was written.
+fn table_counts(path: &Path) -> Vec<(String, i64)> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    let connection = Connection::open(path).expect("database");
+    let tables: Vec<String> = connection
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |row| row.get(0))
+                .and_then(|rows| rows.collect())
+        })
+        .expect("tables");
+    tables
+        .into_iter()
+        .map(|table| {
+            let count = connection
+                .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |row| {
+                    row.get(0)
+                })
+                .expect("count");
+            (table, count)
+        })
+        .collect()
+}
+
+#[test]
+fn cantonese_without_its_dictionary_is_unavailable() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let error = Session::new({
+        let mut options = fixture.options();
+        options.scheme = SchemeType::Cantonese;
+        options
+    })
+    .err()
+    .expect("no cantonese.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+
+    // Switching to it fails and leaves the scheme and the composition as they were.
+    let mut session = fixture.session();
+    type_text(&mut session, "nihao");
+    let error = session
+        .switch_scheme(SchemeType::Cantonese)
+        .expect_err("no cantonese.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    assert_eq!(session.snapshot().scheme, SchemeType::Quanpin);
+    assert_eq!(session.snapshot().preedit, "nihao");
+    assert_eq!(words(&session)[0], "你好");
+
+    // With the file in place the same switch goes through.
+    let mut session = fixture.session_with(|options| {
+        options.cantonese_dictionary = cantonese_dictionary(fixture.path());
+    });
+    type_text(&mut session, "nihao");
+    session.switch_scheme(SchemeType::Cantonese).unwrap();
+    assert_eq!(session.snapshot().scheme, SchemeType::Cantonese);
+    assert!(session.snapshot().preedit.is_empty());
+}
+
+#[test]
+fn cantonese_rows_are_never_learned_or_edited() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let cantonese = cantonese_dictionary(fixture.path());
+    let configure = |options: &mut SessionOptions| {
+        options.scheme = SchemeType::Cantonese;
+        options.cantonese_dictionary = cantonese.clone();
+        options.learning = true;
+        options.personal_context = true;
+        options.frequency = FrequencyAdjustmentOptions {
+            mode: FrequencyAdjustmentMode::Promote,
+            trigger_count: 1,
+            linear_step: 1,
+        };
+    };
+    let mut session = fixture.session_with(configure);
+    let journal = table_counts(&fixture.journal());
+    let main = table_counts(&fixture.main_db());
+
+    type_text(&mut session, "neihou");
+    assert_eq!(session.snapshot().editing_text, "nei hou");
+    assert_eq!(words(&session), ["你好", "妳好", "你", "妳"]);
+    // Pins, removals and fixed slots would key these rows by Jyutping in the pinyin stores.
+    assert!(!session.pin(1).handled);
+    assert!(!session.remove(0).handled);
+    assert!(!session.fix_position(1, 1).handled);
+    assert_eq!(words(&session), ["你好", "妳好", "你", "妳"]);
+
+    // A row covering the first syllable commits at once and the rest keeps composing.
+    let result = session.select(2);
+    assert_eq!(result.commit.as_deref(), Some("你"));
+    assert_eq!(session.snapshot().editing_text, "hou");
+    assert_eq!(words(&session), ["好", "號"]);
+    let result = session.select(1);
+    assert_eq!(result.commit.as_deref(), Some("號"));
+    assert!(session.snapshot().preedit.is_empty());
+
+    // Typing the same reading again finds the order unchanged.
+    type_text(&mut session, "neihou");
+    assert_eq!(words(&session), ["你好", "妳好", "你", "妳"]);
+    assert_eq!(session.select(1).commit.as_deref(), Some("妳好"));
+    type_text(&mut session, "nei'h");
+    assert_eq!(
+        session.command(Command::CommitRaw).commit.as_deref(),
+        Some("nei'h")
+    );
+    drop(session);
+    crate::flush_personal_learning();
+
+    assert_eq!(table_counts(&fixture.journal()), journal);
+    assert_eq!(table_counts(&fixture.main_db()), main);
+    let mut session = fixture.session_with(configure);
+    type_text(&mut session, "neihou");
+    assert_eq!(words(&session), ["你好", "妳好", "你", "妳"]);
+}
+
+#[test]
+fn cantonese_caret_edits_keep_the_shown_syllables() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Cantonese;
+        options.cantonese_dictionary = cantonese_dictionary(fixture.path());
+    });
+    type_text(&mut session, "ngo'oi");
+    assert_eq!(session.snapshot().editing_text, "ngo oi");
+    assert_eq!(words(&session), ["我"]);
+    assert!(session.command(Command::MoveLeft).handled);
+    assert!(session.command(Command::Backspace).handled);
+    // `ngo i`, not the single syllable `ngoi` (外).
+    assert_eq!(session.snapshot().editing_text, "ngo i");
+    assert_eq!(words(&session), ["我"]);
+}
+
+/// A `zhuyin.db` with the rows the Zhuyin session tests read, written with the shipped schema.
+fn zhuyin_dictionary(directory: &Path) -> PathBuf {
+    use crate::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let path = directory.join("zhuyin.db");
+    let connection = Connection::open(&path).expect("zhuyin.db");
+    connection.execute_batch(SCHEMA).expect("zhuyin schema");
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .expect("zhuyin metadata");
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('ㄋㄧˇ'),('ㄏㄠˇ'),('ㄊㄞˊ'),('ㄨㄢ');\
+             INSERT INTO entries VALUES ('ㄋㄧˇ','你',1000),('ㄋㄧˇ','妳',300),('ㄏㄠˇ','好',2000),('ㄏㄠˇ','郝',10),('ㄋㄧˇ ㄏㄠˇ','你好',500),('ㄊㄞˊ','台',900),('ㄊㄞˊ','臺',400),('ㄨㄢ','彎',500),('ㄨㄢ','灣',300),('ㄊㄞˊ ㄨㄢ','臺灣',800),('ㄊㄞˊ ㄨㄢ','台灣',600);",
+        )
+        .expect("zhuyin rows");
+    path
+}
+
+fn zhuyin_session(fixture: &Fixture) -> Session {
+    fixture.session_with(|options| {
+        options.scheme = SchemeType::Zhuyin;
+        options.zhuyin_dictionary = zhuyin_dictionary(fixture.path());
+    })
+}
+
+#[test]
+fn zhuyin_keeps_its_dictionary_open_across_scheme_switches() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = zhuyin_session(&fixture);
+    session.switch_scheme(SchemeType::Quanpin).unwrap();
+    // The file is gone, but the connection opened at activation is still the session's.
+    std::fs::remove_file(fixture.path().join("zhuyin.db")).unwrap();
+    session.switch_scheme(SchemeType::Zhuyin).unwrap();
+    session.switch_scheme(SchemeType::Zhuyin).unwrap();
+    type_text(&mut session, "su3");
+    assert_eq!(
+        session.command(Command::CommitRaw).commit.as_deref(),
+        Some("你")
+    );
+}
+
+#[test]
+fn zhuyin_without_its_dictionary_is_unavailable() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let error = Session::new({
+        let mut options = fixture.options();
+        options.scheme = SchemeType::Zhuyin;
+        options
+    })
+    .err()
+    .expect("no zhuyin.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+
+    let mut session = fixture.session();
+    type_text(&mut session, "nihao");
+    assert!(session.switch_scheme(SchemeType::Zhuyin).is_err());
+    assert_eq!(session.snapshot().scheme, SchemeType::Quanpin);
+    assert_eq!(session.snapshot().preedit, "nihao");
+
+    // With the file in place the switch goes through, and switching away and back opens it again.
+    let mut session = fixture.session_with(|options| {
+        options.zhuyin_dictionary = zhuyin_dictionary(fixture.path());
+    });
+    session.switch_scheme(SchemeType::Zhuyin).unwrap();
+    session.switch_scheme(SchemeType::Quanpin).unwrap();
+    session.switch_scheme(SchemeType::Zhuyin).unwrap();
+    type_text(&mut session, "su3cl3");
+    assert_eq!(session.snapshot().preedit, "你好");
+}
+
+#[test]
+fn zhuyin_composes_and_reports_its_spelling_symbols() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = zhuyin_session(&fixture);
+    // Idle, the tone digits and Space type themselves.
+    assert_eq!(session.snapshot().spelling_symbols, "125890,./;-");
+    assert!(!session.character(b'3', false).handled);
+    assert!(!session.character(b' ', false).handled);
+
+    type_text(&mut session, "su3cl");
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.preedit, "你ㄏㄠ");
+    assert_eq!(snapshot.editing_text, "su3cl");
+    assert_eq!(snapshot.caret_position, 5);
+    assert_eq!(snapshot.spelling_symbols, "1234567890,./;- ");
+    // Nothing is listed until the user opens the list.
+    assert!(snapshot.candidates.is_empty());
+    assert!(!snapshot.candidate_list_open);
+    // A tone digit on the candidate-key route spells.
+    assert!(session.candidate_key(b'3').handled);
+    assert_eq!(session.snapshot().preedit, "你好");
+    // The caret stays at the end.
+    assert!(session.command(Command::MoveLeft).commit.is_some());
+    assert!(session.snapshot().preedit.is_empty());
+}
+
+#[test]
+fn zhuyin_list_selection_pins_without_committing_or_learning() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Zhuyin;
+        options.zhuyin_dictionary = zhuyin_dictionary(fixture.path());
+        options.learning = true;
+        options.personal_context = true;
+    });
+    let journal = table_counts(&fixture.journal());
+    let main = table_counts(&fixture.main_db());
+
+    type_text(&mut session, "su3cl3");
+    assert!(session.command(Command::ConvertHanja).handled);
+    let snapshot = session.snapshot();
+    assert!(snapshot.candidate_list_open);
+    assert_eq!(snapshot.spelling_symbols, "0,./;-");
+    assert_eq!(words(&session), ["你好", "好", "郝"]);
+    // Rows come from the read-only zhuyin.db: none can be pinned, removed or fixed.
+    assert!(!session.pin(1).handled);
+    assert!(!session.remove(0).handled);
+    assert!(!session.fix_position(1, 1).handled);
+
+    // A selection digit with the list open is left for the runtime to select with.
+    let digit = session.character(b'3', false);
+    assert!(!digit.handled && digit.commit.is_none());
+    let space = session.character(b' ', false);
+    assert!(!space.handled && space.commit.is_none());
+
+    let selected = session.select(2);
+    assert!(selected.handled);
+    assert_eq!(selected.commit, None);
+    let snapshot = session.snapshot();
+    assert!(!snapshot.candidate_list_open);
+    assert!(snapshot.candidates.is_empty());
+    assert_eq!(snapshot.preedit, "你郝");
+
+    // The candidate-key route selects too, and the edge route chooses rather than commits.
+    session.command(Command::ConvertHanja);
+    assert!(session.candidate_key(b'2').handled);
+    assert_eq!(session.snapshot().preedit, "你好");
+    session.command(Command::ConvertHanja);
+    let edge = session.select_edge(2, CandidateEdge::FirstHan);
+    assert!(edge.handled && edge.commit.is_none());
+    assert_eq!(session.snapshot().preedit, "你郝");
+    // With the list open CommitCandidate chooses the first row.
+    session.command(Command::ConvertHanja);
+    let first = session.command(Command::CommitCandidate);
+    assert!(first.handled && first.commit.is_none());
+    assert_eq!(session.snapshot().preedit, "你好");
+
+    // With the list closed it commits the converted text.
+    assert_eq!(
+        session.command(Command::CommitCandidate).commit.as_deref(),
+        Some("你好")
+    );
+    assert!(session.snapshot().preedit.is_empty());
+    drop(session);
+    crate::flush_personal_learning();
+    assert_eq!(table_counts(&fixture.journal()), journal);
+    assert_eq!(table_counts(&fixture.main_db()), main);
+}
+
+#[test]
+fn zhuyin_cancel_and_backspace_close_the_list_first() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = zhuyin_session(&fixture);
+    type_text(&mut session, "w96j0 ");
+    assert_eq!(session.snapshot().preedit, "臺灣");
+    session.command(Command::ConvertHanja);
+    assert_eq!(words(&session), ["臺灣", "台灣", "彎", "灣"]);
+    assert!(session.command(Command::Cancel).handled);
+    assert!(!session.snapshot().candidate_list_open);
+    assert_eq!(session.snapshot().preedit, "臺灣");
+    session.command(Command::ConvertHanja);
+    assert!(session.command(Command::Backspace).handled);
+    assert!(!session.snapshot().candidate_list_open);
+    assert_eq!(session.snapshot().preedit, "臺灣");
+    // A phonetic key closes the list and keeps composing.
+    session.command(Command::ConvertHanja);
+    assert!(session.character(b's', false).handled);
+    assert!(!session.snapshot().candidate_list_open);
+    assert_eq!(session.snapshot().preedit, "臺灣ㄋ");
+    assert!(session.command(Command::Backspace).handled);
+    assert_eq!(session.snapshot().preedit, "臺灣");
+    assert!(session.command(Command::Cancel).handled);
+    assert!(session.snapshot().preedit.is_empty());
+    assert!(!session.command(Command::Cancel).handled);
+}
+
+#[test]
+fn zhuyin_enter_shift_punctuation_and_other_keys_commit() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = zhuyin_session(&fixture);
+    // Enter commits the conversion and drops the pending syllable.
+    type_text(&mut session, "su3c");
+    assert_eq!(
+        session.command(Command::CommitRaw).commit.as_deref(),
+        Some("你")
+    );
+    assert!(session.snapshot().preedit.is_empty());
+
+    // A Shift punctuation key commits the text with its full-width mark on either route, even idle.
+    type_text(&mut session, "su3");
+    let marked = session.punctuation(b'<');
+    assert!(marked.handled);
+    assert_eq!(marked.commit.as_deref(), Some("你，"));
+    let idle = session.character(b'?', false);
+    assert!(idle.handled);
+    assert_eq!(idle.commit.as_deref(), Some("？"));
+
+    // A phonetic punctuation key spells on the punctuation route.
+    assert!(session.punctuation(b',').handled);
+    assert_eq!(session.snapshot().preedit, "ㄝ");
+    session.command(Command::Cancel);
+
+    // Other ASCII punctuation finishes the composition ahead of its mark.
+    type_text(&mut session, "su3");
+    let finished = session.punctuation(b'!');
+    assert!(finished.handled);
+    assert_eq!(finished.commit.as_deref(), Some("你！"));
+    assert!(session.snapshot().preedit.is_empty());
+
+    // With Chinese punctuation off the Shift overlay still writes its full-width mark, while other ASCII punctuation is left to the host.
+    session.set_chinese_punctuation_enabled(false);
+    let overlay = session.punctuation(b'<');
+    assert!(overlay.handled);
+    assert_eq!(overlay.commit.as_deref(), Some("，"));
+    let plain = session.punctuation(b'!');
+    assert!(!plain.handled);
+    assert_eq!(plain.commit, None);
+    session.set_chinese_punctuation_enabled(true);
+
+    // A key the editor does not claim commits the text and goes to the host.
+    type_text(&mut session, "su3");
+    let capital = session.character(b'A', true);
+    assert!(!capital.handled);
+    assert_eq!(capital.commit.as_deref(), Some("你"));
+    assert!(session.snapshot().preedit.is_empty());
 }

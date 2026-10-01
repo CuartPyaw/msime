@@ -27,6 +27,12 @@ pub enum InputScheme {
     Japanese,
     /// Korean Hangul on the Dubeolsik layout. The Engine ordinal is 4.
     Korean,
+    /// Cantonese in toneless Jyutping, read from `cantonese.db`. A Chinese scheme. The Engine ordinal is 5.
+    Cantonese,
+    /// Bopomofo on the Dachen layout, read from `zhuyin.db`. A Chinese scheme. The Engine ordinal is 6.
+    Zhuyin,
+    /// Vietnamese through Telex or VNI, set in `vietnamese`. The Engine ordinal is 7.
+    Vietnamese,
 }
 
 /// Presentation layout for touch keyboard hosts. Desktop hosts preserve but ignore it.
@@ -426,6 +432,51 @@ pub enum ChineseScheme {
     Quanpin,
     Shuangpin,
     Wubi,
+    Cantonese,
+    Zhuyin,
+}
+
+impl From<ChineseScheme> for InputScheme {
+    fn from(scheme: ChineseScheme) -> Self {
+        match scheme {
+            ChineseScheme::Quanpin => Self::Quanpin,
+            ChineseScheme::Shuangpin => Self::Shuangpin,
+            ChineseScheme::Wubi => Self::Wubi,
+            ChineseScheme::Cantonese => Self::Cantonese,
+            ChineseScheme::Zhuyin => Self::Zhuyin,
+        }
+    }
+}
+
+/// How Vietnamese letters and tones are typed. The Engine code is the declaration order (`vietnamese_input_method`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VietnameseInputMethod {
+    #[default]
+    Telex,
+    Vni,
+}
+
+/// Where the tone mark goes in an `oa`, `oe` or `uy` syllable: modern places it on the second vowel (hoà), classic on the first (hòa). The Engine code is the declaration order (`vietnamese_tone_style`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VietnameseToneStyle {
+    #[default]
+    Modern,
+    Classic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct VietnamesePreferences {
+    pub input_method: VietnameseInputMethod,
+    pub tone_style: VietnameseToneStyle,
+}
+
+impl VietnamesePreferences {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -616,13 +667,16 @@ pub struct Preferences {
     /// The optional buttons on the touch keyboard's toolbar, the counterpart of the floating toolbar's component switches. The voice entry stays under `touch_voice_shortcut`.
     #[serde(default)]
     pub touch_toolbar: TouchToolbarPreferences,
-    /// Retained when the active scheme is Japanese or Korean. Absent in legacy documents.
+    /// Retained when the active scheme is Japanese, Korean or Vietnamese. Absent in legacy documents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_chinese_scheme: Option<ChineseScheme>,
     #[serde(default)]
     pub shuangpin_profile: ShuangpinProfile,
     #[serde(default = "enabled_by_default")]
     pub shuangpin_preedit_uses_raw: bool,
+    /// The Vietnamese input method and tone placement. Left out of the document at its default, so an untouched document still loads in a build that predates the key.
+    #[serde(default, skip_serializing_if = "VietnamesePreferences::is_default")]
+    pub vietnamese: VietnamesePreferences,
     pub candidate_page_size: u8,
     /// Linux IBus can release the number row to the application while a
     /// candidate list is visible. Other hosts preserve this preference even
@@ -738,9 +792,9 @@ pub struct Preferences {
     /// True when the MSIME account (水杉账号) is the candidate translation service; candidates are then sent to `https://api.msime.app/v1/translate`. Fresh macOS and Linux installs start with it chosen (see `Default`), while a stored document without the field reads false, so a user who never chose it keeps the behaviour they had. Omitted while false so documents that never chose it stay readable by older strict parsers.
     #[serde(default, skip_serializing_if = "is_false")]
     pub translation_account: bool,
-    /// Send the anonymous start and crash events to `https://api.msime.app/v1/telemetry/events`. Off until the user turns it on. Only the Windows Server reads it so far; the other hosts keep their own telemetry behaviour, described in PRIVACY.md.
-    #[serde(default)]
-    pub telemetry_enabled: bool,
+    /// Send anonymous usage reports (daily activity, session ends, crash summaries; see [`crate::telemetry`] and PRIVACY.md) to `https://api.msime.app/v1/telemetry/events`. On by default; turning it off stops all reporting and clears the local queue. Replaces the opt-in `telemetry_enabled`, which is no longer read: a stored document that still carries that key loads with it dropped. Omitted while on, so a document that never turned it off stays readable by older strict parsers; a reader treats an absent key as on.
+    #[serde(default = "enabled_by_default", skip_serializing_if = "is_true")]
+    pub usage_reporting: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1664,6 +1718,7 @@ impl Default for Preferences {
             last_chinese_scheme: None,
             shuangpin_profile: ShuangpinProfile::default(),
             shuangpin_preedit_uses_raw: true,
+            vietnamese: VietnamesePreferences::default(),
             candidate_page_size: 6,
             number_row_selection: true,
             candidate_font_size: default_candidate_font_size(),
@@ -1705,7 +1760,7 @@ impl Default for Preferences {
             translation_secondary_language: None,
             // Only the desktop hosts that offer 水杉账号 in the translation service picker default to it; Android, iOS, Windows and HarmonyOS keep it as an explicit choice.
             translation_account: cfg!(any(target_os = "macos", target_os = "linux")),
-            telemetry_enabled: false,
+            usage_reporting: true,
         }
     }
 }
@@ -1753,6 +1808,10 @@ impl FuzzyPinyinRule {
             Self::UanUang => 1 << 10,
         }
     }
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn is_false(value: &bool) -> bool {
@@ -2339,7 +2398,7 @@ impl PreferencesStore {
             .get_mut("preferences")
             .and_then(serde_json::Value::as_object_mut)
         {
-            migrate_retired_skin_fields(preferences);
+            migrate_retired_fields(preferences);
         }
         let mut snapshot: PreferencesSnapshot = serde_json::from_value(document)?;
         if snapshot.format_version != 1 {
@@ -2560,6 +2619,16 @@ impl PreferencesStore {
     }
 }
 
+/// Keys of [`Preferences`] that were replaced and are dropped on read, so a document an older build saved still loads. `telemetry_enabled` was the opt-in reporting switch; its replacement `usage_reporting` is on by default and deliberately does not inherit the old value.
+const RETIRED_KEYS: [&str; 1] = ["telemetry_enabled"];
+
+fn migrate_retired_fields(preferences: &mut serde_json::Map<String, serde_json::Value>) {
+    for key in RETIRED_KEYS {
+        preferences.remove(key);
+    }
+    migrate_retired_skin_fields(preferences);
+}
+
 /// The candidate colour pickers #1187 moved from the top level into `custom_theme.candidate_colors`, old key and new.
 const RETIRED_CANDIDATE_COLORS: [(&str, &str); 7] = [
     ("candidate_text_color", "text"),
@@ -2665,7 +2734,7 @@ fn salvage_preferences(
             _ => return Ok((default, false)),
         },
     };
-    migrate_retired_skin_fields(&mut source);
+    migrate_retired_fields(&mut source);
     let mut kept = false;
     for (key, value) in &source {
         let mut candidate = salvaged.clone();

@@ -32,9 +32,10 @@ public final class CommunitySkinSheet {
      * @param nineKey draw the preview as the layout this user types on
      * @param onSave  runs when the sheet's own button is pressed; null for kinds that cannot be
      *                imported yet, which get a disabled button rather than a dead one
+     * @param onReport runs when 举报 is pressed, after the sheet closes
      */
     public static void show(Context context, CommunityCatalog.Item item, boolean nineKey,
-            Runnable onSave) {
+            Runnable onSave, Runnable onReport) {
         KeyboardSkin skin = CommunityAdapter.preview(item);
         SettingsSheet sheet = new SettingsSheet(context, item.name(), subtitle(item));
         float density = context.getResources().getDisplayMetrics().density;
@@ -73,6 +74,20 @@ public final class CommunitySkinSheet {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         action.topMargin = Math.round(18 * density);
         sheet.content().addView(save, action);
+
+        // Everything here is someone else's work, published without review first; this is how a reader flags it to the moderators.
+        MaterialButton report = new MaterialButton(context, null,
+            androidx.appcompat.R.attr.borderlessButtonStyle);
+        report.setText("举报");
+        report.setOnClickListener(ignored -> {
+            sheet.dismiss();
+            onReport.run();
+        });
+        LinearLayout.LayoutParams reportParams = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        reportParams.gravity = android.view.Gravity.END;
+        reportParams.topMargin = Math.round(4 * density);
+        sheet.content().addView(report, reportParams);
 
         sheet.addNote(onSave == null
             // 词库和回复要先有本地编辑器才谈得上导入，那一页还没搬过来。
