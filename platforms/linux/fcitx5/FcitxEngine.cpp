@@ -58,6 +58,7 @@
 #include "../src/core/PhrasePreedit.h"
 #include "../src/core/ClientInputModeMemory.h"
 #include "../src/core/JapaneseConversion.h"
+#include "../src/core/KoreanHanja.h"
 #include "../src/system/TypingStatistics.h"
 #include "SystemTheme.h"
 #include "../src/voice/VoiceAction.h"
@@ -5906,7 +5907,7 @@ void FcitxState::render() {
     else
       ic_.inputPanel().setPreedit(preedit);
   } else if (style != "empty" || korean()) {
-    // A Korean syllable is text the user already wrote and has no candidate window to show it in, so it is drawn inline whatever the preedit style.
+    // A Korean syllable is text the user already wrote, so it is drawn inline whatever the preedit style: until its Hanja list opens there is no candidate window to show it in.
     auto reading = style == "pinyin" ? view_.value("preedit", editing) : editing;
     // A Japanese composition is かな, not the letters that produced it; see
     // ../src/core/PhrasePreedit.h for the one case that keeps the letters.
@@ -6495,8 +6496,21 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
       view_.value("editing_text", std::string{}).empty() &&
       view_.value("candidates", Json::array()).empty())
     return false;
-  // A Korean syllable has no candidates. The keys that end it send it to the application as a commit and then do their own work there (the transition is unhandled), as in every Korean input method; Escape discards it and Backspace takes back one jamo. Every other key falls through: a letter composes, a digit or a mark ends the syllable through the runtime, and anything else finishes it at the end of this function.
-  if (composing && korean()) {
+  // Hangul_Hanja, or a bare F9, converts the composing Korean syllable to Hanja, the keys of fcitx5-hangul and ibus-hangul; pressed again with the list open it closes it (msime_client.h, MSIME_CONVERT_HANJA). Ctrl+F9 is the voice toggle above. While a syllable composes the key stays the input method's whatever the Engine answers: a lone jamo has no Hanja, and the tail of this function would write the syllable out and hand the key to the application. With nothing composing it is the application's as before.
+  static_assert(msime::linux_host::kKeysymHangulHanja == FcitxKey_Hangul_Hanja &&
+                msime::linux_host::kKeysymF9 == FcitxKey_F9);
+  if (composing && msime::linux_host::korean_hanja_key(sym) &&
+      !states.testAny(fcitx::KeyStates{fcitx::KeyState::Ctrl, fcitx::KeyState::Alt, fcitx::KeyState::Shift,
+                                       fcitx::KeyState::Super, fcitx::KeyState::Hyper, fcitx::KeyState::Meta,
+                                       fcitx::KeyState::Mod5}) &&
+      msime::linux_host::korean_composition(view_)) {
+    command(MSIME_CONVERT_HANJA);
+    return true;
+  }
+  // With its Hanja list open a Korean syllable has candidates, and the candidate block below takes the keys as it does for any list.
+  const bool koreanHanjaList = msime::linux_host::korean_hanja_list_open(view_);
+  // Otherwise a Korean syllable has no candidates. The keys that end it send it to the application as a commit and then do their own work there (the transition is unhandled), as in every Korean input method; Escape discards it and Backspace takes back one jamo. Every other key falls through: a letter composes, a digit or a mark ends the syllable through the runtime, and anything else finishes it at the end of this function.
+  if (composing && korean() && !koreanHanjaList) {
     switch (sym) {
     case FcitxKey_Escape: return command(MSIME_CANCEL);
     case FcitxKey_BackSpace: return command(MSIME_BACKSPACE);
@@ -6510,9 +6524,10 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
     default: break;
     }
   }
-  if (composing && !korean()) {
+  if (composing && (!korean() || koreanHanjaList)) {
     const bool japanese = view_.value("scheme", 0u) == 3;
-    if (!shift && !view_.at("candidates").empty()) {
+    // The marks among these keys stay punctuation while a Korean Hanja list is open, as they are with no list (core/KoreanHanja.h): the Engine closes the list and writes the Hangul with the mark. Page Up, Page Down and Tab still page.
+    if (!shift && !view_.at("candidates").empty() && !koreanHanjaList) {
       if (word_character_enabled_ && !japanese &&
           ((word_character_minus_equal_ && sym == FcitxKey_minus) ||
            (!word_character_minus_equal_ && sym == FcitxKey_bracketleft)))
@@ -6563,7 +6578,9 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
     case FcitxKey_Escape: return command(MSIME_CANCEL);
     case FcitxKey_BackSpace: return command(MSIME_BACKSPACE);
     case FcitxKey_Delete: case FcitxKey_KP_Delete: return command(MSIME_DELETE_FORWARD);
-    case FcitxKey_Return: case FcitxKey_KP_Enter: return command(MSIME_COMMIT_RAW);
+    // With a Korean Hanja list open Return chooses the highlighted Hanja, as Space does; only the session knows the highlight, so the command is the candidate one (msime_client.h).
+    case FcitxKey_Return: case FcitxKey_KP_Enter:
+      return command(koreanHanjaList ? MSIME_COMMIT_CANDIDATE : MSIME_COMMIT_RAW);
     case FcitxKey_space: return command(MSIME_COMMIT_CANDIDATE);
     case FcitxKey_Left: case FcitxKey_KP_Left: return command(MSIME_MOVE_LEFT);
     case FcitxKey_Right: case FcitxKey_KP_Right: return command(MSIME_MOVE_RIGHT);
@@ -6620,6 +6637,12 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
         const auto id = view_.at("candidates").at(index).at("id");
         return apply(msime_client_select(session_, id.at("generation"), id.at("index")));
       }
+      // A digit past the end of a Hanja page picks nothing and is swallowed, as the runtime swallows it, rather than typed beside the open syllable.
+      return koreanHanjaList;
+    }
+    // With number-row selection off a digit is not a candidate shortcut. Sent to the Engine it would still pick a Hanja, since the runtime turns a digit the Engine leaves unhandled into a page selection, so it ends the syllable instead, as a digit does with no list: the Hangul is written and the digit goes to the application after it.
+    if (number && koreanHanjaList) {
+      command(MSIME_FINISH_COMPOSITION);
       return false;
     }
   }
