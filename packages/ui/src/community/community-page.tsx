@@ -13,14 +13,12 @@ import {
   CommunityCandidateSkinsPage,
   type CandidateSkinCommunityClient,
 } from "./community-candidate-skins";
-import { CandidateSkinSyncStatus, useCandidateSkinSync } from "./candidate-skin-sync";
+import { useCandidateSkinSync } from "./candidate-skin-sync";
 import { CommunityPluginsPage, type CommunityPluginClient } from "./community-plugins";
 import type { PluginCatalogResult } from "../settings/plugins-section";
 import * as style from "./community-style";
-import { ExternalSkinDirectoryRow, useSkinCatalog, type SkinCatalog } from "../skin/external-skins";
+import type { SkinCatalog } from "../skin/external-skins";
 import type { SkinImageReader } from "../skin/skin-image";
-import { GroupList } from "../core/platform-controls";
-import * as settings from "../settings/settings-style";
 
 export interface CommunityPageProps {
   skins?: CommunitySkinClient;
@@ -36,8 +34,6 @@ export interface CommunityPageProps {
   openSkinDirectory?: () => Promise<void>;
   /** Reads an installed package's images, so publishing can draw a preview for a package without one. */
   readSkinImage?: SkinImageReader;
-  /** The host imports a skin the user points at instead of opening the skin directory (`HostSurface.skin_directory_import`). */
-  importsSkin?: boolean;
   /** Opens 主题, where an installed candidate skin is enabled. */
   onOpenSkinPage?: () => void;
   theme: "light" | "dark";
@@ -52,22 +48,12 @@ export interface CommunityPageProps {
   destinationKey?: string;
 }
 
-/** The community page: the external skin directory, which community installs land in and which the signed-in user's library syncs with, above the gallery the host supports. A desktop host that also shares plugin packs gets a 候选窗皮肤 / 插件 tab strip, the skin directory belonging to the first tab only. */
+/** The community page: the gallery the host supports, keeping the external skin directory in step with the signed-in user's library in the background. A desktop host that also shares plugin packs gets a 候选窗皮肤 / 插件 tab strip. The directory itself is listed on 主题. */
 export function CommunityPage(props: CommunityPageProps): ReactNode {
-  const {
-    skins,
-    resources,
-    candidateSkins,
-    plugins,
-    localPlugins,
-    localSkins,
-    openSkinDirectory,
-    importsSkin = false,
-    onLogin,
-    destinationKey,
-  } = props;
-  const local = useSkinCatalog(localSkins, openSkinDirectory, importsSkin);
-  const sync = useCandidateSkinSync(candidateSkins, () => void local.refresh());
+  const { skins, resources, candidateSkins, plugins, localPlugins, onLogin, destinationKey } =
+    props;
+  // 主题 scans the directory again when it is next shown, so a run that changed it needs nothing here.
+  const sync = useCandidateSkinSync(candidateSkins, () => undefined);
   const [tab, setTab] = useState<"skin" | "plugin">("skin");
   if (!skins && !resources && !candidateSkins && !plugins) return null;
   const pluginGallery = plugins && (
@@ -107,41 +93,14 @@ export function CommunityPage(props: CommunityPageProps): ReactNode {
       </div>
     );
   }
-  const gallery = (
-    <CommunityGallery
-      {...props}
-      onInstalled={() => {
-        void local.refresh();
-        sync.run();
-      }}
-    />
-  );
-  if (!localSkins && !openSkinDirectory) {
-    return tabs ? (
-      <div className={style.page}>
-        {tabs}
-        {gallery}
-      </div>
-    ) : (
-      gallery
-    );
-  }
-  return (
-    <>
-      {tabs && <div className={style.page}>{tabs}</div>}
-      <div className={settings.groups}>
-        <GroupList title="本地皮肤">
-          <ExternalSkinDirectoryRow
-            skins={local}
-            scannable={!!localSkins}
-            openable={!!openSkinDirectory}
-            importsSkin={importsSkin}
-            status={candidateSkins && <CandidateSkinSyncStatus sync={sync} />}
-          />
-        </GroupList>
-      </div>
+  const gallery = <CommunityGallery {...props} onInstalled={sync.run} />;
+  return tabs ? (
+    <div className={style.page}>
+      {tabs}
       {gallery}
-    </>
+    </div>
+  ) : (
+    gallery
   );
 }
 

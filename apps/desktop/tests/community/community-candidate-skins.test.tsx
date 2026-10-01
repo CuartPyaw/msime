@@ -251,41 +251,21 @@ test("一键安装 installs, reports it, and 去启用 opens the theme page", as
   expect(onOpenSkinPage).toHaveBeenCalledOnce();
 });
 
-test("the community page carries the skin directory row and scans again after an install", async () => {
-  const localSkins = vi.fn().mockResolvedValue(catalog(["other"]));
-  const openSkinDirectory = vi.fn().mockResolvedValue(undefined);
+test("an install from the community page leaves the directory row to 主题", async () => {
   render(
     <CommunityPage
       theme="light"
       candidateSkins={client()}
-      localSkins={localSkins}
-      openSkinDirectory={openSkinDirectory}
+      localSkins={vi.fn().mockResolvedValue(catalog(["other"]))}
+      openSkinDirectory={vi.fn().mockResolvedValue(undefined)}
     />,
   );
-  expect(await screen.findByText("/synthetic/skins")).not.toBeNull();
-  expect(screen.getByText("外部皮肤", { selector: "[data-row-title]" })).not.toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
-  await waitFor(() => expect(openSkinDirectory).toHaveBeenCalledOnce());
-  const scans = localSkins.mock.calls.length;
   await openDetail();
   fireEvent.click(screen.getByRole("button", { name: "一键安装" }));
   expect(await screen.findByText("已安装到外部皮肤。")).not.toBeNull();
-  // The pre-install check reads the directory once; the row then lists what the install added.
-  await waitFor(() => expect(localSkins.mock.calls.length).toBe(scans + 2));
-});
-
-test("a host that imports skins offers 导入皮肤 on the community page", async () => {
-  render(
-    <CommunityPage
-      theme="light"
-      candidateSkins={client()}
-      localSkins={vi.fn().mockResolvedValue(catalog([]))}
-      openSkinDirectory={vi.fn().mockResolvedValue(undefined)}
-      importsSkin
-    />,
-  );
-  expect(await screen.findByRole("button", { name: "导入皮肤" })).not.toBeNull();
-  expect(await screen.findByText("没有发现外部皮肤。")).not.toBeNull();
+  expect(screen.queryByText("/synthetic/skins")).toBeNull();
+  expect(screen.queryByRole("button", { name: "打开目录" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "导入皮肤" })).toBeNull();
 });
 
 test("an installed package id is confirmed before any download", async () => {
@@ -735,62 +715,18 @@ function communityPage(communityClient: CandidateSkinCommunityClient, localSkins
   return localSkins;
 }
 
-test("the community page syncs as it opens and rescans after a run that changed the directory", async () => {
+test("the community page syncs as it opens without listing the skin directory", async () => {
   const sync = vi
     .fn()
     .mockResolvedValue(report({ uploaded: ["ink-wash"], downloaded: ["paper-cut"] }));
-  const localSkins = communityPage(client({ sync }));
-  expect(await screen.findByText("已同步：上传 1 款，下载 1 款。")).not.toBeNull();
-  expect(sync).toHaveBeenCalledOnce();
-  // One scan as the page opens, one for what the sync downloaded.
-  await waitFor(() => expect(localSkins).toHaveBeenCalledTimes(2));
-});
-
-test("a run with nothing to do says so and does not rescan", async () => {
-  const localSkins = communityPage(client());
-  expect(await screen.findByText("本地皮肤已与云端皮肤库同步。")).not.toBeNull();
+  communityPage(client({ sync }));
+  await waitFor(() => expect(sync).toHaveBeenCalledOnce());
   await settle();
-  expect(localSkins).toHaveBeenCalledOnce();
-});
-
-test("sync names each package it left out, and why uploads stopped, in fixed sentences", async () => {
-  communityPage(
-    client({
-      sync: vi.fn().mockResolvedValue(
-        report({
-          skipped: [
-            { package_id: "styled", code: "candidate_skin_file_type" },
-            { package_id: "moved", code: "account_conflict" },
-            { package_id: "offline", code: "account_unavailable" },
-            { package_id: "shared", code: "candidate_skin_public_kept" },
-          ],
-          stopped: "candidate_skin_library_limit",
-        }),
-      ),
-    }),
-  );
-  expect(
-    await screen.findByText("本地皮肤已与云端皮肤库同步。 云端皮肤库已满 100 款，其余皮肤未上传。"),
-  ).not.toBeNull();
-  expect(screen.getByText("4 款皮肤未同步")).not.toBeNull();
-  expect(screen.getByText("styled：仅支持 PNG 或 JPEG 图片，且不能包含样式表。")).not.toBeNull();
-  expect(screen.getByText("moved：云端的同名作品属于另一个皮肤包，未覆盖。")).not.toBeNull();
-  expect(screen.getByText("offline：暂时无法同步，下次再试。")).not.toBeNull();
-  expect(
-    screen.getByText("shared：这是公开作品，删除本地皮肤不会下架它；如需下架，请在社区中操作。"),
-  ).not.toBeNull();
-});
-
-test("signed out, the row says sign-in turns sync on; other failures stay fixed sentences", async () => {
-  communityPage(client({ sync: vi.fn().mockRejectedValue({ code: "community_unauthorized" }) }));
-  expect(
-    await screen.findByText("登录后，本地皮肤会自动同步到你的云端皮肤库，默认仅自己可见。"),
-  ).not.toBeNull();
-  cleanup();
-  communityPage(
-    client({ sync: vi.fn().mockRejectedValue({ code: "community_unavailable", message: "raw" }) }),
-  );
-  expect(await screen.findByText("同步失败：社区暂时不可用，请稍后重试。")).not.toBeNull();
+  // The directory row and the sync outcome live on 主题 and nowhere, respectively.
+  expect(screen.queryByText("本地皮肤")).toBeNull();
+  expect(screen.queryByText("外部皮肤")).toBeNull();
+  expect(screen.queryByText(/已同步/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "打开目录" })).toBeNull();
 });
 
 test("an install from the gallery syncs again, queued behind a run in progress", async () => {
