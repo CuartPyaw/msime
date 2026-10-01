@@ -753,6 +753,7 @@ impl AccountSessionStorage for MemoryStorage {
 struct FakeApi {
     calls: Arc<AtomicUsize>,
     refreshes: Arc<AtomicUsize>,
+    preview_bearers: Arc<Mutex<Vec<Option<String>>>>,
 }
 
 impl FakeApi {
@@ -821,8 +822,16 @@ impl CandidateSkinCommunityApi for FakeApi {
         value.id = id;
         Ok(value)
     }
-    fn candidate_skin_preview(&self, _: Uuid) -> Result<CandidateSkinPreview, AccountError> {
-        self.call(None)?;
+    fn candidate_skin_preview(
+        &self,
+        _: Uuid,
+        bearer: Option<&str>,
+    ) -> Result<CandidateSkinPreview, AccountError> {
+        self.preview_bearers
+            .lock()
+            .unwrap()
+            .push(bearer.map(str::to_owned));
+        self.call(bearer)?;
         Ok(CandidateSkinPreview {
             path: PREVIEW.into(),
             content_type: "image/png".into(),
@@ -931,6 +940,24 @@ fn service_reads_anonymously_without_creating_a_session() {
         "image/png"
     );
     assert!(storage.load().unwrap().is_none());
+    assert_eq!(*api.preview_bearers.lock().unwrap(), vec![None]);
+}
+
+// A private package's preview is served to its owner only, so a signed-in owner's request must carry the session (refreshed like any other) or every private card shows 预览图加载失败.
+#[test]
+fn service_preview_carries_the_session_when_signed_in() {
+    let api = FakeApi::default();
+    let storage = MemoryStorage::default();
+    *storage.0.lock().unwrap() = Some(saved(b'a'));
+    let service = service(&api, storage);
+    assert_eq!(
+        service.preview(item().id).unwrap().content_type,
+        "image/png"
+    );
+    let bearers = api.preview_bearers.lock().unwrap().clone();
+    assert_eq!(bearers.len(), 2, "stale token refused, then retried");
+    assert!(bearers.iter().all(Option::is_some));
+    assert_eq!(api.refreshes.load(Ordering::SeqCst), 1);
 }
 
 #[test]

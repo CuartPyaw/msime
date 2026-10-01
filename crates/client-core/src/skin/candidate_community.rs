@@ -227,7 +227,11 @@ pub trait CandidateSkinCommunityApi: Send + Sync + 'static {
         id: Uuid,
         token: Option<&str>,
     ) -> Result<CandidateSkinItem, AccountError>;
-    fn candidate_skin_preview(&self, id: Uuid) -> Result<CandidateSkinPreview, AccountError>;
+    fn candidate_skin_preview(
+        &self,
+        id: Uuid,
+        token: Option<&str>,
+    ) -> Result<CandidateSkinPreview, AccountError>;
     fn publish_candidate_skin(
         &self,
         request: &CandidateSkinPublishRequest,
@@ -300,7 +304,11 @@ impl CandidateSkinCommunityApi for BackendAccountClient {
         Ok(item)
     }
 
-    fn candidate_skin_preview(&self, id: Uuid) -> Result<CandidateSkinPreview, AccountError> {
+    fn candidate_skin_preview(
+        &self,
+        id: Uuid,
+        token: Option<&str>,
+    ) -> Result<CandidateSkinPreview, AccountError> {
         if id.is_nil() {
             return Err(AccountError::Invalid);
         }
@@ -308,7 +316,7 @@ impl CandidateSkinCommunityApi for BackendAccountClient {
         let preview = self.json_with_limit::<CandidateSkinPreview, ()>(
             Method::GET,
             &path,
-            None,
+            token,
             None,
             MAX_PREVIEW_RESPONSE_BYTES,
         )?;
@@ -505,12 +513,14 @@ where
         })
     }
 
-    /// The preview is public and carries nothing per viewer, so it is fetched without the session.
+    /// The preview of a public package needs no session, but a private one is served to its owner only, so the session goes along when there is one, as for `detail`.
     pub fn preview(&self, id: Uuid) -> Result<CandidateSkinPreview, AccountError> {
         if id.is_nil() {
             return Err(AccountError::Invalid);
         }
-        self.api.candidate_skin_preview(id)
+        request_with_account_session(&self.api, &self.session, false, |api, token| {
+            api.candidate_skin_preview(id, token)
+        })
     }
 
     pub fn publish(
