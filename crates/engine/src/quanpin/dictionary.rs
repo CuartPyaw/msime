@@ -538,8 +538,7 @@ impl QuanpinDictionary {
         for count in (1..=segments.len()).rev() {
             let partial = &segments[..count];
             let partial_segmentation = join_segments(partial);
-            let partial_input = partial_segmentation.replace('\'', "");
-            let mut rows = self.query_single_path(&partial_input, &partial_segmentation, partial);
+            let mut rows = self.query_single_path(raw, &partial_segmentation, partial);
             if count == segments.len() {
                 // The same-length table often holds only leftovers: all of ping'guo is 苹果 1143881, 评过 1180, 平果 169, 平锅 1, while 苹果电脑 21495 and 苹果公司 19725 sit in tbl_4_p, which a same-length query never sees, so the second seat went to a rare homophone. Continuations join the group by weight, which comes from one corpus and compares across tables. `pinyin` stays the typed string (composition advance consumes only what was typed) and `canonical_pinyin` keeps the full reading for persistence.
                 let longer = self.longer_phrase_candidates(&partial_segmentation, partial);
@@ -561,9 +560,7 @@ impl QuanpinDictionary {
                     continue;
                 }
                 let fallback_segmentation = join_segments(&fallback);
-                let fallback_input = fallback_segmentation.replace('\'', "");
-                let rows =
-                    self.query_single_path(&fallback_input, &fallback_segmentation, &fallback);
+                let rows = self.query_single_path(raw, &fallback_segmentation, &fallback);
                 append_unique_words(&mut result, rows);
             }
         }
@@ -680,11 +677,7 @@ impl QuanpinDictionary {
         segmentation: &str,
         segments: &[String],
     ) -> Vec<WordItem> {
-        let cache_key = if segmentation.is_empty() {
-            raw
-        } else {
-            segmentation
-        };
+        let cache_key = path_cache_key(raw, segmentation);
         if let Some(cached) = self.cache.get_ref_by(cache_key) {
             return cached.clone();
         }
@@ -877,6 +870,14 @@ fn fuzzy_segmentation<'a>(segmentation: &'a str, normalized_segments: &[String])
         Cow::Owned(join_segments(normalized_segments))
     } else {
         Cow::Borrowed(segmentation)
+    }
+}
+
+fn path_cache_key<'a>(raw: &'a str, segmentation: &'a str) -> &'a str {
+    if segmentation.is_empty() {
+        raw
+    } else {
+        segmentation
     }
 }
 

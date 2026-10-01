@@ -76,6 +76,12 @@ fn fuzzy_segmentation_borrows_explicit_input() {
     assert_eq!(owned, "ni'hao");
 }
 
+#[test]
+fn path_cache_key_borrows_the_segmentation_when_present() {
+    assert_eq!(path_cache_key("nihao", "ni'hao"), "ni'hao");
+    assert_eq!(path_cache_key("nihao", ""), "nihao");
+}
+
 fn contains(items: &[WordItem], word: &str) -> bool {
     items.iter().any(|item| item.word == word)
 }
