@@ -270,6 +270,37 @@ fn keep_beam(column: &mut Vec<Hyp<'_>>, beam: usize) {
     column.truncate(beam);
 }
 
+/// The maximum number of hypotheses a column can receive before it is pruned: one per incoming edge for each surviving hypothesis at its source.
+fn column_capacities(
+    graph: &Graph,
+    extra: Option<&Graph>,
+    beam: usize,
+    nbest: usize,
+) -> Vec<usize> {
+    let floor = beam.max(nbest);
+    let mut incoming_edges = vec![0usize; graph.len() + 1];
+    for edges in graph {
+        for edge in edges {
+            if edge.end <= graph.len() {
+                incoming_edges[edge.end] = incoming_edges[edge.end].saturating_add(1);
+            }
+        }
+    }
+    if let Some(extra) = extra {
+        for edges in extra {
+            for edge in edges {
+                if edge.end <= graph.len() {
+                    incoming_edges[edge.end] = incoming_edges[edge.end].saturating_add(1);
+                }
+            }
+        }
+    }
+    incoming_edges
+        .into_iter()
+        .map(|count| floor.max(count.saturating_mul(beam)))
+        .collect()
+}
+
 /// Null when the options carry no personal data worth consulting, so the decode keeps its exact prior arithmetic (WL:71-76).
 fn active_personal<'a>(options: &LatticeOptions<'a>) -> Option<&'a PersonalNgram> {
     options
@@ -303,10 +334,8 @@ pub(super) fn decode_graph(
     let n = graph.len();
     let personal = active_personal(options);
     let bigram = options.bigram.as_deref();
-    let column_capacity = options.beam.max(options.nbest);
-    let mut columns: Vec<Vec<Hyp<'_>>> = (0..=n)
-        .map(|_| Vec::with_capacity(column_capacity))
-        .collect();
+    let capacities = column_capacities(graph, extra, options.beam, options.nbest);
+    let mut columns: Vec<Vec<Hyp<'_>>> = capacities.into_iter().map(Vec::with_capacity).collect();
     columns[0].push(Hyp {
         score: 0.0,
         prev: None,
@@ -569,6 +598,21 @@ pub(super) mod tests {
             ..LatticeOptions::default()
         };
         assert_eq!(edge_log_prob(10, 1, &odd), edge_log_prob(10, 1, &options));
+    }
+
+    #[test]
+    fn columns_reserve_their_incoming_beam_fanout() {
+        let edge = |end| Edge {
+            end,
+            word: "词".to_owned(),
+            key: "ci".to_owned(),
+            log_prob: 0.0,
+            typo: false,
+        };
+        let graph = vec![vec![edge(1), edge(2)], vec![edge(2)], vec![]];
+        let extra = vec![vec![], vec![edge(2)], vec![]];
+
+        assert_eq!(column_capacities(&graph, Some(&extra), 4, 2), [4, 4, 12, 4]);
     }
 
     /// test_pinyin.cpp:540-548, like the other fake-lookup lattice cases of `test_word_lattice` (:534-677) ported here and in merge.rs; the SQLite lookup case (:641-666) is in dictionary/pinyin.rs.
