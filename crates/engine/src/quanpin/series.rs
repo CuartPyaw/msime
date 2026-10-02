@@ -220,18 +220,7 @@ pub fn merge_alternative_segmentations(
     merged.extend(primary_full);
     merged.extend(alternatives);
     merged.sort_by_key(|item| std::cmp::Reverse(item.weight));
-    // Deduplicate the sorted rows by borrowed keys, then move the first occurrence of each word.
-    let mut seen = HashSet::with_capacity(merged.len());
-    let unique = merged
-        .iter()
-        .map(|item| seen.insert(item.word.as_str()))
-        .collect::<Vec<_>>();
-    drop(seen);
-    merged = merged
-        .into_iter()
-        .zip(unique)
-        .filter_map(|(item, unique)| unique.then_some(item))
-        .collect();
+    retain_unique_sorted_rows(&mut merged);
 
     if promote {
         if let Some(at) = merged.iter().position(|item| item.word == best_word) {
@@ -245,6 +234,23 @@ pub fn merge_alternative_segmentations(
     // All of `result`, not a suffix of it: the series answer carries whole-sentence rows inside its full-key group, so index arithmetic that assumes it starts with `primary_full` would drop them. The word dedup keeps the primary rows already merged from repeating.
     append_unique_words(&mut merged, result);
     merged
+}
+
+/// Deduplicate rows that are already sorted by weight while keeping the merged vector's allocation.
+fn retain_unique_sorted_rows(rows: &mut Vec<WordItem>) {
+    // Borrow words while calculating each first occurrence, then retain in place after releasing the set.
+    let mut seen = HashSet::with_capacity(rows.len());
+    let unique = rows
+        .iter()
+        .map(|item| seen.insert(item.word.as_str()))
+        .collect::<Vec<_>>();
+    drop(seen);
+    let mut index = 0;
+    rows.retain(|_| {
+        let keep = unique[index];
+        index += 1;
+        keep
+    });
 }
 
 /// Append the rows whose word is not already present (QD:993-1004). A row repeated inside `rows` is kept once, as the reference's scan over the growing list does.
@@ -415,6 +421,21 @@ mod tests {
         let alternatives = vec![row("ti'an", "提案", 2_000)];
         let merged = merge_alternative_segmentations(Vec::new(), primary, alternatives);
         assert_eq!(words(&merged), ["天", "田", "提案"]);
+    }
+
+    #[test]
+    fn alternative_dedup_keeps_sorted_storage() {
+        let mut rows = vec![
+            row("xian", "甲", 3),
+            row("xi'an", "乙", 2),
+            row("xian", "甲", 1),
+        ];
+        let pointer = rows.as_ptr();
+
+        retain_unique_sorted_rows(&mut rows);
+
+        assert_eq!(rows.as_ptr(), pointer);
+        assert_eq!(words(&rows), ["甲", "乙"]);
     }
 
     #[test]
