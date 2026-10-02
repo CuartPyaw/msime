@@ -98,6 +98,7 @@ inline std::vector<WaveOverlayWorkArea>
 work_area_rectangles(const std::vector<std::uint32_t> &values,
                      std::size_t first, std::size_t count) {
   std::vector<WaveOverlayWorkArea> areas;
+  areas.reserve(count);
   for (std::size_t index = first; index < first + count; ++index) {
     const auto offset = index * 4;
     if (offset + 4 > values.size())
