@@ -41,6 +41,10 @@ updates:
     commit-message:
       prefix: build
     labels: [dependencies, platform/android]
+    # AGP 的大版本要求更新的 Gradle，而本工程借用 Tauri 生成工程的 Gradle wrapper（见 platforms/android/build-apk.sh），两边只能一起升。
+    ignore:
+      - dependency-name: com.android.application
+        update-types: [version-update:semver-major]
     groups:
       gradle-minor:
         update-types: [minor, patch]
