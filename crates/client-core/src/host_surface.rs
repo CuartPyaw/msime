@@ -606,8 +606,8 @@ impl HostCapabilities {
             vocabulary_review: true,
             // 桌面宿主的背单词由 Tauri 层传入插件目录；HarmonyOS 在自己的设置投影里按形态打开；Android 和 iOS 不传插件目录。
             wordbook_packs: platform.is_desktop(),
-            // Windows 和 Linux 桌面的符号面板是 Tauri 层的表情面板（`load_emoji_catalog`），Linux 的 Fcitx5 菜单另外读同一批插件组。macOS 和 HarmonyOS 各有原生选择器，各自在接入的那次改动里打开。
-            symbol_set_packs: matches!(platform, HostPlatform::Windows | HostPlatform::Linux),
+            // Windows 和 Linux 桌面的符号面板是 Tauri 层的表情面板（`load_emoji_catalog`），Linux 的 Fcitx5 菜单和 macOS 的原生表情与符号面板另外读同一批插件组。HarmonyOS 在自己的设置投影里按形态打开；Android 和 iOS 没有接入。
+            symbol_set_packs: platform.is_desktop(),
             // The three desktop hosts play the packs, route V, / and @ by the Engine's spelling symbols and stream music while they are the active input method. HarmonyOS claims key sounds, music and the triggers per form factor in its own settings projection (2in1 only); the phone and tablet hosts wire none of them. A switch with nothing behind it reads as a setting being ignored, so each host flips here only in the change that wires it.
             key_sound: platform.is_desktop(),
             plugin_triggers: platform.is_desktop(),
