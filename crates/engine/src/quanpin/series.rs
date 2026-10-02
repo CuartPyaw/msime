@@ -257,6 +257,7 @@ pub fn append_unique_words(result: &mut Vec<WordItem>, rows: Vec<WordItem>) {
         .map(|item| seen.insert(item.word.as_str()))
         .collect::<Vec<_>>();
     drop(seen);
+    result.reserve(rows.len());
     result.extend(
         rows.into_iter()
             .zip(unique)
@@ -471,5 +472,19 @@ mod tests {
         );
         assert_eq!(words(&result), ["啊", "阿"]);
         assert_eq!(result[1].weight, 3);
+    }
+
+    #[test]
+    fn append_unique_words_reserves_the_incoming_rows() {
+        let mut result = Vec::with_capacity(1);
+        result.push(row("a", "啊", 1));
+        let rows: Vec<WordItem> = (0..10)
+            .map(|index| row("a", &format!("词{index}"), index))
+            .collect();
+
+        append_unique_words(&mut result, rows);
+
+        assert_eq!(result.len(), 11);
+        assert_eq!(result.capacity(), 11);
     }
 }
