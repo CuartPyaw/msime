@@ -258,6 +258,8 @@ fn insert_mixed_rows(
             .filter_map(|(item, unique)| unique.then_some(item))
             .collect(),
     ];
+    let extra = groups.iter().map(Vec::len).sum();
+    candidates.reserve(extra);
 
     let has_source = |source| candidates.iter().any(|item| item.source == source);
     let mut slot = if has_source(CandidateSource::AiSuggestion) {
@@ -381,6 +383,25 @@ mod tests {
             Vec::new(),
         );
         assert_eq!(words(&list), vec!["Ni", "😀", "Ninja"]);
+    }
+
+    #[test]
+    fn mixed_rows_reserve_the_extra_candidate_capacity() {
+        let list = insert_mixed_rows(
+            vec![row("你", CandidateSource::Database)],
+            (0..5)
+                .map(|index| row(&format!("en{index}"), CandidateSource::EnglishDictionary))
+                .collect(),
+            (0..3)
+                .map(|index| row(&format!("😀{index}"), CandidateSource::Emoji))
+                .collect(),
+            (0..3)
+                .map(|index| row(&format!("ka{index}"), CandidateSource::Kaomoji))
+                .collect(),
+        );
+
+        assert_eq!(list.len(), 12);
+        assert_eq!(list.capacity(), 12);
     }
 
     #[test]
