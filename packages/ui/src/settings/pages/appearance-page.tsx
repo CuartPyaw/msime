@@ -7,6 +7,7 @@ import { CandidateFollowCursorSection } from "../candidate-follow-cursor-section
 import { CandidatePageNumberSection } from "../candidate-page-number-section";
 import { CandidateSizingSection } from "../candidate-sizing-section";
 import { CandidatePageSizeSection } from "../candidate-page-size-section";
+import { offeredCandidatePageSizes } from "../candidate-page-size";
 import { CandidateLayoutSection } from "../candidate-layout-section";
 import { PreeditSettingsSection } from "../preedit-settings-section";
 import { appearanceSettingsPreferences } from "../appearance-settings-preferences";
@@ -55,6 +56,18 @@ export function AppearanceSettingsPage() {
     showPageNumber ||
     showCandidateFollowCursor;
   const surfaceName = mobilePlatform ? "候选栏" : "候选窗口";
+  // 预览按下面「布局」组能选到的最高排布预留高度：排列方式能改时按纵向，每页数量能改时按滑块的最大值，两者都固定（iOS）时不预留。
+  const layoutFixed = host?.fixed_candidate_layout !== undefined;
+  const pageSizeFixed = host?.fixed_candidate_page_size !== undefined;
+  const previewReserve =
+    layoutFixed && pageSizeFixed
+      ? undefined
+      : {
+          orientation: layoutFixed ? (draft.candidate_layout ?? "vertical") : ("vertical" as const),
+          count: pageSizeFixed
+            ? draft.candidate_page_size
+            : Math.max(...offeredCandidatePageSizes(draft.candidate_page_size)),
+        };
   return (
     <fieldset disabled={busy} hidden={page !== "appearance"} aria-label="候选窗口">
       {/* 从基础到进阶：候选怎么排列、绘制多大、外围的窗口，最后是预编辑。颜色和明暗只在「主题」编辑，「窗口样式」链接过去；「翻页方式」在「输入」页，挨着「以词定字」。 */}
@@ -70,6 +83,7 @@ export function AppearanceSettingsPage() {
             active={page === "appearance"}
             revision={snapshot?.revision ?? 0}
             mobile={mobilePlatform}
+            reserve={previewReserve}
           />
           {host?.candidate_panel_limit && (
             <CandidatePanelLimitSection limit={host.candidate_panel_limit} />

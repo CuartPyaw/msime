@@ -4854,8 +4854,10 @@ test("appearance preview follows drafts and skin selection before they are saved
   const save = vi.fn();
   render(<SettingsPage initialPage="appearance" client={{ load: async () => initial, save }} />);
   const preview = await screen.findByRole("region", { name: "候选窗口预览" });
-  expect(preview.querySelectorAll(".cand")).toHaveLength(5);
+  // 只数实际样例；预留高度的那份不可见样例不带 `data-preview-layout`，固定按纵向、滑块最大值排。
+  expect(preview.querySelectorAll("[data-preview-layout] .cand")).toHaveLength(5);
   expect(preview.querySelector('[data-preview-layout="vertical"]')).not.toBeNull();
+  expect(preview.querySelectorAll("[data-preview-reserve] .wnd-v .cand")).toHaveLength(9);
   expect(preview.querySelector('[data-font-size="18"]')).not.toBeNull();
   fireEvent.click(
     within(screen.getByRole("radiogroup", { name: "候选项排列方式" })).getByRole("radio", {
@@ -4871,8 +4873,10 @@ test("appearance preview follows drafts and skin selection before they are saved
   expect(
     preview.querySelector(".container.preedit-hidden > .candidate-brand-row > .candidate-brand"),
   ).not.toBeNull();
-  expect(preview.querySelectorAll(".cand")).toHaveLength(9);
+  expect(preview.querySelectorAll("[data-preview-layout] .cand")).toHaveLength(9);
   expect(preview.querySelector('[data-preview-layout="horizontal"]')).not.toBeNull();
+  // 切到横向后预留的仍是纵向九项，预览框高度不变。
+  expect(preview.querySelectorAll("[data-preview-reserve] .wnd-v .cand")).toHaveLength(9);
   expect(preview.querySelector('[data-font-size="20"]')).not.toBeNull();
   expect(preview.querySelector<HTMLElement>(".pinyin")?.hidden).toBe(true);
   expect(
@@ -4934,7 +4938,9 @@ test.each(["quanpin", "shuangpin", "wubi", "japanese"] as const)(
       />,
     );
     const preview = await screen.findByRole("region", { name: "候选窗口预览" });
-    expect(preview.querySelectorAll(".cand-helpcode")).toHaveLength(scheme === "shuangpin" ? 5 : 0);
+    expect(preview.querySelectorAll("[data-preview-layout] .cand-helpcode")).toHaveLength(
+      scheme === "shuangpin" ? 5 : 0,
+    );
   },
 );
 
