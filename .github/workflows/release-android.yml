@@ -27,6 +27,12 @@ jobs:
       # build-apk.sh packs target/language-dictionaries (Cantonese and Zhuyin, with their licences); a release must carry both, so it fails rather than packing fewer.
       - name: Fetch the locked language dictionaries
         run: python3 scripts/fetch_language_dictionaries.py
+      # build-native.sh 需要固定提交的 vcpkg（只用来装 nlohmann-json）和两个 Android Rust target；runner 上都没有。bootstrap-vcpkg.sh 放在 platforms/windows 下但不限平台，装到 build-native.sh 默认读取的 target/tooling/vcpkg。
+      - name: Prepare pinned vcpkg and Rust targets
+        run: |
+          set -euo pipefail
+          bash platforms/windows/bootstrap-vcpkg.sh
+          rustup target add aarch64-linux-android x86_64-linux-android
       - name: Build native Android host
         env: {MSIME_ANDROID_VERSION: "${{ steps.version.outputs.value }}", MSIME_REQUIRE_LANGUAGE_DICTIONARIES: "1"}
         run: |
