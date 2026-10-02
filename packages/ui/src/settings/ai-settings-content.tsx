@@ -53,7 +53,8 @@ export interface AiSettingsContentProps {
   >["providerCredentialMessages"];
   runProviderCredential: ReturnType<typeof useProviderCredentials>["runProviderCredential"];
   credentialTestControl: ReturnType<typeof useProviderCredentials>["credentialTestControl"];
-  mcpConnect: ReactNode;
+  /** 最后一组之后的内容：设置页在这里放进入「AI 对话」的入口。 */
+  trailing: ReactNode;
 }
 
 /** Complete AI settings composition; host state and provider operations stay with SettingsPage. */
@@ -90,7 +91,7 @@ export function AiSettingsContent({
   providerCredentialMessages,
   runProviderCredential,
   credentialTestControl,
-  mcpConnect,
+  trailing,
 }: AiSettingsContentProps) {
   const linuxCredentialTest = credentialTestControl(
     "ai.assistant",
@@ -205,7 +206,7 @@ export function AiSettingsContent({
           />
         ) : null
       }
-      mcpConnect={mcpConnect}
+      trailing={trailing}
     />
   );
 }

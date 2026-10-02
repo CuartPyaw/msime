@@ -7,6 +7,7 @@ import { FrequencySection, type FrequencyPreferences } from "./frequency-section
 import { ImeModeScopeSection } from "./ime-mode-scope-section";
 import { InputModeHudSection } from "./input-mode-hud-section";
 import { LearningSection } from "./learning-section";
+import { MixedInputSection, type MixedInputPreferences } from "./mixed-input-section";
 import { TraditionalChineseOutputSection } from "./traditional-chinese-output-section";
 import {
   WordCharacterSection,
@@ -22,6 +23,9 @@ export interface InputSharedSettingsSectionProps {
   ios: boolean;
   showInputModeHUD: boolean;
   showModeScope: boolean;
+  /** 中英混输、emoji 和颜文字混输，放在「候选与联想」组的云候选之后。 */
+  mixedInput?: MixedInputPreferences;
+  onMixedInputChange?: (mixedInput: MixedInputPreferences) => void;
   /** 放在「候选与联想」组的「学习选词习惯」之前。 */
   beforeLearning?: ReactNode;
   /** 「候选与联想」组末尾的行。 */
@@ -45,6 +49,8 @@ export function InputSharedSettingsSection({
   ios,
   showInputModeHUD,
   showModeScope,
+  mixedInput,
+  onMixedInputChange,
   beforeLearning,
   afterLearning,
   modeExtra,
@@ -87,7 +93,7 @@ export function InputSharedSettingsSection({
     />
   );
 
-  // 输入页按「基础 → 进阶」排列：先是每个人都会碰到的中英文和选词翻页，再是候选来源和输出形式，进阶的快捷模式、模糊音、辅助码由页面经 beforeFrequency 放在调频之前。
+  // 输入页按「基础 → 进阶」排列：先是每个人都会碰到的中英文和选词翻页，再是候选来源（云候选、中英混输与 emoji、颜文字混输、整句联想和学习）和输出形式，进阶的快捷模式、模糊音、辅助码由页面经 beforeFrequency 放在调频之前。
   return (
     <>
       <GroupList title="中英文">
@@ -115,6 +121,9 @@ export function InputSharedSettingsSection({
       </GroupList>
       <GroupList title="候选与联想">
         {cloudCandidatesRow}
+        {mixedInput && onMixedInputChange && (
+          <MixedInputSection preferences={mixedInput} onChange={onMixedInputChange} />
+        )}
         {beforeLearning}
         {learningRow}
         {afterLearning}

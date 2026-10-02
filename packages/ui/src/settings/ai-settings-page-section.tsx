@@ -49,7 +49,8 @@ export interface AiSettingsPageSectionProps {
   onPromptCustom2Change: (value: string) => void;
   onPromptCustom3Change: (value: string) => void;
   testTools: ReactNode;
-  mcpConnect: ReactNode;
+  /** 最后一组之后的内容：设置页在这里放进入「AI 对话」的入口。 */
+  trailing: ReactNode;
 }
 
 /** Page-level composition for the shared AI assistant settings: the 服务, 联想, 提示词 and 测试工具 groups. */
@@ -82,7 +83,7 @@ export function AiSettingsPageSection({
   onPromptCustom2Change,
   onPromptCustom3Change,
   testTools,
-  mcpConnect,
+  trailing,
 }: AiSettingsPageSectionProps) {
   const promptSlot = promptId || "custom_1";
   const slotPrompts = {
@@ -198,7 +199,7 @@ export function AiSettingsPageSection({
           </div>
         </GroupList>
         {testTools}
-        {mcpConnect}
+        {trailing}
       </div>
     </fieldset>
   );
