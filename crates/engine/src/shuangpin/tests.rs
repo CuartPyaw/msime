@@ -100,6 +100,31 @@ fn prefix_groups_list_a_word_once() {
     assert_eq!(words(&rows), ["你", "拟"]);
 }
 
+#[test]
+fn prefix_groups_reserve_their_candidate_rows() {
+    let mut sql = String::from(
+        "CREATE TABLE tbl_1_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);CREATE TABLE tbl_2_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);",
+    );
+    for index in 0..10 {
+        sql.push_str(&format!(
+            "INSERT INTO tbl_1_n VALUES('ni','n','单{index}',{});INSERT INTO tbl_2_n VALUES('ni''hao','nh','双{index}',{});",
+            1000 - index,
+            2000 - index
+        ));
+    }
+    let fixture = Fixture::new(&sql);
+    let mut dictionary = super::dictionary::ShuangpinDictionary::new(
+        profile(ShuangpinProfileKind::Xiaohe),
+        &fixture.paths,
+    );
+
+    let segmentation = super::query::segment_input("nihcma", profile(ShuangpinProfileKind::Xiaohe));
+    let rows = dictionary.generate_series("nihcma", &segmentation, "");
+
+    assert_eq!(rows.len(), 20, "{rows:?}");
+    assert_eq!(rows.capacity(), 20);
+}
+
 const TRAILING_HELPCODE: &str = "BEGIN;CREATE TABLE tbl_1_s(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_s VALUES('shi', 's', '使', 200);INSERT INTO tbl_1_s VALUES('shi', 's', '是', 100);COMMIT;";
 
 /// Xiaohe reads `ui` as shi, so `uiu` is a complete syllable plus the single helpcode `u`, while `ui'u` is the same syllable followed by a user-delimited segment (test_shuangpin.cpp:129-158, golden sp_xiaohe_trailing_helpcode).
