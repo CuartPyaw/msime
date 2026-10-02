@@ -1,6 +1,7 @@
 #include "VoiceInputSession.h"
 #include "AudioCapture.h"
 #include "PolishPrompt.h"
+#include "VoiceHotwordTexts.h"
 
 #include "LocalAsr.h"
 #include "LocalAsrAudioQueue.h"
@@ -62,16 +63,6 @@ nlohmann::json local_hotwords(const VoiceInputConfig &config) {
   if (hotwords == value->end() || !hotwords->is_array())
     return none;
   return *hotwords;
-}
-
-std::vector<std::string> hotword_texts(const nlohmann::json &hotwords) {
-  std::vector<std::string> texts;
-  for (const auto &hotword : hotwords) {
-    const auto text = hotword.find("text");
-    if (hotword.is_object() && text != hotword.end() && text->is_string())
-      texts.push_back(text->get<std::string>());
-  }
-  return texts;
 }
 
 // Whether the installed model's manifest asks the host to correct the final text against the hotwords by pinyin, because the model cannot take them itself.
