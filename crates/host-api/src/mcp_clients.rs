@@ -49,11 +49,14 @@ impl McpFlag {
 }
 
 /// 去重并按 `McpFlag::ALL` 的顺序排好，同一组权限总是写成同一个条目。
+fn canonical_capacity(input_len: usize) -> usize {
+    input_len.min(McpFlag::ALL.len())
+}
+
 fn canonical(flags: &[McpFlag]) -> Vec<McpFlag> {
-    McpFlag::ALL
-        .into_iter()
-        .filter(|flag| flags.contains(flag))
-        .collect()
+    let mut canonical = Vec::with_capacity(canonical_capacity(flags.len()));
+    canonical.extend(McpFlag::ALL.into_iter().filter(|flag| flags.contains(flag)));
+    canonical
 }
 
 #[derive(Debug, Serialize)]
@@ -312,6 +315,16 @@ pub fn install(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_flags_reserve_every_known_slot() {
+        assert_eq!(canonical_capacity(0), 0);
+        assert_eq!(canonical_capacity(McpFlag::ALL.len()), McpFlag::ALL.len());
+        assert_eq!(
+            canonical_capacity(McpFlag::ALL.len() + 10),
+            McpFlag::ALL.len()
+        );
+    }
 
     fn entry() -> Value {
         server_entry(
