@@ -232,9 +232,10 @@ int main(int argc, char **argv) {
     candidateThemeDecoration();
     modeBadgeTheme();
     classicuiTakeoverRecord();
-    require(argc == 2 || (argc == 3 && std::string(argv[2]) == "--ai"),
-            "usage: fcitx5-native-test <verified-resources> [--ai]");
-    const bool ai = argc == 3;
+    require(argc == 2 || (argc == 3 && (std::string(argv[2]) == "--ai" ||
+                                       std::string(argv[2]) == "--ctrl-space")),
+            "usage: fcitx5-native-test <verified-resources> [--ai|--ctrl-space]");
+    const bool ai = argc == 3 && std::string(argv[2]) == "--ai";
     const std::string suggestion = ai ? "合成候选" : "在线";
     char temporary[] = "/tmp/msime-fcitx5-test-XXXXXX";
     const auto *directory = mkdtemp(temporary);
@@ -556,6 +557,67 @@ int main(int argc, char **argv) {
     changedPreferences["smart_punctuation_repeat"] = true;
     changedPreferences["learning"] = true;
     const auto preferenceDirectory = options["preferences_directory"].get<std::string>();
+    if (argc == 3 && std::string(argv[2]) == "--ctrl-space") {
+      const auto press = [&](bool release = false, bool ctrl = true) {
+        fcitx::KeyEvent event(&ic, fcitx::Key(FcitxKey_space,
+            ctrl ? fcitx::KeyStates(fcitx::KeyState::Ctrl) : fcitx::KeyStates()), release);
+        engine.keyEvent(entry, event);
+        return event.accepted();
+      };
+      const auto chord = [&] {
+        const bool accepted = press();
+        require(press(true) == accepted, "Ctrl+Space press and release have different ownership");
+        return accepted;
+      };
+      require(chord() && !state->input_enabled_ && chord() && state->input_enabled_,
+              "Default Ctrl+Space does not switch in both directions");
+      const auto set_binding = [&](bool enabled) {
+        auto snapshot = response(msime_client_load_preferences(
+            reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size()));
+        const auto revision = snapshot.at("revision").get<uint64_t>();
+        snapshot["preferences"]["keybindings"]["switch_language_ctrl_space"] = enabled;
+        const auto document = snapshot.dump();
+        response(msime_client_save_preferences(
+            reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size(),
+            revision, reinterpret_cast<const uint8_t *>(document.data()), document.size()));
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        do {
+          state->refreshPreferences();
+          if (state->preferences_.at("keybindings").value("switch_language_ctrl_space", true) == enabled)
+            return;
+          std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        } while (std::chrono::steady_clock::now() < deadline);
+        require(false, "Ctrl+Space preference did not hot-reload");
+      };
+      set_binding(false);
+      for (bool chinese : {true, false}) {
+        if (state->input_enabled_ != chinese) engine.input_mode_action_.activate(&ic);
+        for (int repeat = 0; repeat < 3; ++repeat)
+          require(!press() && state->input_enabled_ == chinese,
+                  "Disabled Ctrl+Space press was intercepted or switched mode");
+        require(!press(true), "Disabled Ctrl+Space release was intercepted");
+      }
+      engine.input_mode_action_.activate(&ic);
+      fcitx::KeyEvent letter(&ic, fcitx::Key(FcitxKey_n));
+      engine.keyEvent(entry, letter);
+      const auto preedit = ic.inputPanel().clientPreedit().toString();
+      const auto committed = ic.committed;
+      require(letter.accepted() && !preedit.empty() && !chord() &&
+                  ic.inputPanel().clientPreedit().toString() == preedit && ic.committed == committed,
+              "Disabled Ctrl+Space changed the active composition");
+      fcitx::KeyEvent cancel(&ic, fcitx::Key(FcitxKey_Escape));
+      engine.keyEvent(entry, cancel);
+      set_binding(true);
+      for (int repeat = 0; repeat < 3; ++repeat)
+        require(press() && !state->input_enabled_, "Held Ctrl+Space toggled more than once");
+      require(press(true, false) && !state->input_enabled_,
+              "Consumed Ctrl+Space release escaped after Ctrl was released");
+      require(chord() && state->input_enabled_, "Ctrl+Space did not restore Chinese mode");
+      state->close();
+      std::filesystem::remove_all(directory);
+      std::cout << "Fcitx5 Ctrl+Space defaults, passthrough, hot-reload and repeat passed\n";
+      return 0;
+    }
     // The host's statistics gate, not the store, is what keeps an opt-out from reaching the statistics file. First with statistics off after a preference tick, then with them turned on in the store while the host has not ticked since: a commit or passthrough key that slipped past the host would be recorded by that open store and replace the document, so only the host's cached switch can keep it untouched. The preference reload below is the tick that opens the gate, and the check after it proves recording resumes.
     const auto setStatistics = [&](bool enabled) {
       const auto request = Json{{"directory", preferenceDirectory},

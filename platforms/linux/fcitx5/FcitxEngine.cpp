@@ -1511,6 +1511,7 @@ public:
     const auto keybindings = preferences_.value("keybindings", Json::object());
     mode_shift_enabled_ = keybindings.value("switch_language_shift", true);
     mode_ctrl_enabled_ = keybindings.value("switch_language_ctrl", false);
+    mode_ctrl_space_enabled_ = keybindings.value("switch_language_ctrl_space", true);
     mode_ctrl_alt_space_enabled_ =
         keybindings.value("switch_language_ctrl_alt_space", true);
     character_set_shortcut_enabled_ =
@@ -1690,6 +1691,7 @@ public:
             const auto reloaded = preferences_.value("keybindings", Json::object());
             mode_shift_enabled_ = reloaded.value("switch_language_shift", mode_shift_enabled_);
             mode_ctrl_enabled_ = reloaded.value("switch_language_ctrl", mode_ctrl_enabled_);
+            mode_ctrl_space_enabled_ = reloaded.value("switch_language_ctrl_space", true);
             mode_ctrl_alt_space_enabled_ = reloaded.value(
                 "switch_language_ctrl_alt_space", mode_ctrl_alt_space_enabled_);
             character_set_shortcut_enabled_ = reloaded.value(
@@ -3421,6 +3423,7 @@ public:
   bool input_enabled_ = true;
   bool mode_shift_enabled_ = true;
   bool mode_ctrl_enabled_ = false;
+  bool mode_ctrl_space_enabled_ = true;
   bool mode_ctrl_alt_space_enabled_ = true;
   bool character_set_shortcut_enabled_ = true;
   // A bare modifier switches on release, and only if nothing else was typed
@@ -6466,6 +6469,7 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
   pure_ctrl_candidate_ = false;
   if (sym == FcitxKey_space && ctrl && !shift &&
       (alt ? mode_ctrl_alt_space_enabled_ : true)) {
+    if (!alt && !mode_ctrl_space_enabled_) return false;
     if (composing) command(MSIME_COMMIT_RAW);
     if (!toggleInputMode()) return false;
     toggle_chord_held_ = sym;

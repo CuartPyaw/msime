@@ -10,6 +10,7 @@ export function ShortcutSettingsPage() {
     mobilePlatform,
     windowsPlatform,
     macosPlatform,
+    linuxPlatform,
     iosPlatform,
     showModeSwitchShortcuts,
     showPanelShortcuts,
@@ -36,6 +37,7 @@ export function ShortcutSettingsPage() {
       onKeybindingsChange={onKeybindingsChange}
       showModeSwitchShortcuts={showModeSwitchShortcuts}
       macos={macosPlatform}
+      linux={linuxPlatform}
       showFullwidthChord={showFullwidthChord}
       fullwidthChord={fullwidthChord}
       windows={windowsPlatform}

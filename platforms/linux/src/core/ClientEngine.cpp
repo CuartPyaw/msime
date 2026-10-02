@@ -412,6 +412,7 @@ struct State {
   }
   bool mode_shift_enabled = true;
   bool mode_ctrl_enabled = false;
+  bool mode_ctrl_space_enabled = true;
   bool mode_ctrl_alt_space_enabled = true;
   bool character_set_shortcut_enabled = true;
   bool number_row_selection = true;
@@ -752,6 +753,7 @@ struct State {
         voice_preferences.value("hotkey_hold_space_lock", true);
     voice_hotkey_ctrl_f9 = voice_preferences.value("hotkey_ctrl_f9", true);
     const auto keybindings = preferences.value("keybindings", Json::object());
+    mode_ctrl_space_enabled = keybindings.value("switch_language_ctrl_space", true);
     mode_shift_enabled = keybindings.value("switch_language_shift", true);
     mode_ctrl_enabled = keybindings.value("switch_language_ctrl", false);
     mode_ctrl_alt_space_enabled =
@@ -1004,6 +1006,7 @@ struct State {
     voice_hotkey_hold_space_lock = voice.value("hotkey_hold_space_lock", true);
     voice_hotkey_ctrl_f9 = voice.value("hotkey_ctrl_f9", true);
     const auto keybindings = preferences.value("keybindings", Json::object());
+    mode_ctrl_space_enabled = keybindings.value("switch_language_ctrl_space", true);
     mode_shift_enabled = keybindings.value("switch_language_shift", true);
     mode_ctrl_enabled = keybindings.value("switch_language_ctrl", false);
     mode_ctrl_alt_space_enabled =
@@ -6079,12 +6082,11 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
   const bool ctrl_alt_space =
       key == IBUS_space &&
       modifiers == (IBUS_CONTROL_MASK | IBUS_MOD1_MASK);
-  if (ctrl_alt_space && !s.mode_ctrl_alt_space_enabled)
+  const bool ctrl_space = key == IBUS_space && modifiers == IBUS_CONTROL_MASK;
+  if ((ctrl_space && !s.mode_ctrl_space_enabled) ||
+      (ctrl_alt_space && !s.mode_ctrl_alt_space_enabled))
     return FALSE;
-  const bool mode_toggle =
-      (key == IBUS_space &&
-       (modifiers == IBUS_CONTROL_MASK ||
-        ctrl_alt_space));
+  const bool mode_toggle = ctrl_space || ctrl_alt_space;
   const bool fullwidth_toggle = key == IBUS_space &&
                                 modifiers == (IBUS_CONTROL_MASK | IBUS_SHIFT_MASK);
   const bool punctuation_toggle = modifiers == IBUS_CONTROL_MASK && key == IBUS_period;

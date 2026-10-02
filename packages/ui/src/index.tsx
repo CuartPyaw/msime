@@ -1402,6 +1402,7 @@ export {
 export type KeybindingPreferences = {
   switch_language_shift: boolean;
   switch_language_ctrl: boolean;
+  switch_language_ctrl_space?: boolean;
   switch_language_ctrl_alt_space: boolean;
   toggle_character_set_ctrl_shift_f: boolean;
   toggle_fullwidth_option_shift_h: boolean;

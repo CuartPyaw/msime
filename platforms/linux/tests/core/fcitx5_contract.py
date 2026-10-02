@@ -222,14 +222,11 @@ assert 'cycleHelpcodeSchema' in source
 assert 'toggleLocalMode' in source
 assert 'msime-local-unicode' in source
 assert 'msime-local-temporary-japanese' in source
-# The four configurable mode chords, and which host state each is read from. The
-# settings page shows all four switches for this platform; this host answered none
-# of them until it read `keybindings`, and a wiring that quietly went away would
-# look exactly like it did before - a switch that saves and does nothing.
-for name in ("mode_shift_enabled_", "mode_ctrl_enabled_",
+# 五个可配置模式快捷键及各自的宿主状态都要保留，避免设置能保存却不生效。
+for name in ("mode_shift_enabled_", "mode_ctrl_enabled_", "mode_ctrl_space_enabled_",
              "mode_ctrl_alt_space_enabled_", "character_set_shortcut_enabled_"):
     assert name in source, name
-for key in ("switch_language_shift", "switch_language_ctrl",
+for key in ("switch_language_shift", "switch_language_ctrl", "switch_language_ctrl_space",
             "switch_language_ctrl_alt_space", "toggle_character_set_ctrl_shift_f"):
     assert key in source, key
 # A bare modifier is measured on its release, and only when nothing else was typed

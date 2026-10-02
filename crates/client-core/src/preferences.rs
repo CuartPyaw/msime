@@ -1500,6 +1500,9 @@ pub struct KeybindingPreferences {
     pub switch_language_shift: bool,
     #[serde(default)]
     pub switch_language_ctrl: bool,
+    /// Linux 已默认处理这个组合键；关闭时交还应用，不改输入法框架的全局绑定。
+    #[serde(default = "enabled_by_default")]
+    pub switch_language_ctrl_space: bool,
     #[serde(default = "enabled_by_default")]
     pub switch_language_ctrl_alt_space: bool,
     #[serde(default = "enabled_by_default")]
@@ -1516,6 +1519,7 @@ impl Default for KeybindingPreferences {
         Self {
             switch_language_shift: true,
             switch_language_ctrl: false,
+            switch_language_ctrl_space: true,
             switch_language_ctrl_alt_space: true,
             toggle_character_set_ctrl_shift_f: true,
             toggle_fullwidth_option_shift_h: true,
