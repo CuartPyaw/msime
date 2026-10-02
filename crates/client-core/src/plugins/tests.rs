@@ -1989,6 +1989,13 @@ fn helpcode_tables_are_bounded_and_load_as_codes() {
     assert!(helpcode_pack::load_codes(root.path(), "twice").is_err());
 }
 
+#[test]
+fn helpcode_parser_reserves_its_bounded_entry_capacity() {
+    let entries = helpcode_pack::parse_table("你=ni\n".as_bytes(), "table.txt").unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries.capacity(), helpcode_pack::MAX_ENTRIES);
+}
+
 fn installed_wordbook(root: &Path, id: &str, words: &[u8]) {
     let pack = kind_directory(root, PluginKind::Wordbook).join(id);
     fs::create_dir_all(&pack).unwrap();
