@@ -302,9 +302,11 @@ ctest --test-dir target/macos-isolated -R '^emoji-swift-host$' --output-on-failu
 表情首页、普通网格与颜文字流式布局同样提供独立的本地测试（搜索框使用 `emoji-search-test-build`，滚动使用 `emoji-scroll-test-build`，同属 `emoji-local`）：
 
 ```sh
-cmake --build target/macos-isolated --target emoji-home-test-build emoji-flow-test-build emoji-grid-test-build emoji-toast-test-build emoji-main-tabs-test-build emoji-category-tabs-test-build emoji-symbol-sections-test-build emoji-catalog-cursor-test-build --parallel
+cmake --build target/macos-isolated --target emoji-home-test-build emoji-flow-test-build emoji-grid-test-build emoji-toast-test-build emoji-main-tabs-test-build emoji-category-tabs-test-build emoji-symbol-sections-test-build emoji-catalog-cursor-test-build emoji-catalog-test-build --parallel
 ctest --test-dir target/macos-isolated -L emoji-local --output-on-failure
 ```
+
+符号集插件并入符号和颜文字页：面板用 `list_plugin_symbol_groups` 与 `<preferences_directory>/plugins` 读出已安装插件的全部组，这个请求不读 `others.db`。`symbols` 组以插件包为上级分类，排在内置分类之后（分类显示插件名，按包 id 区分，同名插件包也各占一个分类，图标是该包第一个符号），组标题作为分节标题；`kaomoji` 组作为独立分节排在内置颜文字 All 之后。不与内置目录或其他插件包去重。搜索词命中组关键词时给整组，否则只给文本包含搜索词的项，插件结果排在内置结果之后。插件读取失败或没有偏好目录时只显示内置目录；内置符号分类读取失败时插件分类照常显示。`emoji-catalog` 用模拟会话覆盖请求参数、解码与非法响应，`emoji-category-tabs`、`emoji-symbol-sections` 和 `emoji-flow` 覆盖分类、分节下标和跨分节的上下移动。首页预览不含插件组。
 
 ### 布局度量
 
