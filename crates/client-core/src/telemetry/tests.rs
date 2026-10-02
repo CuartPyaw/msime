@@ -432,6 +432,15 @@ fn telemetry_queue_capacity_is_bounded_by_the_queue_limit() {
 }
 
 #[test]
+fn crash_record_paths_reserve_one_start_batch() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("synthetic.crash"), b"fixture").unwrap();
+    let records = super::crash_record_paths(directory.path()).unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records.capacity(), super::MAX_CRASH_RECORDS_PER_START);
+}
+
+#[test]
 fn the_queue_keeps_the_newest_sixty_four() {
     let (_directory, store) = store();
     let start = noon();
