@@ -660,12 +660,7 @@ fn crash_event(
     install_id: &str,
 ) -> Option<TelemetryEvent> {
     // A record is read up to the limit and the rest ignored rather than refused: a stack that ran long still has its useful top.
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(
-        &mut std::io::Read::take(File::open(path).ok()?, MAX_CRASH_RECORD_BYTES),
-        &mut bytes,
-    )
-    .ok()?;
+    let bytes = read_crash_file(path)?;
     let text = String::from_utf8_lossy(&bytes);
     let (message, stack) = text.split_once('\n').unwrap_or((&text, ""));
     let mut message = clean_message(message);
@@ -694,6 +689,23 @@ fn crash_event(
         install_id: install_id.to_owned(),
     };
     event.is_valid().then_some(event)
+}
+
+fn read_crash_file(path: &Path) -> Option<Vec<u8>> {
+    let file = File::open(path).ok()?;
+    let capacity = file
+        .metadata()
+        .ok()
+        .map(|metadata| metadata.len().min(MAX_CRASH_RECORD_BYTES))
+        .and_then(|size| usize::try_from(size).ok())
+        .unwrap_or(0);
+    let mut bytes = Vec::with_capacity(capacity);
+    std::io::Read::read_to_end(
+        &mut std::io::Read::take(file, MAX_CRASH_RECORD_BYTES),
+        &mut bytes,
+    )
+    .ok()?;
+    Some(bytes)
 }
 
 /// Appends `event` unless an event with its id is queued already, then drops the oldest events beyond [`MAX_QUEUED_EVENTS`].
