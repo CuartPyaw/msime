@@ -300,7 +300,7 @@ impl TelemetryStore {
         let mut previous_session_crashed = false;
         if let Some(previous) = &previous {
             let record = crashes_directory.join(format!("{}.{CRASH_EXTENSION}", previous.id));
-            if record.is_file() {
+            if is_regular_file(&record) {
                 previous_session_crashed = true;
                 push(
                     &mut queue,
@@ -573,7 +573,7 @@ impl TelemetryStore {
     /// Parses the queue, keeping only events the server would accept. This is also the migration of a queue the C++ reporter wrote: its per-start `download` events fail to parse and are dropped, ids shorter than the server's 16 characters are regenerated, and events without `install_id` get this installation's.
     fn parse_queue(&self, install_id: &str) -> (Vec<TelemetryEvent>, bool) {
         let path = self.directory.join(QUEUE_FILE);
-        let Ok(file) = File::open(&path) else {
+        let Some(file) = open_regular_file(&path) else {
             return (Vec::new(), false);
         };
         let Ok(bytes) = crate::bounded_io::read_bounded(file, MAX_QUEUE_BYTES) else {
@@ -700,7 +700,7 @@ fn crash_event(
 }
 
 fn read_crash_file(path: &Path) -> Option<Vec<u8>> {
-    let file = File::open(path).ok()?;
+    let file = open_regular_file(path)?;
     let capacity = file
         .metadata()
         .ok()
@@ -781,9 +781,27 @@ fn unix_ms(now: SystemTime) -> u64 {
 }
 
 fn read_small_json<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
-    let file = File::open(path).ok()?;
+    let file = open_regular_file(path)?;
     let bytes = crate::bounded_io::read_bounded(file, MAX_SMALL_FILE_BYTES).ok()?;
     serde_json::from_slice(&bytes).ok()
+}
+
+fn is_regular_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_file())
+}
+
+fn open_regular_file(path: &Path) -> Option<File> {
+    if !is_regular_file(path) {
+        return None;
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    options.open(path).ok()
 }
 
 fn remove_file(path: &Path) -> Result<(), TelemetryError> {
