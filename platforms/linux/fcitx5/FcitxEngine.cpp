@@ -6942,12 +6942,15 @@ bool FcitxEngine::toolbarEnabled(fcitx::InputContext *ic) {
 // The package entries of the 主题 menu follow the skin catalogue in the runtime options, which can change while the process runs; the menu is shared by every context, so it follows the context that last read the catalogue, as the toolbar menu does. Nothing is rebuilt while the packages and their titles stay the same, so an entry is never replaced under a menu that shows it.
 void FcitxEngine::rebuildThemeMenu(fcitx::InputContext *ic) {
   if (!ic) return;
+  const auto choices = ic->propertyFor(&factory_)->themeChoices();
   std::vector<std::pair<std::string, std::string>> packages;
-  for (const auto &choice : ic->propertyFor(&factory_)->themeChoices())
+  packages.reserve(choices.size());
+  for (const auto &choice : choices)
     if (choice.package_base) packages.emplace_back(choice.id, choice.title);
   if (packages == global_theme_packages_) return;
   for (const auto &item : global_theme_package_items_) global_theme_menu_.removeAction(item.get());
   global_theme_package_items_.clear();
+  global_theme_package_items_.reserve(packages.size());
   for (const auto &[id, title] : packages) {
     global_theme_package_items_.push_back(std::make_unique<FcitxGlobalThemeItemAction>(&factory_, id, title));
     // Registered under their own prefix, so a package can never take a global theme's name, and reachable from the D-Bus menus like every other entry.
