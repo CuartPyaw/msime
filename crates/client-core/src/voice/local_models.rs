@@ -309,7 +309,7 @@ fn check_root(root: &Path) -> Result<(), LocalModelError> {
         Err(_) => return Err(LocalModelError::InvalidRoot),
     }
     // 逐个检查所有祖先；只看最近的已存在目录会漏掉“符号链接后面中间目录已存在”的路径。
-    let mut ancestors = Vec::new();
+    let mut ancestors = Vec::with_capacity(ancestor_capacity(root));
     let mut current = Some(root);
     while let Some(path) = current {
         ancestors.push(path);
@@ -330,6 +330,10 @@ fn check_root(root: &Path) -> Result<(), LocalModelError> {
         }
     }
     Ok(())
+}
+
+fn ancestor_capacity(root: &Path) -> usize {
+    root.components().count()
 }
 
 fn unique_suffix() -> String {

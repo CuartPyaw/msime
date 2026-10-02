@@ -13,6 +13,12 @@ fn relative_component_capacity_covers_each_valid_component() {
     }
 }
 
+#[test]
+fn ancestor_capacity_matches_the_absolute_path_components() {
+    let root = Path::new("/synthetic/state/models");
+    assert_eq!(ancestor_capacity(root), root.components().count());
+}
+
 /// Serves fixed bytes per URL and records what was asked for.
 struct MapFetcher {
     files: HashMap<String, Vec<u8>>,
