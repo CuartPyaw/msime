@@ -14,6 +14,7 @@ use super::catalog;
 use crate::account::{AccountApi, AccountError, AccountSessionStorage};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -165,15 +166,34 @@ struct SyncState {
 
 /// A state file that cannot be read is treated as empty: without state a run never deletes anything, it only uploads, downloads or compares.
 fn load_state(path: &Path) -> SyncState {
-    std::fs::File::open(path)
-        .ok()
+    open_state_file(path)
         .and_then(|file| crate::bounded_io::read_bounded(file, MAX_STATE_BYTES).ok())
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
 }
 
+fn open_state_file(path: &Path) -> Option<File> {
+    // 同步状态参与本地删除决策，不能跟随外部符号链接读取。
+    crate::storage::reject_symlink(path).ok()?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    options.open(path).ok()
+}
+
 /// Write the state by rename, so a reader never sees half of it.
 fn save_state(path: &Path, state: &SyncState) -> Result<(), &'static str> {
+    crate::storage::reject_symlink(path).map_err(|_| STORAGE)?;
     let directory = path.parent().ok_or(STORAGE)?;
     let bytes = serde_json::to_vec_pretty(state).map_err(|_| STORAGE)?;
     let mut file = tempfile::NamedTempFile::new_in(directory).map_err(|_| STORAGE)?;
