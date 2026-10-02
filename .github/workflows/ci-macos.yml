@@ -63,9 +63,9 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" != push && "$GITHUB_EVENT_NAME" != pull_request ]]; then
             echo "build=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          # 推到 develop 不构建：同一份改动在 PR 上已经构建并测过，合并后再跑一遍只是和排队的 PR 抢那 5 台 macOS runner（2026-10-03 实测一个动到 macOS 的 PR 就占满 5 台约 30 分钟，合并后的推送再占一轮）。develop 上的回归由每天的定时运行兜底，发往 main 的发布 PR 也会完整再跑一遍。推到 main 照常构建。
-          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/heads/develop ]]; then
-            echo "build=false" >> "$GITHUB_OUTPUT"; echo "推到 develop，跳过构建。"; exit 0
+          # 推送（develop 和 main）不构建：同一份改动在 PR 上已经构建并测过，合并后再跑一遍只是和排队的 PR 抢那 5 台 macOS runner（2026-10-03 实测一个动到 macOS 的 PR 就占满 5 台约 30 分钟，合并后的推送再占一轮；0.51.0 合进 main 的推送又占了 4 台）。合并后的回归由每天的定时运行兜底；发往 main 的发布 PR 会完整跑一遍，发版脚本另有手动触发的运行。
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"; echo "推送不构建（PR 上已跑过）。"; exit 0
           fi
           # 拿不到可比的两端时也构建。范围算不出来不等于没有改动,而少构建一次的代价是把问题放过去。
           if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
