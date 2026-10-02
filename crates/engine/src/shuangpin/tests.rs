@@ -317,6 +317,30 @@ fn fuzzy_rows_take_the_typed_keys() {
     assert!(fuzzy[1].fuzzy);
 }
 
+#[test]
+fn fuzzy_rows_reserve_unique_results_before_appending() {
+    let mut sql = String::from(
+        "CREATE TABLE tbl_1_z(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_z VALUES('zi','z','精确',100);",
+    );
+    for index in 0..20 {
+        sql.push_str(&format!(
+            "INSERT INTO tbl_1_z VALUES('zhi','z','模糊{index:02}',{});",
+            99 - index
+        ));
+    }
+    let fixture = Fixture::new(&sql);
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let mut typed = request("zi", false);
+    typed.fuzzy_pinyin = FuzzyPinyinOptions {
+        rules: fuzzy_rule::Z_ZH,
+    };
+
+    let fuzzy = engine.query(&typed, None);
+
+    assert_eq!(fuzzy.len(), 21);
+    assert_eq!(fuzzy.capacity(), fuzzy.len());
+}
+
 /// A fixed row missing from the list is looked up by its canonical quanpin key (user_dictionary positions).
 #[test]
 fn find_candidate_reads_the_canonical_key() {
