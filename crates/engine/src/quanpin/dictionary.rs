@@ -281,7 +281,7 @@ impl QuanpinDictionary {
             }
         }
         let segments = split_segments(segmentation);
-        let mut result = Vec::with_capacity(FUZZY_PATH_BUDGET.saturating_mul(FUZZY_ROW_LIMIT));
+        let mut result = Vec::new();
         let mut budget = FUZZY_PATH_BUDGET;
         for count in (1..=segments.len()).rev() {
             if budget <= 1 {
@@ -297,6 +297,7 @@ impl QuanpinDictionary {
             let rows = self
                 .database
                 .query_exact_segmentations_keyed_flat(&paths, FUZZY_ROW_LIMIT);
+            result.reserve(rows.len());
             result.extend(rows.into_iter().map(|row| {
                 let mut item = WordItem::new(
                     typed.clone(),
