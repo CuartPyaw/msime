@@ -341,3 +341,60 @@ test("on Windows the terminal instructions pass the arguments through a file", a
   );
   expect(usage).not.toContain("'<JSON 参数>'");
 });
+
+/** The text of each coloured piece in a shown block, in order, by the utility that colours it. */
+function coloured(block: HTMLElement, utility: string): string[] {
+  return [...block.querySelectorAll(`.${utility}`)].map((span) => span.textContent ?? "");
+}
+
+test("commands are coloured by program, flag, quoted argument and placeholder", async () => {
+  await openDeveloper({
+    mcpServerStatus: async () => ({ ...status(), options: "/Library/Application Support/o.json" }),
+  });
+  const group = await screen.findByRole("group", { name: "连接 AI 助手" });
+  const install = within(group).getByLabelText("Claude Code 安装命令");
+  expect(coloured(install, "text-syntax-program")).toEqual(["claude", "/opt/msime/msime-mcp"]);
+  expect(coloured(install, "text-syntax-flag")).toEqual(["--scope", "--", "--options"]);
+  expect(coloured(install, "text-syntax-string")).toEqual([
+    "'/Library/Application Support/o.json'",
+  ]);
+
+  fireEvent.click(within(group).getByRole("radio", { name: "命令行" }));
+  const usage = within(group).getByLabelText("命令行用法");
+  expect(coloured(usage, "text-syntax-placeholder")).toEqual(["<工具名>", "@<文件路径>"]);
+  expect(coloured(usage, "text-syntax-string")).toContain("'<JSON 参数>'");
+  // The prose around the commands stays uncoloured.
+  expect(coloured(usage, "text-syntax-program").join("")).not.toContain("水杉");
+});
+
+test("the configuration is coloured when it is laid out as the host's pretty printer writes it", async () => {
+  const pretty = JSON.stringify(JSON.parse(config), null, 2);
+  const copyText = vi.fn(async () => {});
+  await openDeveloper({ mcpServerStatus: async () => ({ ...status(), config: pretty }), copyText });
+  const group = await screen.findByRole("group", { name: "连接 AI 助手" });
+  fireEvent.click(within(group).getByRole("radio", { name: "其他" }));
+  const block = within(group).getByLabelText("MCP 配置");
+  expect(block.textContent).toBe(pretty);
+  expect(coloured(block, "text-syntax-key")).toEqual([
+    '"mcpServers"',
+    '"msime"',
+    '"command"',
+    '"args"',
+  ]);
+  expect(coloured(block, "text-syntax-string")).toEqual([
+    '"/opt/msime/msime-mcp"',
+    '"--options"',
+    '"/state/runtime-options.json"',
+  ]);
+  fireEvent.click(within(group).getByRole("button", { name: "复制配置" }));
+  await waitFor(() => expect(copyText).toHaveBeenCalledWith(pretty));
+});
+
+test("a configuration laid out differently is shown as written, uncoloured", async () => {
+  await openDeveloper({ mcpServerStatus: async () => status() });
+  const group = await screen.findByRole("group", { name: "连接 AI 助手" });
+  fireEvent.click(within(group).getByRole("radio", { name: "其他" }));
+  const block = within(group).getByLabelText("MCP 配置");
+  expect(block.textContent).toBe(config);
+  expect(block.querySelector("span")).toBeNull();
+});

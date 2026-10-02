@@ -64,6 +64,11 @@
   --color-faint: var(--text-subtle);
   --color-danger: var(--danger-text);
   --color-danger-hover: var(--danger-hover);
+  --color-syntax-program: var(--syntax-program);
+  --color-syntax-flag: var(--syntax-flag);
+  --color-syntax-string: var(--syntax-string);
+  --color-syntax-placeholder: var(--syntax-placeholder);
+  --color-syntax-key: var(--syntax-key);
   --shadow-card: var(--card-shadow);
   --font-ui: "Noto Sans SC", "Microsoft YaHei", "Segoe UI Variable", "Segoe UI", sans-serif;
   /* The emoji panel needs a stack that actually carries colour glyphs. `font-emoji-text` adds the CJK
@@ -1454,6 +1459,24 @@
     --cand-selected: #e8e8e8;
     --scrollbar-thumb: rgba(0, 0, 0, 0.28);
     --scrollbar-thumb-hover: rgba(0, 0, 0, 0.45);
+  }
+
+  /* Syntax colours for the commands and configuration the settings page shows to copy. They are the redesign's own, not the source's, so they sit outside the two palette rules above that scripts/test-settings-palette-parity.py holds to the source. */
+  :root,
+  html[data-theme="dark"] {
+    --syntax-program: #d2a8ff;
+    --syntax-flag: #79c0ff;
+    --syntax-string: #a5d6ff;
+    --syntax-placeholder: #ffa657;
+    --syntax-key: #7ee787;
+  }
+
+  html[data-theme="light"] {
+    --syntax-program: #8250df;
+    --syntax-flag: #0550ae;
+    --syntax-string: #0a3069;
+    --syntax-placeholder: #953800;
+    --syntax-key: #116329;
   }
 
   /*
