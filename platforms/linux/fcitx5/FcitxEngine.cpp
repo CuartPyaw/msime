@@ -1880,6 +1880,8 @@ public:
   }
   static Json preferOnline(const Json &glosses, const Json &online) {
     std::vector<std::pair<std::string, std::string>> merged, answers;
+    merged.reserve(glosses.is_array() ? glosses.size() : 0);
+    answers.reserve(online.is_array() ? online.size() : 0);
     const auto read = [](const Json &values, auto &into) {
       if (!values.is_array()) return;
       for (const auto &item : values)
