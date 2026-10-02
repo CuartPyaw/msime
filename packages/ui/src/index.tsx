@@ -380,6 +380,7 @@ import { TypingStatisticsPage, type TypingStatisticsClient } from "./settings/ty
 import { VocabularyReviewPage, type VocabularyReviewClient } from "./settings/vocabulary-review";
 import {
   type McpClientId,
+  type McpFlag,
   type McpInstallOutcome,
   type McpServerStatus,
 } from "./settings/mcp-connect";
@@ -495,6 +496,7 @@ export {
   McpConnectSection,
   type McpClientId,
   type McpClientStatus,
+  type McpFlag,
   type McpInstallOutcome,
   type McpServerStatus,
 } from "./settings/mcp-connect";
@@ -1921,8 +1923,12 @@ export interface SettingsClient {
   copyText?: (text: string) => Promise<void>;
   /** The desktop hosts ship `msime-mcp` beside the settings app and report where it is and the entry an AI assistant runs it with. */
   mcpServerStatus?: () => Promise<McpServerStatus>;
-  /** Write that entry into an assistant's configuration file. A different `msime` entry there rejects with code `mcp_entry_exists` unless `replace` is set. */
-  installMcpClient?: (client: McpClientId, replace: boolean) => Promise<McpInstallOutcome>;
+  /** 把条目（`args` 末尾加上 `flags`）写进助手的配置文件。已有条目只差权限参数时直接更新；其它不同的 `msime` 条目在未设 `replace` 时以 `mcp_entry_exists` 拒绝。 */
+  installMcpClient?: (
+    client: McpClientId,
+    replace: boolean,
+    flags: readonly McpFlag[],
+  ) => Promise<McpInstallOutcome>;
   /** Mobile hosts can open the platform keyboard/input-method settings. */
   openSystemKeyboardSettings?: () => Promise<void>;
   /** Mobile hosts persist keyboard sound and haptic feedback in native preferences. */
