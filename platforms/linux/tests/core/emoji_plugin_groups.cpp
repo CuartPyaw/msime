@@ -19,6 +19,8 @@ int main() {
     {"pack":"music","pack_name":"音乐符号","tab":"symbols","title":"音符","items":["♪",1,""]}
   ])json"));
   assert(groups.size() == 4);
+  assert(groups.capacity() == 7);
+  assert(groups[0].items.capacity() == 2);
   assert(groups[0].keywords == "jiantou" && groups[1].keywords.empty());
   assert(groups[3].pack == "music" && groups[3].items == std::vector<std::string>{"♪"});
   assert(parse_plugin_symbol_groups(Json()).empty());
