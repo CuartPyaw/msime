@@ -15,6 +15,45 @@ fn emoji_group_page_capacity_reserves_the_first_page_size() {
     assert!(positions.capacity() >= 7);
 }
 
+/// 插件符号组追加在内置组之后：符号以插件名为上级分类，颜文字排在 All 之后；没写关键词时用符号本身搜索。
+#[test]
+fn plugin_symbol_groups_follow_the_built_in_catalog() {
+    use msime_client_core::plugins::symbol_set::SymbolTab;
+    let group =
+        |tab, title: &str, keywords: &str, items: &[&str]| msime_host_api::PluginSymbolGroup {
+            pack: "arrows".into(),
+            pack_name: "箭头大全".into(),
+            tab,
+            title: title.into(),
+            keywords: keywords.into(),
+            items: items.iter().map(|item| (*item).to_owned()).collect(),
+        };
+    let built_in = |title: &str| super::EmojiCatalogGroup {
+        title: title.into(),
+        parent: None,
+        icon: String::new(),
+        items: Vec::new(),
+    };
+    let mut kaomoji = vec![built_in("All")];
+    let mut symbols = vec![built_in("数学")];
+    super::append_plugin_symbol_groups(
+        vec![
+            group(SymbolTab::Symbols, "箭头", "jiantou", &["→", "←"]),
+            group(SymbolTab::Kaomoji, "开心", "", &["(^_^)"]),
+        ],
+        &mut kaomoji,
+        &mut symbols,
+    );
+    assert_eq!(symbols.len(), 2);
+    assert_eq!(symbols[1].title, "箭头");
+    assert_eq!(symbols[1].parent.as_deref(), Some("箭头大全"));
+    assert_eq!(symbols[1].icon, "→");
+    assert_eq!(symbols[1].items[1].keywords, "jiantou");
+    assert_eq!(kaomoji[0].title, "All");
+    assert_eq!(kaomoji[1].title, "开心");
+    assert_eq!(kaomoji[1].items[0].keywords, "(^_^)");
+}
+
 #[test]
 fn runtime_options_fallback_reserves_all_candidate_slots() {
     let candidates: Vec<std::path::PathBuf> =

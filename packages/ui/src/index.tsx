@@ -444,7 +444,11 @@ import { PluginsSettingsPage } from "./settings/pages/plugins-page";
 import type { PluginClient } from "./settings/plugins-section";
 import type { PluginPreferences } from "./settings/plugin-preferences";
 import { AboutSettingsPage } from "./settings/pages/about-page";
-import type { CustomHelpcodeSchema, HelpcodePreferences } from "./settings/pages/helpcode-page";
+import type {
+  CustomHelpcodeSchema,
+  HelpcodePackOption,
+  HelpcodePreferences,
+} from "./settings/pages/helpcode-page";
 import type { ClipboardHistoryClient } from "./settings/clipboard-history-section";
 import type { CloudClipboardRequest } from "./settings/cloud-clipboard-send";
 import { type FuzzyPinyinPreferences } from "./settings/fuzzy-pinyin-section";
@@ -593,6 +597,7 @@ export {
   HelpcodeSettingsGroup,
   type HelpcodeSettingsGroupProps,
   type CustomHelpcodeSchema,
+  type HelpcodePackOption,
   type HelpcodePreferences,
   type HelpcodeSchema,
   type HelpcodeSettings,
@@ -1496,6 +1501,10 @@ export interface HostCapabilities {
   music?: boolean;
   /** The host draws the typing effects and the combo count `msime_client_typing_effect` answers with. Absent on a host older than the field. */
   typing_effects?: boolean;
+  /** 背单词书目列出单词本插件（`pack-<插件 id>` 词书）。旧宿主没有这个字段。 */
+  wordbook_packs?: boolean;
+  /** 符号面板显示已安装的符号集插件。旧宿主没有这个字段。 */
+  symbol_set_packs?: boolean;
   /** The input schemes this host offers; the others are shown disabled. Absent on a host older than the field, which offers 全拼, 双拼, 五笔, 日文 and 韩文. */
   input_schemes?: InputScheme[];
 }
@@ -2083,6 +2092,34 @@ function useCustomHelpcodeSchemas(
   return schemas;
 }
 
+/** 已安装的辅助码表插件，每次进入「输入」页时重读，在别处导入或删除的包下次进来就能看到。 */
+function useHelpcodePacks(
+  catalog: PluginClient["catalog"] | undefined,
+  inputPageOpen: boolean,
+): HelpcodePackOption[] {
+  const [packs, setPacks] = useState<HelpcodePackOption[]>([]);
+  useEffect(() => {
+    if (!catalog || !inputPageOpen) return;
+    let active = true;
+    void catalog()
+      .then((next) => {
+        if (!active) return;
+        setPacks(
+          next.packages
+            .filter((pack) => pack.kind === "helpcode")
+            .map((pack) => ({ id: pack.id, name: pack.name })),
+        );
+      })
+      .catch(() => {
+        if (active) setPacks([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [catalog, inputPageOpen]);
+  return packs;
+}
+
 // The state, effects and handlers behind the settings window. The shell below and every page component read the same values - the pages through `SettingsFormContext` - so splitting the page into files changed where the markup lives, not what it closes over.
 function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps) {
   const { confirm, confirmation } = useConfirm();
@@ -2141,6 +2178,8 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showTypingEffects,
     showTypingEffectStyles,
     showTypingEffectPacks,
+    showWordbookPacks,
+    showSymbolSetPacks,
   } = capabilities;
   const {
     fullwidthChord,
@@ -2235,6 +2274,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     fallbackVersion: fallbackAppVersion,
   });
   const customHelpcodeSchemas = useCustomHelpcodeSchemas(client.listHelpcodeSchemas);
+  const helpcodePacks = useHelpcodePacks(client.plugins?.catalog, page === "input");
   const {
     value: mobileKeyboardFeedback,
     busy: mobileKeyboardFeedbackBusy,
@@ -2656,6 +2696,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showHelpcodeShiftEntry,
     showHelpcode,
     customHelpcodeSchemas,
+    helpcodePacks,
     showShuangpinPreedit,
     showCharacterWidth,
     showVoiceCommitMode,
@@ -2690,6 +2731,8 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showTypingEffects,
     showTypingEffectStyles,
     showTypingEffectPacks,
+    showWordbookPacks,
+    showSymbolSetPacks,
     snapshot,
     draft,
     setDraft,

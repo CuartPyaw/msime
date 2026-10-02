@@ -57,8 +57,11 @@ import {
 import { NineKeyLayout, NineKey } from './input/NineKeyLayout';
 import { SpaceCursorMovement } from './input/SpaceCursorMovement';
 import {
-  EmojiCatalogModel, EmojiCategory, EmojiItem, EmojiSymbolGroup, EMOJI_PAGE_SIZE
+  EmojiCatalogModel, EmojiCategory, EmojiItem, EMOJI_PAGE_SIZE
 } from './emoji/EmojiCatalogModel';
+import {
+  EmojiPanelGroupTab, PluginSymbolGroup, PluginSymbolGroupPolicy
+} from './emoji/PluginSymbolGroupPolicy';
 import {
   EmojiPanelKey, EmojiPanelKeyAction, EmojiPanelKeyDecision, EmojiPanelKeyPolicy
 } from './emoji/EmojiPanelKeyPolicy';
@@ -365,9 +368,11 @@ struct KeyboardView {
   @State emojiShowingRecents: boolean = false;
   @State emojiPanel: string = EMOJI_PANEL;
   @State emojiUnicodeGroup: string = EmojiCatalogModel.categories()[0].group;
-  @State emojiKaomojiGroups: string[] = [];
-  @State emojiSymbolGroups: EmojiSymbolGroup[] = [];
-  @State emojiSymbolParent: string = '';
+  // 颜文字页和符号页的标签：内置组在前，符号集插件的组在后，见 PluginSymbolGroupPolicy。
+  @State emojiKaomojiTabs: EmojiPanelGroupTab[] = [];
+  @State emojiSymbolTabs: EmojiPanelGroupTab[] = [];
+  // 颜文字页或符号页当前选中标签的 key。
+  @State emojiPanelTab: string = '';
   // What the 2in1 panel's search reads and which item the arrows have reached; see EmojiPanelKeyPolicy.
   @State emojiQuery: string = '';
   @State emojiSelected: number = 0;
@@ -1040,6 +1045,40 @@ struct KeyboardView {
       .map((item: EmojiItem): string => item.text);
   }
 
+  /** 打开颜文字页或符号页的一个标签：内置标签向 Engine 分页读取，插件标签直接显示清单里的条目。 */
+  private loadEmojiTab(category: string, tab: EmojiPanelGroupTab): void {
+    this.emojiPanelTab = tab.key;
+    if (!tab.plugin) {
+      this.loadEmojiCatalog(category, tab.catalogGroup, tab.catalogParent);
+      return;
+    }
+    this.emojiShowingRecents = false;
+    this.resetEmojiSearch();
+    for (const item of tab.items) {
+      if (item.annotation.length > 0) {
+        this.emojiKeywords.set(item.text, item.annotation);
+      }
+    }
+    this.emojiItems = tab.items.map((item: EmojiItem): string => item.text);
+  }
+
+  /** 打开一页时选中它的第一个标签；一个标签都没有时照旧不带分组读取目录。 */
+  private loadFirstEmojiTab(category: string, tabs: EmojiPanelGroupTab[]): void {
+    if (tabs.length > 0) {
+      this.loadEmojiTab(category, tabs[0]);
+      return;
+    }
+    this.emojiPanelTab = '';
+    this.loadEmojiCatalog(category, '', '');
+  }
+
+  /**
+   * 已安装的符号集插件组。插件只能在 2in1 的插件页安装，`symbol_set_packs` 能力也只在 2in1 声明，所以手机面板不去读。
+   */
+  private pluginSymbolGroups(): PluginSymbolGroup[] {
+    return KeyboardFormFactor.isDesktop() ? KeyboardSession.shared.pluginSymbolGroups() : [];
+  }
+
   private collectEmojiCatalog(category: string, group: string, parent: string): EmojiItem[] {
     const collected: EmojiItem[] = [];
     let offset: number = 0;
@@ -1154,11 +1193,13 @@ struct KeyboardView {
         pages = EmojiCatalogModel.categories().map((category: EmojiCategory): EmojiItem[] =>
           this.collectEmojiCatalog(EMOJI_PANEL, category.group, ''));
       } else if (this.emojiPanel === KAOMOJI_PANEL) {
-        pages = this.emojiKaomojiGroups.map((group: string): EmojiItem[] =>
-          this.collectEmojiCatalog(KAOMOJI_PANEL, group, ''));
+        pages = this.emojiKaomojiTabs.filter((tab: EmojiPanelGroupTab): boolean => !tab.plugin)
+          .map((tab: EmojiPanelGroupTab): EmojiItem[] =>
+            this.collectEmojiCatalog(KAOMOJI_PANEL, tab.catalogGroup, ''));
       } else {
-        pages = this.emojiSymbolGroups.map((group: EmojiSymbolGroup): EmojiItem[] =>
-          this.collectEmojiCatalog(SYMBOLS_PANEL, '', group.parent));
+        pages = this.emojiSymbolTabs.filter((tab: EmojiPanelGroupTab): boolean => !tab.plugin)
+          .map((tab: EmojiPanelGroupTab): EmojiItem[] =>
+            this.collectEmojiCatalog(SYMBOLS_PANEL, '', tab.catalogParent));
       }
       const flattened: EmojiItem[] = [];
       for (const page of pages) {
@@ -1169,8 +1210,12 @@ struct KeyboardView {
       index = flattened;
       this.emojiSearchIndex.set(this.emojiPanel, index);
     }
+    // 缓存里只有内置目录；插件条目取自这次打开时读到的标签并接在后面，装上或卸下插件后重开面板即可搜到最新内容。
+    const tabs: EmojiPanelGroupTab[] = this.emojiPanel === KAOMOJI_PANEL ? this.emojiKaomojiTabs
+      : this.emojiPanel === SYMBOLS_PANEL ? this.emojiSymbolTabs : [];
+    const searched: EmojiItem[] = index.concat(PluginSymbolGroupPolicy.pluginItems(tabs));
     const results: string[] = [];
-    for (const item of index) {
+    for (const item of searched) {
       if (EmojiPanelKeyPolicy.matches(item.text, item.annotation, query) && !results.includes(item.text)) {
         results.push(item.text);
         if (results.length === EMOJI_SEARCH_LIMIT) {
@@ -1244,14 +1289,14 @@ struct KeyboardView {
       return;
     }
     if (panel === KAOMOJI_PANEL) {
-      this.emojiKaomojiGroups = KeyboardSession.shared.emojiGroups(KAOMOJI_PANEL);
-      const group: string = this.emojiKaomojiGroups[0] ?? '';
-      this.loadEmojiCatalog(KAOMOJI_PANEL, group);
+      this.emojiKaomojiTabs = PluginSymbolGroupPolicy.kaomojiTabs(
+        KeyboardSession.shared.emojiGroups(KAOMOJI_PANEL), this.pluginSymbolGroups());
+      this.loadFirstEmojiTab(KAOMOJI_PANEL, this.emojiKaomojiTabs);
       return;
     }
-    this.emojiSymbolGroups = KeyboardSession.shared.emojiSymbolGroups();
-    this.emojiSymbolParent = this.emojiSymbolGroups[0]?.parent ?? '';
-    this.loadEmojiCatalog(SYMBOLS_PANEL, '', this.emojiSymbolParent);
+    this.emojiSymbolTabs = PluginSymbolGroupPolicy.symbolTabs(
+      KeyboardSession.shared.emojiSymbolGroups(), this.pluginSymbolGroups());
+    this.loadFirstEmojiTab(SYMBOLS_PANEL, this.emojiSymbolTabs);
   }
 
   private showEmojiRecents(): void {
@@ -5615,16 +5660,16 @@ struct KeyboardView {
                 .onClick(() => this.loadEmoji(category.group))
             }, (category: EmojiCategory) => `${category.group}:${this.emojiGroup}:${this.emojiShowingRecents}`)
           } else if (this.emojiPanel === KAOMOJI_PANEL) {
-            ForEach(this.emojiKaomojiGroups, (group: string) => {
-              Text(group)
+            ForEach(this.emojiKaomojiTabs, (tab: EmojiPanelGroupTab) => {
+              Text(tab.title)
                 .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-                .fontColor(group === this.emojiGroup
+                .fontColor(tab.key === this.emojiPanelTab
                   ? this.emojiSkin.accent : this.emojiSkin.keyForeground)
                 .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
                   right: KeyboardMetrics.CANDIDATE_PADDING_VP })
                 .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
-                .onClick(() => this.loadEmojiCatalog(KAOMOJI_PANEL, group))
-            }, (group: string) => `${group}:${this.emojiGroup}`)
+                .onClick(() => this.loadEmojiTab(KAOMOJI_PANEL, tab))
+            }, (tab: EmojiPanelGroupTab) => `${tab.key}:${this.emojiPanelTab}`)
           } else if (this.emojiPanel === CLIPBOARD_PANEL) {
             // Saving and clearing act on this device's history, so the cloud section does not offer them.
             if (!this.cloudTabActive()) {
@@ -5645,19 +5690,16 @@ struct KeyboardView {
                 .onClick(() => this.clearClipboard())
             }
           } else {
-            ForEach(this.emojiSymbolGroups, (group: EmojiSymbolGroup) => {
-              Text(group.title)
+            ForEach(this.emojiSymbolTabs, (tab: EmojiPanelGroupTab) => {
+              Text(tab.title)
                 .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-                .fontColor(group.parent === this.emojiSymbolParent
+                .fontColor(tab.key === this.emojiPanelTab
                   ? this.emojiSkin.accent : this.emojiSkin.keyForeground)
                 .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
                   right: KeyboardMetrics.CANDIDATE_PADDING_VP })
                 .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
-                .onClick(() => {
-                  this.emojiSymbolParent = group.parent;
-                  this.loadEmojiCatalog(SYMBOLS_PANEL, '', group.parent);
-                })
-            }, (group: EmojiSymbolGroup) => `${group.parent}:${this.emojiSymbolParent}`)
+                .onClick(() => this.loadEmojiTab(SYMBOLS_PANEL, tab))
+            }, (tab: EmojiPanelGroupTab) => `${tab.key}:${this.emojiPanelTab}`)
           }
         }
       }

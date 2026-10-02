@@ -1919,6 +1919,9 @@ pub unsafe extern "C" fn msime_client_vocabulary_review(
         /// both per-day and this layer cannot resolve the host's timezone.
         day: String,
         action: session::ReviewAction,
+        /// 插件目录的绝对路径：其中的单词本插件作为 `pack-<插件 id>` 词书列出。不传的宿主（Android、iOS）只有内置和导入的书。
+        #[serde(default)]
+        plugins: Option<String>,
     }
 
     response(|| {
@@ -1940,9 +1943,15 @@ pub unsafe extern "C" fn msime_client_vocabulary_review(
         {
             return Err("invalid vocabulary review directory".into());
         }
+        if request.plugins.as_deref().is_some_and(|plugins| {
+            plugins.len() > 16_384 || !std::path::Path::new(plugins).is_absolute()
+        }) {
+            return Err("invalid vocabulary review directory".into());
+        }
         let status = session::apply(
             std::path::Path::new(&request.directory),
             std::path::Path::new(&request.resources),
+            request.plugins.as_deref().map(std::path::Path::new),
             &request.day,
             request.action,
         )

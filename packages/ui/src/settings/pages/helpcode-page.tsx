@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import * as settings from "../settings-style";
 import { GroupList, Row, Switch } from "../../core/platform-controls";
 import { SelectRow } from "../select-row";
+import { pluginPreferences, type PluginPreferences } from "../plugin-preferences";
 
 export type HelpcodeSchema =
   | "lantian"
@@ -27,7 +28,21 @@ export type HelpcodePreferences = {
 };
 
 export type HelpcodeKey = "quanpin_helpcode" | "shuangpin_helpcode";
-export type HelpcodeSettings = Partial<Record<HelpcodeKey, HelpcodePreferences>>;
+/** 辅助码设置，以及选中辅助码表插件的 `plugins.helpcode_pack_*`。 */
+export type HelpcodeSettings = Partial<Record<HelpcodeKey, HelpcodePreferences>> & {
+  plugins?: PluginPreferences;
+};
+
+/** 一个已安装的辅助码表插件，供下拉框选用。 */
+export type HelpcodePackOption = { id: string; name: string };
+
+/** 下拉框里辅助码表插件的值前缀：`pack:<插件 id>`。 */
+const PACK_PREFIX = "pack:";
+
+const packKeys = {
+  quanpin_helpcode: "helpcode_pack_quanpin",
+  shuangpin_helpcode: "helpcode_pack_shuangpin",
+} as const;
 
 /** The core's `default_quanpin_helpcode` / `default_shuangpin_helpcode`, used wherever a document carries no helpcode object for a scheme: this form and the candidate previews. */
 export const defaultHelpcode: Readonly<Record<HelpcodeKey, HelpcodePreferences>> = {
@@ -67,6 +82,8 @@ export interface HelpcodeSettingsPageProps {
   hidden?: boolean;
   /** Custom tables discovered by the host. They are optional for hosts without resource scanning. */
   customSchemas?: readonly CustomHelpcodeSchema[];
+  /** 已安装的辅助码表插件；选中后替换该方案的辅助码方案。没有插件目录的宿主为空。 */
+  packs?: readonly HelpcodePackOption[];
   onChange: (patch: HelpcodeSettings) => void;
 }
 
@@ -93,8 +110,10 @@ export function HelpcodeSettingsGroup({
   mobile,
   showShiftEntry,
   customSchemas = [],
+  packs = [],
   onChange,
 }: HelpcodeSettingsGroupProps) {
+  const plugins = pluginPreferences(draft);
   const schemaOptions = [
     ...helpcodeSchemas,
     ...customSchemas.map((schema): readonly [HelpcodeSchema, string] => [
@@ -124,6 +143,18 @@ export function HelpcodeSettingsGroup({
         } as Required<HelpcodePreferences>;
         // Named after its own scheme, the way the reference window names these: both rows are on the page at once, so one shared wording left two switches with the same accessible name and nothing to tell a screen reader -- or a test -- which one it had.
         const display = mobile ? `在候选栏中显示${label}辅助码` : `在候选窗口中显示${label}辅助码`;
+        const packKey = packKeys[key];
+        const selectedPack = plugins[packKey];
+        const packOptions = packs
+          .map((pack): readonly [string, string] => [
+            `${PACK_PREFIX}${pack.id}`,
+            `${pack.name}（插件）`,
+          ])
+          .concat(
+            selectedPack && !packs.some((pack) => pack.id === selectedPack)
+              ? [[`${PACK_PREFIX}${selectedPack}`, `${selectedPack}（插件，未找到）`] as const]
+              : [],
+          );
         return (
           <Fragment key={key}>
             <Row title={`${label}辅助码`}>
@@ -135,12 +166,21 @@ export function HelpcodeSettingsGroup({
             <SelectRow
               title={`${label}辅助码方案`}
               disabled={!current.enabled}
-              value={current.schema}
-              onChange={(event) =>
+              value={selectedPack ? `${PACK_PREFIX}${selectedPack}` : current.schema}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value.startsWith(PACK_PREFIX)) {
+                  onChange({
+                    plugins: { ...plugins, [packKey]: value.slice(PACK_PREFIX.length) },
+                  });
+                  return;
+                }
+                // 选内置或自定义方案时不再使用辅助码表插件。
                 onChange({
-                  [key]: { ...current, schema: event.target.value as HelpcodeSchema },
-                })
-              }
+                  [key]: { ...current, schema: value as HelpcodeSchema },
+                  ...(selectedPack ? { plugins: { ...plugins, [packKey]: "" } } : {}),
+                });
+              }}
             >
               {schemaOptions
                 // Keep a previously selected table visible if the resource directory was
@@ -151,6 +191,8 @@ export function HelpcodeSettingsGroup({
                     ? [[current.schema, current.schema] as const]
                     : [],
                 )
+                .map(([schema, name]): readonly [string, string] => [schema, name])
+                .concat(packOptions)
                 .map(([schema, name]) => (
                   <option key={schema} value={schema}>
                     {name}

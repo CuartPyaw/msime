@@ -242,6 +242,8 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         local_mention: false,
         command_table: Vec::new(),
         mention_entries: Vec::new(),
+        quick_phrase_table: Vec::new(),
+        helpcode_table: None,
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
@@ -5544,6 +5546,54 @@ fn complete_candidate_abi_keeps_view_paged_and_selects_a_later_entry() {
     assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }
 
+/// 表情目录请求列出插件符号组：不需要 others.db，没传插件目录时为空，相对路径被拒绝。
+#[test]
+#[cfg(unix)]
+fn emoji_catalog_lists_plugin_symbol_groups() {
+    let directory = tempfile::tempdir().unwrap();
+    let pack = directory.path().join("plugins/symbol_set/arrows");
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        "schema_version = 1\nkind = \"symbol_set\"\nid = \"arrows\"\nname = \"箭头大全\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n[[groups]]\ntab = \"symbols\"\ntitle = \"箭头\"\nkeywords = \"jiantou\"\nitems = [\"→\", \"←\"]\n[[groups]]\ntab = \"kaomoji\"\ntitle = \"开心\"\nitems = [\"(^_^)\"]\n",
+    )
+    .unwrap();
+    let resources = directory.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    let resources = resources.to_str().unwrap().to_owned();
+    let call = |query: Value| {
+        let query = query.to_string();
+        read(unsafe {
+            super::ffi::msime_client_emoji_catalog_request(
+                query.as_ptr(),
+                query.len(),
+                resources.as_ptr(),
+                resources.len(),
+            )
+        })
+    };
+    let listed = call(json!({
+        "list_plugin_symbol_groups": true,
+        "plugins": directory.path().join("plugins"),
+    }));
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(
+        listed["value"]["plugin_symbol_groups"],
+        json!([
+            {"pack": "arrows", "pack_name": "箭头大全", "tab": "symbols", "title": "箭头", "keywords": "jiantou", "items": ["→", "←"]},
+            {"pack": "arrows", "pack_name": "箭头大全", "tab": "kaomoji", "title": "开心", "keywords": "", "items": ["(^_^)"]},
+        ])
+    );
+    assert_eq!(
+        call(json!({"list_plugin_symbol_groups": true}))["value"]["plugin_symbol_groups"],
+        json!([])
+    );
+    assert_eq!(
+        call(json!({"list_plugin_symbol_groups": true, "plugins": "plugins"}))["ok"],
+        false
+    );
+}
+
 #[test]
 #[cfg(unix)]
 fn emoji_catalog_pagination_preserves_legacy_defaults() {
@@ -7458,6 +7508,44 @@ fn only_a_resource_mismatch_counts_as_outdated() {
         assert_eq!(mapped.to_string(), text);
     }
 }
+/// 带 `plugins` 的背单词请求把单词本插件列成 `pack-<插件 id>` 词书；相对路径被拒绝；不带时看不到它。
+#[test]
+fn vocabulary_boundary_lists_wordbook_packs_from_the_plugins_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let pack = directory.path().join("plugins/wordbook/cs-words");
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        "schema_version = 1\nkind = \"wordbook\"\nid = \"cs-words\"\nname = \"计算机词汇\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n[wordbook]\nfile = \"words.tsv\"\n",
+    )
+    .unwrap();
+    std::fs::write(pack.join("words.tsv"), "cache\tn. 缓存\n").unwrap();
+    let call = |plugins: Option<Value>| {
+        let mut request = json!({
+            "directory": directory.path(),
+            "resources": directory.path(),
+            "day": "2026-09-23",
+            "action": {"operation": "load"},
+        });
+        if let Some(plugins) = plugins {
+            request["plugins"] = plugins;
+        }
+        let request = serde_json::to_vec(&request).unwrap();
+        read(unsafe { msime_client_vocabulary_review(request.as_ptr(), request.len()) })
+    };
+    let listed = call(Some(json!(directory.path().join("plugins"))));
+    assert_eq!(listed["ok"], true, "{listed}");
+    let books = listed["value"]["wordbooks"].as_array().unwrap();
+    assert_eq!(books.len(), 1);
+    assert_eq!(books[0]["id"], "pack-cs-words");
+    assert_eq!(books[0]["pack"], true);
+    assert_eq!(call(Some(json!("plugins")))["ok"], false);
+    assert_eq!(
+        call(None)["value"]["wordbooks"].as_array().unwrap().len(),
+        0
+    );
+}
+
 #[test]
 fn vocabulary_boundary_imports_reviews_and_reports_one_whole_status() {
     let directory = tempfile::tempdir().unwrap();
@@ -7858,6 +7946,139 @@ fn command_tables_and_mentions_reach_the_engine_from_the_plugins_directory() {
     assert!(!commands.contains(&"张三敬上".to_owned()));
     assert!(local_mode_candidates(handle, b"@ls").contains(&"李四".to_owned()));
     assert!(!local_mode_candidates(handle, b"@zs").contains(&"张三".to_owned()));
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+fn install_phrase_table(root: &std::path::Path, id: &str, phrases: &[(&str, &str)]) {
+    let pack = root.join("state/plugins/phrase_table").join(id);
+    std::fs::create_dir_all(&pack).unwrap();
+    let rows: String = phrases
+        .iter()
+        .map(|(key, text)| format!("[[phrases]]\nkey = \"{key}\"\ntext = \"{text}\"\n"))
+        .collect();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        format!("schema_version = 1\nkind = \"phrase_table\"\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n{rows}"),
+    )
+    .unwrap();
+}
+
+/// K 模式在一个空闲会话里输入 `keys` 后的候选文本，之后取消。
+fn quick_phrase_candidates(handle: u64, keys: &[u8]) -> Vec<String> {
+    let entered = read(msime_client_character(handle, b'K', true));
+    assert_eq!(entered["ok"], true, "{entered}");
+    local_mode_candidates(handle, keys)
+}
+
+/// 启用的短语表在创建时进入 Engine，接在数据库短语之后；设置页改了包，获得焦点时跟上；偏好里换了启用顺序，走普通的偏好更新。
+#[test]
+fn phrase_tables_reach_the_quick_phrase_mode_from_the_plugins_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["resources", "dictionaries"] {
+        let directory = dir.path().join(name);
+        std::fs::create_dir_all(&directory).unwrap();
+        rusqlite::Connection::open(directory.join("msime.db"))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO quick_parases VALUES('dh','电话',10);",
+            )
+            .unwrap();
+    }
+    install_phrase_table(
+        dir.path(),
+        "office",
+        &[("dh", "电话"), ("dhhm", "电话号码")],
+    );
+    install_phrase_table(dir.path(), "home", &[("dh", "家里电话")]);
+    let mut preferences = chinese_preferences();
+    preferences.plugins.phrase_tables = vec!["office".into()];
+    let handle = plugin_host(dir.path(), preferences.clone());
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    assert_eq!(quick_phrase_candidates(handle, b"dh"), ["电话", "电话号码"]);
+
+    install_phrase_table(dir.path(), "office", &[("dh", "办公室电话")]);
+    assert_eq!(read(msime_client_focus(handle, false))["ok"], true);
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    assert_eq!(
+        quick_phrase_candidates(handle, b"dh"),
+        ["电话", "办公室电话"]
+    );
+
+    preferences.plugins.phrase_tables = vec!["home".into(), "office".into()];
+    assert_eq!(update(handle, 1, &preferences)["value"]["deferred"], false);
+    assert_eq!(
+        quick_phrase_candidates(handle, b"dh"),
+        ["电话", "家里电话", "办公室电话"]
+    );
+
+    // K 模式关闭时不读任何短语表。
+    preferences.local_modes.quick_phrase = false;
+    assert_eq!(update(handle, 2, &preferences)["value"]["deferred"], false);
+    SESSIONS.with(|sessions| {
+        assert!(sessions.borrow()[&handle]
+            .options
+            .quick_phrase_table
+            .is_empty());
+    });
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
+fn install_helpcode_pack(root: &std::path::Path, id: &str, table: &str) {
+    let pack = root.join("state/plugins/helpcode").join(id);
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(
+        pack.join("plugin.toml"),
+        format!("schema_version = 1\nkind = \"helpcode\"\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1\"\nlicense = \"CC0-1.0\"\n[helpcode]\ntable = \"table.txt\"\n"),
+    )
+    .unwrap();
+    std::fs::write(pack.join("table.txt"), table).unwrap();
+}
+
+/// 会话里 Engine 选项的辅助码表：没有时为 None，有时给出「你」的码。
+fn session_helpcode(handle: u64) -> Option<String> {
+    SESSIONS.with(|sessions| {
+        sessions.borrow()[&handle]
+            .options
+            .helpcode_table
+            .as_ref()
+            .map(|table| table.code("你").unwrap_or_default().to_owned())
+    })
+}
+
+/// 当前方案选中的辅助码表包替换方案原来的表；包被重新导入时获得焦点就跟上，包不见了就退回方案原来的表；换到另一个方案用那个方案自己的选择。
+#[test]
+fn the_selected_helpcode_pack_replaces_the_scheme_table() {
+    let dir = tempfile::tempdir().unwrap();
+    install_helpcode_pack(dir.path(), "radicals", "你=ab\n");
+    let mut preferences = chinese_preferences();
+    preferences.scheme = msime_client_core::preferences::InputScheme::Quanpin;
+    preferences.plugins.helpcode_pack_quanpin = "radicals".into();
+    let handle = plugin_host(dir.path(), preferences.clone());
+    assert_eq!(session_helpcode(handle).as_deref(), Some("ab"));
+
+    install_helpcode_pack(dir.path(), "radicals", "你=cd\n好=ef\n");
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    assert_eq!(session_helpcode(handle).as_deref(), Some("cd"));
+
+    // 包不见了：退回方案原来的表，会话照常可用。
+    std::fs::remove_dir_all(dir.path().join("state/plugins/helpcode/radicals")).unwrap();
+    assert_eq!(read(msime_client_focus(handle, false))["ok"], true);
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    assert_eq!(session_helpcode(handle), None);
+
+    // 双拼没有选包，用双拼方案自己的表；关掉全拼辅助码时不读包。
+    install_helpcode_pack(dir.path(), "radicals", "你=gh\n");
+    preferences.scheme = msime_client_core::preferences::InputScheme::Shuangpin;
+    assert_eq!(update(handle, 1, &preferences)["value"]["deferred"], false);
+    assert_eq!(session_helpcode(handle), None);
+    preferences.scheme = msime_client_core::preferences::InputScheme::Quanpin;
+    preferences.quanpin_helpcode.enabled = false;
+    assert_eq!(update(handle, 2, &preferences)["value"]["deferred"], false);
+    assert_eq!(session_helpcode(handle), None);
+    preferences.quanpin_helpcode.enabled = true;
+    assert_eq!(update(handle, 3, &preferences)["value"]["deferred"], false);
+    assert_eq!(session_helpcode(handle).as_deref(), Some("gh"));
     assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }
 

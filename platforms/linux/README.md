@@ -181,6 +181,8 @@ Linux 独立手写面板使用同一类用户管理 Unix socket，不把 GTK、W
 
 桌面 Tauri Emoji 面板在 Linux 上直接读取 HostOptions `resources` 下 Engine 提供的 `others.db`，通过输入引擎分页读取完整 Emoji、颜文字和符号目录，并按数据库分类聚合后交给共享 UI；读取失败时 UI 保留内置目录。面板只接收资源目录中的目录数据，不读取用户输入、凭据或私人资料。
 
+Fcitx5 插件状态栏里的表情菜单同样显示已安装的符号集插件：在切换表情类别、开始表情搜索和读取分组列表时，经 `msime_client_emoji_catalog_request` 的 `list_plugin_symbol_groups` 读取 `<preferences_directory>/plugins` 下的符号集。符号组排在内置符号之后，分组循环里显示为「插件名 / 组名」；颜文字组排在内置的 All 之后。「全部」和搜索结果在内置条目读完后接上插件条目，搜索匹配组关键词或条目原文；不与内置目录去重。插件读取失败时菜单只显示内置目录。合并与分页规则在 `src/core/EmojiPluginGroups.h`，由 `tests/core/emoji_plugin_groups.cpp` 钉住。
+
 桌面 Tauri 面板的系统剪贴板按 Linux 会话能力选择后端：优先使用 Wayland 的 `wl-paste` / `wl-copy`，不可用时回退到 X11 的 `xclip`；剪贴板历史仍只在用户开启设置后写入本地受限存储。桌面宿主运行期间以低频轮询捕获新的文本剪贴板内容，设置关闭后立即停止记录并清除本轮监视状态，读取失败不会伪造同步结果。
 
 桌面 Tauri 面板在 Linux 上也接入了屏幕键盘、手写和语音提交。打开面板时宿主先保存当前输入目标：X11 使用 `xdotool getactivewindow`，Sway 使用 `swaymsg -t get_tree`；按键通过目标窗口的 `xdotool key`、Sway 的 `wtype` 或通用 Wayland 的 `ydotool` 发送。`ydotool` 仅在其 daemon 可用时启用，以 `/dev/uinput` 注入，不依赖面板重新夺取焦点；没有全局注入能力时回退到 `wtype`。手写候选和语音识别结果通过同一目标提交文本，语音面板消费 provider 的 partial/final 事件并实时显示转写，关闭面板时发送当前 generation 的取消消息。手写识别服务的绝对 Unix socket 由 `MSIME_HANDWRITING_PROVIDER_SOCKET` 提供，语音服务使用 HostOptions 的 `voice_provider_socket` 或 `MSIME_VOICE_PROVIDER_SOCKET`；服务仍负责录音、模型和凭据。缺少注入工具或服务时面板保留可见状态并返回宿主错误，不伪造提交。

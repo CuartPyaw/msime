@@ -1,8 +1,10 @@
 import type { ReactNode, TextareaHTMLAttributes } from "react";
 import * as settings from "./settings-style";
 
-export interface SettingsTextareaFieldProps
-  extends Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value" | "onChange" | "aria-label"> {
+export interface SettingsTextareaFieldProps extends Omit<
+  TextareaHTMLAttributes<HTMLTextAreaElement>,
+  "value" | "onChange" | "aria-label"
+> {
   label: ReactNode;
   description?: ReactNode;
   ariaLabel: string;

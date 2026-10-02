@@ -32,6 +32,7 @@ export function InputSettingsPage() {
     showHelpcode,
     showHelpcodeShiftEntry,
     customHelpcodeSchemas,
+    helpcodePacks,
     translationProvider,
     draft,
     setDraft,
@@ -165,6 +166,7 @@ export function InputSettingsPage() {
                 <HelpcodeSettingsGroup
                   value={draft}
                   customSchemas={customHelpcodeSchemas}
+                  packs={helpcodePacks}
                   mobile={mobilePlatform}
                   showShiftEntry={showHelpcodeShiftEntry}
                   onChange={onHelpcodeChange}

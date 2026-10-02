@@ -256,6 +256,7 @@ int32_t msime_client_typing_statistics_enabled(const uint8_t *directory, size_t 
  *   text is a CSV/TXT word list; the library mints the id and selects the book.
  * {directory,resources,day,action:{operation:"remove",wordbook}}
  * {directory,resources,day,action:{operation:"reset"}} clears progress, keeps the books.
+ * 可选的 plugins 是插件目录的绝对路径：其中的单词本插件按 pack-<插件 id> 列在内置书之后、导入的书之前，带 pack:true；对它们的 remove 失败（在插件页卸载），卸载后复习进度保留。不传 plugins 的宿主只有内置和导入的书。
  * `day` is the caller's local day and is required by every action: the counts and
  * the queue are per-day and this layer cannot resolve the host's timezone.
  * Requests may be up to 8 MiB rather than the usual 64 KiB, because an imported
@@ -637,6 +638,10 @@ char *msime_client_emoji_provider_request(const uint8_t *query,
  * {groups:[name,...]} in catalog order instead of an item page.
  * list_symbol_groups:true returns {symbol_groups:[{parent,title},...]}.
  * Optional parent narrows symbols to a parent category before paging.
+ * list_plugin_symbol_groups:true with plugins (absolute plugins directory) returns
+ * {plugin_symbol_groups:[{pack,pack_name,tab:"symbols"|"kaomoji",title,keywords,items:[text,...]},...]}:
+ * 已安装符号集插件的全部组，包按名字排序、组按清单顺序；keywords 没写时为空串。宿主把 symbols 组追加在内置符号之后、以 pack_name 为上级分类，
+ * kaomoji 组追加在颜文字 All 之后，不与内置目录去重。没传 plugins 时为空列表。
  * Advance offset by limit, not returned item count: each page deduplicates text. */
 char *msime_client_emoji_catalog_request(const uint8_t *query,
                                          size_t query_length,
@@ -768,7 +773,7 @@ char *msime_client_music_pack(const uint8_t *request, size_t length);
 /* The settings page's pack store and @ name list, for a settings host other than the desktop shell (HarmonyOS). Request (<=2 MiB): {state_root: absolute, sound_packs: absolute|null, action}; packs and mentions.json live in state_root/plugins, sound_packs is the bundle's built-in sound pack root. action.operation:
  * "catalog": value {packages:[...], issues:[{kind, folder, reason}]}, every installed pack and the built-in sound packs, as the desktop shell lists them.
  * "import" {source: absolute path of a pack folder or .zip file}: installs it, replacing an installed pack of the same id whole; value is the installed pack.
- * "remove" {kind: "sound"|"music"|"command_table"|"effect", id}: value null; a pack that is not installed is already removed.
+ * "remove" {kind: "sound"|"music"|"command_table"|"effect"|"phrase_table"|"helpcode"|"wordbook"|"symbol_set", id}: value null; a pack that is not installed is already removed.
  * "load_mentions": value [{text, key}], empty before a list was saved.
  * "save_mentions" {entries:[{text, key}]}: replaces the list; value null.
  * A failure is {ok:false, error: code, detail?}: the codes are the desktop shell's (invalid, storage, plugin_invalid, plugin_unsupported_source, plugin_archive, plugin_reserved, plugin_storage, mention_invalid, mention_format, mention_storage) and detail, when present, is the rule a refused pack or entry broke, in Chinese for the page. Reads and writes files, and an import copies up to a music pack's size: use a worker thread where the host has one. */

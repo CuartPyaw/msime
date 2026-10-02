@@ -1,8 +1,10 @@
 import type { ReactNode, SelectHTMLAttributes } from "react";
 import { SettingField } from "./setting-field";
 
-export interface SelectSettingFieldProps
-  extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "value" | "onChange" | "aria-label" | "children"> {
+export interface SelectSettingFieldProps extends Omit<
+  SelectHTMLAttributes<HTMLSelectElement>,
+  "value" | "onChange" | "aria-label" | "children"
+> {
   label: ReactNode;
   inputLabel: string;
   description?: ReactNode;

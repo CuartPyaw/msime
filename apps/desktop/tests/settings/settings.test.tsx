@@ -1703,6 +1703,37 @@ test("helpcode schemes save independently and retain disabled selections", async
   });
 });
 
+// 输入页的辅助码组从插件目录读出已安装的辅助码表，作为两个方案下拉框的选项。
+test("the 输入 page offers installed helpcode packs as helpcode schemes", async () => {
+  const catalog = vi.fn().mockResolvedValue({
+    packages: [{ id: "radicals", kind: "helpcode", name: "部首码" }],
+    issues: [],
+  });
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(initial),
+        save: vi.fn(),
+        plugins: {
+          catalog,
+          importPack: vi.fn(),
+          remove: vi.fn(),
+          loadMentions: vi.fn().mockResolvedValue([]),
+          saveMentions: vi.fn(),
+        } as never,
+      }}
+    />,
+  );
+  await settingsReady();
+  fireEvent.click(screen.getByRole("button", { name: "输入" }));
+  const quanpin = (await screen.findByRole("combobox", {
+    name: "全拼辅助码方案",
+  })) as HTMLSelectElement;
+  await waitFor(() => expect(within(quanpin).getByRole("option", { name: "部首码（插件）" })));
+  const shuangpin = screen.getByRole("combobox", { name: "双拼辅助码方案" });
+  expect(within(shuangpin).getByRole("option", { name: "部首码（插件）" })).toBeTruthy();
+});
+
 test("shortcut page reflects enabled navigation shortcuts", async () => {
   render(<SettingsPage client={{ load: vi.fn().mockResolvedValue(initial), save: vi.fn() }} />);
   await settingsReady();

@@ -975,11 +975,11 @@ int main(int argc, char **argv) {
     require(!firstEmoji.empty() && !state->emoji_complete_, "emoji page exposes continuation");
     engine.emoji_next_action_.activate(&ic);
     const auto nextEmojiDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (state->emoji_offset_ == 0 && std::chrono::steady_clock::now() < nextEmojiDeadline) {
+    while (state->emoji_offset_.offset == 0 && std::chrono::steady_clock::now() < nextEmojiDeadline) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       state->refreshEmoji();
     }
-    require(state->emoji_offset_ > 0 && !state->emoji_items_.empty(),
+    require(state->emoji_offset_.offset > 0 && !state->emoji_items_.empty(),
             "emoji next page loaded");
     require(state->emoji_items_.front().value("text", std::string{}).size() > 0,
             "emoji pagination returns catalog entries");
