@@ -634,6 +634,10 @@ fn enabled_command_tables_merge_in_priority_order() {
     );
     assert!(enabled(&[]).is_empty());
     assert!(enabled(&["../first"]).is_empty());
+    assert_eq!(
+        command_table::enabled_commands(root.path(), &[]).capacity(),
+        command_table::MAX_COMMANDS
+    );
 
     // The merged table stops where the Engine would.
     let many = |offset: usize| -> String {
