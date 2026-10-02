@@ -247,6 +247,7 @@ public:
     // Counts one press of `keyId` on `day` and returns the batches now due, oldest first: the previous day's counts when `day` differs from theirs, then this day's once they reach kFlushThreshold.
     std::vector<KeyPressFlush> record(std::string_view day, std::string_view keyId) {
         std::vector<KeyPressFlush> due;
+        due.reserve(2);
         if (presses_ != 0 && day != day_) due.push_back(*drain());
         if (presses_ == 0) day_.assign(day);
         ++keys_[std::string(keyId)];
