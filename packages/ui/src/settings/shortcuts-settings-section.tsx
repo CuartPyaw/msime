@@ -14,6 +14,7 @@ export interface ShortcutsSettingsSectionProps {
   onKeybindingsChange: (patch: Partial<InputModeShortcutPreferences>) => void;
   showModeSwitchShortcuts: boolean;
   macos: boolean;
+  linux?: boolean;
   showFullwidthChord: boolean;
   fullwidthChord: string;
   windows: boolean;
@@ -36,6 +37,7 @@ export function ShortcutsSettingsSection({
   onKeybindingsChange,
   showModeSwitchShortcuts,
   macos,
+  linux,
   showFullwidthChord,
   fullwidthChord,
   windows,
@@ -56,6 +58,7 @@ export function ShortcutsSettingsSection({
           onChange={onKeybindingsChange}
           showModeSwitchShortcuts={showModeSwitchShortcuts}
           macos={macos}
+          linux={linux}
           showFullwidthChord={showFullwidthChord}
           fullwidthChord={fullwidthChord}
           windows={windows}

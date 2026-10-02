@@ -7,6 +7,7 @@ import { SelectRow } from "./select-row";
 export interface InputModeShortcutPreferences {
   switch_language_shift: boolean;
   switch_language_ctrl: boolean;
+  switch_language_ctrl_space?: boolean;
   switch_language_ctrl_alt_space: boolean;
   toggle_character_set_ctrl_shift_f: boolean;
   toggle_fullwidth_option_shift_h: boolean;
@@ -19,6 +20,7 @@ export interface InputModeShortcutsSectionProps {
   onInputModeHUDChange?: (value: boolean) => void;
   showModeSwitchShortcuts: boolean;
   macos: boolean;
+  linux?: boolean;
   /** 设置窗口把中英文切换提示放在输入页，所以快捷键页不传；留给自己拼快捷键组、想把提示放在这里的宿主，只在 macOS 生效。 */
   showInputModeHUD?: boolean;
   inputModeHUD?: boolean;
@@ -65,6 +67,7 @@ export function InputModeShortcutsSection({
   onInputModeHUDChange,
   showModeSwitchShortcuts,
   macos,
+  linux = false,
   showInputModeHUD = false,
   inputModeHUD = false,
   showFullwidthChord,
@@ -102,6 +105,14 @@ export function InputModeShortcutsSection({
             </option>
           ))}
         </SelectRow>
+        {linux && (
+          <SwitchRow
+            title="Ctrl+Space 切换中英文"
+            description="关闭后水杉不处理此组合键；若 IBus 或 Fcitx5 配置了同名全局快捷键，需在框架设置中另行关闭。"
+            checked={keybindings.switch_language_ctrl_space ?? true}
+            onChange={(checked) => onChange({ switch_language_ctrl_space: checked })}
+          />
+        )}
         <SwitchRow
           title={characterSetLabel}
           checked={keybindings.toggle_character_set_ctrl_shift_f ?? false}

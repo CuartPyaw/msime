@@ -5681,6 +5681,68 @@ test("the sidebar follows the six titled navigation groups", async () => {
   }
 });
 
+test("Linux Ctrl+Space defaults on, saves independently and reloads disabled", async () => {
+  let snapshot = initial;
+  const save = vi.fn().mockImplementation(async (_revision, preferences) => {
+    snapshot = { ...initial, revision: 8, preferences };
+    return snapshot;
+  });
+  const client = {
+    load: async () => snapshot,
+    save,
+    host: testHost({ platform: "linux", mode_switch_shortcuts: true }),
+  };
+  const page = render(<SettingsPage initialPage="shortcuts" client={client} />);
+  await settingsReady();
+  const toggle = screen.getByRole("switch", { name: "Ctrl+Space 切换中英文" });
+  expect((toggle as HTMLInputElement).checked).toBe(true);
+  expect(screen.getByText(/Fcitx5.*全局快捷键/)).toBeTruthy();
+  fireEvent.click(toggle);
+  fireEvent.change(screen.getByRole("combobox", { name: "切换中英文" }), {
+    target: { value: "ctrl_alt_space" },
+  });
+  saveSettingsNow();
+  await screen.findByText("已保存");
+  expect(save).toHaveBeenCalledWith(
+    7,
+    expect.objectContaining({
+      keybindings: expect.objectContaining({
+        switch_language_ctrl_space: false,
+        switch_language_shift: false,
+        switch_language_ctrl: false,
+        switch_language_ctrl_alt_space: true,
+      }),
+    }),
+  );
+  page.unmount();
+  render(<SettingsPage initialPage="shortcuts" client={client} />);
+  await settingsReady();
+  expect(
+    (screen.getByRole("switch", { name: "Ctrl+Space 切换中英文" }) as HTMLInputElement).checked,
+  ).toBe(false);
+});
+
+test.each(["macos", "windows"] as const)(
+  "%s omits the Linux Ctrl+Space switch",
+  async (platform) => {
+    render(
+      <SettingsPage
+        initialPage="shortcuts"
+        client={{
+          load: async () => initial,
+          save: vi.fn(),
+          host: testHost({ platform, mode_switch_shortcuts: true }),
+        }}
+      />,
+    );
+    await settingsReady();
+    expect(screen.queryByRole("switch", { name: "Ctrl+Space 切换中英文" })).toBeNull();
+    if (platform === "windows") {
+      expect(screen.getByText("Ctrl+Space（由 Windows 管理）")).toBeTruthy();
+    }
+  },
+);
+
 test("macOS shortcut page owns the full-width chord and the input page the mode HUD", async () => {
   const save = vi.fn().mockResolvedValue({ ...initial, revision: 8 });
   render(

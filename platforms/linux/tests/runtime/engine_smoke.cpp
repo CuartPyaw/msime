@@ -323,7 +323,8 @@ GVariant *call(GDBusConnection *connection, const char *destination,
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 2 && !(argc == 3 && std::string(argv[2]) == "--page-number"))
+  if (argc != 2 && !(argc == 3 && (std::string(argv[2]) == "--page-number" ||
+                                  std::string(argv[2]) == "--ctrl-space")))
     return 2;
   try {
     // This fixture asserts RegisterProperties and must exercise the real menu path.
@@ -504,6 +505,60 @@ int main(int argc, char **argv) {
       g_test_dbus_down(bus);
       g_object_unref(bus);
     };
+    if (argc == 3 && std::string(argv[2]) == "--ctrl-space") {
+      msime_ibus_configure(options.dump());
+      invoke("FocusIn");
+      const auto chord = [&] {
+        const bool pressed = key(IBUS_space, IBUS_CONTROL_MASK);
+        require(key(IBUS_space, IBUS_CONTROL_MASK | IBUS_RELEASE_MASK) == pressed,
+                "Ctrl+Space press and release have different ownership");
+        return pressed;
+      };
+      require(chord() && !seen.input_enabled && chord() && seen.input_enabled,
+              "Default Ctrl+Space does not switch in both directions");
+      const auto set_binding = [&](bool enabled) {
+        nlohmann::json snapshot;
+        std::ifstream(root / "preferences.json") >> snapshot;
+        snapshot["revision"] = snapshot.at("revision").get<uint64_t>() + 1;
+        snapshot["preferences"]["keybindings"]["switch_language_ctrl_space"] = enabled;
+        std::ofstream(root / "next.json") << snapshot.dump();
+        std::filesystem::rename(root / "next.json", root / "preferences.json");
+      };
+      set_binding(false);
+      require(wait_until([&] {
+                if (!chord()) return true;
+                chord();
+                return false;
+              }), "Disabled Ctrl+Space did not hot-reload");
+      for (guint mode : {guint(PROP_STATE_CHECKED), guint(PROP_STATE_UNCHECKED)}) {
+        invoke("PropertyActivate", g_variant_new("(su)", "InputMode", mode));
+        const bool before = seen.input_enabled;
+        for (int repeat = 0; repeat < 3; ++repeat)
+          require(!key(IBUS_space, IBUS_CONTROL_MASK) && seen.input_enabled == before,
+                  "Disabled Ctrl+Space press was intercepted or switched mode");
+        require(!key(IBUS_space, IBUS_CONTROL_MASK | IBUS_RELEASE_MASK),
+                "Disabled Ctrl+Space release was intercepted");
+      }
+      invoke("PropertyActivate", g_variant_new("(su)", "InputMode", PROP_STATE_CHECKED));
+      phrase();
+      const auto committed = seen.committed;
+      require(!chord() && seen.preedit == "nihao" && seen.committed == committed,
+              "Disabled Ctrl+Space changed the active composition");
+      invoke("Reset");
+      set_binding(true);
+      require(wait_until([&] { return chord(); }), "Enabled Ctrl+Space did not hot-reload");
+      invoke("PropertyActivate", g_variant_new("(su)", "InputMode", PROP_STATE_CHECKED));
+      for (int repeat = 0; repeat < 3; ++repeat)
+        require(key(IBUS_space, IBUS_CONTROL_MASK) && !seen.input_enabled,
+                "Held Ctrl+Space toggled more than once");
+      require(key(IBUS_space, IBUS_RELEASE_MASK) && !seen.input_enabled,
+              "Consumed Ctrl+Space release escaped after Ctrl was released");
+      require(chord() && seen.input_enabled, "Ctrl+Space did not restore Chinese mode");
+      invoke("Disable");
+      finish();
+      std::cout << "IBus Ctrl+Space defaults, passthrough, hot-reload and repeat passed\n";
+      return 0;
+    }
     if (argc == 3) {
       auto visibility = options;
       visibility.erase("preferences_directory");
