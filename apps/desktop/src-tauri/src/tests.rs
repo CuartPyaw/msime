@@ -1078,6 +1078,71 @@ fn packaged_handwriting_model_only_accepts_an_existing_absolute_file() {
     );
 }
 
+/// 在 `state_root` 下伪造一个已完整安装的手写资源包，返回其中的模型路径。
+fn publish_fake_handwriting_pack(state_root: &std::path::Path) -> std::path::PathBuf {
+    use msime_client_core::resource_packs::{self, ResourcePack};
+    let pack = resource_packs::root(state_root).join(ResourcePack::Handwriting.id());
+    std::fs::create_dir_all(&pack).unwrap();
+    let model = pack.join("handwriting-zh_CN.model");
+    std::fs::write(&model, b"synthetic").unwrap();
+    std::fs::write(
+        pack.join(msime_client_core::voice::local_models::MANIFEST_FILE),
+        serde_json::to_vec(&ResourcePack::Handwriting.manifest()).unwrap(),
+    )
+    .unwrap();
+    model
+}
+
+#[test]
+fn packaged_handwriting_model_prefers_the_option_over_a_downloaded_pack() {
+    let state = tempfile::tempdir().unwrap();
+    let downloaded = publish_fake_handwriting_pack(state.path());
+    let configured = state.path().join("configured.model");
+    std::fs::write(&configured, b"synthetic").unwrap();
+    let document = serde_json::json!({
+        "handwriting_model": configured.to_string_lossy(),
+        "preferences_directory": state.path().to_string_lossy(),
+    });
+    assert_eq!(
+        super::packaged_handwriting_model(&document.to_string()),
+        Some(configured)
+    );
+    assert_eq!(
+        super::downloaded_handwriting_model(Some(&document)),
+        Some(downloaded.clone())
+    );
+    // 只有选项和环境变量都没给时，macOS 才用已下载的资源包。
+    #[cfg(target_os = "macos")]
+    if std::env::var_os("MSIME_HANDWRITING_MODEL").is_none_or(|value| value.is_empty()) {
+        let document = serde_json::json!({
+            "preferences_directory": state.path().to_string_lossy(),
+        });
+        assert_eq!(
+            super::packaged_handwriting_model(&document.to_string()),
+            Some(downloaded)
+        );
+    }
+}
+
+#[test]
+fn packaged_handwriting_model_ignores_a_relative_preferences_directory() {
+    let state = tempfile::tempdir().unwrap();
+    let downloaded = publish_fake_handwriting_pack(state.path());
+    let relative =
+        std::path::Path::new(".").join(state.path().strip_prefix("/").unwrap_or(state.path()));
+    let document = serde_json::json!({ "preferences_directory": relative.to_string_lossy() });
+    assert_eq!(super::downloaded_handwriting_model(Some(&document)), None);
+    assert_ne!(
+        super::packaged_handwriting_model(&document.to_string()),
+        Some(downloaded)
+    );
+    assert_eq!(super::downloaded_handwriting_model(None), None);
+    assert_eq!(
+        super::downloaded_handwriting_model(Some(&serde_json::json!({}))),
+        None
+    );
+}
+
 #[test]
 fn custom_translations_round_trip_through_the_user_directory() {
     let state = tempfile::tempdir().unwrap();

@@ -539,22 +539,36 @@ pub(crate) fn install_model(
         }
     }
     check_cancel(cancel)?;
-    let manifest = serde_json::to_vec_pretty(&model.manifest).map_err(io::Error::other)?;
-    {
-        let mut file = fs::File::create(model_dir.join(MANIFEST_FILE))?;
-        file.write_all(&manifest)?;
-        file.sync_all()?;
-    }
+    write_manifest(&model_dir, &model.manifest)?;
+    let target = publish(root, &model.id, &model_dir)?;
+    progress(InstallProgress {
+        stage: "done",
+        downloaded: total,
+        total,
+    });
+    Ok(target)
+}
 
-    let target = root.join(&model.id);
-    let aside = root.join(format!(".old-{}-{}", model.id, unique_suffix()));
+/// 把 `msime-model.json` 写进暂存目录；它总是该目录里最后写入的文件，有它才算安装完整。
+fn write_manifest(dir: &Path, manifest: &Value) -> Result<(), LocalModelError> {
+    let manifest = serde_json::to_vec_pretty(manifest).map_err(io::Error::other)?;
+    let mut file = fs::File::create(dir.join(MANIFEST_FILE))?;
+    file.write_all(&manifest)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+/// 把完整的暂存目录移到 `<root>/<id>`：先把旧安装改名挪开，移动失败时再挪回来，成功后删除旧安装。
+fn publish(root: &Path, id: &str, staged: &Path) -> Result<PathBuf, LocalModelError> {
+    let target = root.join(id);
+    let aside = root.join(format!(".old-{}-{}", id, unique_suffix()));
     let replaced = if target.exists() {
         fs::rename(&target, &aside)?;
         true
     } else {
         false
     };
-    if let Err(error) = fs::rename(&model_dir, &target) {
+    if let Err(error) = fs::rename(staged, &target) {
         if replaced {
             let _ = fs::rename(&aside, &target);
         }
@@ -563,6 +577,101 @@ pub(crate) fn install_model(
     if replaced {
         let _ = fs::remove_dir_all(&aside);
     }
+    Ok(target)
+}
+
+/// 下载一组固定的文件（名称、URL、长度、SHA-256 都来自仓库里审过的锁文件）到 `<root>/<id>`，写入 `manifest` 作为 `msime-model.json` 并整体发布，替换之前的安装。阻塞调用，不要放在 UI 线程。
+pub fn install_files(
+    root: &Path,
+    id: &str,
+    files: &[crate::resources::Artifact],
+    manifest: &Value,
+    mirror: &str,
+    progress: &mut dyn FnMut(InstallProgress),
+    cancel: &AtomicBool,
+) -> Result<PathBuf, LocalModelError> {
+    install_files_with(
+        root,
+        id,
+        files,
+        manifest,
+        mirror,
+        &HttpFetcher::new()?,
+        progress,
+        cancel,
+    )
+}
+
+/// 不变量：已经发布的文件永远不会被重新打开写入。输入法会内存映射 dict_japanese.dat，原地改写会让正在使用的映射读到半新半旧的内容甚至触发 SIGBUS；所以新文件一律写进暂存目录，再整体改名替换旧目录，旧文件只被改名和删除，已打开的句柄仍能读到原来的字节。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn install_files_with(
+    root: &Path,
+    id: &str,
+    files: &[crate::resources::Artifact],
+    manifest: &Value,
+    mirror: &str,
+    fetcher: &dyn Fetcher,
+    progress: &mut dyn FnMut(InstallProgress),
+    cancel: &AtomicBool,
+) -> Result<PathBuf, LocalModelError> {
+    check_root(root)?;
+    if !crate::preferences::valid_model_mirror(mirror) {
+        return Err(LocalModelError::InvalidMirror);
+    }
+    if single_component(id).is_none_or(|single| single != id) || id.starts_with('.') {
+        return Err(LocalModelError::UnknownModel);
+    }
+    fs::create_dir_all(root)?;
+    remove_leftovers(root, id);
+    let staging = Staging(root.join(format!(".staging-{}-{}", id, unique_suffix())));
+    fs::create_dir(&staging.0)?;
+    let pack_dir = staging.0.join("model");
+    fs::create_dir(&pack_dir)?;
+
+    let total = files
+        .iter()
+        .fold(0u64, |sum, file| sum.saturating_add(file.size));
+    let mut offset = 0u64;
+    let mut last = 0u64;
+    for file in files {
+        check_cancel(cancel)?;
+        let name = single_component(&file.name)
+            .filter(|single| *single == file.name)
+            .ok_or_else(|| LocalModelError::UnsafeArchive(file.name.clone()))?;
+        let mut output = BufWriter::new(fs::File::create(pack_dir.join(&name))?);
+        let digest = download(
+            fetcher,
+            &mirrored(mirror, &file.url),
+            file.size,
+            &mut output,
+            cancel,
+            &mut |n| {
+                let downloaded = offset + n;
+                if downloaded == total || downloaded - last >= (total / 200).max(CHUNK as u64) {
+                    last = downloaded;
+                    progress(InstallProgress {
+                        stage: "download",
+                        downloaded,
+                        total,
+                    });
+                }
+            },
+        )?;
+        let output = output.into_inner().map_err(|error| error.into_error())?;
+        output.sync_all()?;
+        if !digest.eq_ignore_ascii_case(&file.sha256) {
+            return Err(LocalModelError::ChecksumMismatch(file.name.clone()));
+        }
+        offset += file.size;
+    }
+    progress(InstallProgress {
+        stage: "verify",
+        downloaded: total,
+        total,
+    });
+    write_manifest(&pack_dir, manifest)?;
+    check_cancel(cancel)?;
+    let target = publish(root, id, &pack_dir)?;
     progress(InstallProgress {
         stage: "done",
         downloaded: total,
@@ -570,6 +679,33 @@ pub(crate) fn install_model(
     });
     Ok(target)
 }
+
+/// 读取 `<root>/<id>/msime-model.json`。只接受不超过 64 KiB 的普通文件，符号链接、目录或无法解析的内容都视为没有。
+pub fn installed_manifest(root: &Path, id: &str) -> Option<Value> {
+    if single_component(id).is_none_or(|single| single != id) || id.starts_with('.') {
+        return None;
+    }
+    let directory = root.join(id);
+    if !fs::symlink_metadata(&directory).ok()?.file_type().is_dir() {
+        return None;
+    }
+    let path = directory.join(MANIFEST_FILE);
+    let metadata = fs::symlink_metadata(&path).ok()?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_MANIFEST_BYTES {
+        return None;
+    }
+    let bytes = crate::bounded_io::read_bounded_file_with(
+        fs::File::open(&path).ok()?,
+        MAX_MANIFEST_BYTES,
+        || (),
+        |_| (),
+    )
+    .ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// `msime-model.json` 由安装器在本机写出，正常只有几 KB；限制大小，免得被替换的文件占用无界内存。
+const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 
 fn check_cancel(cancel: &AtomicBool) -> Result<(), LocalModelError> {
     if cancel.load(Ordering::Relaxed) {

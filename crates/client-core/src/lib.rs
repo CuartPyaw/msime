@@ -34,6 +34,7 @@ pub mod panels;
 pub mod plugins;
 pub mod preferences;
 pub mod punctuation;
+pub mod resource_packs;
 pub mod resources;
 pub mod skin;
 mod storage;

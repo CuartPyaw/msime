@@ -17,6 +17,7 @@ import {
 } from "./touch-keyboard-scheme-helpers";
 import { TouchKeyboardSchemesSection } from "./touch-keyboard-schemes-section";
 import { WubiSection } from "./wubi-section";
+import { ResourcePackRow, resourcePackForScheme, type ResourcePacks } from "./resource-packs";
 
 export interface InputSchemeSettingsContentProps {
   preferences: Preferences;
@@ -36,6 +37,8 @@ export interface InputSchemeSettingsContentProps {
   onToggleTouchKeyboardScheme: (scheme: TouchKeyboardScheme, enabled: boolean) => void;
   onMacosShuangpinKeymapChange: (enabled: boolean) => void;
   onMacosWubiAutoCommitUniqueChange: (enabled: boolean) => void;
+  /** 宿主提供按需资源包时传入（目前只有 macOS）：选用日文、粤拼或注音会照常保存方案并开始下载对应词库，下载完成前运行时按缺少词库回退。 */
+  resourcePacks?: ResourcePacks;
 }
 
 /** Shared input mode, scheme selector, scheme details, and Wubi composition for settings hosts. */
@@ -55,7 +58,15 @@ export function InputSchemeSettingsContent({
   onToggleTouchKeyboardScheme,
   onMacosShuangpinKeymapChange,
   onMacosWubiAutoCommitUniqueChange,
+  resourcePacks,
 }: InputSchemeSettingsContentProps) {
+  // 方案改动立即写入草稿（随自动保存生效），需要词库的方案再在后台下载，不等下载完成。
+  const onSchemeChange = (patch: Partial<Preferences>) => {
+    onPreferencesChange(patch);
+    const pack = resourcePackForScheme(patch.scheme);
+    if (pack) resourcePacks?.ensure(pack);
+  };
+  const schemePack = resourcePackForScheme(preferences.scheme);
   const chineseSchemes = isChineseScheme(preferences.scheme);
   // The Cantonese, Zhuyin and Vietnamese touch keyboards type their own input scheme, so they are offered only where the host offers that scheme (Cantonese and Zhuyin also need their installed dictionary).
   const touchOptions = touchKeyboardSchemeOptions.filter(
@@ -70,7 +81,7 @@ export function InputSchemeSettingsContent({
         lastChineseScheme={preferences.last_chinese_scheme}
         supportedSchemes={inputSchemes}
         hidden={hasTouchKeyboardSchemes}
-        onChange={onPreferencesChange}
+        onChange={onSchemeChange}
       />
       {hasTouchKeyboardSchemes && (
         <TouchKeyboardSchemesSection
@@ -89,7 +100,7 @@ export function InputSchemeSettingsContent({
         supportedSchemes={inputSchemes}
         lastChineseScheme={preferences.last_chinese_scheme}
         onChange={(scheme: InputSchemeSelectorValue) =>
-          onPreferencesChange({ scheme, last_chinese_scheme: scheme })
+          onSchemeChange({ scheme, last_chinese_scheme: scheme })
         }
       />
       <InputSchemeDetailsSection
@@ -105,6 +116,7 @@ export function InputSchemeSettingsContent({
         vietnamese={preferences.vietnamese}
         onVietnameseChange={(vietnamese) => onPreferencesChange({ vietnamese })}
       />
+      {resourcePacks && schemePack && <ResourcePackRow packs={resourcePacks} id={schemePack} />}
       {((hasTouchKeyboardSchemes && touchKeyboardSchemes.enabled.includes("wubi")) ||
         preferences.scheme === "wubi") && (
         <WubiSection

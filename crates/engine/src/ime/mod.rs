@@ -71,16 +71,22 @@ pub struct ImeSession {
 }
 
 impl ImeSession {
-    /// ime_session.cpp:42-49. `cantonese_dictionary` and `zhuyin_dictionary` are where `cantonese.db` and `zhuyin.db` are, each read only when its scheme is activated; starting in Cantonese or Zhuyin fails as `switch_scheme` does when its file cannot be opened.
+    /// ime_session.cpp:42-49. `cantonese_dictionary` and `zhuyin_dictionary` are where `cantonese.db` and `zhuyin.db` are, each read only when its scheme is activated; starting in Cantonese or Zhuyin fails as `switch_scheme` does when its file cannot be opened. `japanese_dictionary` 是 `dict_japanese.dat` 的位置，为空时读资源目录里的那份。
     pub fn new(
         scheme: SchemeType,
         profile: ShuangpinProfileKind,
         paths: &RuntimePaths,
         cantonese_dictionary: PathBuf,
         zhuyin_dictionary: PathBuf,
+        japanese_dictionary: PathBuf,
     ) -> Result<Self> {
-        let mut registry =
-            ProviderRegistry::new(profile, paths, cantonese_dictionary, zhuyin_dictionary);
+        let mut registry = ProviderRegistry::new(
+            profile,
+            paths,
+            cantonese_dictionary,
+            zhuyin_dictionary,
+            japanese_dictionary,
+        );
         registry.activate(scheme)?;
         let zhuyin = registry.take_dictionary(scheme);
         let mut session = Self {

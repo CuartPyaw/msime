@@ -14,6 +14,7 @@ import { HelpcodeSettingsGroup } from "./helpcode-page";
 import { createUtilitiesSettingsActions } from "../utilities-settings-actions";
 import { createSettingsDraftActions } from "../settings-draft-actions";
 import { createHelpcodeSettingsActions } from "../helpcode-settings-actions";
+import { ResourcePackRow, resourcePackStatus, useResourcePacks } from "../resource-packs";
 
 /** The 输入 page of the settings form. */
 export function InputSettingsPage() {
@@ -60,6 +61,9 @@ export function InputSettingsPage() {
   const { onPreferencesChange } = createSettingsDraftActions({ setDraft });
   const { onChange: onHelpcodeChange } = createHelpcodeSettingsActions({ setDraft });
   const navigation = draft.navigation ?? defaultNavigation;
+  // 升级后补齐已保存方案的词库由宿主在启动时完成，这里挂载时不自动下载，只在用户选用方案或点「下载」时下载。
+  const resourcePacks = useResourcePacks(macosPlatform ? client.resourcePacks : undefined);
+  const japanesePack = resourcePackStatus(resourcePacks, "japanese");
   return (
     <fieldset disabled={busy} hidden={page !== "input"} aria-label="输入">
       {/* 组的顺序按「基础 → 进阶」排：先选方案，再是每次打字都会碰到的中英文、选词与翻页，然后是候选从哪来（含中英混输）、以什么形式输出，最后是少数人才调的快捷模式、模糊音、辅助码和调频。这里不再沿用参考窗口的顺序，不要按参考窗口把它们挪回去。方案相关的行在当前方案用不到时隐藏而不删除，换方案时原样出现。 */}
@@ -86,6 +90,7 @@ export function InputSettingsPage() {
           }
           onMacosShuangpinKeymapChange={setShuangpinKeymap}
           onMacosWubiAutoCommitUniqueChange={setWubiAutoCommitUnique}
+          resourcePacks={resourcePacks}
         />
         <InputSharedSettingsSection
           preferences={draft}
@@ -148,6 +153,16 @@ export function InputSettingsPage() {
                 translationService={translationProvider !== "none"}
                 onChange={onLocalModesChange}
               />
+              {/* 临时日语只是一个快捷模式，不为它自动下载 60 多 MB 的词库，由用户手动下载。当前方案是日文时方案组里已有同一行，这里不再重复。 */}
+              {macosPlatform &&
+                localModes.temporary_japanese &&
+                draft.scheme !== "japanese" &&
+                japanesePack &&
+                japanesePack.state !== "installed" && (
+                  <GroupList title="临时日语词库">
+                    <ResourcePackRow packs={resourcePacks} id="japanese" note="临时日语需要它" />
+                  </GroupList>
+                )}
               {client.fuzzyPinyin && (
                 <GroupList title="模糊音">
                   <FuzzyPinyinSection

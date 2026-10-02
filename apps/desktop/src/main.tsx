@@ -76,6 +76,8 @@ import {
   type LocalVoiceModelList,
   type LocalVoiceModelProgress,
   type MentionEntry,
+  type ResourcePackClient,
+  type ResourcePackStatus,
   type PluginCatalogResult,
   type PluginClient,
   type PluginPackage,
@@ -209,6 +211,14 @@ const inputSourceStartup: NonNullable<SettingsClient["inputSourceStartup"]> = {
 const macosInputModes: NonNullable<SettingsClient["macosInputModes"]> = {
   enabled: () => invoke("enabled_input_modes"),
   openSettings: () => invoke("open_input_source_settings"),
+};
+// macOS 按需下载的资源包（日文词库、粤语与注音词库、手写模型）；这些命令只在 macOS 宿主上注册，所以只在宿主报告 macOS 时提供给页面。
+const resourcePacks: ResourcePackClient = {
+  list: () => invoke<ResourcePackStatus[]>("resource_packs"),
+  install: (id) => invoke<string>("resource_pack_install", { id }),
+  cancel: (id) => invoke<boolean>("resource_pack_cancel", { id }),
+  onProgress: (listener) =>
+    listen<LocalVoiceModelProgress>("resource-pack-progress", (event) => listener(event.payload)),
 };
 const macosInstallClient: MacosInstallClient = {
   install: () => invoke("run_first_input_source_install"),
@@ -428,9 +438,17 @@ const panelClients: {
   },
 };
 const panel = new URLSearchParams(window.location.search).get("panel");
+// macOS 的手写面板第一次打开时下载手写模型。客户端固定为模块级对象，避免每次渲染换一个 client 让面板重置识别队列。
+const macosHandwritingClient: PanelClient = { ...panelClients.handwriting, resourcePacks };
 function DesktopHandwriting({ theme }: { theme: "dark" | "light" }) {
   const platform = useHostPlatform(client.host);
-  return <HandwritingPanel client={panelClients.handwriting} theme={theme} platform={platform} />;
+  return (
+    <HandwritingPanel
+      client={platform === "macos" ? macosHandwritingClient : panelClients.handwriting}
+      theme={theme}
+      platform={platform}
+    />
+  );
 }
 
 function DesktopPanelTheme({
@@ -658,6 +676,7 @@ function DesktopSettings() {
                       },
                 }
               : {}),
+            ...(host.platform === "macos" ? { resourcePacks } : {}),
             // The macOS input method writes diagnostic.log under Application Support, which the Finder hides; the host reveals it rather than asking the user to navigate there.
             ...(host.platform === "macos"
               ? { openDiagnosticLogDirectory: () => invoke<void>("open_diagnostic_log_directory") }

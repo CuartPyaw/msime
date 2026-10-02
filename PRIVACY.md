@@ -110,7 +110,21 @@ Windows 与 HarmonyOS 除了你主动提交的[社区举报](#社区举报与审
 
 首次准备词库时从 GitHub Releases 拉取固定版本的资源，地址、长度和 SHA-256 全部写死在 `resources/desktop-dictionary.lock.json` 里，逐一校验，全部成功才发布到内容标识目录。下载的是公开发布物，不上传任何东西。检查更新只在点击「检查更新」时进行，向 `https://api.github.com/repos/metasequoiaime/msime/releases` 发起 GET 请求并在本地按平台标签前缀筛选（识别不出宿主平台时改为读取 `https://msime.app/update.json`）；请求除 IP 地址和防缓存时间戳外不携带标识，适用 GitHub 隐私条款。
 
-Android 的手写识别使用 ML Kit，**首次使用需要联网下载识别模型**，之后在设备上离线识别。Linux 与桌面端使用 Engine 随附的离线 Zinnia 模型，从安装路径读取，全程不联网。
+macOS 发布包只内置打中文所需的核心词库，日文词典、粤拼与注音词库、手写模型三个资源包由设置应用在首次用到时下载，之后从本机读取：
+
+| | |
+| --- | --- |
+| 触发 | 只在这几种情况下发生：在设置里选日文、粤拼或注音方案；第一次打开手写面板；设置应用启动时发现已保存的方案（或上一次的中文方案）需要的资源包还没装；在「临时日语」一行点「下载」 |
+| 目的地 | GitHub Releases（`https://github.com/metasequoiaime/msime/releases/download/dict-v.../`、`.../langdict-v.../`，下载时会被重定向到 GitHub 的文件存储域名）与 `https://raw.githubusercontent.com/metasequoiaime/msime-engine/<固定提交>/...`（手写模型）；配置了镜像时改为镜像地址 |
+| 发送内容 | 对固定文件的 HTTPS GET 请求，不携带任何输入内容、账号或设备标识 |
+| 需要凭据 | 否 |
+| 偏好字段 | 沿用 `voice_input.asr_model_mirror`，默认空字符串，表示直接访问 GitHub |
+| 存放位置 | `~/Library/Application Support/app.msime.macos/resource-packs/<资源包>/`，许可证文本放在数据旁边 |
+| 代码 | `crates/client-core/src/resource_packs.rs`；地址、长度和 SHA-256 固定在 `resources/desktop-dictionary.lock.json`、`resources/language-dictionaries.lock.json` 和 `resources/handwriting-model.lock.json` |
+
+镜像规则和下面本地语音模型的相同：必须是 `https://` 地址，镜像运营方能看到你的 IP 和你下载的是哪个资源包，但下载内容按固定的 SHA-256 校验，镜像无法替换文件。不需要这些功能就不会发生这些请求，缺少资源包时对应的方案或手写面板显示为不可用。
+
+Android 的手写识别使用 ML Kit，**首次使用需要联网下载识别模型**，之后在设备上离线识别。Linux 与其余桌面端使用 Engine 随附的离线 Zinnia 模型，从安装路径读取，全程不联网；macOS 的手写模型按上一段在首次打开手写面板时下载，之后同样离线识别。
 
 ### 使用统计与崩溃上报（默认开启，可关闭）
 

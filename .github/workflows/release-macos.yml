@@ -92,6 +92,7 @@ jobs:
       - name: Fetch the locked offline candidate glosses
         run: python3 scripts/fetch_offline_glosses.py
       # Fetches the pinned dictionaries, builds the Release host library, the input method bundle and the Tauri settings app that embeds both, signs them (Developer ID when the secrets are present, ad-hoc otherwise), checks the embedded resources and signatures inside the mounted DMG, notarizes when the Apple ID secrets are present, and writes SHA256SUMS.
+      # 包里只带核心词库；日文词典、粤拼/注音词库和手写模型由 App 首次用到时下载。package-release.sh 在编译之前先用 App 的同一个安装器把三个资源包装一遍，地址失效或哈希不符就在这里失败，不会发出一个补不齐数据的包。
       # package-release.sh 按这两个 target 各编一次 Rust 产物再合并；rust-toolchain.toml 只固定编译器版本，不带这两个标准库。
       - name: Add the Rust targets for the universal package
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -116,6 +117,7 @@ jobs:
           [[ -f dist/SHA256SUMS ]]
           (cd dist && shasum -a 256 -c SHA256SUMS)
           ls -l dist
+          echo "- $(basename "${dmgs[0]}"): $(stat -f %z "${dmgs[0]}") bytes" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: msime-macos-${{ steps.version.outputs.value }}

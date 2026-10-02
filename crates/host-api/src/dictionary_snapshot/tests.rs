@@ -307,6 +307,7 @@ fn discard_does_not_require_maintenance_lock_for_live_paths() {
         vietnamese_tone_style: 0,
         cantonese_dictionary: String::new(),
         zhuyin_dictionary: String::new(),
+        japanese_dictionary: String::new(),
     };
     registry().lock().unwrap().insert(
         456,
@@ -398,6 +399,7 @@ fn activation_case(nested_dictionaries: bool, hold_session: bool, handle: u64) {
         vietnamese_tone_style: 0,
         cantonese_dictionary: String::new(),
         zhuyin_dictionary: String::new(),
+        japanese_dictionary: String::new(),
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
@@ -628,6 +630,7 @@ fn activation_reopens_the_personal_context_store_on_the_restored_journal() {
         vietnamese_tone_style: 0,
         cantonese_dictionary: String::new(),
         zhuyin_dictionary: String::new(),
+        japanese_dictionary: String::new(),
         sentence_association: msime_engine::host::SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
@@ -692,4 +695,48 @@ fn activation_reopens_the_personal_context_store_on_the_restored_journal() {
     pick("你好");
     assert_eq!(learned("你好"), 1, "learning after the restore was lost");
     assert_eq!(learned("拟好"), 0, "the pre-restore context came back");
+}
+
+/// 快照准备与 `prepare_host_configuration` 用同一条发货规则：给出按需清单时，不含日文词典的资源目录通过校验；不给时照旧拒绝。
+#[test]
+fn snapshot_preparation_accepts_resources_shipped_without_the_on_demand_pair() {
+    use super::*;
+    use msime_client_core::resources::MACOS_ON_DEMAND_ARTIFACTS;
+    use std::fs;
+
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    let specification = crate::tests::synthetic_desktop_lock(&resources);
+    fs::remove_file(resources.join("dict_japanese.dat")).unwrap();
+    fs::remove_file(resources.join("mozc_dictionary_oss_README.txt")).unwrap();
+    for name in ["user", "cache", "dictionaries", "staging"] {
+        fs::create_dir_all(root.path().join(name)).unwrap();
+    }
+    let document = serde_json::json!({
+        "api_version": 1,
+        "resources": resources,
+        "user_data": root.path().join("user"),
+        "cache": root.path().join("cache"),
+        "dictionaries": root.path().join("dictionaries"),
+        "preferences": msime_client_core::preferences::Preferences::default(),
+    });
+    let request = || -> PrepareRequest {
+        let options: HostOptions = serde_json::from_value(document.clone()).unwrap();
+        let expected_version = version(&options.clone().into_engine_options()).unwrap();
+        PrepareRequest {
+            options,
+            staging_root: root.path().join("staging").to_str().unwrap().into(),
+            expected_version,
+            records: 0,
+            activation_id: None,
+        }
+    };
+    let rejected = |on_demand: &[&str]| {
+        matches!(
+            prepare(request(), &specification, on_demand, std::iter::empty()),
+            Err("snapshot resources rejected")
+        )
+    };
+    assert!(rejected(&[]));
+    assert!(!rejected(&MACOS_ON_DEMAND_ARTIFACTS));
 }

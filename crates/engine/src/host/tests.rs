@@ -65,6 +65,7 @@ fn options(root: &Path) -> EngineOptions {
         vietnamese_tone_style: 0,
         cantonese_dictionary: String::new(),
         zhuyin_dictionary: String::new(),
+        japanese_dictionary: String::new(),
     }
 }
 
@@ -908,6 +909,43 @@ fn real_engine_cycles_the_last_japanese_kana_variant() {
     assert_eq!(session.snapshot().unwrap().reading, "が");
     assert!(session.command(Command::CycleKanaVariant).unwrap().handled);
     assert_eq!(session.snapshot().unwrap().reading, "か");
+}
+
+/// 录制器的单词条日文模型（读音 かな，词 甲），与 golden 场景 `ri_japanese_model_a` 同一份字节。
+const JAPANESE_MODEL_KANA: &str = "MSJPDT1\u{0}\u{1}\u{0}\u{0}\u{0}\u{1}\u{0}\u{0}\u{0}\u{1}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}8\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}L\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}N\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\t\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{6}\u{0}\u{6}\u{0}\u{0}\u{0}\u{3}\u{0}\u{0}\u{0}\u{0}\u{0}\u{1}\u{0}\u{0}\u{0}\u{0}\u{0}かな甲";
+
+fn japanese_candidates(value: &EngineOptions) -> Vec<String> {
+    let mut session = Session::new(value).unwrap();
+    type_text(&mut session, b"kana");
+    session.snapshot().unwrap().candidates
+}
+
+/// `japanese_dictionary` 指向资源目录之外的模型时读那一份；为空时仍读资源目录里的 `dict_japanese.dat`，两处都没有就只给假名行。
+#[test]
+fn the_japanese_model_path_overrides_the_resource_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 3;
+
+    let empty = japanese_candidates(&value);
+    assert!(empty.iter().any(|word| word == "かな"));
+    assert!(!empty.iter().any(|word| word == "甲"));
+
+    let downloaded = dir.path().join("packs").join(crate::assets::JAPANESE_MODEL);
+    std::fs::create_dir_all(downloaded.parent().unwrap()).unwrap();
+    std::fs::write(&downloaded, JAPANESE_MODEL_KANA).unwrap();
+    value.japanese_dictionary = downloaded.to_str().unwrap().to_owned();
+    assert!(japanese_candidates(&value).iter().any(|word| word == "甲"));
+
+    let other = tempfile::tempdir().unwrap();
+    let mut value = options(other.path());
+    value.scheme = 3;
+    std::fs::write(
+        Path::new(&value.resources).join(crate::assets::JAPANESE_MODEL),
+        JAPANESE_MODEL_KANA,
+    )
+    .unwrap();
+    assert!(japanese_candidates(&value).iter().any(|word| word == "甲"));
 }
 
 #[test]

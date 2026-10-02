@@ -91,7 +91,9 @@ fn resource_verification_rejects_a_symlinked_state_root() {
     let state = root.path().join("state");
     std::os::unix::fs::symlink(outside.path(), &state).unwrap();
 
-    assert!(verify_resources_once(&resources, &specification, &state).is_err());
+    assert!(
+        verify_resources_once(&resources, &specification, &state, ON_DEMAND_ARTIFACTS).is_err()
+    );
     assert!(!outside.path().join("verified-resources.json").exists());
 }
 
@@ -118,7 +120,9 @@ fn resource_verification_rejects_an_existing_state_root_below_a_symlink() {
     std::os::unix::fs::symlink(outside.path(), &linked).unwrap();
     let state = linked.join("state");
 
-    assert!(verify_resources_once(&resources, &specification, &state).is_err());
+    assert!(
+        verify_resources_once(&resources, &specification, &state, ON_DEMAND_ARTIFACTS).is_err()
+    );
     assert!(!outside
         .path()
         .join("state/verified-resources.json")
@@ -183,6 +187,7 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         vietnamese_tone_style: 0,
         cantonese_dictionary: String::new(),
         zhuyin_dictionary: String::new(),
+        japanese_dictionary: String::new(),
     };
     apply_local_mode_resource_gates(&mut options);
     assert!(options.local_unicode);
@@ -8632,4 +8637,350 @@ fn community_moderation_abi_lists_reasons_builds_reports_and_words_refusals() {
     let generic = error(404, "not_found");
     assert_eq!(generic["code"], "account_unavailable");
     assert!(generic["message"].is_null());
+}
+
+/// 合成的桌面词库锁：`msime.db` 与 `english.db` 是可以复制进代次的 SQLite 小库，另有日文词典与 Mozc 说明这一对 macOS 按需下载的文件。文件写在 `resources` 里，清单按实际内容计算长度与 SHA-256。
+pub(crate) fn synthetic_desktop_lock(resources: &Path) -> ResourceSet {
+    std::fs::create_dir_all(resources).unwrap();
+    for name in ["msime.db", "english.db"] {
+        rusqlite::Connection::open(resources.join(name))
+            .unwrap()
+            .execute_batch("CREATE TABLE fixture(value TEXT);")
+            .unwrap();
+    }
+    std::fs::write(resources.join("dict_japanese.dat"), b"japanese").unwrap();
+    std::fs::write(resources.join("mozc_dictionary_oss_README.txt"), b"readme").unwrap();
+    let artifacts = [
+        "msime.db",
+        "english.db",
+        "dict_japanese.dat",
+        "mozc_dictionary_oss_README.txt",
+    ]
+    .into_iter()
+    .map(|name| {
+        let bytes = std::fs::read(resources.join(name)).unwrap();
+        msime_client_core::resources::Artifact {
+            name: name.into(),
+            url: format!("https://example.invalid/{name}"),
+            sha256: hex::encode(Sha256::digest(&bytes)),
+            size: bytes.len() as u64,
+        }
+    })
+    .collect();
+    ResourceSet {
+        source_commit: "a".repeat(40),
+        artifacts,
+    }
+}
+
+/// 在 `state_root` 下发布一个资源包：文件平铺在 `resource-packs/<id>/`，带上标记安装完整的 `msime-model.json`。
+fn publish_resource_pack(state_root: &Path, pack: ResourcePack, files: &[&str]) -> PathBuf {
+    let directory = resource_packs::root(state_root).join(pack.id());
+    std::fs::create_dir_all(&directory).unwrap();
+    for name in files {
+        std::fs::write(directory.join(name), b"downloaded").unwrap();
+    }
+    std::fs::write(directory.join("msime-model.json"), b"{}").unwrap();
+    directory
+}
+
+#[test]
+fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let recorded = root.path().join("language-dictionaries");
+    std::fs::create_dir_all(&recorded).unwrap();
+    std::fs::write(recorded.join("cantonese.db"), b"bundled").unwrap();
+    std::fs::write(recorded.join("zhuyin.db"), b"bundled").unwrap();
+
+    // 没有资源包：用记录的（随包内置的）那份。
+    let bundled = LanguageDictionaries {
+        cantonese: Some(recorded.join("cantonese.db")),
+        zhuyin: Some(recorded.join("zhuyin.db")),
+    };
+    assert_eq!(
+        LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
+        bundled
+    );
+    assert_eq!(
+        LanguageDictionaries::resolve(None, Some(&recorded)),
+        bundled
+    );
+    assert_eq!(
+        LanguageDictionaries::resolve(Some(&state), None),
+        LanguageDictionaries::default()
+    );
+
+    // 暂存目录里的文件不算安装。
+    let staging = resource_packs::root(&state)
+        .join(".staging-language-dictionaries-abc")
+        .join("model");
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::write(staging.join("cantonese.db"), b"partial").unwrap();
+    std::fs::write(staging.join("msime-model.json"), b"{}").unwrap();
+    assert_eq!(
+        LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
+        bundled
+    );
+
+    // 资源包里的粤拼词库优先，资源包缺的注音词库退回记录的那份。
+    let pack = publish_resource_pack(
+        &state,
+        ResourcePack::LanguageDictionaries,
+        &["cantonese.db"],
+    );
+    assert_eq!(
+        LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
+        LanguageDictionaries {
+            cantonese: Some(pack.join("cantonese.db")),
+            zhuyin: Some(recorded.join("zhuyin.db")),
+        }
+    );
+    assert_eq!(
+        LanguageDictionaries::resolve(Some(&state), None),
+        LanguageDictionaries {
+            cantonese: Some(pack.join("cantonese.db")),
+            zhuyin: None,
+        }
+    );
+
+    // HostOptions 走同一条查找路径，状态目录取自 `preferences_directory`。
+    let preferences = Preferences {
+        scheme: InputScheme::Cantonese,
+        ..Preferences::default()
+    };
+    let document = json!({ "api_version": 1, "resources": "/r", "user_data": "/u", "cache": "/c", "dictionaries": "/d", "preferences": preferences, "preferences_directory": state, "language_dictionaries": recorded });
+    let options = serde_json::from_value::<HostOptions>(document)
+        .unwrap()
+        .into_engine_options();
+    assert_eq!(
+        options.cantonese_dictionary,
+        pack.join("cantonese.db").to_str().unwrap()
+    );
+    assert_eq!(
+        options.zhuyin_dictionary,
+        recorded.join("zhuyin.db").to_str().unwrap()
+    );
+    assert_eq!(options.scheme, 5);
+}
+
+#[test]
+fn a_downloaded_japanese_pack_keeps_temporary_japanese_available() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    let state = root.path().join("state");
+    let mut preferences = Preferences::default();
+    preferences.local_modes.temporary_japanese = true;
+    let options = || {
+        let document = json!({ "api_version": 1, "resources": resources, "user_data": "/u", "cache": "/c", "dictionaries": "/d", "preferences": preferences, "preferences_directory": state });
+        serde_json::from_value::<HostOptions>(document)
+            .unwrap()
+            .into_engine_options()
+    };
+
+    // 资源目录和状态目录里都没有日文词典：字段为空，临时日语关闭。
+    let without = options();
+    assert_eq!(without.japanese_dictionary, "");
+    assert!(!without.local_temporary_japanese);
+
+    // 只在暂存目录里：仍然不算。
+    let staging = resource_packs::root(&state)
+        .join(".staging-japanese-abc")
+        .join("model");
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::write(staging.join("dict_japanese.dat"), b"partial").unwrap();
+    std::fs::write(staging.join("msime-model.json"), b"{}").unwrap();
+    assert_eq!(options().japanese_dictionary, "");
+
+    let pack = publish_resource_pack(
+        &state,
+        ResourcePack::Japanese,
+        &["dict_japanese.dat", "mozc_dictionary_oss_README.txt"],
+    );
+    let with = options();
+    assert_eq!(
+        with.japanese_dictionary,
+        pack.join("dict_japanese.dat").to_str().unwrap()
+    );
+    assert!(with.local_temporary_japanese);
+
+    // 资源目录内置的那份照旧可用，字段为空时 Engine 读它。
+    std::fs::remove_dir_all(resource_packs::root(&state)).unwrap();
+    std::fs::write(resources.join("dict_japanese.dat"), b"bundled").unwrap();
+    let bundled = options();
+    assert_eq!(bundled.japanese_dictionary, "");
+    assert!(bundled.local_temporary_japanese);
+}
+
+#[test]
+fn verification_accepts_resources_shipped_without_the_on_demand_pair() {
+    use msime_client_core::resources::MACOS_ON_DEMAND_ARTIFACTS;
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    let specification = synthetic_desktop_lock(&resources);
+    let fresh_state = |name: &str| root.path().join(name);
+
+    // 完整目录按两种规则都通过。
+    verify_resources_once(&resources, &specification, &fresh_state("full"), &[]).unwrap();
+    verify_resources_once(
+        &resources,
+        &specification,
+        &fresh_state("full-macos"),
+        &MACOS_ON_DEMAND_ARTIFACTS,
+    )
+    .unwrap();
+
+    // 只缺一半：两种规则都拒绝。
+    std::fs::remove_file(resources.join("mozc_dictionary_oss_README.txt")).unwrap();
+    assert!(verify_resources_once(
+        &resources,
+        &specification,
+        &fresh_state("half"),
+        &MACOS_ON_DEMAND_ARTIFACTS,
+    )
+    .is_err());
+
+    // 整对缺席：macOS 的发货规则通过，完整规则仍然拒绝。
+    std::fs::remove_file(resources.join("dict_japanese.dat")).unwrap();
+    assert!(verify_resources_once(&resources, &specification, &fresh_state("slim"), &[]).is_err());
+    verify_resources_once(
+        &resources,
+        &specification,
+        &fresh_state("slim-macos"),
+        &MACOS_ON_DEMAND_ARTIFACTS,
+    )
+    .unwrap();
+
+    // 准备出的代次仍按完整清单命名。
+    let state = fresh_state("prepared");
+    let prepared: Value = serde_json::from_str(
+        &prepare_shipped_host_configuration(
+            &resources,
+            &state,
+            &specification,
+            &MACOS_ON_DEMAND_ARTIFACTS,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let dictionaries = PathBuf::from(prepared["dictionaries"].as_str().unwrap());
+    assert_eq!(
+        dictionaries.file_name().unwrap().to_str().unwrap(),
+        specification.generation().unwrap()
+    );
+    assert!(dictionaries.join("msime.db").is_file());
+}
+
+/// 平台默认的按需清单：macOS 接受不含日文词典的发布包，其余平台仍要求完整的锁文件。
+#[test]
+fn the_platform_shipping_rule_decides_whether_a_slim_bundle_prepares() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    let specification = synthetic_desktop_lock(&resources);
+    std::fs::remove_file(resources.join("dict_japanese.dat")).unwrap();
+    std::fs::remove_file(resources.join("mozc_dictionary_oss_README.txt")).unwrap();
+    let prepared = prepare_shipped_host_configuration(
+        &resources,
+        &root.path().join("state"),
+        &specification,
+        ON_DEMAND_ARTIFACTS,
+    );
+    #[cfg(target_os = "macos")]
+    {
+        prepared.unwrap();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let error = prepared.unwrap_err();
+        assert!(
+            matches!(
+                error.downcast_ref::<msime_client_core::resources::ResourceError>(),
+                Some(msime_client_core::resources::ResourceError::ExistingGeneration(_))
+            ),
+            "{error}"
+        );
+    }
+}
+
+/// 会话打开后才下载好的资源包，在下一次聚焦时被看见，Engine 在输入空闲时重建。
+#[test]
+fn a_resource_pack_installed_after_the_session_opened_is_picked_up_on_focus() {
+    let root = tempfile::tempdir().unwrap();
+    let path = |name| {
+        let path = root.path().join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    };
+    let state = path("state");
+    let resources = path("resources");
+    rusqlite::Connection::open(resources.join("msime.db"))
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+             CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);",
+        )
+        .unwrap();
+    let dictionaries = path("dictionaries");
+    std::fs::copy(resources.join("msime.db"), dictionaries.join("msime.db")).unwrap();
+    let options = json!({ "api_version": 1, "resources": resources, "user_data": path("user"), "cache": path("cache"), "dictionaries": dictionaries, "preferences": chinese_preferences(), "preferences_directory": state }).to_string();
+    let created = read(unsafe { msime_client_create(options.as_ptr(), options.len()) });
+    assert_eq!(created["ok"], true, "{created}");
+    let handle = created["value"]["session"].as_u64().unwrap();
+    let observed = || {
+        SESSIONS.with(|sessions| {
+            let sessions = sessions.borrow();
+            let session = sessions.get(&handle).unwrap();
+            (
+                LanguageDictionaries::of_options(&session.options),
+                session.options.japanese_dictionary.clone(),
+                session.resources_pending,
+            )
+        })
+    };
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    let (before, japanese, pending) = observed();
+    assert_eq!(before, LanguageDictionaries::default());
+    assert_eq!(japanese, "");
+    assert!(!pending);
+
+    let language = publish_resource_pack(
+        &state,
+        ResourcePack::LanguageDictionaries,
+        &["cantonese.db"],
+    );
+    let japanese = publish_resource_pack(&state, ResourcePack::Japanese, &["dict_japanese.dat"]);
+    // 组字中途不重建：变化先记下，等输入空闲。
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let session = sessions.get_mut(&handle).unwrap();
+        session.refresh_resource_packs();
+        assert!(session.resources_pending);
+        session.resources_pending = false;
+        session.options.cantonese_dictionary.clear();
+        session.options.japanese_dictionary.clear();
+    });
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    let (after, japanese_path, pending) = observed();
+    assert_eq!(
+        after,
+        LanguageDictionaries {
+            cantonese: Some(language.join("cantonese.db")),
+            zhuyin: None,
+        }
+    );
+    assert_eq!(
+        japanese_path,
+        japanese.join("dict_japanese.dat").to_str().unwrap()
+    );
+    assert!(!pending, "an idle session rebuilds at once");
+
+    // 没有变化时不再标记重建。
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let session = sessions.get_mut(&handle).unwrap();
+        session.refresh_resource_packs();
+        assert!(!session.resources_pending);
+    });
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }

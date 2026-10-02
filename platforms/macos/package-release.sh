@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# Build the installable macOS release: the Tauri settings app with the pinned dictionaries (EngineResources), the handwriting model, the licence files and the InputMethodKit bundle 水杉输入法.app embedded as resources, packed into a DMG with a SHA256SUMS beside it.
+# Build the installable macOS release: the Tauri settings app with the pinned core dictionaries (EngineResources), the licence files and the InputMethodKit bundle 水杉输入法.app embedded as resources, packed into a DMG with a SHA256SUMS beside it.
+#
+# 包里只带装好就能打中文的核心词库（msime.db、bigram/trigram、english.db、others.db、sentence-model、helpcodes/、dictionary-manifest.json）。其余三个资源包由 App 在首次用到时下载到 <state_root>/resource-packs/<id>/（state_root 默认 ~/Library/Application Support/app.msime.macos），查找时下载的优先、包内或旧版本记录的副本次之，两者都没有时对应功能显示为不可用：
+#   japanese              dict_japanese.dat 与 mozc README，用户选日文方案时下载
+#   language-dictionaries 粤拼与注音词库及其许可证（resources/language-dictionaries.lock.json），用户选粤拼或注音时下载
+#   handwriting           手写模型及其许可证（resources/handwriting-model.lock.json），首次打开手写面板时下载
+# 打包时在编译之前先把三个资源包按 App 用的同一套安装器、URL 和哈希装一遍，链接失效或内容漂移的资源包不会随发布包出去。
 #
 # The same steps run locally and in release-macos.yml, so a package that passes here is the package CI publishes.
 #
@@ -14,8 +20,6 @@
 #   MACOS_SIGNING_IDENTITY        a "Developer ID Application: ... (TEAMID)" identity in the keychain. Without it everything is signed ad-hoc: the package builds and the settings app runs, but macOS will not register the embedded input method as an input source (see scripts/install.sh)
 #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_SPECIFIC_PASSWORD
 #                                 when all three are set (and an identity is), the DMG is notarized and stapled
-#   MSIME_REQUIRE_LANGUAGE_DICTIONARIES
-#                                 1 fails the package unless the Cantonese and Zhuyin dictionaries are staged and embedded; otherwise a package without them still builds, with both schemes shown as unavailable
 #
 # 产物是 universal 的：Apple 芯片和 Intel Mac 用同一个包。Rust 产物按两个 target 各编一次再用 lipo 合并，CMake 的目标和 Swift 后端经 CMAKE_OSX_ARCHITECTURES 编出双架构，打包后 check_app 逐个核对包里的 Mach-O 都含两种架构。需要 rustup target add aarch64-apple-darwin x86_64-apple-darwin。
 set -euo pipefail
@@ -83,15 +87,15 @@ only() {
   printf '%s\n' "$1"
 }
 
-# ---- Dictionaries and the handwriting model ----
-# The offline handwriting model the settings app's handwriting panel recognises with (apps/desktop/src-tauri/src/platform/macos/macos_handwriting.rs), pinned by resources/handwriting-model.lock.json. It is copied into the app below rather than listed in tauri.macos.conf.json, so a development build of the settings app does not need the 26.8 MB download.
-handwriting_model="$repo_root/target/handwriting-model"
-python3 scripts/fetch_handwriting_model.py --out "$handwriting_model"
+# ---- Core dictionaries ----
 # install_resources prints progress on stderr and the verified directory as its last stdout line. stage-resources.sh re-verifies it and stages target/macos/EngineResources, which tauri.macos.conf.json embeds.
 resources="$(cargo run --quiet --locked -p msime-client-core --example install_resources -- "$work/desktop-resources" | tail -n 1)"
-# The Cantonese and Zhuyin dictionaries pinned by resources/language-dictionaries.lock.json, into target/language-dictionaries where stage-resources.sh looks for them. Until a release is pinned the script prints a skipped line and fetches nothing.
-python3 scripts/fetch_language_dictionaries.py >/dev/null
-bash platforms/macos/stage-resources.sh "$resources"
+# 只暂存核心词库：日文词典那一对文件不进 EngineResources，粤拼、注音词库和手写模型也不再取回，三者都由 App 按需下载。
+MSIME_MACOS_OMIT_ON_DEMAND=1 bash platforms/macos/stage-resources.sh "$resources"
+
+# ---- On-demand resource packs ----
+# 编译之前先用 App 运行时的同一个安装器、同一组 URL 和 SHA-256 把三个资源包装一遍，失败就在这里停下：资源包不在包里，发布出去的 App 只能靠这些地址补齐，地址失效或内容漂移的发布包不该出去。不接管道，安装器的退出码就是这一步的结果。
+cargo run --quiet --locked -p msime-client-core --example install_resource_pack -- "$work/pack-check" >/dev/null
 
 # ---- Input method bundle ----
 # The minimum system version goes to the C/C++ compilers and to CMake separately, never as MACOSX_DEPLOYMENT_TARGET: rustc applies that to host proc-macro dylibs too, which then fail to load (README.md, 构建与本地测试).
@@ -158,14 +162,6 @@ glosses="$repo_root/target/macos/offline-glosses"
 if [ -d "$glosses" ]; then
   ditto "$glosses" "$app/Contents/Resources/offline-glosses"
 fi
-# The Cantonese and Zhuyin dictionaries, copied for the same reason as the glosses. The input method finds them beside EngineResources; without them both schemes fall back.
-languages="$repo_root/target/macos/language-dictionaries"
-if [ -d "$languages" ]; then
-  ditto "$languages" "$app/Contents/Resources/language-dictionaries"
-fi
-# Beside the Zinnia licence tauri.macos.conf.json already put in Contents/Resources/handwriting.
-mkdir -p "$app/Contents/Resources/handwriting"
-cp "$handwriting_model/handwriting-zh_CN.model" "$handwriting_model/HandwritingModel-LICENSE.txt" "$app/Contents/Resources/handwriting/"
 # Without --deep, so the input method keeps the signature and entitlements it was given above; the outer signature seals it as a nested resource.
 sign "$app"
 codesign --verify --deep --strict "$app"
@@ -175,28 +171,28 @@ check_app() {
   local root="$1"
   local resources_dir="$root/Contents/Resources"
   test -d "$resources_dir/EngineResources"
-  cargo run --quiet --locked -p msime-client-core --example verify_resources -- "$resources_dir/EngineResources" >/dev/null
+  cargo run --quiet --locked -p msime-client-core --example verify_resources -- --omit-on-demand "$resources_dir/EngineResources" >/dev/null
   for table in helpcode.txt zrm_helpcode_big_unique.txt shouyou2_0_helpcode.txt shouyouplus_helpcode.txt xiaohe_helpcode.txt jiajia_helpcode.txt NOTICE.md NOTICE-jiajia.md; do
     test -f "$resources_dir/EngineResources/helpcodes/$table"
   done
-  test -f "$resources_dir/handwriting/handwriting-zh_CN.model"
-  test -f "$resources_dir/handwriting/HandwritingModel-LICENSE.txt"
+  # 按需下载的资源包不该出现在包里：日文词典、粤拼与注音词库、手写模型都由 App 下载到 resource-packs/<id>/。识别器代码的 Zinnia 许可证仍由 tauri.macos.conf.json 放进包里。
+  test ! -e "$resources_dir/EngineResources/dict_japanese.dat"
+  test ! -e "$resources_dir/EngineResources/mozc_dictionary_oss_README.txt"
+  test ! -e "$resources_dir/language-dictionaries"
+  test ! -e "$resources_dir/handwriting/handwriting-zh_CN.model"
   test -f "$resources_dir/handwriting/Zinnia-LICENSE.txt"
+  # 核心词库的体积预算（KiB）。按需资源包被误放回 EngineResources，或者核心词库意外变大，都会在这里报出来。
+  local engine_kib
+  engine_kib="$(du -sk "$resources_dir/EngineResources" | cut -f1)"
+  test "$engine_kib" -le 115000 || {
+    echo "EngineResources is ${engine_kib} KiB, over the 115000 KiB core-dictionary budget: $resources_dir/EngineResources" >&2
+    exit 1
+  }
   test -f "$resources_dir/Licenses/THIRD_PARTY_NOTICES.txt"
   test -x "$root/Contents/MacOS/msime-mcp"
   codesign --verify --strict "$root/Contents/MacOS/msime-mcp"
   if [ -d "$glosses" ]; then
     test -f "$resources_dir/offline-glosses/offline-glosses-NOTICE.txt"
-  fi
-  # A release build must carry both dictionaries; any other build carries whatever was staged, each dictionary with its licence.
-  if [ "${MSIME_REQUIRE_LANGUAGE_DICTIONARIES:-0}" = 1 ] || [ -d "$languages" ]; then
-    local pair
-    for pair in cantonese.db:rime_cantonese_LICENSE.txt zhuyin.db:libchewing_data_LICENSE.txt; do
-      if [ "${MSIME_REQUIRE_LANGUAGE_DICTIONARIES:-0}" = 1 ] || [ -f "$languages/${pair%%:*}" ]; then
-        test -s "$resources_dir/language-dictionaries/${pair%%:*}"
-        test -f "$resources_dir/language-dictionaries/${pair#*:}"
-      fi
-    done
   fi
   local nested
   nested="$(only "$resources_dir"/*.app)"
@@ -271,4 +267,11 @@ hdiutil detach -quiet "$mount_point"
 mount_point=""
 
 (cd "$out_dir" && shasum -a 256 -- *.dmg > SHA256SUMS && shasum -a 256 -c SHA256SUMS)
+# 体积报告：DMG 本身和 App 的 Contents/Resources。在 GitHub Actions 里同时写进这一步的摘要，方便逐次对比。
+dmg_bytes="$(stat -f %z "$dmg")"
+resources_kib="$(du -sk "$app/Contents/Resources" | cut -f1)"
+echo "DMG size: $dmg_bytes bytes; Contents/Resources: $resources_kib KiB"
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  printf '### macOS package size\n\n- %s: %s bytes\n- Contents/Resources: %s KiB\n' "$(basename "$dmg")" "$dmg_bytes" "$resources_kib" >> "$GITHUB_STEP_SUMMARY"
+fi
 echo "macOS package: $dmg"
