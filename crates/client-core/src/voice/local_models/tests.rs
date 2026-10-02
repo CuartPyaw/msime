@@ -497,7 +497,13 @@ fn symlinked_root_ancestors_with_existing_descendants_are_rejected() {
 
     assert!(matches!(result, Err(LocalModelError::InvalidRoot)));
     assert!(fetcher.requested.lock().unwrap().is_empty());
-    assert!(target.path().join("inner/models").read_dir().unwrap().next().is_none());
+    assert!(target
+        .path()
+        .join("inner/models")
+        .read_dir()
+        .unwrap()
+        .next()
+        .is_none());
 }
 
 #[test]
