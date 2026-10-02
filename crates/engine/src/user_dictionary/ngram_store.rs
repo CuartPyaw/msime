@@ -77,7 +77,7 @@ impl PersonalNgramStore {
                 model: RwLock::new(PersonalNgram::new(PersonalNgramOptions::default())),
                 path: user_db.to_path_buf(),
                 writer: Mutex::new(Writer::default()),
-                pending: Mutex::new(Vec::new()),
+                pending: Mutex::new(Vec::with_capacity(FLUSH_BATCH)),
                 version: AtomicU64::new(0),
                 invalidations: AtomicU64::new(0),
                 loaded_generation: AtomicU64::new(NEVER_LOADED),
@@ -685,6 +685,13 @@ mod tests {
         );
         store.flush().unwrap();
         assert_eq!(count(&journal, "SELECT sum(count) FROM personal_bigram"), 4);
+    }
+
+    #[test]
+    fn pending_queue_reserves_one_flush_batch() {
+        let dir = Dir::new();
+        let store = PersonalNgramStore::for_journal(&dir.journal());
+        assert!(lock(&store.pending).capacity() >= FLUSH_BATCH);
     }
 
     #[test]
