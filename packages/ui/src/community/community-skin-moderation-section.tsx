@@ -1,5 +1,6 @@
-import * as style from "./community-style";
 import { ActionButton } from "../core/action-button";
+import { CommunityRatingButtons } from "./community-rating-buttons";
+import { CommunityUnpublishConfirmation } from "./community-unpublish-confirmation";
 
 export interface CommunitySkinModerationSectionProps {
   owned: boolean;
@@ -41,24 +42,11 @@ export function CommunitySkinModerationSection({
   return (
     <>
       {!owned && (
-        <div
-          className={`${style.divided} [&>p]:mt-0 [&>p]:mb-2.5 [&>p]:text-xs [&>p]:text-secondary`}
-          aria-label="我的评分"
-        >
-          <p>{ratingDescription}</p>
-          <div className="grid grid-cols-5 gap-1.5">
-            {[1, 2, 3, 4, 5].map((stars) => (
-              <ActionButton
-                key={stars}
-                action={() => onRate(stars)}
-                className="secondary min-w-0 px-[5px]"
-                disabled={actionBusy}
-                ariaLabel={`评 ${stars} 星`}
-                label={`${stars} 星`}
-              />
-            ))}
-          </div>
-        </div>
+        <CommunityRatingButtons
+          description={ratingDescription}
+          disabled={actionBusy}
+          onRate={onRate}
+        />
       )}
       {owned && unpublishable && (
         <ActionButton
@@ -69,24 +57,14 @@ export function CommunitySkinModerationSection({
         />
       )}
       {confirmUnpublish && (
-        <div className={style.confirmation} role="alertdialog" aria-label={unpublishConfirmLabel}>
-          <p>{unpublishMessage}</p>
-          <div className={confirmationActionsClassName}>
-            <ActionButton
-              action={onUnpublish}
-              ariaBusy={actionBusy}
-              className="danger"
-              disabled={actionBusy}
-              label="确认下架"
-            />
-            <ActionButton
-              action={onCancelUnpublish}
-              ariaBusy={actionBusy}
-              disabled={actionBusy}
-              label="取消"
-            />
-          </div>
-        </div>
+        <CommunityUnpublishConfirmation
+          ariaLabel={unpublishConfirmLabel}
+          message={unpublishMessage}
+          actionBusy={actionBusy}
+          onConfirm={onUnpublish}
+          onCancel={onCancelUnpublish}
+          actionsClassName={confirmationActionsClassName}
+        />
       )}
     </>
   );

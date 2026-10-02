@@ -11,10 +11,11 @@ import {
 } from "./community-helpers";
 import type { CustomSkinLibraryClient } from "../keyboard/touch-keyboard-skin-design";
 import * as style from "./community-style";
+import { CommunityCardAuthor } from "./community-card-author";
 import { CommunitySearchForm } from "./community-search-form";
 import { CommunityDialogActions, CommunityDialogHeader } from "./community-dialog";
+import { CommunityDetailHeader } from "./community-detail-header";
 import {
-  CommunityRemovedBadge,
   CommunityReportSection,
   communityReportedNotice,
   type CommunityModeration,
@@ -29,6 +30,8 @@ import { CommunityInputField } from "./community-input-field";
 import { CommunitySelectField } from "./community-select-field";
 import { CommunityTextareaField } from "./community-textarea-field";
 import { ActionButton } from "../core/action-button";
+import { CommunityRatingButtons } from "./community-rating-buttons";
+import { CommunityUnpublishConfirmation } from "./community-unpublish-confirmation";
 
 export type CommunityResourceKind = "dictionary" | "reply";
 export type { CommunityResourceScope } from "./community-resource-scope-buttons";
@@ -114,10 +117,11 @@ function ResourceCard({ item, open }: { item: CommunityResource; open: () => voi
         {item.kind === "dictionary" ? "字" : "话"}
       </span>
       <strong className={style.cardTitle}>{item.name}</strong>
-      <span className={style.cardAuthor}>
-        {item.owned ? "我的作品" : item.author}
-        {item.owned && item.moderation === "removed" && " · 已下架"}
-      </span>
+      <CommunityCardAuthor
+        author={item.author}
+        owned={item.owned}
+        removed={item.moderation === "removed"}
+      />
       <span className={style.resourceDescription}>
         {item.description || (item.kind === "dictionary" ? "共享词条" : "回复模板")}
       </span>
@@ -511,17 +515,13 @@ function ResourceDetail({
         </p>
       )}
       <section className={`section ${style.detail}`}>
-        <div className={style.detailTitle}>
-          <div className={style.headingBody}>
-            <h2 className={style.headingTitle}>{item.name}</h2>
-            <p className={style.headingNote}>
-              {item.author} · v{item.revision}
-            </p>
-          </div>
-          {item.owned && <span className={style.detailBadge}>我的作品</span>}
-          <CommunityRemovedBadge owned={item.owned} moderation={item.moderation} />
-        </div>
-        {item.description && <p className={style.description}>{item.description}</p>}
+        <CommunityDetailHeader
+          title={item.name}
+          note={`${item.author} · v${item.revision}`}
+          owned={item.owned}
+          moderation={item.moderation}
+          description={item.description}
+        />
         <p className={style.metrics}>
           {item.saves.toLocaleString("zh-CN")} 人收藏 ·{" "}
           {communityRating(item.rating_count, item.rating_average)} ·{" "}
@@ -586,24 +586,11 @@ function ResourceDetail({
           label={item.saved ? "取消收藏" : "收藏，关注后续更新"}
         />
         {!item.owned && (
-          <div
-            className={`${style.divided} [&>p]:mt-0 [&>p]:mb-2.5 [&>p]:text-xs [&>p]:text-secondary`}
-            aria-label="我的评分"
-          >
-            <p>我的评分（可重新选择）</p>
-            <div>
-              {[1, 2, 3, 4, 5].map((stars) => (
-                <ActionButton
-                  key={stars}
-                  action={() => rateResource(stars)}
-                  className="secondary"
-                  disabled={busy}
-                  ariaLabel={`评 ${stars} 星`}
-                  label={`${stars} 星`}
-                />
-              ))}
-            </div>
-          </div>
+          <CommunityRatingButtons
+            description="我的评分（可重新选择）"
+            disabled={busy}
+            onRate={rateResource}
+          />
         )}
         {item.owned && (
           <>
@@ -625,26 +612,18 @@ function ResourceDetail({
           <CommunityReportSection actionBusy={busy} onReport={report} />
         )}
         {confirmDelete && (
-          <div className={style.confirmation} role="alertdialog" aria-label="确认下架作品">
-            <p>
-              下架后其他用户无法获取此作品，已有本地回复模板和云词库副本不会被删除。确定下架“
-              {item.name}”吗？
-            </p>
-            <div>
-              <ActionButton
-                action={unpublish}
-                className="danger"
-                disabled={busy}
-                label="确认下架"
-              />
-              <ActionButton
-                action={() => setConfirmDelete(false)}
-                className="secondary"
-                disabled={busy}
-                label="取消"
-              />
-            </div>
-          </div>
+          <CommunityUnpublishConfirmation
+            ariaLabel="确认下架作品"
+            message={
+              <>
+                下架后其他用户无法获取此作品，已有本地回复模板和云词库副本不会被删除。确定下架“
+                {item.name}”吗？
+              </>
+            }
+            actionBusy={busy}
+            onConfirm={unpublish}
+            onCancel={() => setConfirmDelete(false)}
+          />
         )}
       </section>
       {editing && (

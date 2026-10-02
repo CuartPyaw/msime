@@ -4,7 +4,8 @@ on:
     inputs:
       version: {description: Semantic version (defaults to platforms/linux/version.txt), required: false, type: string}
       prerelease: {description: Mark as prerelease, required: false, default: false, type: boolean}
-      publish: {description: Publish the build as a linux-v release (otherwise it is only uploaded as a workflow artifact), required: false, default: false, type: boolean}
+      publish: {description: Publish the build as a linux-v release (otherwise it is only uploaded as a workflow artifact), required: false, default: true, type: boolean}
+      ref: {description: 要构建并发布的分支、标签或提交（默认 main；触发时选的分支只决定用哪份 workflow 文件）, required: false, default: main, type: string}
 permissions: {contents: write}
 concurrency: {group: release-linux, cancel-in-progress: false}
 jobs:
@@ -13,7 +14,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: {fetch-depth: 0, persist-credentials: false}
+        with: {ref: "${{ inputs.ref }}", fetch-depth: 0, persist-credentials: false}
       - id: version
         env: {REQUESTED: "${{ inputs.version }}"}
         run: |
@@ -57,7 +58,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: {persist-credentials: false}
+        with: {ref: "${{ inputs.ref }}", persist-credentials: false}
       - id: version
         env: {REQUESTED: "${{ inputs.version }}"}
         run: |
@@ -95,7 +96,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: {fetch-depth: 0, persist-credentials: false}
+        with: {ref: "${{ inputs.ref }}", fetch-depth: 0, persist-credentials: false}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: {path: dist, merge-multiple: true}
       # workflow_dispatch runs on whatever ref it is given, so publishing has to be asked for rather than implied. Without the gate a dispatch on a feature branch cuts a real public release.
@@ -109,4 +110,4 @@ jobs:
           start=$(git tag --list 'linux-v*' --sort=-v:refname | head -1)
           tag="linux-v${VERSION}"; flags=(); [[ "$PRERELEASE" == true ]] && flags+=(--prerelease)
           [[ -n "$start" ]] && flags+=(--notes-start-tag "$start")
-          gh release create "$tag" "$dist"/*.deb "$dist"/*.rpm "$dist"/*.tar.gz "$dist/SHA256SUMS" --target "$GITHUB_SHA" --title "Linux ${VERSION}" --generate-notes "${flags[@]}"
+          gh release create "$tag" "$dist"/*.deb "$dist"/*.rpm "$dist"/*.tar.gz "$dist/SHA256SUMS" --target "$(git rev-parse HEAD)" --title "Linux ${VERSION}" --generate-notes "${flags[@]}"

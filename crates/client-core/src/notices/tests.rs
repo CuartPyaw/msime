@@ -68,6 +68,15 @@ fn images_become_links_and_are_never_loaded() {
 }
 
 #[test]
+fn valid_items_reserves_the_notice_limit_or_input_capacity() {
+    let items = (0..21)
+        .map(|index| notice(&index.to_string()))
+        .collect::<Vec<_>>();
+    let valid = valid_items(items.clone());
+    assert_eq!(valid.capacity(), items.len().min(MAX_NOTICES));
+}
+
+#[test]
 fn the_cache_is_used_within_a_minute_and_refreshed_after() {
     let directory = tempfile::tempdir().unwrap();
     let store = NoticeStore::new(directory.path().join("notices"));

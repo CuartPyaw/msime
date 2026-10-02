@@ -630,16 +630,7 @@ impl TelemetryStore {
         install_id: &str,
         queue: &mut Vec<TelemetryEvent>,
     ) -> Result<usize, TelemetryError> {
-        let mut records = Vec::new();
-        for entry in fs::read_dir(directory)? {
-            let entry = entry?;
-            let path = entry.path();
-            if entry.file_type()?.is_file()
-                && path.extension().and_then(|value| value.to_str()) == Some(CRASH_EXTENSION)
-            {
-                records.push(path);
-            }
-        }
+        let mut records = crash_record_paths(directory)?;
         records.sort();
         let mut queued = 0;
         for path in records {
@@ -653,6 +644,20 @@ impl TelemetryStore {
         }
         Ok(queued)
     }
+}
+
+fn crash_record_paths(directory: &Path) -> Result<Vec<PathBuf>, TelemetryError> {
+    let mut records = Vec::with_capacity(MAX_CRASH_RECORDS_PER_START);
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_file()
+            && path.extension().and_then(|value| value.to_str()) == Some(CRASH_EXTENSION)
+        {
+            records.push(path);
+        }
+    }
+    Ok(records)
 }
 
 fn crash_event(
