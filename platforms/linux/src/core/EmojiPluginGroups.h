@@ -57,6 +57,7 @@ struct EmojiGroupChoice {
 inline std::vector<PluginSymbolGroup> parse_plugin_symbol_groups(const nlohmann::json &list) {
   std::vector<PluginSymbolGroup> groups;
   if (!list.is_array()) return groups;
+  groups.reserve(list.size());
   for (const auto &entry : list) {
     if (!entry.is_object()) continue;
     const auto text = [&entry](const char *key) {
@@ -67,6 +68,7 @@ inline std::vector<PluginSymbolGroup> parse_plugin_symbol_groups(const nlohmann:
     if ((group.tab != "symbols" && group.tab != "kaomoji") || group.title.empty()) continue;
     const auto items = entry.find("items");
     if (items == entry.end() || !items->is_array()) continue;
+    group.items.reserve(items->size());
     for (const auto &item : *items)
       if (item.is_string() && !item.get<std::string>().empty()) group.items.push_back(item.get<std::string>());
     if (group.items.empty()) continue;
