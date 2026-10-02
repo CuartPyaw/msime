@@ -118,22 +118,24 @@ pub fn dictionary_table_entries(
             format!("{key_column}=?1"),
         ),
     };
-    let mut rows = Vec::new();
-    for table in &tables {
-        let present = connection
-            .query_row(
-                "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?1",
-                [table],
-                |_| Ok(()),
-            )
-            .optional()
-            .map_err(|_| failed(DICTIONARY_NOT_READ))?;
-        if present.is_some() {
-            rows.push(format!(
-                "SELECT {key_column} AS key,{value_column} AS value,weight,{exact} AS exact FROM main.\"{table}\" WHERE {matches}"
-            ));
-        }
-    }
+    let rows = lookup_rows(
+        &tables,
+        key_column,
+        value_column,
+        &exact,
+        &matches,
+        |table| {
+            connection
+                .query_row(
+                    "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map(|present| present.is_some())
+        },
+    )
+    .map_err(|_| failed(DICTIONARY_NOT_READ))?;
     if rows.is_empty() {
         return Ok(DictionaryTablePage::default());
     }
@@ -356,6 +358,28 @@ fn lookup_tables(kind: PersonalDictionaryKind, code: &str) -> Vec<String> {
     tables
 }
 
+fn lookup_rows<F>(
+    tables: &[String],
+    key_column: &str,
+    value_column: &str,
+    exact: &str,
+    matches: &str,
+    mut table_exists: F,
+) -> rusqlite::Result<Vec<String>>
+where
+    F: FnMut(&str) -> rusqlite::Result<bool>,
+{
+    let mut rows = Vec::with_capacity(tables.len());
+    for table in tables {
+        if table_exists(table)? {
+            rows.push(format!(
+                "SELECT {key_column} AS key,{value_column} AS value,weight,{exact} AS exact FROM main.\"{table}\" WHERE {matches}"
+            ));
+        }
+    }
+    Ok(rows)
+}
+
 /// The query folded to the form codes of the kind are stored in, or `None` when it holds a character no such code can contain. Pinyin drops its separators so a query matches a key however it was split (J:2033-2049).
 fn lookup_code(kind: PersonalDictionaryKind, query: &str) -> Option<String> {
     let mut code = String::with_capacity(query.len());
@@ -478,6 +502,15 @@ mod tests {
 
         let wubi = lookup_tables(Wubi, "wqv");
         assert_eq!(wubi.capacity(), 1);
+    }
+
+    #[test]
+    fn lookup_rows_reserve_the_bounded_table_count() {
+        let tables = vec!["tbl_a".to_owned(), "tbl_b".to_owned(), "tbl_c".to_owned()];
+        let rows = lookup_rows(&tables, "key", "value", "exact", "matches", |_| Ok(true)).unwrap();
+
+        assert_eq!(rows.len(), tables.len());
+        assert!(rows.capacity() >= tables.len());
     }
 
     #[test]
