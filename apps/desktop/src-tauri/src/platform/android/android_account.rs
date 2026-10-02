@@ -1138,11 +1138,14 @@ fn local_account_preferences(
             ShuangpinProfile::Microsoft => "microsoft",
         },
     );
-    insert_string(
-        &mut settings,
-        "input.wubi_schema",
-        account_wubi_schema(preferences.wubi_profile),
-    );
+    // 五笔版本只随五笔方案上传（与 iOS、鸿蒙一致）：上传是合并进账号文档的，不在五笔上时本机的缺省 86 不该盖掉账号里别的设备选的 98。
+    if preferences.scheme == InputScheme::Wubi {
+        insert_string(
+            &mut settings,
+            "input.wubi_schema",
+            account_wubi_schema(preferences.wubi_profile),
+        );
+    }
     insert_bool(&mut settings, "input.learning", preferences.learning);
     settings.extend(frequency_account_preferences(&preferences.frequency));
     insert_bool(

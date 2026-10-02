@@ -93,11 +93,12 @@ impl ProviderRegistry {
         self.cantonese.as_ref().map(CantoneseDictionary::inventory)
     }
 
-    /// Cached pinyin answers carry the old table's annotations and the online rows stored beside them, so both pinyin engines drop their caches, as the reference's setters did (quanpin/engine.h:37-41, shuangpin/shuangpin_dictionary.h:250-254). The reference left the shuangpin fuzzy cache alone; clearing it too only costs one requery.
+    /// 切换五笔码表版本；provider 下一次查询起读对应的表。
     pub fn set_wubi_profile(&mut self, profile: WubiProfileKind) {
         self.wubi.set_profile(profile);
     }
 
+    /// Cached pinyin answers carry the old table's annotations and the online rows stored beside them, so both pinyin engines drop their caches, as the reference's setters did (quanpin/engine.h:37-41, shuangpin/shuangpin_dictionary.h:250-254). The reference left the shuangpin fuzzy cache alone; clearing it too only costs one requery.
     pub fn set_helpcode_keymap(&mut self, keymap: Option<SharedKeymap>) {
         self.keymap = keymap;
         self.quanpin.reset_cache();

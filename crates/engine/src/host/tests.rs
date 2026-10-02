@@ -1841,7 +1841,6 @@ fn snapshot_vectors_stay_parallel_to_the_candidates() {
     assert!(!view.microsoft_shuangpin);
 }
 
-// The C++ wrote the queued personal context from `atexit`; here the dropped session writes it, so a host that quits within the ~2 s flush delay of its last pick keeps it.
 /// 98 五笔会话读 `wubi98`，选词的学习记录归入 `wubi98`，不碰 `wubi86`。
 #[test]
 fn a_wubi98_session_reads_and_learns_into_wubi98() {
@@ -1882,6 +1881,7 @@ fn a_wubi98_session_reads_and_learns_into_wubi98() {
     assert_eq!(count("wubi"), 0);
 }
 
+// The C++ wrote the queued personal context from `atexit`; here the dropped session writes it, so a host that quits within the ~2 s flush delay of its last pick keeps it.
 #[test]
 fn dropping_a_session_writes_its_queued_personal_context() {
     let dir = tempfile::tempdir().unwrap();
