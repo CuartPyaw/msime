@@ -87,6 +87,7 @@ inline std::vector<size_t> plugin_groups_in(const std::vector<PluginSymbolGroup>
                                             const std::string &category) {
   std::vector<size_t> indexes;
   if (category != "symbols" && category != "kaomoji") return indexes;
+  indexes.reserve(groups.size());
   for (size_t index = 0; index < groups.size(); ++index)
     if (groups[index].tab == category) indexes.push_back(index);
   return indexes;

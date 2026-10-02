@@ -33,6 +33,13 @@ int main() {
   assert((plugin_groups_in(groups, "symbols") == std::vector<size_t>{0, 2, 3}));
   assert((plugin_groups_in(groups, "kaomoji") == std::vector<size_t>{1}));
   assert(plugin_groups_in(groups, "").empty());
+  std::vector<PluginSymbolGroup> many_groups;
+  for (int index = 0; index < 9; ++index)
+    many_groups.push_back(PluginSymbolGroup{
+        "pack", "Pack", index == 0 ? "symbols" : "kaomoji", "Group", "", {}});
+  const auto symbol_indexes = plugin_groups_in(many_groups, "symbols");
+  assert(symbol_indexes.size() == 1);
+  assert(symbol_indexes.capacity() == many_groups.size());
 
   // 「全部」：本目录下所有插件条目按顺序排在一起，不去重；Emoji 目录没有插件条目。
   const auto all = plugin_emoji_items(groups, "symbols", "", std::nullopt, "");
