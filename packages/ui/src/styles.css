@@ -1536,6 +1536,7 @@
     --p-sel-border: 1px solid rgba(255, 255, 255, 0.08);
     --p-sel-pad: 5px 11px;
     --p-sel-fs: 14px;
+    --p-sel-sizing: fixed;
     --p-btn-bg: rgba(255, 255, 255, 0.06);
     --p-btn-fg: #ffffff;
     --p-btn-border: 1px solid rgba(255, 255, 255, 0.08);
