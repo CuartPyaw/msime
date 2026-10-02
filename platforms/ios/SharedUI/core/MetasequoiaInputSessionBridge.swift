@@ -458,6 +458,7 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
       if let profile = selected.shuangpinProfile {
         preferences["shuangpin_profile"] = profile
       }
+      // 五笔版本 `wubi_profile` 不随方案选择写入：文档里已有的版本原样保留，切到五笔就沿用它；只有设置页的版本选项会改它（`WubiProfilePreference.save`）。
       preferences["touch_keyboard_layout"] = layout
       preferences["touch_keyboard_schemes"] = [
         "enabled": enabled.map(\.sharedIdentifier),
@@ -962,6 +963,7 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
     }
     return response as? Bool == true
   }
+  /// 只改 `scheme`，会话里的 `wubi_profile` 不动，所以切过去仍是当前的 86 或 98 五笔。
   func switchToWubi() -> MetasequoiaInputSnapshot { switchScheme("wubi", profile: nil) }
   func switchToJapanese() -> MetasequoiaInputSnapshot { switchScheme("japanese", profile: nil) }
   /// Korean Hangul (Dubeolsik). Switching discards an open syllable, so callers finish the composition first.

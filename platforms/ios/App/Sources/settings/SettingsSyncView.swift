@@ -22,6 +22,8 @@ private enum IOSCloudSettings {
       settings["platform.ios.custom_keyboard_skin"] = .string(String(decoding: try JSONEncoder().encode(design), as: UTF8.self))
     }
     if let profile = scheme.shuangpinProfile { settings["input.shuangpin_schema"] = .string(profile) }
+    // `input.wubi_schema` 是 `wubi_profile` 在云端的名字，与双拼版本一样只在当前方案是五笔时上传。
+    if scheme == .wubi { settings["input.wubi_schema"] = .string(document.map(WubiProfilePreference.profile(in:)) ?? WubiProfilePreference.profile) }
     return settings
   }
   static func apply(_ values: [String: BackendPreferenceValue]) throws {
@@ -51,10 +53,12 @@ private enum IOSCloudSettings {
         document["custom_theme"] = customTheme
       }
       schemeFields?(&document)
+      if let profile = plan.wubiProfile { document[WubiProfilePreference.documentKey] = profile }
       if let traditional = plan.traditional { document[ChineseOutputPreference.documentKey] = traditional }
     }
     guard written else { throw CocoaError(.fileWriteUnknown) }
     if let scheme { InputSchemePreference.scheme = scheme }
+    if let profile = plan.wubiProfile { WubiProfilePreference.profile = profile }
     if let traditional = plan.traditional { ChineseOutputPreference.usesTraditional = traditional }
     let defaults = KeyboardFeedbackPreference.defaults
     if let sound = plan.sound { defaults.set(sound, forKey: KeyboardFeedbackPreference.soundKey) }
