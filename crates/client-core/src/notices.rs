@@ -107,11 +107,9 @@ pub fn fetch_notices(
 }
 
 fn valid_items(items: Vec<Notice>) -> Vec<Notice> {
-    items
-        .into_iter()
-        .filter(Notice::is_valid)
-        .take(MAX_NOTICES)
-        .collect()
+    let mut valid = Vec::with_capacity(items.len().min(MAX_NOTICES));
+    valid.extend(items.into_iter().filter(Notice::is_valid).take(MAX_NOTICES));
+    valid
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
