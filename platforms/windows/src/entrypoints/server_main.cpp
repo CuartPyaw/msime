@@ -452,6 +452,7 @@ struct TrayMenuPreferences {
   bool translations = true;
   std::string scheme = "quanpin";
   std::string shuangpin_profile = "xiaohe";
+  std::string wubi_profile = "wubi86";
   std::string language_hint;
 };
 TrayMenuPreferences tray_menu_preferences(
@@ -463,6 +464,7 @@ TrayMenuPreferences tray_menu_preferences(
   result.scheme = running_scheme(preferences, installed);
   result.shuangpin_profile =
       preferences.value("shuangpin_profile", std::string("xiaohe"));
+  result.wubi_profile = preferences.value("wubi_profile", std::string("wubi86"));
   // The same defaults the TIP reads (FanyUtils::ReadConfiguredSwitchLanguageHotkeys).
   const auto bindings =
       preferences.value("keybindings", nlohmann::json::object());
@@ -1321,6 +1323,7 @@ int wmain(int argc, wchar_t **argv) {
             state.translations = tray_preferences->translations;
             state.scheme = tray_preferences->scheme;
             state.shuangpin_profile = tray_preferences->shuangpin_profile;
+            state.wubi_profile = tray_preferences->wubi_profile;
             state.language_hint = tray_preferences->language_hint;
           }
           // candidate_theme_values keeps global_theme only when it is a string.

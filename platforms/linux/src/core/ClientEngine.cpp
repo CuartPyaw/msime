@@ -40,6 +40,7 @@
 #include "../candidates/CandidateTranslationPolicy.h"
 #include "../candidates/PairedPunctuation.h"
 #include "../candidates/ShuangpinProfileNames.h"
+#include "../candidates/WubiProfileNames.h"
 #include "ClientInputModeMemory.h"
 #include "../system/DiagnosticLog.h"
 #include "../system/KeySound.h"
@@ -3255,9 +3256,12 @@ void publish_mode(IBusEngine *engine, bool registration) {
   // The input languages and the Chinese schemes are two radio groups; without the rule ibus-ui-gtk3 joins them and marks only one of the two checked entries.
   ibus_prop_list_append(scheme_menu, menu_separator("Scheme/Separator"));
   // Cantonese and Zhuyin are offered only when their dictionary is installed: host-api would fall back from either without it.
+  // 五笔一项跟随存储的码表版本显示「86 五笔」或「98 五笔」。
+  const char *wubi_label = msime::linux_host::wubi_scheme_label(
+      configured.at("preferences").value("wubi_profile", std::string("wubi86")));
   for (const auto &[value, name, label] : {std::tuple{"quanpin", "Scheme/Quanpin", "全拼"},
                                            std::tuple{"shuangpin", "Scheme/Shuangpin", "双拼"},
-                                           std::tuple{"wubi", "Scheme/Wubi", "五笔"},
+                                           std::tuple{"wubi", "Scheme/Wubi", wubi_label},
                                            std::tuple{"cantonese", "Scheme/Cantonese", "粤拼"},
                                            std::tuple{"zhuyin", "Scheme/Zhuyin", "注音"}}) {
     if (!msime::linux_host::input_scheme_available(value, configured_dictionaries)) continue;

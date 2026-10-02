@@ -2757,6 +2757,8 @@ private:
                   L"vietnamese.tone_style", {{L"modern", L"新式"}, {L"classic", L"旧式"}}, L"modern");
     }
     if (scheme == L"wubi" || indexing_) {
+      select_row(schemes, 0xE8AB, L"五笔方案", L"", L"wubi_profile",
+                 {{L"wubi86", L"86 五笔"}, {L"wubi98", L"98 五笔"}}, L"wubi86");
       bool_row(schemes, 0xE8D2, L"编码打不出时用拼音候选",
                L"五笔词库无法回答当前编码时，用同一串字母查询全拼；词库能回答时不影响。",
                L"wubi_mixed_pinyin", false);

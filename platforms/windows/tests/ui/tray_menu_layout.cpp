@@ -176,6 +176,18 @@ int main() {
   require(tray_menu_shuangpin_label("microsoft") == "双拼（微软）");
   require(tray_menu_shuangpin_label("shoudao") == "双拼（首道）");
   require(tray_menu_shuangpin_label("unknown") == "双拼");
+  // 五笔一行跟随存储的码表版本，不认识的版本退回方案名。
+  require(tray_menu_wubi_label("wubi86") == "五笔 86");
+  require(tray_menu_wubi_label("wubi98") == "五笔 98");
+  require(tray_menu_wubi_label("unknown") == "五笔");
+  {
+    auto wubi98 = state;
+    wubi98.scheme = "wubi";
+    wubi98.wubi_profile = "wubi98";
+    const auto rows = tray_menu_items(all, wubi98);
+    require(rows[find(rows, TrayMenuCommand::SelectWubi)].label == "五笔 98" &&
+            checked(rows, TrayMenuCommand::SelectWubi));
+  }
   {
     // English, and the Engine's own English mode while the TIP still reports Chinese.
     auto english = state;

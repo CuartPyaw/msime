@@ -64,6 +64,8 @@ struct TrayMenuState {
   bool translations = true;
   std::string scheme = "quanpin";
   std::string shuangpin_profile = "xiaohe";
+  // 存储的 `wubi_profile`，五笔一行按它标出 86 或 98。
+  std::string wubi_profile = "wubi86";
   // Title of the selected global theme, shown beside 主题. Empty draws no hint.
   std::string theme_title;
   // The configured CN/EN key, shown beside the language row.
@@ -91,6 +93,14 @@ inline std::string tray_menu_shuangpin_label(const std::string &profile) {
   if (profile == "shoudao")
     return "双拼（首道）";
   return "双拼";
+}
+// 五笔一行标出存储的码表版本，与工具栏的「五笔 86」「五笔 98」一致；不认识的版本只写方案名，不猜一个错的。
+inline std::string tray_menu_wubi_label(const std::string &profile) {
+  if (profile == "wubi86")
+    return "五笔 86";
+  if (profile == "wubi98")
+    return "五笔 98";
+  return "五笔";
 }
 // The stored `scheme` value a scheme row selects, or null for every other row.
 inline const char *tray_menu_scheme(TrayMenuCommand command) {
@@ -195,7 +205,8 @@ tray_menu_items(const TrayMenuCapabilities &capabilities,
   row(TrayMenuCommand::SelectShuangpin,
       tray_menu_shuangpin_label(state.shuangpin_profile), true,
       state.scheme == "shuangpin");
-  row(TrayMenuCommand::SelectWubi, "五笔 86", true, state.scheme == "wubi");
+  row(TrayMenuCommand::SelectWubi, tray_menu_wubi_label(state.wubi_profile), true,
+      state.scheme == "wubi");
   row(TrayMenuCommand::SelectJapanese, "日文", true, japanese);
   row(TrayMenuCommand::SelectKorean, "韩文", true, korean);
   row(TrayMenuCommand::SelectCantonese, "粤拼", capabilities.cantonese,
