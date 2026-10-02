@@ -246,6 +246,7 @@ impl ShuangpinDictionary {
             .collect::<Vec<_>>();
         drop(listed);
         for (rows, unique) in prefix_rows.into_iter().zip(unique) {
+            candidates.reserve(rows.len());
             candidates.extend(
                 rows.into_iter()
                     .zip(unique)
