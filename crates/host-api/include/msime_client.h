@@ -79,8 +79,8 @@ char *msime_client_community_moderation(const uint8_t *request, size_t length);
 /* options is a readable UTF-8 buffer of length bytes; maximum 1 MiB.
  * Object: api_version=1, resources/user_data/cache/dictionaries (absolute paths),
  * preferences={scheme, candidate_page_size, learning, chinese_punctuation,
- *              shuangpin_profile?}. Missing profile defaults to xiaohe; allowed
- * profiles: xiaohe, ziranma, shoudao, microsoft. Unknown values are rejected.
+ *              shuangpin_profile?, wubi_profile?}. Missing profile defaults to xiaohe; allowed
+ * profiles: xiaohe, ziranma, shoudao, microsoft. 缺省 wubi_profile 为 wubi86，可选 wubi86、wubi98。 Unknown values are rejected.
  * Optional preferences_directory is bootstrap metadata for host file monitoring;
  * session creation itself does not monitor or load it.
  * Optional phrase_preedit=true asks for a half-composed phrase to stay in the

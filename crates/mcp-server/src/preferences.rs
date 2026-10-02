@@ -4,7 +4,7 @@
 
 use msime_client_core::preferences::{
     CandidateLayout, CharacterWidthPreference, ChineseScheme, DefaultImeMode, InputScheme,
-    Preferences, PreferencesSnapshot, PreferencesStore, ShuangpinProfile,
+    Preferences, PreferencesSnapshot, PreferencesStore, ShuangpinProfile, WubiProfile,
 };
 use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -43,6 +43,16 @@ pub enum Profile {
     Ziranma,
     Shoudao,
     Microsoft,
+}
+
+/// 五笔码表版本。
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[schemars(crate = "rmcp::schemars")]
+pub enum WubiVersion {
+    #[serde(rename = "wubi86")]
+    Wubi86,
+    #[serde(rename = "wubi98")]
+    Wubi98,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -112,6 +122,24 @@ impl From<Profile> for ShuangpinProfile {
             Profile::Ziranma => Self::Ziranma,
             Profile::Shoudao => Self::Shoudao,
             Profile::Microsoft => Self::Microsoft,
+        }
+    }
+}
+
+impl From<WubiProfile> for WubiVersion {
+    fn from(value: WubiProfile) -> Self {
+        match value {
+            WubiProfile::Wubi86 => Self::Wubi86,
+            WubiProfile::Wubi98 => Self::Wubi98,
+        }
+    }
+}
+
+impl From<WubiVersion> for WubiProfile {
+    fn from(value: WubiVersion) -> Self {
+        match value {
+            WubiVersion::Wubi86 => Self::Wubi86,
+            WubiVersion::Wubi98 => Self::Wubi98,
         }
     }
 }
@@ -205,6 +233,8 @@ pub struct PreferencesView {
     pub smart_punctuation: bool,
     /// Output Traditional Chinese.
     pub traditional_chinese_output: bool,
+    /// 五笔用 86 还是 98 码表。
+    pub wubi_profile: WubiVersion,
     /// In Wubi, answer a code with no match with candidates from the same pinyin spelling.
     pub wubi_mixed_pinyin: bool,
     /// In Wubi, show the rest of each candidate's code after the typed keys.
@@ -239,6 +269,7 @@ impl From<&PreferencesSnapshot> for PreferencesView {
             chinese_punctuation: preferences.chinese_punctuation,
             smart_punctuation: preferences.smart_punctuation,
             traditional_chinese_output: preferences.traditional_chinese_output,
+            wubi_profile: preferences.wubi_profile.into(),
             wubi_mixed_pinyin: preferences.wubi_mixed_pinyin,
             wubi_code_hint: preferences.wubi_code_hint,
             diagnostic_log_server: preferences.diagnostic_log.server,
@@ -279,6 +310,7 @@ pub struct PreferencesChange {
     pub chinese_punctuation: Option<bool>,
     pub smart_punctuation: Option<bool>,
     pub traditional_chinese_output: Option<bool>,
+    pub wubi_profile: Option<WubiVersion>,
     pub wubi_mixed_pinyin: Option<bool>,
     pub wubi_code_hint: Option<bool>,
     /// Turn on to look into a problem the user reports, and off again once it is understood.
@@ -306,6 +338,7 @@ impl PreferencesChange {
             && self.chinese_punctuation.is_none()
             && self.smart_punctuation.is_none()
             && self.traditional_chinese_output.is_none()
+            && self.wubi_profile.is_none()
             && self.wubi_mixed_pinyin.is_none()
             && self.wubi_code_hint.is_none()
             && self.diagnostic_log_server.is_none()
@@ -366,6 +399,9 @@ impl PreferencesChange {
         }
         if let Some(value) = self.traditional_chinese_output {
             preferences.traditional_chinese_output = value;
+        }
+        if let Some(value) = self.wubi_profile {
+            preferences.wubi_profile = value.into();
         }
         if let Some(value) = self.wubi_mixed_pinyin {
             preferences.wubi_mixed_pinyin = value;
@@ -507,6 +543,10 @@ mod tests {
         ] {
             same(json!(Profile::from(profile)), json!(profile));
             assert_eq!(ShuangpinProfile::from(Profile::from(profile)), profile);
+        }
+        for profile in [WubiProfile::Wubi86, WubiProfile::Wubi98] {
+            same(json!(WubiVersion::from(profile)), json!(profile));
+            assert_eq!(WubiProfile::from(WubiVersion::from(profile)), profile);
         }
         for layout in [CandidateLayout::Horizontal, CandidateLayout::Vertical] {
             same(json!(Layout::from(layout)), json!(layout));

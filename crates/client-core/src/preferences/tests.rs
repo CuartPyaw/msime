@@ -2078,6 +2078,33 @@ fn shuangpin_profiles_preserve_legacy_files_and_reject_unknown_values() {
 }
 
 #[test]
+fn wubi_profile_defaults_to_86_and_rejects_unknown_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let legacy = r#"{"format_version":1,"revision":3,"preferences":{"scheme":"wubi","candidate_page_size":5,"learning":false,"chinese_punctuation":true}}"#;
+    fs::write(store.path(), legacy).unwrap();
+    assert_eq!(
+        store.load().unwrap().preferences.wubi_profile,
+        WubiProfile::Wubi86
+    );
+    let saved = store
+        .save(
+            3,
+            Preferences {
+                scheme: InputScheme::Wubi,
+                wubi_profile: WubiProfile::Wubi98,
+                ..Preferences::default()
+            },
+        )
+        .unwrap();
+    let text = fs::read_to_string(store.path()).unwrap();
+    assert!(text.contains(r#""wubi_profile": "wubi98""#), "{text}");
+    assert_eq!(store.load().unwrap(), saved);
+    fs::write(store.path(), text.replace("wubi98", "wubi06")).unwrap();
+    assert!(store.load().is_err());
+}
+
+#[test]
 fn try_load_distinguishes_busy_missing_and_corrupt() {
     let dir = tempfile::tempdir().unwrap();
     let store = PreferencesStore::new(dir.path());
