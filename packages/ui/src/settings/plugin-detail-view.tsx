@@ -136,15 +136,13 @@ export function PluginDetailView({
       {!pack.builtin && (
         <GroupList>
           <ActionBlock note="删除后包里的文件会从本机移除；正在使用的话，设置会回到默认选择。">
-            <button
-              type="button"
-              className="secondary"
-              aria-label={`删除${pack.name}`}
+            <ActionButton
+              action={() => onRemove(pack)}
+              ariaBusy={working}
+              ariaLabel={`删除${pack.name}`}
               disabled={working}
-              onClick={() => onRemove(pack)}
-            >
-              删除
-            </button>
+              label="删除"
+            />
           </ActionBlock>
         </GroupList>
       )}
@@ -425,13 +423,10 @@ function PackActions({
         return <ActionBlock note="这台设备的背单词不列出单词本插件。" />;
       return (
         <ActionBlock note="这本书出现在背单词的词书里。卸载插件后复习进度仍会保留，重新安装后可以接着复习。">
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => onOpenWordbook(wordbookPackBookId(pack.id))}
-          >
-            去背单词
-          </button>
+          <ActionButton
+            action={() => onOpenWordbook(wordbookPackBookId(pack.id))}
+            label="去背单词"
+          />
         </ActionBlock>
       );
     }
@@ -529,16 +524,13 @@ export function MissingPluginView({
       <PluginViewHeader title={missingTitle(entry)} onBack={onBack} />
       <GroupList>
         <ActionBlock note={note}>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => {
+          <ActionButton
+            action={() => {
               onChange(dropped());
               onBack();
             }}
-          >
-            {action}
-          </button>
+            label={action}
+          />
         </ActionBlock>
       </GroupList>
     </>

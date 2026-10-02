@@ -2,6 +2,23 @@ use super::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+#[test]
+fn relative_component_capacity_covers_each_valid_component() {
+    for (path, expected) in [("", 0), ("encoder.onnx", 1), ("tokenizer/merges.txt", 2)] {
+        assert_eq!(relative_component_capacity(path), expected);
+        assert!(
+            relative_components(path).unwrap().len() <= relative_component_capacity(path),
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn ancestor_capacity_matches_the_absolute_path_components() {
+    let root = Path::new("/synthetic/state/models");
+    assert_eq!(ancestor_capacity(root), root.components().count());
+}
+
 /// Serves fixed bytes per URL and records what was asked for.
 struct MapFetcher {
     files: HashMap<String, Vec<u8>>,
@@ -567,6 +584,224 @@ fn listing_rejects_symlinked_model_directories_and_manifests() {
     assert!(!list(root.path())
         .into_iter()
         .any(|model| model.id == id && model.installed));
+}
+
+const PACK_A_URL: &str = "https://example.test/packs/a.dat";
+const PACK_B_URL: &str = "https://example.test/packs/b.txt";
+const PACK_A: &[u8] = b"synthetic dictionary bytes";
+const PACK_B: &[u8] = b"licence";
+
+fn pack_artifact(name: &str, url: &str, bytes: &[u8]) -> crate::resources::Artifact {
+    crate::resources::Artifact {
+        name: name.into(),
+        url: url.into(),
+        sha256: hex::encode(Sha256::digest(bytes)),
+        size: bytes.len() as u64,
+    }
+}
+
+fn pack_files() -> Vec<crate::resources::Artifact> {
+    vec![
+        pack_artifact("a.dat", PACK_A_URL, PACK_A),
+        pack_artifact("b.txt", PACK_B_URL, PACK_B),
+    ]
+}
+
+fn pack_fetcher(mirror: &str, b: &[u8]) -> MapFetcher {
+    MapFetcher::new([
+        (mirrored(mirror, PACK_A_URL), PACK_A.to_vec()),
+        (mirrored(mirror, PACK_B_URL), b.to_vec()),
+    ])
+}
+
+fn run_pack(
+    root: &Path,
+    id: &str,
+    files: &[crate::resources::Artifact],
+    mirror: &str,
+    fetcher: &MapFetcher,
+    cancel: &AtomicBool,
+) -> (Result<PathBuf, LocalModelError>, Vec<InstallProgress>) {
+    let mut events = Vec::new();
+    let manifest = serde_json::json!({"pack": id});
+    let result = install_files_with(
+        root,
+        id,
+        files,
+        &manifest,
+        mirror,
+        fetcher,
+        &mut |event| events.push(event),
+        cancel,
+    );
+    (result, events)
+}
+
+#[test]
+fn installing_files_publishes_them_with_the_manifest_and_reports_progress() {
+    let root = tempfile::tempdir().unwrap();
+    let files = pack_files();
+    let mirror = "https://mirror.example.test/";
+    let fetcher = pack_fetcher(mirror, PACK_B);
+    let (result, events) = run_pack(
+        root.path(),
+        "pack",
+        &files,
+        mirror,
+        &fetcher,
+        &AtomicBool::new(false),
+    );
+    let installed = result.unwrap();
+    assert_eq!(installed, root.path().join("pack"));
+    assert_eq!(root_entries(root.path()), vec!["pack"]);
+    assert_eq!(
+        root_entries(&installed),
+        vec!["a.dat", "b.txt", MANIFEST_FILE]
+    );
+    assert_eq!(fs::read(installed.join("a.dat")).unwrap(), PACK_A);
+    assert_eq!(fs::read(installed.join("b.txt")).unwrap(), PACK_B);
+    assert_eq!(
+        installed_manifest(root.path(), "pack"),
+        Some(serde_json::json!({"pack": "pack"}))
+    );
+    assert_eq!(
+        *fetcher.requested.lock().unwrap(),
+        vec![
+            format!("https://mirror.example.test/{PACK_A_URL}"),
+            format!("https://mirror.example.test/{PACK_B_URL}"),
+        ]
+    );
+    let total = (PACK_A.len() + PACK_B.len()) as u64;
+    let last = events.last().unwrap();
+    assert_eq!(last.stage, "done");
+    assert_eq!((last.downloaded, last.total), (total, total));
+    assert!(events
+        .iter()
+        .any(|event| event.stage == "download" && event.downloaded == total));
+    assert!(events
+        .iter()
+        .all(|event| event.total == total && event.downloaded <= total));
+}
+
+#[test]
+fn a_file_checksum_mismatch_leaves_nothing_behind() {
+    let root = tempfile::tempdir().unwrap();
+    let files = pack_files();
+    let fetcher = pack_fetcher("", b"LICENCE");
+    let (result, _) = run_pack(
+        root.path(),
+        "pack",
+        &files,
+        "",
+        &fetcher,
+        &AtomicBool::new(false),
+    );
+    assert!(matches!(result, Err(LocalModelError::ChecksumMismatch(name)) if name == "b.txt"));
+    assert!(root_entries(root.path()).is_empty());
+}
+
+#[test]
+fn cancelling_a_file_install_leaves_nothing_behind() {
+    let root = tempfile::tempdir().unwrap();
+    let fetcher = pack_fetcher("", PACK_B);
+    let (result, _) = run_pack(
+        root.path(),
+        "pack",
+        &pack_files(),
+        "",
+        &fetcher,
+        &AtomicBool::new(true),
+    );
+    assert!(matches!(result, Err(LocalModelError::Cancelled)));
+    assert!(root_entries(root.path()).is_empty());
+}
+
+#[test]
+fn file_install_ids_must_be_a_single_visible_component() {
+    let root = tempfile::tempdir().unwrap();
+    let fetcher = pack_fetcher("", PACK_B);
+    for id in ["", "a/b", "/abs", "..", ".", ".hidden", "pack/.."] {
+        let (result, _) = run_pack(
+            root.path(),
+            id,
+            &pack_files(),
+            "",
+            &fetcher,
+            &AtomicBool::new(false),
+        );
+        assert!(
+            matches!(result, Err(LocalModelError::UnknownModel)),
+            "{id}: {result:?}"
+        );
+    }
+    assert!(fetcher.requested.lock().unwrap().is_empty());
+    assert!(root_entries(root.path()).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn reinstalling_files_keeps_an_open_handle_to_the_old_file_readable() {
+    let root = tempfile::tempdir().unwrap();
+    let fetcher = pack_fetcher("", PACK_B);
+    let (result, _) = run_pack(
+        root.path(),
+        "pack",
+        &pack_files(),
+        "",
+        &fetcher,
+        &AtomicBool::new(false),
+    );
+    let installed = result.unwrap();
+    // 模拟输入法映射着旧文件：句柄在重新安装期间保持打开。
+    let mut open = fs::File::open(installed.join("a.dat")).unwrap();
+    let mut files = pack_files();
+    let replacement: &[u8] = b"a newer dictionary";
+    files[0] = pack_artifact("a.dat", PACK_A_URL, replacement);
+    let fetcher = MapFetcher::new([
+        (PACK_A_URL.to_owned(), replacement.to_vec()),
+        (PACK_B_URL.to_owned(), PACK_B.to_vec()),
+    ]);
+    let (result, _) = run_pack(
+        root.path(),
+        "pack",
+        &files,
+        "",
+        &fetcher,
+        &AtomicBool::new(false),
+    );
+    let installed = result.unwrap();
+    let mut old = Vec::new();
+    open.read_to_end(&mut old).unwrap();
+    assert_eq!(old, PACK_A);
+    assert_eq!(fs::read(installed.join("a.dat")).unwrap(), replacement);
+    assert_eq!(root_entries(root.path()), vec!["pack"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_manifest_ignores_symlinks_and_oversized_files() {
+    let root = tempfile::tempdir().unwrap();
+    assert_eq!(installed_manifest(root.path(), "pack"), None);
+    let pack = root.path().join("pack");
+    fs::create_dir(&pack).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let external = outside.path().join(MANIFEST_FILE);
+    fs::write(&external, b"{}").unwrap();
+    std::os::unix::fs::symlink(&external, pack.join(MANIFEST_FILE)).unwrap();
+    assert_eq!(installed_manifest(root.path(), "pack"), None);
+    fs::remove_file(pack.join(MANIFEST_FILE)).unwrap();
+    fs::write(
+        pack.join(MANIFEST_FILE),
+        vec![b' '; MAX_MANIFEST_BYTES as usize + 1],
+    )
+    .unwrap();
+    assert_eq!(installed_manifest(root.path(), "pack"), None);
+    fs::write(pack.join(MANIFEST_FILE), b"{}").unwrap();
+    assert_eq!(
+        installed_manifest(root.path(), "pack"),
+        Some(serde_json::json!({}))
+    );
+    assert_eq!(installed_manifest(root.path(), "../pack"), None);
 }
 
 /// Downloads the real default model once. Not run in CI; run by hand with

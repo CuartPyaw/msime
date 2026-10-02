@@ -14,8 +14,10 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
         }
         // SAFETY: guaranteed by the C caller's documented buffer contract.
         let bytes = unsafe { std::slice::from_raw_parts(options, length) };
-        let options: HostOptions =
-            serde_json::from_slice(bytes).map_err(|_| "invalid options document")?;
+        let options = serde_json::from_slice(bytes)
+            .ok()
+            .and_then(HostOptions::from_document)
+            .ok_or("invalid options document")?;
         if options.api_version != 1 {
             return Err("unsupported host API version".into());
         }
@@ -40,6 +42,12 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
         let sentence_model_path = options.sentence_model.clone();
         let settled_model_path = options.settled_model.clone();
         let phrase_preedit = options.phrase_preedit.unwrap_or(false);
+        // 聚焦时据此重新查找按需下载的资源包，见 `HostSession::refresh_resource_packs`。
+        let state_root = absolute_state_root(options.preferences_directory.as_deref());
+        let recorded_language_dictionaries = options
+            .language_dictionaries
+            .as_deref()
+            .map(std::path::PathBuf::from);
         let plugin_roots = key_sound::PluginRoots::new(
             options.preferences_directory.as_deref(),
             options.sound_packs.as_deref(),
@@ -132,6 +140,9 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
                     plugin_roots,
                     sound,
                     plugin_tables,
+                    state_root,
+                    recorded_language_dictionaries,
+                    resources_pending: false,
                     _dictionary_access: dictionary_access,
                 },
             )
@@ -150,6 +161,8 @@ pub extern "C" fn msime_client_focus(handle: u64, focused: bool) -> *mut c_char 
                 msime_engine::flush_personal_learning();
             } else {
                 session.refresh_plugin_tables()?;
+                // 设置应用可能刚下载好日文、粤拼或注音的资源包；Engine 在随后的 `complete_transition` 里空闲时重建。
+                session.refresh_resource_packs();
                 // The settings page may have imported the pack in use again, or removed it, since this session last looked.
                 session.sound.restamp();
             }

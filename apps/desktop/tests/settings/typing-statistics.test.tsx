@@ -361,6 +361,87 @@ test("a late statistics response is ignored after the page unmounts", async () =
   await Promise.resolve();
 });
 
+test("marks the desktop statistics refresh action busy", async () => {
+  let finish!: (value: TypingStatisticsStatus) => void;
+  const load = vi
+    .fn()
+    .mockResolvedValueOnce(status())
+    .mockImplementationOnce(
+      () => new Promise<TypingStatisticsStatus>((resolve) => (finish = resolve)),
+    );
+  render(<TypingStatisticsPage client={{ load, setEnabled: vi.fn(), reset: vi.fn() }} />);
+
+  await screen.findByLabelText("当前范围输入字符数");
+  fireEvent.click(screen.getByRole("button", { name: "刷新统计" }));
+
+  const button = screen.getByRole("button", { name: "处理中…" });
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  finish(status());
+});
+
+test("marks the mobile statistics menu refresh action busy", async () => {
+  let finish!: (value: TypingStatisticsStatus) => void;
+  const load = vi
+    .fn()
+    .mockResolvedValueOnce(status())
+    .mockImplementationOnce(
+      () => new Promise<TypingStatisticsStatus>((resolve) => (finish = resolve)),
+    );
+  render(<TypingStatisticsPage client={{ load, setEnabled: vi.fn(), reset: vi.fn() }} mobile />);
+
+  await screen.findByLabelText("当前范围输入字符数");
+  const summary = document.querySelector('summary[aria-label="统计选项"]');
+  if (!summary) throw new Error("missing statistics menu summary");
+  fireEvent.click(summary);
+  fireEvent.click(screen.getByRole("menuitem", { name: "刷新统计" }));
+
+  const menuItem = screen.getByRole("menuitem", { name: "处理中…" });
+  expect(menuItem.getAttribute("aria-busy")).toBe("true");
+  expect((menuItem as HTMLButtonElement).disabled).toBe(true);
+  finish(status());
+});
+
+test("opens the statistics data directory", async () => {
+  const openDirectory = vi.fn().mockResolvedValue(undefined);
+  render(
+    <TypingStatisticsPage
+      client={{
+        load: vi.fn().mockResolvedValue(status()),
+        setEnabled: vi.fn(),
+        reset: vi.fn(),
+        openDirectory,
+      }}
+    />,
+  );
+
+  await screen.findByLabelText("当前范围输入字符数");
+  fireEvent.click(screen.getByRole("button", { name: "打开数据目录" }));
+  await waitFor(() => expect(openDirectory).toHaveBeenCalledOnce());
+});
+
+test("marks the statistics data directory action busy", async () => {
+  let finish!: (value: TypingStatisticsStatus) => void;
+  const load = vi
+    .fn()
+    .mockResolvedValueOnce(status())
+    .mockImplementationOnce(
+      () => new Promise<TypingStatisticsStatus>((resolve) => (finish = resolve)),
+    );
+  const openDirectory = vi.fn().mockResolvedValue(undefined);
+  render(
+    <TypingStatisticsPage client={{ load, setEnabled: vi.fn(), reset: vi.fn(), openDirectory }} />,
+  );
+
+  await screen.findByLabelText("当前范围输入字符数");
+  fireEvent.click(screen.getByRole("button", { name: "刷新统计" }));
+
+  const button = screen.getByRole("button", { name: "打开数据目录" });
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  finish(status());
+});
+
 test("a statistics mutation from a replaced client cannot overwrite the current page", async () => {
   const pending = deferred<TypingStatisticsStatus>();
   const oldClient = {
@@ -414,6 +495,49 @@ test("statistics toggle refreshes immediately and reset requires confirmation wi
   await waitFor(() => expect(typingStatistics.reset).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(screen.getByLabelText("当前范围输入字符数").textContent).toBe("0"));
   expect((toggle as HTMLInputElement).checked).toBe(false);
+});
+
+test("marks the statistics reset action busy", async () => {
+  const pending = deferred<TypingStatisticsStatus>();
+  const reset = vi.fn().mockReturnValue(pending.promise);
+  render(
+    <TypingStatisticsPage
+      client={{ load: vi.fn().mockResolvedValue(status()), setEnabled: vi.fn(), reset }}
+    />,
+  );
+
+  await screen.findByLabelText("当前范围输入字符数");
+  fireEvent.click(screen.getByRole("button", { name: "清空统计" }));
+  await answerConfirm("confirm");
+  await waitFor(() => expect(reset).toHaveBeenCalledOnce());
+
+  const button = screen.getByRole("button", { name: "清空统计" });
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  pending.resolve(status());
+});
+
+test("marks the enable statistics action busy", async () => {
+  const disabled = { ...initialStatistics(), enabled: false };
+  const pending = deferred<TypingStatisticsStatus>();
+  const setEnabled = vi.fn().mockReturnValue(pending.promise);
+  render(
+    <TypingStatisticsPage
+      client={{ load: vi.fn().mockResolvedValue(status(disabled)), setEnabled, reset: vi.fn() }}
+    />,
+  );
+
+  await screen.findByText("输入统计已关闭");
+  fireEvent.click(screen.getByRole("button", { name: "启用输入统计" }));
+
+  const disabledSection = screen
+    .getByRole("heading", { name: "输入统计已关闭" })
+    .closest("section");
+  if (!disabledSection) throw new Error("missing disabled statistics section");
+  const button = within(disabledSection).getByRole("button", { name: "处理中…" });
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  pending.resolve(status());
 });
 
 test("never-written status explains the empty local-only data channel", async () => {

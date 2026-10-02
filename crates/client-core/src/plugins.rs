@@ -516,7 +516,7 @@ fn load_directory_with(directory: &Path, data_files: DataFiles) -> Result<Plugin
     {
         return Err(format!("plugin.toml 里有未知的键 {key}"));
     }
-    let mut data: Vec<DataFile> = Vec::new();
+    let mut data: Vec<DataFile> = Vec::with_capacity(data_file_capacity(kind));
     let (content, audio, limits) = match kind {
         PluginKind::Sound => {
             let pack = sound_pack::parse(table)?;
@@ -607,6 +607,14 @@ fn load_directory_with(directory: &Path, data_files: DataFiles) -> Result<Plugin
         directory: directory.to_path_buf(),
         content,
     })
+}
+
+fn data_file_capacity(kind: PluginKind) -> usize {
+    if matches!(kind, PluginKind::Helpcode | PluginKind::Wordbook) {
+        1
+    } else {
+        0
+    }
 }
 
 /// Bounds on the audio files of one kind.

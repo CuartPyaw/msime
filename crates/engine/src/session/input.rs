@@ -107,6 +107,7 @@ impl InputSession {
             &paths,
             options.cantonese_dictionary.clone(),
             options.zhuyin_dictionary.clone(),
+            options.japanese_dictionary.clone(),
         )?;
         engine.set_autocorrect_types(0);
         engine.set_quanpin_helpcode_enabled(true);
@@ -798,9 +799,22 @@ impl InputSession {
         self.reset_composition();
         self.chain.reset();
         let translate = self.chinese_punctuation_enabled && self.punctuation_lock != 2;
-        let mut text = String::new();
-        for key in [prefix, value] {
-            match translate.then(|| self.punctuation.translate(key)).flatten() {
+        let keys = [prefix, value];
+        let translated = keys.map(|key| {
+            if translate {
+                self.punctuation.translate(key)
+            } else {
+                None
+            }
+        });
+        let capacity = keys
+            .into_iter()
+            .zip(&translated)
+            .map(|(key, mark)| mark.map_or_else(|| char::from(key).len_utf8(), str::len))
+            .sum();
+        let mut text = String::with_capacity(capacity);
+        for (key, mark) in keys.into_iter().zip(translated) {
+            match mark {
                 Some(mark) => text.push_str(mark),
                 None => text.push(char::from(key)),
             }

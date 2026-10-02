@@ -91,7 +91,9 @@ fn resource_verification_rejects_a_symlinked_state_root() {
     let state = root.path().join("state");
     std::os::unix::fs::symlink(outside.path(), &state).unwrap();
 
-    assert!(verify_resources_once(&resources, &specification, &state).is_err());
+    assert!(
+        verify_resources_once(&resources, &specification, &state, ON_DEMAND_ARTIFACTS).is_err()
+    );
     assert!(!outside.path().join("verified-resources.json").exists());
 }
 
@@ -118,7 +120,9 @@ fn resource_verification_rejects_an_existing_state_root_below_a_symlink() {
     std::os::unix::fs::symlink(outside.path(), &linked).unwrap();
     let state = linked.join("state");
 
-    assert!(verify_resources_once(&resources, &specification, &state).is_err());
+    assert!(
+        verify_resources_once(&resources, &specification, &state, ON_DEMAND_ARTIFACTS).is_err()
+    );
     assert!(!outside
         .path()
         .join("state/verified-resources.json")
@@ -183,6 +187,7 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         vietnamese_tone_style: 0,
         cantonese_dictionary: String::new(),
         zhuyin_dictionary: String::new(),
+        japanese_dictionary: String::new(),
     };
     apply_local_mode_resource_gates(&mut options);
     assert!(options.local_unicode);
@@ -3201,6 +3206,40 @@ fn test_host_with_pinyin_fixture(root: &std::path::Path, preferences: Preference
     let created = read(unsafe { msime_client_create(options.as_ptr(), options.len()) });
     assert_eq!(created["ok"], true);
     created["value"]["session"].as_u64().unwrap()
+}
+
+#[test]
+fn session_reads_live_preferences_when_the_options_copy_carries_a_retired_field() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = |name| {
+        let path = directory.path().join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    };
+    let mut stale = serde_json::to_value(chinese_preferences()).unwrap();
+    stale["autocorrect"] = json!(true);
+    let options = |preferences_directory: &std::path::Path| {
+        json!({ "api_version": 1, "resources": path("resources"), "user_data": path("user"), "cache": path("cache"), "dictionaries": path("dictionaries"), "preferences_directory": preferences_directory, "preferences": stale }).to_string()
+    };
+    let create =
+        |options: String| read(unsafe { msime_client_create(options.as_ptr(), options.len()) });
+
+    // Nothing to stand in for the copy: refused as before, and the directory is not created by looking.
+    let missing = directory.path().join("missing");
+    assert_eq!(
+        create(options(&missing))["error"],
+        "invalid options document"
+    );
+    assert!(!missing.exists());
+
+    let state = path("state");
+    PreferencesStore::new(&state)
+        .save(0, chinese_preferences())
+        .unwrap();
+    let created = create(options(&state));
+    assert_eq!(created["ok"], true, "{created}");
+    let handle = created["value"]["session"].as_u64().unwrap();
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }
 
 #[test]
@@ -6812,14 +6851,20 @@ fn stale_dictionary_generation_is_prepared_and_other_keys_survive() {
         "online_provider_socket": "/run/user/1000/msime-online.sock",
     });
     let mut requested = None;
-    let refreshed = super::refreshed_host_options(&document, "new", None, |resources, state| {
-        requested = Some((resources.to_owned(), state.to_owned()));
-        Ok(json!({
-            "resources": "/usr/share/msime-client/resources",
-            "dictionaries": "/home/u/.config/msime-client/user/dictionaries/new",
-            "preferences": {},
-        }))
-    })
+    let refreshed = super::refreshed_host_options(
+        &document,
+        "new",
+        None,
+        |_| true,
+        |resources, state| {
+            requested = Some((resources.to_owned(), state.to_owned()));
+            Ok(json!({
+                "resources": "/usr/share/msime-client/resources",
+                "dictionaries": "/home/u/.config/msime-client/user/dictionaries/new",
+                "preferences": {},
+            }))
+        },
+    )
     .unwrap()
     .unwrap();
     assert_eq!(
@@ -6849,9 +6894,13 @@ fn current_or_unfamiliar_options_are_not_prepared() {
     let mut relative = current.clone();
     relative["resources"] = json!("r");
     for document in [current, unfamiliar, moved, relative, json!({})] {
-        let refreshed = super::refreshed_host_options(&document, "new", None, |_, _| {
-            panic!("must not prepare {document}")
-        })
+        let refreshed = super::refreshed_host_options(
+            &document,
+            "new",
+            None,
+            |_| true,
+            |_, _| panic!("must not prepare {document}"),
+        )
         .unwrap();
         assert_eq!(refreshed, None);
     }
@@ -6883,9 +6932,16 @@ fn refresh_keeps_the_language_dictionaries_in_step_with_the_installed_package() 
     assert_eq!(refresh(&current), Some(installed.clone()));
     assert_eq!(refresh(&installed), None);
 
+    // 指向另一个仍然存在的目录是有意为之，保留；指向已经不存在的目录（应用挪走后留下的旧路径）则换成实际安装的那份。
+    let other = root.path().join("elsewhere");
+    std::fs::create_dir_all(&other).expect("elsewhere");
     let mut elsewhere = current.clone();
-    elsewhere["language_dictionaries"] = json!("/opt/language-dictionaries");
+    elsewhere["language_dictionaries"] = json!(other);
     assert_eq!(refresh(&elsewhere), None);
+    let mut gone = current.clone();
+    gone["language_dictionaries"] =
+        json!(root.path().join("moved-away").join("language-dictionaries"));
+    assert_eq!(refresh(&gone), Some(installed.clone()));
 
     // A document outside the prepared layout is not guessed at.
     let mut moved = current.clone();
@@ -6913,9 +6969,13 @@ fn a_prepared_generation_records_the_language_dictionaries_beside_its_new_resour
         "dictionaries": "/s/user/dictionaries/old",
         "preferences_directory": "/s",
     });
-    let prepared = super::refreshed_host_options(&stale, "new", None, |_, _| {
-        Ok(json!({ "resources": new, "dictionaries": "/s/user/dictionaries/new" }))
-    })
+    let prepared = super::refreshed_host_options(
+        &stale,
+        "new",
+        None,
+        |_| true,
+        |_, _| Ok(json!({ "resources": new, "dictionaries": "/s/user/dictionaries/new" })),
+    )
     .unwrap()
     .unwrap();
     assert_eq!(prepared.get("language_dictionaries"), None);
@@ -7030,13 +7090,18 @@ fn outdated_recorded_resources_are_prepared_from_the_bundled_copy() {
         }
     };
     let mut requested = Vec::new();
-    let refreshed =
-        super::refreshed_host_options(&stale, "new", Some(bundled), |resources, state| {
+    let refreshed = super::refreshed_host_options(
+        &stale,
+        "new",
+        Some(bundled),
+        |_| true,
+        |resources, state| {
             requested.push((resources.to_owned(), state.to_owned()));
             outdated(resources)
-        })
-        .unwrap()
-        .unwrap();
+        },
+    )
+    .unwrap()
+    .unwrap();
     assert_eq!(
         requested,
         [
@@ -7052,28 +7117,88 @@ fn outdated_recorded_resources_are_prepared_from_the_bundled_copy() {
     expected["dictionaries"] = json!("/s/user/dictionaries/new");
     assert_eq!(refreshed, expected);
 
-    let error =
-        super::refreshed_host_options(&stale, "new", None, |resources, _| outdated(resources))
-            .unwrap_err();
+    let error = super::refreshed_host_options(
+        &stale,
+        "new",
+        None,
+        |_| true,
+        |resources, _| outdated(resources),
+    )
+    .unwrap_err();
     assert!(error.is::<super::DictionaryOutdated>());
     let mut packaged = stale.clone();
     packaged["resources"] = json!(bundled);
-    let error = super::refreshed_host_options(&packaged, "new", Some(bundled), |_, _| {
-        Err(Box::new(super::DictionaryOutdated(
-            ResourceError::Integrity,
-        )))
-    })
+    let error = super::refreshed_host_options(
+        &packaged,
+        "new",
+        Some(bundled),
+        |_| true,
+        |_, _| {
+            Err(Box::new(super::DictionaryOutdated(
+                ResourceError::Integrity,
+            )))
+        },
+    )
     .unwrap_err();
     assert!(error.is::<super::DictionaryOutdated>());
     let mut calls = 0;
-    assert!(
-        super::refreshed_host_options(&stale, "new", Some(bundled), |_, _| {
+    assert!(super::refreshed_host_options(
+        &stale,
+        "new",
+        Some(bundled),
+        |_| true,
+        |_, _| {
             calls += 1;
             Err("busy".into())
-        })
-        .is_err()
-    );
+        }
+    )
+    .is_err());
     assert_eq!(calls, 1);
+}
+
+/// 设置应用从 /Applications 挪到 ~/Applications 后再打开：代次没变，但记录的资源目录已经不存在，配置要改指向新位置的 bundle，而不是因为代次一致就原样返回。
+#[test]
+fn refresh_follows_the_bundle_when_the_recorded_resources_are_gone() {
+    let moved = json!({
+        "resources": "/Applications/MSIME.app/Contents/Resources/EngineResources",
+        "user_data": "/s/user",
+        "dictionaries": "/s/user/dictionaries/new",
+        "preferences_directory": "/s",
+        "preferences": {},
+    });
+    let bundled = Path::new("/Users/u/Applications/MSIME.app/Contents/Resources/EngineResources");
+    let gone = |path: &Path| {
+        path != Path::new("/Applications/MSIME.app/Contents/Resources/EngineResources")
+    };
+    let mut requested = Vec::new();
+    let refreshed =
+        super::refreshed_host_options(&moved, "new", Some(bundled), gone, |resources, state| {
+            requested.push((resources.to_owned(), state.to_owned()));
+            Ok(json!({ "resources": resources, "dictionaries": "/s/user/dictionaries/new" }))
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(requested, [(bundled.to_owned(), PathBuf::from("/s"))]);
+    let mut expected = moved.clone();
+    expected["resources"] = json!(bundled);
+    assert_eq!(refreshed, expected);
+
+    // 记录的目录还在时，代次一致就什么都不做，也不碰 bundle。
+    let untouched = super::refreshed_host_options(
+        &moved,
+        "new",
+        Some(bundled),
+        |_| true,
+        |_, _| panic!("nothing to prepare"),
+    )
+    .unwrap();
+    assert_eq!(untouched, None);
+    // 没有 bundle 可依（开发运行）时，不猜新位置。
+    let unknown = super::refreshed_host_options(&moved, "new", None, gone, |_, _| {
+        panic!("nothing to prepare")
+    })
+    .unwrap();
+    assert_eq!(unknown, None);
 }
 
 #[test]
@@ -7131,11 +7256,22 @@ fn a_failed_preparation_is_reported_and_incomplete_output_rejected() {
         "dictionaries": "/s/user/dictionaries/old",
         "preferences_directory": "/s",
     });
-    assert!(super::refreshed_host_options(&stale, "new", None, |_, _| Err("busy".into())).is_err());
-    assert!(
-        super::refreshed_host_options(&stale, "new", None, |_, _| Ok(json!({"resources": "/r"})))
-            .is_err()
-    );
+    assert!(super::refreshed_host_options(
+        &stale,
+        "new",
+        None,
+        |_| true,
+        |_, _| Err("busy".into())
+    )
+    .is_err());
+    assert!(super::refreshed_host_options(
+        &stale,
+        "new",
+        None,
+        |_| true,
+        |_, _| Ok(json!({"resources": "/r"}))
+    )
+    .is_err());
 }
 
 /// A symlinked locator is left alone: replacing it would turn the link into a private copy.
@@ -8501,4 +8637,350 @@ fn community_moderation_abi_lists_reasons_builds_reports_and_words_refusals() {
     let generic = error(404, "not_found");
     assert_eq!(generic["code"], "account_unavailable");
     assert!(generic["message"].is_null());
+}
+
+/// 合成的桌面词库锁：`msime.db` 与 `english.db` 是可以复制进代次的 SQLite 小库，另有日文词典与 Mozc 说明这一对 macOS 按需下载的文件。文件写在 `resources` 里，清单按实际内容计算长度与 SHA-256。
+pub(crate) fn synthetic_desktop_lock(resources: &Path) -> ResourceSet {
+    std::fs::create_dir_all(resources).unwrap();
+    for name in ["msime.db", "english.db"] {
+        rusqlite::Connection::open(resources.join(name))
+            .unwrap()
+            .execute_batch("CREATE TABLE fixture(value TEXT);")
+            .unwrap();
+    }
+    std::fs::write(resources.join("dict_japanese.dat"), b"japanese").unwrap();
+    std::fs::write(resources.join("mozc_dictionary_oss_README.txt"), b"readme").unwrap();
+    let artifacts = [
+        "msime.db",
+        "english.db",
+        "dict_japanese.dat",
+        "mozc_dictionary_oss_README.txt",
+    ]
+    .into_iter()
+    .map(|name| {
+        let bytes = std::fs::read(resources.join(name)).unwrap();
+        msime_client_core::resources::Artifact {
+            name: name.into(),
+            url: format!("https://example.invalid/{name}"),
+            sha256: hex::encode(Sha256::digest(&bytes)),
+            size: bytes.len() as u64,
+        }
+    })
+    .collect();
+    ResourceSet {
+        source_commit: "a".repeat(40),
+        artifacts,
+    }
+}
+
+/// 在 `state_root` 下发布一个资源包：文件平铺在 `resource-packs/<id>/`，带上标记安装完整的 `msime-model.json`。
+fn publish_resource_pack(state_root: &Path, pack: ResourcePack, files: &[&str]) -> PathBuf {
+    let directory = resource_packs::root(state_root).join(pack.id());
+    std::fs::create_dir_all(&directory).unwrap();
+    for name in files {
+        std::fs::write(directory.join(name), b"downloaded").unwrap();
+    }
+    std::fs::write(directory.join("msime-model.json"), b"{}").unwrap();
+    directory
+}
+
+#[test]
+fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let recorded = root.path().join("language-dictionaries");
+    std::fs::create_dir_all(&recorded).unwrap();
+    std::fs::write(recorded.join("cantonese.db"), b"bundled").unwrap();
+    std::fs::write(recorded.join("zhuyin.db"), b"bundled").unwrap();
+
+    // 没有资源包：用记录的（随包内置的）那份。
+    let bundled = LanguageDictionaries {
+        cantonese: Some(recorded.join("cantonese.db")),
+        zhuyin: Some(recorded.join("zhuyin.db")),
+    };
+    assert_eq!(
+        LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
+        bundled
+    );
+    assert_eq!(
+        LanguageDictionaries::resolve(None, Some(&recorded)),
+        bundled
+    );
+    assert_eq!(
+        LanguageDictionaries::resolve(Some(&state), None),
+        LanguageDictionaries::default()
+    );
+
+    // 暂存目录里的文件不算安装。
+    let staging = resource_packs::root(&state)
+        .join(".staging-language-dictionaries-abc")
+        .join("model");
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::write(staging.join("cantonese.db"), b"partial").unwrap();
+    std::fs::write(staging.join("msime-model.json"), b"{}").unwrap();
+    assert_eq!(
+        LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
+        bundled
+    );
+
+    // 资源包里的粤拼词库优先，资源包缺的注音词库退回记录的那份。
+    let pack = publish_resource_pack(
+        &state,
+        ResourcePack::LanguageDictionaries,
+        &["cantonese.db"],
+    );
+    assert_eq!(
+        LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
+        LanguageDictionaries {
+            cantonese: Some(pack.join("cantonese.db")),
+            zhuyin: Some(recorded.join("zhuyin.db")),
+        }
+    );
+    assert_eq!(
+        LanguageDictionaries::resolve(Some(&state), None),
+        LanguageDictionaries {
+            cantonese: Some(pack.join("cantonese.db")),
+            zhuyin: None,
+        }
+    );
+
+    // HostOptions 走同一条查找路径，状态目录取自 `preferences_directory`。
+    let preferences = Preferences {
+        scheme: InputScheme::Cantonese,
+        ..Preferences::default()
+    };
+    let document = json!({ "api_version": 1, "resources": "/r", "user_data": "/u", "cache": "/c", "dictionaries": "/d", "preferences": preferences, "preferences_directory": state, "language_dictionaries": recorded });
+    let options = serde_json::from_value::<HostOptions>(document)
+        .unwrap()
+        .into_engine_options();
+    assert_eq!(
+        options.cantonese_dictionary,
+        pack.join("cantonese.db").to_str().unwrap()
+    );
+    assert_eq!(
+        options.zhuyin_dictionary,
+        recorded.join("zhuyin.db").to_str().unwrap()
+    );
+    assert_eq!(options.scheme, 5);
+}
+
+#[test]
+fn a_downloaded_japanese_pack_keeps_temporary_japanese_available() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    let state = root.path().join("state");
+    let mut preferences = Preferences::default();
+    preferences.local_modes.temporary_japanese = true;
+    let options = || {
+        let document = json!({ "api_version": 1, "resources": resources, "user_data": "/u", "cache": "/c", "dictionaries": "/d", "preferences": preferences, "preferences_directory": state });
+        serde_json::from_value::<HostOptions>(document)
+            .unwrap()
+            .into_engine_options()
+    };
+
+    // 资源目录和状态目录里都没有日文词典：字段为空，临时日语关闭。
+    let without = options();
+    assert_eq!(without.japanese_dictionary, "");
+    assert!(!without.local_temporary_japanese);
+
+    // 只在暂存目录里：仍然不算。
+    let staging = resource_packs::root(&state)
+        .join(".staging-japanese-abc")
+        .join("model");
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::write(staging.join("dict_japanese.dat"), b"partial").unwrap();
+    std::fs::write(staging.join("msime-model.json"), b"{}").unwrap();
+    assert_eq!(options().japanese_dictionary, "");
+
+    let pack = publish_resource_pack(
+        &state,
+        ResourcePack::Japanese,
+        &["dict_japanese.dat", "mozc_dictionary_oss_README.txt"],
+    );
+    let with = options();
+    assert_eq!(
+        with.japanese_dictionary,
+        pack.join("dict_japanese.dat").to_str().unwrap()
+    );
+    assert!(with.local_temporary_japanese);
+
+    // 资源目录内置的那份照旧可用，字段为空时 Engine 读它。
+    std::fs::remove_dir_all(resource_packs::root(&state)).unwrap();
+    std::fs::write(resources.join("dict_japanese.dat"), b"bundled").unwrap();
+    let bundled = options();
+    assert_eq!(bundled.japanese_dictionary, "");
+    assert!(bundled.local_temporary_japanese);
+}
+
+#[test]
+fn verification_accepts_resources_shipped_without_the_on_demand_pair() {
+    use msime_client_core::resources::MACOS_ON_DEMAND_ARTIFACTS;
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    let specification = synthetic_desktop_lock(&resources);
+    let fresh_state = |name: &str| root.path().join(name);
+
+    // 完整目录按两种规则都通过。
+    verify_resources_once(&resources, &specification, &fresh_state("full"), &[]).unwrap();
+    verify_resources_once(
+        &resources,
+        &specification,
+        &fresh_state("full-macos"),
+        &MACOS_ON_DEMAND_ARTIFACTS,
+    )
+    .unwrap();
+
+    // 只缺一半：两种规则都拒绝。
+    std::fs::remove_file(resources.join("mozc_dictionary_oss_README.txt")).unwrap();
+    assert!(verify_resources_once(
+        &resources,
+        &specification,
+        &fresh_state("half"),
+        &MACOS_ON_DEMAND_ARTIFACTS,
+    )
+    .is_err());
+
+    // 整对缺席：macOS 的发货规则通过，完整规则仍然拒绝。
+    std::fs::remove_file(resources.join("dict_japanese.dat")).unwrap();
+    assert!(verify_resources_once(&resources, &specification, &fresh_state("slim"), &[]).is_err());
+    verify_resources_once(
+        &resources,
+        &specification,
+        &fresh_state("slim-macos"),
+        &MACOS_ON_DEMAND_ARTIFACTS,
+    )
+    .unwrap();
+
+    // 准备出的代次仍按完整清单命名。
+    let state = fresh_state("prepared");
+    let prepared: Value = serde_json::from_str(
+        &prepare_shipped_host_configuration(
+            &resources,
+            &state,
+            &specification,
+            &MACOS_ON_DEMAND_ARTIFACTS,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let dictionaries = PathBuf::from(prepared["dictionaries"].as_str().unwrap());
+    assert_eq!(
+        dictionaries.file_name().unwrap().to_str().unwrap(),
+        specification.generation().unwrap()
+    );
+    assert!(dictionaries.join("msime.db").is_file());
+}
+
+/// 平台默认的按需清单：macOS 接受不含日文词典的发布包，其余平台仍要求完整的锁文件。
+#[test]
+fn the_platform_shipping_rule_decides_whether_a_slim_bundle_prepares() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    let specification = synthetic_desktop_lock(&resources);
+    std::fs::remove_file(resources.join("dict_japanese.dat")).unwrap();
+    std::fs::remove_file(resources.join("mozc_dictionary_oss_README.txt")).unwrap();
+    let prepared = prepare_shipped_host_configuration(
+        &resources,
+        &root.path().join("state"),
+        &specification,
+        ON_DEMAND_ARTIFACTS,
+    );
+    #[cfg(target_os = "macos")]
+    {
+        prepared.unwrap();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let error = prepared.unwrap_err();
+        assert!(
+            matches!(
+                error.downcast_ref::<msime_client_core::resources::ResourceError>(),
+                Some(msime_client_core::resources::ResourceError::ExistingGeneration(_))
+            ),
+            "{error}"
+        );
+    }
+}
+
+/// 会话打开后才下载好的资源包，在下一次聚焦时被看见，Engine 在输入空闲时重建。
+#[test]
+fn a_resource_pack_installed_after_the_session_opened_is_picked_up_on_focus() {
+    let root = tempfile::tempdir().unwrap();
+    let path = |name| {
+        let path = root.path().join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    };
+    let state = path("state");
+    let resources = path("resources");
+    rusqlite::Connection::open(resources.join("msime.db"))
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+             CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);",
+        )
+        .unwrap();
+    let dictionaries = path("dictionaries");
+    std::fs::copy(resources.join("msime.db"), dictionaries.join("msime.db")).unwrap();
+    let options = json!({ "api_version": 1, "resources": resources, "user_data": path("user"), "cache": path("cache"), "dictionaries": dictionaries, "preferences": chinese_preferences(), "preferences_directory": state }).to_string();
+    let created = read(unsafe { msime_client_create(options.as_ptr(), options.len()) });
+    assert_eq!(created["ok"], true, "{created}");
+    let handle = created["value"]["session"].as_u64().unwrap();
+    let observed = || {
+        SESSIONS.with(|sessions| {
+            let sessions = sessions.borrow();
+            let session = sessions.get(&handle).unwrap();
+            (
+                LanguageDictionaries::of_options(&session.options),
+                session.options.japanese_dictionary.clone(),
+                session.resources_pending,
+            )
+        })
+    };
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    let (before, japanese, pending) = observed();
+    assert_eq!(before, LanguageDictionaries::default());
+    assert_eq!(japanese, "");
+    assert!(!pending);
+
+    let language = publish_resource_pack(
+        &state,
+        ResourcePack::LanguageDictionaries,
+        &["cantonese.db"],
+    );
+    let japanese = publish_resource_pack(&state, ResourcePack::Japanese, &["dict_japanese.dat"]);
+    // 组字中途不重建：变化先记下，等输入空闲。
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let session = sessions.get_mut(&handle).unwrap();
+        session.refresh_resource_packs();
+        assert!(session.resources_pending);
+        session.resources_pending = false;
+        session.options.cantonese_dictionary.clear();
+        session.options.japanese_dictionary.clear();
+    });
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    let (after, japanese_path, pending) = observed();
+    assert_eq!(
+        after,
+        LanguageDictionaries {
+            cantonese: Some(language.join("cantonese.db")),
+            zhuyin: None,
+        }
+    );
+    assert_eq!(
+        japanese_path,
+        japanese.join("dict_japanese.dat").to_str().unwrap()
+    );
+    assert!(!pending, "an idle session rebuilds at once");
+
+    // 没有变化时不再标记重建。
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let session = sessions.get_mut(&handle).unwrap();
+        session.refresh_resource_packs();
+        assert!(!session.resources_pending);
+    });
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }

@@ -246,6 +246,7 @@ impl ShuangpinDictionary {
             .collect::<Vec<_>>();
         drop(listed);
         for (rows, unique) in prefix_rows.into_iter().zip(unique) {
+            candidates.reserve(rows.len());
             candidates.extend(
                 rows.into_iter()
                     .zip(unique)
@@ -353,6 +354,7 @@ impl ShuangpinDictionary {
             .map(|item| listed.insert(item.word.as_str()))
             .collect::<Vec<_>>();
         drop(listed);
+        result.reserve(rows.len());
         result.extend(
             rows.into_iter()
                 .zip(unique)

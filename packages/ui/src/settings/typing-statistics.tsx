@@ -1577,23 +1577,21 @@ export function TypingStatisticsPage({
                   onChange={(event) => void update(() => client.setEnabled(event.target.checked))}
                 />
               </label>
-              <button
-                type="button"
-                role="menuitem"
+              <ActionButton
+                action={() => void update(() => client.load(), true)}
+                ariaBusy={busy}
+                className=""
                 disabled={busy}
-                onClick={() => void update(() => client.load(), true)}
-              >
-                {busy ? "处理中…" : "刷新统计"}
-              </button>
-              <button
-                type="button"
+                label={busy ? "处理中…" : "刷新统计"}
                 role="menuitem"
+              />
+              <ActionButton
+                action={() => void resetStatistics()}
                 className={`${menuItem} text-danger`}
                 disabled={busy}
-                onClick={() => void resetStatistics()}
-              >
-                清空统计
-              </button>
+                label="清空统计"
+                role="menuitem"
+              />
             </div>
           </details>
         </div>
@@ -1606,14 +1604,13 @@ export function TypingStatisticsPage({
           <p className="mt-2 mb-0 leading-relaxed text-secondary">
             开启后这里会显示输入字数、速度、时段分布与按键热力图。统计只保存在本机，不记录输入内容，也不联网。
           </p>
-          <button
-            type="button"
+          <ActionButton
+            action={() => void update(() => client.setEnabled(true))}
+            ariaBusy={busy}
             className="secondary"
             disabled={busy}
-            onClick={() => void update(() => client.setEnabled(true))}
-          >
-            {busy ? "处理中…" : "启用输入统计"}
-          </button>
+            label={busy ? "处理中…" : "启用输入统计"}
+          />
         </section>
       )}
       <section className="section m-0" aria-label="统计概览">
@@ -1915,39 +1912,38 @@ export function TypingStatisticsPage({
             </SelectSettingField>
           )}
           <div className="flex flex-wrap gap-[9px]">
-            <button
-              type="button"
+            <ActionButton
+              action={() => void update(() => client.load(), true)}
+              ariaBusy={busy}
               className="secondary m-0"
               disabled={busy}
-              onClick={() => void update(() => client.load(), true)}
-            >
-              {busy ? "处理中…" : "刷新统计"}
-            </button>
+              label={busy ? "处理中…" : "刷新统计"}
+            />
             {client.openDirectory && (
-              <button
-                type="button"
-                className="secondary m-0"
-                disabled={busy}
-                onClick={() => {
+              <ActionButton
+                action={async () => {
                   const openDirectory = client.openDirectory;
                   if (!openDirectory) return;
                   setError("");
-                  void openDirectory().catch(() =>
-                    setError("无法打开数据目录，可能是文件管理器不可用。"),
-                  );
+                  try {
+                    await openDirectory();
+                  } catch {
+                    setError("无法打开数据目录，可能是文件管理器不可用。");
+                  }
                 }}
-              >
-                打开数据目录
-              </button>
+                ariaBusy={busy}
+                className="secondary m-0"
+                disabled={busy}
+                label="打开数据目录"
+              />
             )}
-            <button
-              type="button"
+            <ActionButton
+              action={() => void resetStatistics()}
+              ariaBusy={busy}
               className="secondary m-0 text-danger"
               disabled={busy}
-              onClick={() => void resetStatistics()}
-            >
-              清空统计
-            </button>
+              label="清空统计"
+            />
           </div>
           <p className={privacy}>
             字数统计水杉键盘提交的字符，以及英文模式和放行给应用的字母、数字与符号（按按键时估计），含标点及表情，不含空格和换行。组合表情计为一个字符，删除文字不扣减。按键热力图只保存每个键每天被按下的次数，不保存按键顺序和输入内容。仅在本机保存日期、分类和数量，不保存输入内容。每日明细默认永久保留，可在「自动清理」中改为只保留最近一段时间；清理删除的日期同时从累计总数与分类中扣除。

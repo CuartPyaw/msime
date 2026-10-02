@@ -36,6 +36,7 @@ import {
 import * as skin from "./touch-skin-style";
 import * as doc from "../settings/document-style";
 import * as community from "../community/community-style";
+import { ActionButton } from "../core/action-button";
 
 type Category = "背景" | "按键" | "文本" | "设计" | "我的";
 type NameEditor = { operation: "create" } | { operation: "rename"; id: string };
@@ -216,15 +217,13 @@ function AiSkinGeneration({
             <h2>AI 皮肤抽卡</h2>
             <p>一次抽出三张原创皮肤，遇到喜欢的就留下。</p>
           </div>
-          <button
-            type="button"
+          <ActionButton
+            action={onClose}
             className={community.dialogClose}
             disabled={busy}
-            onClick={onClose}
-            aria-label="关闭 AI 皮肤抽卡"
-          >
-            ×
-          </button>
+            ariaLabel="关闭 AI 皮肤抽卡"
+            label="×"
+          />
         </div>
         {proposals.length === 0 && (
           <div className={doc.mysteryCards} aria-hidden="true">
@@ -235,28 +234,24 @@ function AiSkinGeneration({
             ))}
           </div>
         )}
-        <button
-          type="button"
+        <ActionButton
+          action={() => generate()}
           className="primary"
           disabled={busy}
-          onClick={() => void generate()}
-          aria-label="抽三张皮肤"
-        >
-          {proposals.length ? "再抽三张" : "抽三张皮肤"}
-        </button>
+          ariaLabel="抽三张皮肤"
+          label={proposals.length ? "再抽三张" : "抽三张皮肤"}
+        />
         <p className={doc.generationNote}>
           AI 随机搭配插画、键帽造型与材质。抽到的皮肤可以继续编辑、保存或分享。
         </p>
         {busy && (
           <p role="status">
             主题插画已完成 {completed}/3，可能需要几分钟…{" "}
-            <button
-              type="button"
+            <ActionButton
+              action={() => client.cancel(requestRef.current)}
               className="secondary"
-              onClick={() => void client.cancel(requestRef.current)}
-            >
-              取消
-            </button>
+              label="取消"
+            />
           </p>
         )}
         {message && <p role="status">{message}</p>}
@@ -269,39 +264,34 @@ function AiSkinGeneration({
                 <p>{proposal.description}</p>
                 <ScreenKeyboardPreview theme="light" skin="custom" customDesign={proposal.design} />
                 <div className={doc.cardActions}>
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => {
+                  <ActionButton
+                    action={() => {
                       onUse(proposal.design);
                       onClose();
                     }}
-                  >
-                    使用并继续编辑
-                  </button>
-                  <button
-                    type="button"
+                    className="primary"
+                    label="使用并继续编辑"
+                  />
+                  <ActionButton
+                    action={async () => {
+                      await save(proposal);
+                    }}
                     className="secondary"
                     disabled={Boolean(item)}
-                    onClick={() => void save(proposal)}
-                  >
-                    {item ? "已保存" : "保存到我的皮肤"}
-                  </button>
+                    label={item ? "已保存" : "保存到我的皮肤"}
+                  />
                   {communitySkins && (
-                    <button
-                      type="button"
+                    <ActionButton
+                      action={async () => {
+                        const value = await save(proposal);
+                        if (value) {
+                          setPublishing(value);
+                          setPublishDescription(proposal.description);
+                        }
+                      }}
                       className="secondary"
-                      onClick={() =>
-                        void save(proposal).then((value) => {
-                          if (value) {
-                            setPublishing(value);
-                            setPublishDescription(proposal.description);
-                          }
-                        })
-                      }
-                    >
-                      发布到社区
-                    </button>
+                      label="发布到社区"
+                    />
                   )}
                 </div>
               </article>
@@ -574,32 +564,26 @@ export function TouchKeyboardSkinEditor({
         </div>
         <div className={skin.editorHeadingActions}>
           {aiSkins && library && (
-            <button
-              type="button"
+            <ActionButton
+              action={() => setAiGenerationOpen(true)}
               className="primary"
               disabled={disabled || libraryBusy}
-              onClick={() => setAiGenerationOpen(true)}
-            >
-              AI 皮肤抽卡
-            </button>
+              label="AI 皮肤抽卡"
+            />
           )}
           {library && (
-            <button
-              type="button"
-              className="primary"
-              disabled={disabled || libraryBusy || saved.length >= 12}
-              onClick={() => {
+            <ActionButton
+              action={() => {
                 setSkinName(`我的设计 ${saved.length + 1}`);
                 setNameEditor({ operation: "create" });
                 setLibraryNotice("");
               }}
-            >
-              保存设计
-            </button>
+              className="primary"
+              disabled={disabled || libraryBusy || saved.length >= 12}
+              label="保存设计"
+            />
           )}
-          <button type="button" className="secondary" onClick={onClose}>
-            完成
-          </button>
+          <ActionButton action={onClose} className="secondary" label="完成" />
         </div>
       </div>
       {aiGenerationOpen && aiSkins && library && (
@@ -629,22 +613,18 @@ export function TouchKeyboardSkinEditor({
             />
           </label>
           <div>
-            <button
-              type="button"
+            <ActionButton
+              action={() => submitName()}
               className="primary"
               disabled={libraryBusy || !skinName.trim()}
-              onClick={() => void submitName()}
-            >
-              {nameEditor.operation === "create" ? "确认保存" : "确认重命名"}
-            </button>
-            <button
-              type="button"
+              label={nameEditor.operation === "create" ? "确认保存" : "确认重命名"}
+            />
+            <ActionButton
+              action={() => setNameEditor(null)}
               className="secondary"
               disabled={libraryBusy}
-              onClick={() => setNameEditor(null)}
-            >
-              取消
-            </button>
+              label="取消"
+            />
           </div>
         </div>
       )}
@@ -662,22 +642,18 @@ export function TouchKeyboardSkinEditor({
               : `删除“${confirmation.item.name}”？`}
           </p>
           <div>
-            <button
-              type="button"
+            <ActionButton
+              action={() => confirmLibraryMutation()}
               className={confirmation.operation === "delete" ? "danger" : "primary"}
               disabled={libraryBusy}
-              onClick={() => void confirmLibraryMutation()}
-            >
-              {confirmation.operation === "update" ? "确认更新" : "确认删除"}
-            </button>
-            <button
-              type="button"
+              label={confirmation.operation === "update" ? "确认更新" : "确认删除"}
+            />
+            <ActionButton
+              action={() => setConfirmation(null)}
               className="secondary"
               disabled={libraryBusy}
-              onClick={() => setConfirmation(null)}
-            >
-              取消
-            </button>
+              label="取消"
+            />
           </div>
         </div>
       )}
@@ -1030,9 +1006,7 @@ export function TouchKeyboardSkinEditor({
             {!hasReadableSkinText(design) && (
               <p className={skin.warning}>部分文字与背景对比度偏低，建议调整配色。</p>
             )}
-            <button type="button" className="secondary" onClick={optimizeContrast}>
-              优化文字对比度
-            </button>
+            <ActionButton action={optimizeContrast} className="secondary" label="优化文字对比度" />
           </div>
         )}
 
@@ -1060,13 +1034,11 @@ export function TouchKeyboardSkinEditor({
                 </button>
               ))}
             </div>
-            <button
-              type="button"
+            <ActionButton
+              action={() => apply(defaultTouchKeyboardSkinDesign)}
               className="danger-text"
-              onClick={() => apply(defaultTouchKeyboardSkinDesign)}
-            >
-              重置我的皮肤
-            </button>
+              label="重置我的皮肤"
+            />
           </>
         )}
         {category === "我的" && library && (
@@ -1099,37 +1071,31 @@ export function TouchKeyboardSkinEditor({
                     <strong>{item.name}</strong>
                   </button>
                   <div className={skin.libraryActions}>
-                    <button
-                      type="button"
+                    <ActionButton
+                      action={() => setConfirmation({ operation: "update", item })}
                       className="secondary"
                       disabled={libraryBusy}
-                      aria-label={`用当前设计更新 ${item.name}`}
-                      onClick={() => setConfirmation({ operation: "update", item })}
-                    >
-                      更新
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={libraryBusy}
-                      aria-label={`重命名 ${item.name}`}
-                      onClick={() => {
+                      ariaLabel={`用当前设计更新 ${item.name}`}
+                      label="更新"
+                    />
+                    <ActionButton
+                      action={() => {
                         setSkinName(item.name);
                         setNameEditor({ operation: "rename", id: item.id });
                         setLibraryNotice("");
                       }}
-                    >
-                      重命名
-                    </button>
-                    <button
-                      type="button"
+                      className="secondary"
+                      disabled={libraryBusy}
+                      ariaLabel={`重命名 ${item.name}`}
+                      label="重命名"
+                    />
+                    <ActionButton
+                      action={() => setConfirmation({ operation: "delete", item })}
                       className="danger-text"
                       disabled={libraryBusy}
-                      aria-label={`删除 ${item.name}`}
-                      onClick={() => setConfirmation({ operation: "delete", item })}
-                    >
-                      删除
-                    </button>
+                      ariaLabel={`删除 ${item.name}`}
+                      label="删除"
+                    />
                   </div>
                 </article>
               ))}

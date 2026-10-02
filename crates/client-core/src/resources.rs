@@ -27,6 +27,10 @@ pub struct ResourceSet {
     pub artifacts: Vec<Artifact>,
 }
 
+/// macOS 发布包不内置、改为按需下载的桌面词库文件。两者作为一个整体出现或缺席：日文词典与它的 Mozc 许可说明必须同时在场，只有一个在场时按原规则校验失败。
+pub const MACOS_ON_DEMAND_ARTIFACTS: [&str; 2] =
+    ["dict_japanese.dat", "mozc_dictionary_oss_README.txt"];
+
 #[derive(Debug, thiserror::Error)]
 pub enum ResourceError {
     #[error("invalid pinned resource set")]
@@ -84,6 +88,44 @@ impl ResourceSet {
         self.validate()?;
         let encoded = serde_json::to_vec(self).map_err(|_| ResourceError::InvalidManifest)?;
         Ok(hex::encode(Sha256::digest(encoded)))
+    }
+
+    /// 只保留 `names` 中列出的文件，顺序与锁文件一致，source_commit 不变。
+    pub fn only(&self, names: &[&str]) -> ResourceSet {
+        self.filtered(|name| names.contains(&name))
+    }
+
+    /// 去掉 `names` 中列出的文件，是 [`ResourceSet::only`] 的补集。
+    pub fn without(&self, names: &[&str]) -> ResourceSet {
+        self.filtered(|name| !names.contains(&name))
+    }
+
+    /// 目录实际按哪一份清单发货。`on_demand` 中的文件全部不存在（连符号链接也没有）时，说明这是不内置按需文件的发布包，返回去掉它们的子集；其余情况（列表为空、部分存在、是符号链接、读取出错）一律返回完整清单，让 `verify` 像以前一样报告缺一半或文件损坏。
+    pub fn as_shipped_in(&self, directory: &Path, on_demand: &[&str]) -> ResourceSet {
+        let all_absent = !on_demand.is_empty()
+            && on_demand.iter().all(|name| {
+                matches!(
+                    fs::symlink_metadata(directory.join(name)),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                )
+            });
+        if all_absent {
+            self.without(on_demand)
+        } else {
+            self.clone()
+        }
+    }
+
+    fn filtered(&self, keep: impl Fn(&str) -> bool) -> ResourceSet {
+        ResourceSet {
+            source_commit: self.source_commit.clone(),
+            artifacts: self
+                .artifacts
+                .iter()
+                .filter(|artifact| keep(&artifact.name))
+                .cloned()
+                .collect(),
+        }
     }
 }
 
@@ -432,6 +474,143 @@ mod tests {
     }
     fn source(bytes: &[u8]) -> Box<dyn Read> {
         Box::new(Cursor::new(bytes.to_vec()))
+    }
+
+    fn fixture_artifact(name: &str, bytes: &[u8]) -> Artifact {
+        Artifact {
+            name: name.into(),
+            url: format!("https://example.invalid/{name}"),
+            sha256: hex::encode(Sha256::digest(bytes)),
+            size: bytes.len() as u64,
+        }
+    }
+
+    /// 在现有夹具上追加两个按需下载的文件，夹在核心文件中间，用来检查顺序保持不变。
+    fn desktop_specification() -> ResourceSet {
+        let mut set = specification();
+        set.artifacts
+            .push(fixture_artifact(MACOS_ON_DEMAND_ARTIFACTS[0], b"japanese"));
+        set.artifacts
+            .push(fixture_artifact(MACOS_ON_DEMAND_ARTIFACTS[1], b"readme"));
+        set.artifacts
+            .push(fixture_artifact("english.db", b"english"));
+        set
+    }
+
+    fn write_core(directory: &Path) {
+        fs::write(directory.join("msime.db"), b"fixture").unwrap();
+        fs::write(directory.join("english.db"), b"english").unwrap();
+    }
+
+    fn names(set: &ResourceSet) -> Vec<&str> {
+        set.artifacts.iter().map(|a| a.name.as_str()).collect()
+    }
+
+    #[test]
+    fn only_and_without_partition_the_set_in_lock_order() {
+        let spec = desktop_specification();
+        let on_demand = spec.only(&MACOS_ON_DEMAND_ARTIFACTS);
+        let core = spec.without(&MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(
+            names(&on_demand),
+            ["dict_japanese.dat", "mozc_dictionary_oss_README.txt"]
+        );
+        assert_eq!(names(&core), ["msime.db", "english.db"]);
+        assert_eq!(on_demand.source_commit, spec.source_commit);
+        assert_eq!(core.source_commit, spec.source_commit);
+        assert!(on_demand.validate().is_ok() && core.validate().is_ok());
+    }
+
+    #[test]
+    fn a_core_only_directory_ships_and_verifies_the_subset() {
+        let directory = tempfile::tempdir().unwrap();
+        write_core(directory.path());
+        let spec = desktop_specification();
+        let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(names(&shipped), ["msime.db", "english.db"]);
+        let store = ResourceStore::new(directory.path());
+        assert!(store.verify(directory.path(), &shipped).is_ok());
+        assert_ne!(spec.generation().unwrap(), shipped.generation().unwrap());
+    }
+
+    #[test]
+    fn a_half_present_pair_is_verified_against_the_full_set() {
+        let directory = tempfile::tempdir().unwrap();
+        write_core(directory.path());
+        fs::write(directory.path().join("dict_japanese.dat"), b"japanese").unwrap();
+        let spec = desktop_specification();
+        let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(names(&shipped), names(&spec));
+        let error = ResourceStore::new(directory.path())
+            .verify(directory.path(), &shipped)
+            .unwrap_err();
+        assert!(
+            matches!(&error, ResourceError::ExistingGeneration(message) if message.contains("mozc_dictionary_oss_README.txt")),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_complete_directory_ships_the_full_set() {
+        let directory = tempfile::tempdir().unwrap();
+        write_core(directory.path());
+        fs::write(directory.path().join("dict_japanese.dat"), b"japanese").unwrap();
+        fs::write(
+            directory.path().join("mozc_dictionary_oss_README.txt"),
+            b"readme",
+        )
+        .unwrap();
+        let spec = desktop_specification();
+        let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(names(&shipped), names(&spec));
+        assert!(ResourceStore::new(directory.path())
+            .verify(directory.path(), &shipped)
+            .is_ok());
+    }
+
+    /// 用户词库代际取自完整锁文件的 generation，裁剪发货清单不能改变它。
+    #[test]
+    fn the_full_generation_is_unchanged() {
+        let lock: ResourceSet = serde_json::from_str(include_str!(
+            "../../../resources/desktop-dictionary.lock.json"
+        ))
+        .unwrap();
+        let before = lock.generation().unwrap();
+        let empty = tempfile::tempdir().unwrap();
+        let _ = lock.only(&MACOS_ON_DEMAND_ARTIFACTS);
+        let _ = lock.without(&MACOS_ON_DEMAND_ARTIFACTS);
+        let shipped = lock.as_shipped_in(empty.path(), &MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(lock.generation().unwrap(), before);
+        assert_eq!(lock.artifacts.len(), 9);
+        assert_eq!(shipped.artifacts.len(), 7);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_on_demand_file_still_fails_verification() {
+        let directory = tempfile::tempdir().unwrap();
+        write_core(directory.path());
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("dict_japanese.dat");
+        fs::write(&target, b"japanese").unwrap();
+        std::os::unix::fs::symlink(&target, directory.path().join("dict_japanese.dat")).unwrap();
+        let spec = desktop_specification();
+        let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(names(&shipped), names(&spec));
+        assert!(ResourceStore::new(directory.path())
+            .verify(directory.path(), &shipped)
+            .is_err());
+    }
+
+    #[test]
+    fn an_empty_on_demand_list_keeps_the_full_set() {
+        let directory = tempfile::tempdir().unwrap();
+        write_core(directory.path());
+        let spec = desktop_specification();
+        assert_eq!(
+            names(&spec.as_shipped_in(directory.path(), &[])),
+            names(&spec)
+        );
     }
     #[test]
     fn an_artifact_needs_an_https_url() {

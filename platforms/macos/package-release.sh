@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# Build the installable macOS release: the Tauri settings app with the pinned dictionaries (EngineResources), the handwriting model, the licence files and the InputMethodKit bundle 水杉输入法.app embedded as resources, packed into a DMG with a SHA256SUMS beside it.
+# Build the installable macOS release: the Tauri settings app with the pinned core dictionaries (EngineResources), the licence files and the InputMethodKit bundle 水杉输入法.app embedded as resources, packed into a DMG with a SHA256SUMS beside it.
+#
+# 包里只带装好就能打中文的核心词库（msime.db、bigram/trigram、english.db、others.db、sentence-model、helpcodes/、dictionary-manifest.json）。其余三个资源包由 App 在首次用到时下载到 <state_root>/resource-packs/<id>/（state_root 默认 ~/Library/Application Support/app.msime.macos），查找时下载的优先、包内或旧版本记录的副本次之，两者都没有时对应功能显示为不可用：
+#   japanese              dict_japanese.dat 与 mozc README，用户选日文方案时下载
+#   language-dictionaries 粤拼与注音词库及其许可证（resources/language-dictionaries.lock.json），用户选粤拼或注音时下载
+#   handwriting           手写模型及其许可证（resources/handwriting-model.lock.json），首次打开手写面板时下载
+# 打包时在编译之前先把三个资源包按 App 用的同一套安装器、URL 和哈希装一遍，链接失效或内容漂移的资源包不会随发布包出去。
 #
 # The same steps run locally and in release-macos.yml, so a package that passes here is the package CI publishes.
 #
 # Usage: platforms/macos/package-release.sh [VERSION] [OUT_DIR]
 #   VERSION defaults to platforms/macos/version.txt, the version release-macos.yml tags as macos-vVERSION. It becomes the version the settings app reports, so the in-app update check compares like with like, and it must equal the input method's CFBundleShortVersionString (platforms/macos/Info.plist.in).
-#   OUT_DIR defaults to target/macos-package/dist and receives msime-macos-VERSION-ARCH.dmg and SHA256SUMS.
+#   OUT_DIR defaults to target/macos-package/dist and receives msime-macos-VERSION-universal.dmg and SHA256SUMS.
 #
 # Environment:
 #   MSIME_SPARKLE_ROOT            required; directory containing the pinned Sparkle.framework (see README.md)
@@ -14,10 +20,8 @@
 #   MACOS_SIGNING_IDENTITY        a "Developer ID Application: ... (TEAMID)" identity in the keychain. Without it everything is signed ad-hoc: the package builds and the settings app runs, but macOS will not register the embedded input method as an input source (see scripts/install.sh)
 #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_SPECIFIC_PASSWORD
 #                                 when all three are set (and an identity is), the DMG is notarized and stapled
-#   MSIME_REQUIRE_LANGUAGE_DICTIONARIES
-#                                 1 fails the package unless the Cantonese and Zhuyin dictionaries are staged and embedded; otherwise a package without them still builds, with both schemes shown as unavailable
 #
-# The product is built for the host architecture only; the DMG name carries it.
+# 产物是 universal 的：Apple 芯片和 Intel Mac 用同一个包。Rust 产物按两个 target 各编一次再用 lipo 合并，CMake 的目标和 Swift 后端经 CMAKE_OSX_ARCHITECTURES 编出双架构，打包后 check_app 逐个核对包里的 Mach-O 都含两种架构。需要 rustup target add aarch64-apple-darwin x86_64-apple-darwin。
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -33,7 +37,9 @@ out_dir="${2:-$repo_root/target/macos-package/dist}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target}"
 build_dir="${MSIME_MACOS_BUILD_DIR:-$repo_root/target/macos-release}"
 identity="${MACOS_SIGNING_IDENTITY:-}"
-arch="$(uname -m)"
+arch=universal
+architectures=(arm64 x86_64)
+rust_targets=(aarch64-apple-darwin x86_64-apple-darwin)
 bundle_name="水杉输入法.app"
 bundle_id="app.msime.inputmethod.MetasequoiaIME"
 entitlements="$repo_root/platforms/macos/resources/VoiceInput.entitlements"
@@ -45,6 +51,19 @@ cleanup() {
   rm -rf "$work"
 }
 trap cleanup EXIT
+
+# 按 rust_targets 各编一次（其余参数原样传给 cargo build），再把每个 target 的同名产物用 lipo 合并到第一个参数指定的路径。
+cargo_universal() {
+  local output="$1" name="$2" target slices=()
+  shift 2
+  for target in "${rust_targets[@]}"; do
+    cargo build --release --locked --target "$target" "$@"
+    slices+=("$CARGO_TARGET_DIR/$target/release/$name")
+  done
+  mkdir -p "$(dirname "$output")"
+  lipo -create "${slices[@]}" -output "$output"
+}
+universal_dir="$CARGO_TARGET_DIR/universal/release"
 
 if [ -z "$identity" ]; then
   echo "warning: MACOS_SIGNING_IDENTITY is not set; signing ad-hoc. The settings app will run, but macOS will not register the embedded input method as an input source until it is re-signed with a Developer ID (platforms/macos/scripts/install.sh)." >&2
@@ -68,23 +87,24 @@ only() {
   printf '%s\n' "$1"
 }
 
-# ---- Dictionaries and the handwriting model ----
-# The offline handwriting model the settings app's handwriting panel recognises with (apps/desktop/src-tauri/src/platform/macos/macos_handwriting.rs), pinned by resources/handwriting-model.lock.json. It is copied into the app below rather than listed in tauri.macos.conf.json, so a development build of the settings app does not need the 26.8 MB download.
-handwriting_model="$repo_root/target/handwriting-model"
-python3 scripts/fetch_handwriting_model.py --out "$handwriting_model"
+# ---- Core dictionaries ----
 # install_resources prints progress on stderr and the verified directory as its last stdout line. stage-resources.sh re-verifies it and stages target/macos/EngineResources, which tauri.macos.conf.json embeds.
 resources="$(cargo run --quiet --locked -p msime-client-core --example install_resources -- "$work/desktop-resources" | tail -n 1)"
-# The Cantonese and Zhuyin dictionaries pinned by resources/language-dictionaries.lock.json, into target/language-dictionaries where stage-resources.sh looks for them. Until a release is pinned the script prints a skipped line and fetches nothing.
-python3 scripts/fetch_language_dictionaries.py >/dev/null
-bash platforms/macos/stage-resources.sh "$resources"
+# 只暂存核心词库：日文词典那一对文件不进 EngineResources，粤拼、注音词库和手写模型也不再取回，三者都由 App 按需下载。
+MSIME_MACOS_OMIT_ON_DEMAND=1 bash platforms/macos/stage-resources.sh "$resources"
+
+# ---- On-demand resource packs ----
+# 编译之前先用 App 运行时的同一个安装器、同一组 URL 和 SHA-256 把三个资源包装一遍，失败就在这里停下：资源包不在包里，发布出去的 App 只能靠这些地址补齐，地址失效或内容漂移的发布包不该出去。不接管道，安装器的退出码就是这一步的结果。
+cargo run --quiet --locked -p msime-client-core --example install_resource_pack -- "$work/pack-check" >/dev/null
 
 # ---- Input method bundle ----
 # The minimum system version goes to the C/C++ compilers and to CMake separately, never as MACOSX_DEPLOYMENT_TARGET: rustc applies that to host proc-macro dylibs too, which then fail to load (README.md, 构建与本地测试).
 CFLAGS="-mmacosx-version-min=13.0" CXXFLAGS="-mmacosx-version-min=13.0" CMAKE_OSX_DEPLOYMENT_TARGET=13.0 CMAKE_PREFIX_PATH="$(brew --prefix)" \
-  cargo build --release --locked -p msime-host-api
+  cargo_universal "$universal_dir/libmsime_host_api.a" libmsime_host_api.a -p msime-host-api
 # MSIME_HOST_LIBRARY is explicit: the CMake default is target/debug, which would link the debug Rust library into a Release bundle.
 cmake -S platforms/macos -B "$build_dir" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
-  -DMSIME_SPARKLE_ROOT="$MSIME_SPARKLE_ROOT" -DMSIME_HOST_LIBRARY="$CARGO_TARGET_DIR/release/libmsime_host_api.a"
+  -DCMAKE_OSX_ARCHITECTURES="$(IFS=';'; echo "${architectures[*]}")" \
+  -DMSIME_SPARKLE_ROOT="$MSIME_SPARKLE_ROOT" -DMSIME_HOST_LIBRARY="$universal_dir/libmsime_host_api.a"
 # An explicit job count: a bare --parallel with the Makefile generator starts every compile at once and runs a 7 GB runner out of memory (ci-macos.yml).
 cmake --build "$build_dir" --config Release --parallel "$(sysctl -n hw.logicalcpu)"
 ctest --test-dir "$build_dir" --no-tests=error --output-on-failure -R '^bundle-contents$'
@@ -111,15 +131,19 @@ codesign --verify --deep --strict "$staged_bundle"
 # ---- MCP server ----
 # The same compiler flags as the input method: msime-mcp links the Engine through msime-host-api, and those objects are shared with the build above. Nothing in the app starts it; an agent's MCP configuration runs Contents/MacOS/msime-mcp over stdio.
 CFLAGS="-mmacosx-version-min=13.0" CXXFLAGS="-mmacosx-version-min=13.0" CMAKE_OSX_DEPLOYMENT_TARGET=13.0 CMAKE_PREFIX_PATH="$(brew --prefix)" \
-  cargo build --release --locked -p msime-mcp-server --bin msime-mcp
+  cargo_universal "$universal_dir/msime-mcp" msime-mcp -p msime-mcp-server --bin msime-mcp
 
 # ---- Settings app ----
 pnpm install --frozen-lockfile
 pnpm --filter @msime/desktop build
 # Compiled with cargo and only then bundled by `tauri bundle`, not with `tauri build`: tauri build exports MACOSX_DEPLOYMENT_TARGET from bundle.macOS.minimumSystemVersion, rustc applies it to the host proc-macro dylibs as well, and on current macOS those come out with a mis-aligned LINKEDIT string pool that dlopen rejects, so the build fails with "can't find crate". cargo leaves the variable out of its fingerprint, so a broken proc-macro would also be reused by later builds. tauri/custom-protocol is what tauri build would enable (the binary serves the embedded frontend instead of devUrl), and TAURI_CONFIG sets the version the app reports, as package-container.sh does for Linux.
-env -u MACOSX_DEPLOYMENT_TARGET TAURI_CONFIG="{\"version\":\"$version\"}" \
-  CFLAGS="-mmacosx-version-min=13.0" CXXFLAGS="-mmacosx-version-min=13.0" CMAKE_OSX_DEPLOYMENT_TARGET=13.0 CMAKE_PREFIX_PATH="$(brew --prefix)" \
-  cargo build --release --locked -p msime-desktop --bin msime-desktop --features tauri/custom-protocol
+# cargo_universal 是 shell 函数，env 只能执行外部程序，所以在子 shell 里 unset 再调用。合并后的 universal 可执行文件放在 target/release/msime-desktop，tauri bundle 从那里取。
+(
+  unset MACOSX_DEPLOYMENT_TARGET
+  TAURI_CONFIG="{\"version\":\"$version\"}" \
+    CFLAGS="-mmacosx-version-min=13.0" CXXFLAGS="-mmacosx-version-min=13.0" CMAKE_OSX_DEPLOYMENT_TARGET=13.0 CMAKE_PREFIX_PATH="$(brew --prefix)" \
+    cargo_universal "$CARGO_TARGET_DIR/release/msime-desktop" msime-desktop -p msime-desktop --bin msime-desktop --features tauri/custom-protocol
+)
 tauri_bundle_dir="$CARGO_TARGET_DIR/release/bundle/macos"
 rm -rf "$tauri_bundle_dir"
 # No APPLE_SIGNING_IDENTITY: Tauri would sign the nested input method again without its entitlements. The outer app is signed below instead. tauri.macos.conf.json is merged automatically on macOS and is what embeds EngineResources and the input method.
@@ -131,21 +155,13 @@ app_name="$(basename "$app")"
 find "$app/Contents/Resources" -maxdepth 1 -name '*.app' -exec rm -rf {} +
 ditto "$staged_bundle" "$app/Contents/Resources/$bundle_name"
 # A helper executable beside the app's own is signed on its own first, and the outer signature below seals it.
-ditto "$CARGO_TARGET_DIR/release/msime-mcp" "$app/Contents/MacOS/msime-mcp"
+ditto "$universal_dir/msime-mcp" "$app/Contents/MacOS/msime-mcp"
 sign "$app/Contents/MacOS/msime-mcp"
 # Non-English candidate glosses (scripts/fetch_offline_glosses.py), copied here rather than listed in tauri.macos.conf.json because Tauri fails on a resource path that does not exist and the package must still build without them. The input method reads them beside EngineResources.
 glosses="$repo_root/target/macos/offline-glosses"
 if [ -d "$glosses" ]; then
   ditto "$glosses" "$app/Contents/Resources/offline-glosses"
 fi
-# The Cantonese and Zhuyin dictionaries, copied for the same reason as the glosses. The input method finds them beside EngineResources; without them both schemes fall back.
-languages="$repo_root/target/macos/language-dictionaries"
-if [ -d "$languages" ]; then
-  ditto "$languages" "$app/Contents/Resources/language-dictionaries"
-fi
-# Beside the Zinnia licence tauri.macos.conf.json already put in Contents/Resources/handwriting.
-mkdir -p "$app/Contents/Resources/handwriting"
-cp "$handwriting_model/handwriting-zh_CN.model" "$handwriting_model/HandwritingModel-LICENSE.txt" "$app/Contents/Resources/handwriting/"
 # Without --deep, so the input method keeps the signature and entitlements it was given above; the outer signature seals it as a nested resource.
 sign "$app"
 codesign --verify --deep --strict "$app"
@@ -155,28 +171,28 @@ check_app() {
   local root="$1"
   local resources_dir="$root/Contents/Resources"
   test -d "$resources_dir/EngineResources"
-  cargo run --quiet --locked -p msime-client-core --example verify_resources -- "$resources_dir/EngineResources" >/dev/null
+  cargo run --quiet --locked -p msime-client-core --example verify_resources -- --omit-on-demand "$resources_dir/EngineResources" >/dev/null
   for table in helpcode.txt zrm_helpcode_big_unique.txt shouyou2_0_helpcode.txt shouyouplus_helpcode.txt xiaohe_helpcode.txt jiajia_helpcode.txt NOTICE.md NOTICE-jiajia.md; do
     test -f "$resources_dir/EngineResources/helpcodes/$table"
   done
-  test -f "$resources_dir/handwriting/handwriting-zh_CN.model"
-  test -f "$resources_dir/handwriting/HandwritingModel-LICENSE.txt"
+  # 按需下载的资源包不该出现在包里：日文词典、粤拼与注音词库、手写模型都由 App 下载到 resource-packs/<id>/。识别器代码的 Zinnia 许可证仍由 tauri.macos.conf.json 放进包里。
+  test ! -e "$resources_dir/EngineResources/dict_japanese.dat"
+  test ! -e "$resources_dir/EngineResources/mozc_dictionary_oss_README.txt"
+  test ! -e "$resources_dir/language-dictionaries"
+  test ! -e "$resources_dir/handwriting/handwriting-zh_CN.model"
   test -f "$resources_dir/handwriting/Zinnia-LICENSE.txt"
+  # 核心词库的体积预算（KiB）。按需资源包被误放回 EngineResources，或者核心词库意外变大，都会在这里报出来。
+  local engine_kib
+  engine_kib="$(du -sk "$resources_dir/EngineResources" | cut -f1)"
+  test "$engine_kib" -le 115000 || {
+    echo "EngineResources is ${engine_kib} KiB, over the 115000 KiB core-dictionary budget: $resources_dir/EngineResources" >&2
+    exit 1
+  }
   test -f "$resources_dir/Licenses/THIRD_PARTY_NOTICES.txt"
   test -x "$root/Contents/MacOS/msime-mcp"
   codesign --verify --strict "$root/Contents/MacOS/msime-mcp"
   if [ -d "$glosses" ]; then
     test -f "$resources_dir/offline-glosses/offline-glosses-NOTICE.txt"
-  fi
-  # A release build must carry both dictionaries; any other build carries whatever was staged, each dictionary with its licence.
-  if [ "${MSIME_REQUIRE_LANGUAGE_DICTIONARIES:-0}" = 1 ] || [ -d "$languages" ]; then
-    local pair
-    for pair in cantonese.db:rime_cantonese_LICENSE.txt zhuyin.db:libchewing_data_LICENSE.txt; do
-      if [ "${MSIME_REQUIRE_LANGUAGE_DICTIONARIES:-0}" = 1 ] || [ -f "$languages/${pair%%:*}" ]; then
-        test -s "$resources_dir/language-dictionaries/${pair%%:*}"
-        test -f "$resources_dir/language-dictionaries/${pair#*:}"
-      fi
-    done
   fi
   local nested
   nested="$(only "$resources_dir"/*.app)"
@@ -191,6 +207,20 @@ check_app() {
   }
   codesign --verify --deep --strict "$nested"
   codesign --verify --deep --strict "$root"
+  # universal 包里任何一个只含单一架构的 Mach-O，都会让另一种 Mac 上的输入法、设置应用或某个功能起不来，而单一架构的开发机上看不出来。
+  local file
+  while IFS= read -r -d '' file; do
+    if file -b "$file" | grep -q '^Mach-O'; then
+      # lipo -verify_arch 一次只接受一种架构（传多个会报 requires exactly one input file），所以逐个核对。
+      local architecture
+      for architecture in "${architectures[@]}"; do
+        lipo "$file" -verify_arch "$architecture" || {
+          echo "missing $architecture ($(lipo -archs "$file")): $file" >&2
+          exit 1
+        }
+      done
+    fi
+  done < <(find "$root" -type f -print0)
 }
 check_app "$app"
 
@@ -237,4 +267,11 @@ hdiutil detach -quiet "$mount_point"
 mount_point=""
 
 (cd "$out_dir" && shasum -a 256 -- *.dmg > SHA256SUMS && shasum -a 256 -c SHA256SUMS)
+# 体积报告：DMG 本身和 App 的 Contents/Resources。在 GitHub Actions 里同时写进这一步的摘要，方便逐次对比。
+dmg_bytes="$(stat -f %z "$dmg")"
+resources_kib="$(du -sk "$app/Contents/Resources" | cut -f1)"
+echo "DMG size: $dmg_bytes bytes; Contents/Resources: $resources_kib KiB"
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  printf '### macOS package size\n\n- %s: %s bytes\n- Contents/Resources: %s KiB\n' "$(basename "$dmg")" "$dmg_bytes" "$resources_kib" >> "$GITHUB_STEP_SUMMARY"
+fi
 echo "macOS package: $dmg"

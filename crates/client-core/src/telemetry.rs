@@ -35,6 +35,11 @@ const LOCK_FILE: &str = "telemetry.lock";
 
 /// Most events kept for delivery; the oldest are dropped first.
 pub const MAX_QUEUED_EVENTS: usize = 64;
+
+fn telemetry_queue_capacity(input_len: usize) -> usize {
+    input_len.min(MAX_QUEUED_EVENTS)
+}
+
 /// The server's limit on a crash message, in Unicode scalar values.
 pub const MAX_MESSAGE_CHARS: usize = 1000;
 /// The server's limit on a crash stack, in Unicode scalar values.
@@ -440,7 +445,7 @@ impl TelemetryStore {
             }
             self.read_queue()?
         };
-        let mut done = Vec::new();
+        let mut done = Vec::with_capacity(pending.len());
         let mut report = FlushReport::default();
         let mut retry_after = None;
         for event in &pending {
@@ -577,7 +582,7 @@ impl TelemetryStore {
         let Ok(serde_json::Value::Array(values)) = serde_json::from_slice(&bytes) else {
             return (Vec::new(), true);
         };
-        let mut queue = Vec::new();
+        let mut queue = Vec::with_capacity(telemetry_queue_capacity(values.len()));
         let mut changed = false;
         for value in values {
             let Ok(original) = serde_json::from_value::<TelemetryEvent>(value) else {

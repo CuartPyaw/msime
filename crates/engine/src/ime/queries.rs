@@ -165,10 +165,11 @@ impl CandidateQueries {
         if raw.is_empty() {
             return Vec::new();
         }
-        let mut candidates = vec![WordItem::new("", raw, 0, CandidateSource::Generated, "")];
         let completions = self
             .english_dictionary()
             .query_prefix(&raw.to_ascii_lowercase(), MODE_ENGLISH_LIMIT);
+        let mut candidates = Vec::with_capacity(completions.len().saturating_add(1));
+        candidates.push(WordItem::new("", raw, 0, CandidateSource::Generated, ""));
         candidates.extend(
             completions
                 .into_iter()
@@ -257,6 +258,8 @@ fn insert_mixed_rows(
             .filter_map(|(item, unique)| unique.then_some(item))
             .collect(),
     ];
+    let extra = groups.iter().map(Vec::len).sum();
+    candidates.reserve(extra);
 
     let has_source = |source| candidates.iter().any(|item| item.source == source);
     let mut slot = if has_source(CandidateSource::AiSuggestion) {
@@ -291,6 +294,8 @@ fn unique_mask<'a>(rows: &'a [WordItem], seen: &mut HashSet<&'a str>) -> Vec<boo
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::Connection;
+
     use super::*;
 
     fn row(word: &str, source: CandidateSource) -> WordItem {
@@ -378,6 +383,25 @@ mod tests {
             Vec::new(),
         );
         assert_eq!(words(&list), vec!["Ni", "😀", "Ninja"]);
+    }
+
+    #[test]
+    fn mixed_rows_reserve_the_extra_candidate_capacity() {
+        let list = insert_mixed_rows(
+            vec![row("你", CandidateSource::Database)],
+            (0..5)
+                .map(|index| row(&format!("en{index}"), CandidateSource::EnglishDictionary))
+                .collect(),
+            (0..3)
+                .map(|index| row(&format!("😀{index}"), CandidateSource::Emoji))
+                .collect(),
+            (0..3)
+                .map(|index| row(&format!("ka{index}"), CandidateSource::Kaomoji))
+                .collect(),
+        );
+
+        assert_eq!(list.len(), 12);
+        assert_eq!(list.capacity(), 12);
     }
 
     #[test]
@@ -486,5 +510,43 @@ mod tests {
             queries.english.is_none(),
             "no pass-through opens the English dictionary"
         );
+    }
+
+    #[test]
+    fn temporary_english_reserves_the_generated_row_capacity() {
+        let directory = tempfile::tempdir().unwrap();
+        let words = [
+            ("he00", "he00", 0),
+            ("he01", "he01", 0),
+            ("he02", "he02", 0),
+            ("he03", "he03", 0),
+            ("he04", "he04", 0),
+            ("he05", "he05", 0),
+            ("he06", "he06", 0),
+            ("he07", "he07", 0),
+            ("he08", "he08", 0),
+            ("he09", "he09", 0),
+        ];
+        let database = directory.path().join(assets::ENGLISH_DICTIONARY);
+        crate::ensure_english_schema(&database).unwrap();
+        let connection = Connection::open(&database).unwrap();
+        for word in words {
+            connection
+                .execute(
+                    "INSERT INTO english_words(word,display,weight) VALUES(?1,?2,?3)",
+                    word,
+                )
+                .unwrap();
+        }
+        let paths = RuntimePaths {
+            dictionaries: directory.path().to_owned(),
+            ..RuntimePaths::default()
+        };
+        let mut queries = CandidateQueries::new(&paths, ShuangpinProfileKind::Xiaohe);
+
+        let candidates = queries.temporary_english("he");
+
+        assert_eq!(candidates.len(), 11);
+        assert_eq!(candidates.capacity(), 11);
     }
 }

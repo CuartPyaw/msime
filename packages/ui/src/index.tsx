@@ -26,6 +26,7 @@ import { clipboardHistoryEnabled } from "./settings/clipboard-history-preference
 import { settingsThemePreferences } from "./settings/settings-theme-preferences";
 import type { VoiceDeviceReader } from "./voice/voice-device-picker";
 import type { LocalVoiceModelClient } from "./voice/local-models";
+import type { ResourcePackClient } from "./settings/resource-packs";
 import { useEffect, useRef, useState } from "react";
 import {
   type DictionaryEntry,
@@ -113,6 +114,7 @@ import { useClipboardHistoryToggle } from "./settings/use-clipboard-history-togg
 import { useTouchKeyboardSchemeSelection } from "./settings/use-touch-keyboard-scheme-selection";
 import { useSettingsDestinationActions } from "./settings/use-settings-destination-actions";
 import { useMacosSettings } from "./settings/use-macos-settings";
+import type { MacosInputModesClient } from "./settings/macos-input-mode-entries-section";
 import { useWindowState } from "./settings/use-window-state";
 import { useAppVersion } from "./settings/use-app-version";
 import { supportDiagnostics } from "./settings/support-diagnostics";
@@ -300,6 +302,11 @@ export {
   type UseSettingsDestinationActionsOptions,
 } from "./settings/use-settings-destination-actions";
 export { useMacosSettings, type UseMacosSettingsOptions } from "./settings/use-macos-settings";
+export {
+  MacosInputModeEntriesSection,
+  macosInputModeEntries,
+  type MacosInputModesClient,
+} from "./settings/macos-input-mode-entries-section";
 export { useWindowState, type UseWindowStateOptions } from "./settings/use-window-state";
 export {
   useSettingsWindowInteractions,
@@ -1381,6 +1388,16 @@ export {
   type LocalVoiceModelList,
   type LocalVoiceModelProgress,
 } from "./voice/local-models";
+export {
+  ResourcePackRow,
+  resourcePackForScheme,
+  resourcePackTitles,
+  useResourcePacks,
+  type ResourcePackClient,
+  type ResourcePackId,
+  type ResourcePacks,
+  type ResourcePackStatus,
+} from "./settings/resource-packs";
 
 export type KeybindingPreferences = {
   switch_language_shift: boolean;
@@ -1429,6 +1446,8 @@ export interface HostCapabilities {
   floating_toolbar_handwriting: boolean;
   /** The toolbar carries a voice input button, for the same reason. */
   floating_toolbar_voice: boolean;
+  /** 工具栏带切换输入方案的按钮（目前只有 macOS）。 */
+  floating_toolbar_input_scheme: boolean;
   mode_switch_shortcuts: boolean;
   panel_shortcuts: boolean;
   number_row_selection: boolean;
@@ -1820,6 +1839,8 @@ export { dictionaryKindKeyHint } from "./settings/pages/dictionary-page";
 export type FloatingToolbarPreferences = {
   enabled: boolean;
   english_mode: boolean;
+  /** 切换输入方案的按钮。 */
+  input_scheme: boolean;
   fullwidth: boolean;
   punctuation: boolean;
   character_set: boolean;
@@ -1947,6 +1968,8 @@ export interface SettingsClient {
   restartInputMethod?: () => Promise<void>;
   /** macOS installs/updates the separate InputMethodKit bundle before registering it. */
   installInputSource?: () => Promise<void>;
+  /** macOS 上哪几个输入模式已经加入输入法列表，用于「方案」里的「菜单栏入口」提示。 */
+  macosInputModes?: MacosInputModesClient;
   /** macOS installs or refreshes the input method on every start; this reports what that did. */
   inputSourceStartup?: {
     /** Resolves once the start-time check has finished; `null` when it did not run for this launch. Whether the source is enabled is read afresh on every call, and nothing is installed again, so it is safe to call repeatedly. */
@@ -1983,6 +2006,8 @@ export interface SettingsClient {
   pickVoiceModelPath?: () => Promise<string | null>;
   /** The host's on-device speech model store; hosts that provide it offer the `local` provider with a model manager. */
   localVoiceModels?: LocalVoiceModelClient;
+  /** 按需下载的资源包（日文词库、粤语与注音词库、手写模型）。只有 macOS 提供：发布包不再内置它们，选用对应方案时由设置页下载。 */
+  resourcePacks?: ResourcePackClient;
   windowControl?: (action: "minimize" | "maximize" | "restore" | "close") => Promise<void>;
   beginWindowDrag?: () => Promise<void>;
   resizeWindow?: (edge: "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw") => Promise<void>;
@@ -2492,15 +2517,9 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     selectHome: selectHomeScheme,
     setEnabled: setTouchKeyboardSchemeEnabled,
   } = useTouchKeyboardSchemeSelection({ draft, setDraft });
-  // Every platform sees every mode. macOS used to hide emoji, kaomoji and temporary Japanese on the
-  // grounds that its bundle shipped only msime.db and english.db, but others.db and dict_japanese.dat have
-  // been in resources/desktop-dictionary.lock.json since 780a9381b and tauri.macos.conf.json bundles the
-  // whole verified set - so the switches were hidden for modes that worked. Temporary English, gated the
-  // same way on english.db, was visible throughout, which is how inconsistent this had become.
+  // 每个平台都显示全部快捷模式的开关。macOS 以前以发布包只带 msime.db 和 english.db 为由隐藏 Emoji、颜文字和临时日语，但 others.db 早已在 resources/desktop-dictionary.lock.json 里并随包发布，隐藏开关只是藏起了能用的功能；同样依赖 english.db 的临时英文却一直显示，前后并不一致。
   //
-  // A host missing a catalog is still handled, and handled better than by hiding a switch: the runtime
-  // turns that mode off when its resource is absent, so the trigger key inserts its capital instead of
-  // being swallowed.
+  // 现在 macOS 发布包不再内置 dict_japanese.dat，改为按需下载（输入页「临时日语」开关下方提供下载）。缺资源的情况仍由运行时处理，而且比隐藏开关处理得更好：资源不在时运行时关闭对应模式（临时日语在日文词库下载前不可用），触发键照常输入大写字母而不是被吞掉。
   const clipboardHistory = clipboardHistoryEnabled(iosPlatform, draft);
   const toggleClipboardHistory = useClipboardHistoryToggle({
     draft,

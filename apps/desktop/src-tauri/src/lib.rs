@@ -57,6 +57,7 @@ use platform::linux::{
 use platform::macos::{
     macos_account, macos_cloud_clipboard, macos_cloud_dictionary, macos_data_directory,
     macos_handwriting, macos_input_source, macos_keyboard, macos_launch, macos_panel_session,
+    macos_resource_packs,
 };
 #[cfg(any(target_os = "ios", target_os = "android"))]
 use platform::mobile::mobile_account_helpers::parse_cloud_dictionary_request;
@@ -190,11 +191,14 @@ fn host_capabilities(app: tauri::AppHandle) -> HostCapabilities {
     let host_options = app
         .try_state::<DictionaryHostOptions>()
         .and_then(|options| options.snapshot().ok());
-    drop_uninstalled_language_schemes(
-        &mut capabilities,
-        host_options.as_ref(),
-        cfg!(target_os = "windows"),
-    );
+    // macOS 上选用粤拼/注音会下载对应的语言词库，所以即便还没下载，这两个方案也保持可选。
+    if !cfg!(target_os = "macos") {
+        drop_uninstalled_language_schemes(
+            &mut capabilities,
+            host_options.as_ref(),
+            cfg!(target_os = "windows"),
+        );
+    }
     capabilities
 }
 
@@ -2973,6 +2977,17 @@ fn leave_first_install_window(
     window.center().map_err(unavailable)
 }
 
+/// 用户已经加入输入法列表的本输入法模式（完整标识符）；读不到列表时为 `None`。设置页据此提示还没加入的模式该去系统设置的哪个语言下添加。
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn enabled_input_modes() -> Result<Option<Vec<String>>, HostActionError> {
+    tauri::async_runtime::spawn_blocking(macos_input_source::enabled_input_modes)
+        .await
+        .map_err(|_| HostActionError {
+            code: "unavailable",
+        })
+}
+
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn open_input_source_settings() -> Result<(), HostActionError> {
@@ -3786,13 +3801,11 @@ fn discover_session_provider_in(
     Some(path)
 }
 
-/// Locate the Engine's packaged handwriting model: the host options first, then
-/// an explicit override, then the layouts the installers produce. Only an
-/// absolute path to a file that exists is accepted, so a stale setting cannot
-/// send strokes at something else.
+/// 查找引擎的手写模型：先看 HostOptions 的 `handwriting_model`，再看 `MSIME_HANDWRITING_MODEL`，macOS 上接着是偏好目录（同一份文档里的绝对 `preferences_directory`）下已下载的手写资源包，然后是旧版本打进 app 的模型，最后是各安装器的固定布局。只接受指向已存在文件的绝对路径，过期的设置不会把笔画送给别的文件。
 fn packaged_handwriting_model(host_options: &str) -> Option<PathBuf> {
-    serde_json::from_str::<Value>(host_options)
-        .ok()
+    let document = serde_json::from_str::<Value>(host_options).ok();
+    document
+        .as_ref()
         .and_then(|value| {
             value
                 .get("handwriting_model")
@@ -3805,6 +3818,16 @@ fn packaged_handwriting_model(host_options: &str) -> Option<PathBuf> {
             std::env::var_os("MSIME_HANDWRITING_MODEL")
                 .filter(|value| !value.is_empty())
                 .map(PathBuf::from)
+        })
+        .or_else(|| {
+            #[cfg(target_os = "macos")]
+            {
+                downloaded_handwriting_model(document.as_ref())
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                None
+            }
         })
         .or_else(|| {
             #[cfg(target_os = "macos")]
@@ -3825,6 +3848,17 @@ fn packaged_handwriting_model(host_options: &str) -> Option<PathBuf> {
             )
         })
         .filter(|path| path.is_absolute() && path.is_file())
+}
+
+/// HostOptions 文档里绝对 `preferences_directory` 下已下载的手写模型；相对路径一律忽略。
+#[cfg(any(target_os = "macos", test))]
+fn downloaded_handwriting_model(document: Option<&Value>) -> Option<PathBuf> {
+    let state_root = document?
+        .get("preferences_directory")
+        .and_then(Value::as_str)
+        .map(std::path::Path::new)
+        .filter(|path| path.is_absolute())?;
+    platform::macos::macos_handwriting::downloaded_model(state_root)
 }
 
 #[cfg(target_os = "linux")]
@@ -4874,6 +4908,9 @@ pub fn run() {
             #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
             app.manage(voice_sessions::VoiceSessions::default());
             app.manage(voice::local_models::LocalModelInstalls::default());
+            // 偏好和安装登记都已就位，在后台补齐已保存方案需要的资源包。
+            #[cfg(target_os = "macos")]
+            macos_resource_packs::ensure_saved_scheme_packs(app.handle().clone());
             #[cfg(target_os = "linux")]
             app.manage(linux_setup::LinuxSetupState::default());
             // Native packaging/installer supplies this verified HostOptions JSON.
@@ -5175,6 +5212,12 @@ pub fn run() {
             voice::local_models::voice_local_model_install,
             voice::local_models::voice_local_model_cancel,
             voice::local_models::voice_local_model_remove,
+            #[cfg(target_os = "macos")]
+            macos_resource_packs::resource_packs,
+            #[cfg(target_os = "macos")]
+            macos_resource_packs::resource_pack_install,
+            #[cfg(target_os = "macos")]
+            macos_resource_packs::resource_pack_cancel,
             submit_handwriting_candidate,
             open_external_url,
             #[cfg(target_os = "macos")]
@@ -5205,6 +5248,8 @@ pub fn run() {
             leave_first_install_window,
             #[cfg(target_os = "macos")]
             open_input_source_settings,
+            #[cfg(target_os = "macos")]
+            enabled_input_modes,
             #[cfg(target_os = "macos")]
             data_directory_status,
             #[cfg(target_os = "macos")]

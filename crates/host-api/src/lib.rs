@@ -24,6 +24,7 @@ use msime_client_core::preferences::{
 use msime_client_core::punctuation::{
     route as punctuation_route, PunctuationContext, PunctuationRoute,
 };
+use msime_client_core::resource_packs::{self, ResourcePack};
 use msime_client_core::resources::{ResourceSet, ResourceStore, VerifiedMarker};
 use msime_client_core::typing_statistics::{TypingSource, TypingStatisticsStore, RANKS};
 use msime_client_core::voice::doubao_frame::{
@@ -216,6 +217,12 @@ struct HostSession {
     sound: key_sound::SessionSound,
     /// The command-table and name-list files `options` was filled from.
     plugin_tables: plugin_tables::PluginTables,
+    /// 按需下载资源包所在的状态目录（HostOptions 的 `preferences_directory`），不是绝对路径时为空。
+    state_root: Option<PathBuf>,
+    /// HostOptions 记录的 `language_dictionaries` 目录：资源包里没有某个词库时退回这里的那份。
+    recorded_language_dictionaries: Option<PathBuf>,
+    /// 会话打开后有资源包新装好（或被移除），`options` 里的词典路径已经更新，Engine 还要在输入空闲时重建。
+    resources_pending: bool,
     // Declared after runtime so the Engine is dropped before releasing access.
     _dictionary_access: DictionaryAccess,
 }
@@ -228,7 +235,12 @@ fn apply_local_mode_resource_gates(options: &mut EngineOptions) {
     let resources = std::path::Path::new(&options.resources);
     let has_emoji_catalog = resources.join("others.db").is_file();
     let has_english_dictionary = resources.join("english.db").is_file();
-    let has_japanese_model = resources.join("dict_japanese.dat").is_file();
+    // 下载的日文词典写在 `japanese_dictionary` 里；为空时 Engine 读资源目录里的那份。
+    let has_japanese_model = if options.japanese_dictionary.is_empty() {
+        resources.join("dict_japanese.dat").is_file()
+    } else {
+        Path::new(&options.japanese_dictionary).is_file()
+    };
     options.local_emoji &= has_emoji_catalog;
     options.local_kaomoji &= has_emoji_catalog;
     options.local_temporary_english &= has_english_dictionary;
@@ -340,80 +352,78 @@ impl HostSession {
                     .map_err(|e| e.to_string())?;
             }
         }
-        let Some(snapshot) = &self.requested else {
-            return Ok(None);
-        };
-        if !self.preferences_pending || !self.runtime.is_idle() {
+        if !(self.preferences_pending || self.resources_pending) || !self.runtime.is_idle() {
             return Ok(None);
         }
+        // 只因资源包变化而重建时，没有新请求的偏好，按已应用的那份重建。
+        let preferences = self
+            .requested
+            .as_ref()
+            .map(|snapshot| &snapshot.preferences)
+            .unwrap_or(&self.applied)
+            .clone();
         let mut options = self.options.clone();
         let (scheme, fallback) = effective_scheme(
-            &snapshot.preferences,
+            &preferences,
             compiled_input_schemes(),
             &LanguageDictionaries::of_options(&self.options),
         );
         options.scheme = scheme_code(scheme);
-        options.vietnamese_input_method =
-            vietnamese_input_method_code(snapshot.preferences.vietnamese);
-        options.vietnamese_tone_style = vietnamese_tone_style_code(snapshot.preferences.vietnamese);
-        options.shuangpin_profile = profile_code(snapshot.preferences.shuangpin_profile);
-        options.shuangpin_preedit_uses_raw = snapshot.preferences.shuangpin_preedit_uses_raw;
-        options.learning = snapshot.preferences.learning;
-        options.autocorrect_transposition = snapshot.preferences.quanpin.autocorrect_transposition;
-        options.autocorrect_neighbor = snapshot.preferences.quanpin.autocorrect_neighbor;
-        options.fuzzy_pinyin_rules = snapshot.preferences.fuzzy_pinyin.active_rules();
-        options.wubi_mixed_pinyin = snapshot.preferences.wubi_mixed_pinyin;
-        options.frequency_mode = snapshot.preferences.frequency.mode.as_str().into();
-        options.frequency_trigger_count = snapshot.preferences.frequency.trigger_count;
-        options.frequency_linear_step = snapshot.preferences.frequency.linear_step;
-        options.mixed_english = snapshot.preferences.mixed_input.english;
-        options.english_minimum_prefix = snapshot.preferences.mixed_input.minimum_prefix;
-        options.mixed_emoji = snapshot.preferences.mixed_input.emoji;
-        options.mixed_kaomoji = snapshot.preferences.mixed_input.kaomoji;
-        options.local_unicode = snapshot.preferences.local_modes.unicode;
-        options.local_date_time = snapshot.preferences.local_modes.date_time;
-        options.local_quick_phrase = snapshot.preferences.local_modes.quick_phrase;
-        options.local_emoji = snapshot.preferences.local_modes.emoji;
-        options.local_kaomoji = snapshot.preferences.local_modes.kaomoji;
-        options.local_super_jianpin = snapshot.preferences.local_modes.super_jianpin;
-        options.local_temporary_english = snapshot.preferences.local_modes.temporary_english;
-        options.local_temporary_japanese = snapshot.preferences.local_modes.temporary_japanese;
-        options.local_expression = snapshot.preferences.local_modes.expression;
-        options.local_command = snapshot.preferences.local_modes.command;
-        options.local_mention = snapshot.preferences.local_modes.mention;
+        options.vietnamese_input_method = vietnamese_input_method_code(preferences.vietnamese);
+        options.vietnamese_tone_style = vietnamese_tone_style_code(preferences.vietnamese);
+        options.shuangpin_profile = profile_code(preferences.shuangpin_profile);
+        options.shuangpin_preedit_uses_raw = preferences.shuangpin_preedit_uses_raw;
+        options.learning = preferences.learning;
+        options.autocorrect_transposition = preferences.quanpin.autocorrect_transposition;
+        options.autocorrect_neighbor = preferences.quanpin.autocorrect_neighbor;
+        options.fuzzy_pinyin_rules = preferences.fuzzy_pinyin.active_rules();
+        options.wubi_mixed_pinyin = preferences.wubi_mixed_pinyin;
+        options.frequency_mode = preferences.frequency.mode.as_str().into();
+        options.frequency_trigger_count = preferences.frequency.trigger_count;
+        options.frequency_linear_step = preferences.frequency.linear_step;
+        options.mixed_english = preferences.mixed_input.english;
+        options.english_minimum_prefix = preferences.mixed_input.minimum_prefix;
+        options.mixed_emoji = preferences.mixed_input.emoji;
+        options.mixed_kaomoji = preferences.mixed_input.kaomoji;
+        options.local_unicode = preferences.local_modes.unicode;
+        options.local_date_time = preferences.local_modes.date_time;
+        options.local_quick_phrase = preferences.local_modes.quick_phrase;
+        options.local_emoji = preferences.local_modes.emoji;
+        options.local_kaomoji = preferences.local_modes.kaomoji;
+        options.local_super_jianpin = preferences.local_modes.super_jianpin;
+        options.local_temporary_english = preferences.local_modes.temporary_english;
+        options.local_temporary_japanese = preferences.local_modes.temporary_japanese;
+        options.local_expression = preferences.local_modes.expression;
+        options.local_command = preferences.local_modes.command;
+        options.local_mention = preferences.local_modes.mention;
         // 先定下辅助码设置：插件表的戳要看当前方案的辅助码是否打开、选了哪个辅助码表包。
-        let helpcode = helpcode_for_scheme(&snapshot.preferences, scheme);
+        let helpcode = helpcode_for_scheme(&preferences, scheme);
         options.helpcode = helpcode.enabled;
         options.show_helpcode = helpcode.show_in_candidate_window;
         options.helpcode_schema = helpcode.schema.as_str().into();
         let plugin_root = self.plugin_roots.installed.as_deref();
-        let plugin_tables = plugin_tables::PluginTables::stamp(
-            plugin_root,
-            &options,
-            &snapshot.preferences.plugins,
-        );
+        let plugin_tables =
+            plugin_tables::PluginTables::stamp(plugin_root, &options, &preferences.plugins);
         plugin_tables.fill(&self.plugin_tables, plugin_root, &mut options);
         options.sentence_association =
-            engine_sentence_association(&snapshot.preferences.sentence_association);
+            engine_sentence_association(&preferences.sentence_association);
         // Unconditional, because `Runtime::crop_alternative_readings` runs whether or not a model is
         // attached: the host always shows one whole-sentence reading. Asking for the rest only ever
         // gives it more to choose from, and even with no model the engine's own pick among them is
         // better than the one it makes when it searches without alternatives.
         options.sentence_alternatives = true;
         apply_local_mode_resource_gates(&mut options);
-        options.paired_punctuation = snapshot.preferences.paired_punctuation;
-        options.punctuation_lock = punctuation_lock_code(snapshot.preferences.punctuation_lock);
-        options.chinese_punctuation = engine_chinese_punctuation(
-            snapshot.preferences.chinese_punctuation,
-            options.punctuation_lock,
-        );
+        options.paired_punctuation = preferences.paired_punctuation;
+        options.punctuation_lock = punctuation_lock_code(preferences.punctuation_lock);
+        options.chinese_punctuation =
+            engine_chinese_punctuation(preferences.chinese_punctuation, options.punctuation_lock);
         // Build and validate first; errors leave the original session usable.
         let mut engine = Session::new(&options).map_err(|e| e.to_string())?;
         if self.punctuation_override.is_some() || self.punctuation_lock_override.is_some() {
             engine
                 .set_chinese_punctuation_enabled(engine_chinese_punctuation(
                     self.punctuation_override
-                        .unwrap_or(snapshot.preferences.chinese_punctuation),
+                        .unwrap_or(preferences.chinese_punctuation),
                     self.punctuation_lock_override
                         .unwrap_or(options.punctuation_lock),
                 ))
@@ -430,7 +440,7 @@ impl HostSession {
                 .map_err(|e| e.to_string())?;
         }
         let layout_changed =
-            snapshot.preferences.touch_keyboard_layout != self.applied.touch_keyboard_layout;
+            preferences.touch_keyboard_layout != self.applied.touch_keyboard_layout;
         let nine_key_scheme = SchemeType::from_u8(options.scheme).is_some_and(SchemeType::nine_key);
         let next_nine_key_override = if nine_key_scheme && !layout_changed {
             self.nine_key_override
@@ -439,7 +449,7 @@ impl HostSession {
         };
         let nine_key_mode = nine_key_scheme
             && next_nine_key_override.unwrap_or(matches!(
-                snapshot.preferences.touch_keyboard_layout,
+                preferences.touch_keyboard_layout,
                 TouchKeyboardLayout::NineKey
             ));
         if nine_key_mode {
@@ -452,22 +462,23 @@ impl HostSession {
             .map_err(|e| e.to_string())?;
         // The places of `@` mode are not an engine option: every new engine starts with them off, so the switch is carried over on each rebuild.
         engine
-            .set_mention_places(snapshot.preferences.local_modes.mention_places)
+            .set_mention_places(preferences.local_modes.mention_places)
             .map_err(|e| e.to_string())?;
         self.runtime
             .replace_engine_with_touch_layout(
                 engine,
                 self.page_size_override
-                    .unwrap_or(snapshot.preferences.candidate_page_size),
-                snapshot.preferences.touch_keyboard_layout,
+                    .unwrap_or(preferences.candidate_page_size),
+                preferences.touch_keyboard_layout,
             )
             .map_err(|e| e.to_string())?;
         self.runtime
-            .set_settled_rerank_enabled(snapshot.preferences.sentence_association.neural_desktop);
+            .set_settled_rerank_enabled(preferences.sentence_association.neural_desktop);
         self.options = options;
         self.plugin_tables = plugin_tables;
-        self.applied = snapshot.preferences.clone();
+        self.applied = preferences;
         self.preferences_pending = false;
+        self.resources_pending = false;
         self.nine_key_override = next_nine_key_override;
         Ok(fallback)
     }
@@ -507,6 +518,30 @@ impl HostSession {
         }
         self.plugin_tables = tables;
         Ok(())
+    }
+
+    /// 输入框获得焦点时，看设置应用是否在会话打开后装好（或移除）了日文、粤拼和注音的资源包：只做几次 stat。路径有变就记下，等输入空闲时由 `apply_pending` 重建 Engine，重建时日文临时模式的开关按新路径重新判断。
+    ///
+    /// 资源包目录只在校验完、整体原子发布之后才出现，所以这里看到的文件都是完整的。
+    fn refresh_resource_packs(&mut self) {
+        let state_root = self.state_root.as_deref();
+        let dictionaries = LanguageDictionaries::resolve(
+            state_root,
+            self.recorded_language_dictionaries.as_deref(),
+        );
+        let cantonese = path_text(dictionaries.cantonese);
+        let zhuyin = path_text(dictionaries.zhuyin);
+        let japanese = path_text(japanese_dictionary(state_root));
+        if cantonese == self.options.cantonese_dictionary
+            && zhuyin == self.options.zhuyin_dictionary
+            && japanese == self.options.japanese_dictionary
+        {
+            return;
+        }
+        self.options.cantonese_dictionary = cantonese;
+        self.options.zhuyin_dictionary = zhuyin;
+        self.options.japanese_dictionary = japanese;
+        self.resources_pending = true;
     }
 
     fn complete_transition(&mut self, mut result: Transition) -> Transition {
@@ -629,6 +664,25 @@ pub(crate) struct LanguageDictionaries {
 }
 
 impl LanguageDictionaries {
+    /// 每个词库优先用 `state_root` 下已下载的资源包里的那份，没有时用 HostOptions 记录的 `recorded` 目录里的那份（随包内置或旧版本留下的），两处都没有就是缺席。
+    pub(crate) fn resolve(state_root: Option<&Path>, recorded: Option<&Path>) -> Self {
+        let find = |name: &str| {
+            state_root
+                .and_then(|root| {
+                    resource_packs::installed_file(root, ResourcePack::LanguageDictionaries, name)
+                })
+                .or_else(|| {
+                    recorded
+                        .map(|directory| directory.join(name))
+                        .filter(|path| path.is_file())
+                })
+        };
+        LanguageDictionaries {
+            cantonese: find("cantonese.db"),
+            zhuyin: find("zhuyin.db"),
+        }
+    }
+
     /// `cantonese.db` and `zhuyin.db` in `directory`, each when it is a file.
     fn in_directory(directory: &std::path::Path) -> Self {
         let present = |name: &str| {
@@ -662,6 +716,24 @@ impl LanguageDictionaries {
             _ => true,
         }
     }
+}
+
+/// 已下载的日文资源包里的 `dict_japanese.dat`。`None` 时 Engine 读资源目录里的那份（完整发布包或开发环境内置的）。
+fn japanese_dictionary(state_root: Option<&Path>) -> Option<PathBuf> {
+    resource_packs::installed_file(state_root?, ResourcePack::Japanese, "dict_japanese.dat")
+}
+
+/// EngineOptions 里的路径文本，没有路径（或路径不是 UTF-8）时为空。
+fn path_text(path: Option<PathBuf>) -> String {
+    path.and_then(|path| path.to_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// HostOptions 的 `preferences_directory`，只认绝对路径：按需下载的资源包装在它下面。
+fn absolute_state_root(preferences_directory: Option<&str>) -> Option<PathBuf> {
+    preferences_directory
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
 }
 
 /// The scheme to hand the Engine for `preferences`, and why it is not the preferred one when it is not. A scheme this build does not offer, or Cantonese or Zhuyin without its dictionary, falls back to the last Chinese scheme when that one can run and to 全拼 otherwise, so a document written on another host never leaves this one without a working scheme. The preferences themselves are left alone: once the dictionary is installed, the next session runs the scheme the user chose.
@@ -766,19 +838,32 @@ struct HostOptions {
 }
 
 impl HostOptions {
+    /// 解析 HostOptions 文档。其中的 `preferences` 是准备运行时配置那一刻的副本，升级时被原样带下去（`refresh_options_file`），所以后续版本一旦退役某个偏好字段，这份文档就读不了，会话、快照和词库请求全部被拒：#2830 退役了 `autocorrect`，macOS 输入随之失效，每个按键都像在英文模式下一样直接交给应用。副本被拒时，改用 `preferences_directory` 下实时的 preferences.json——设置界面会保持它最新并负责修复，宿主在会话打开后本来也会应用它。副本能解析时照原样使用。
+    pub(crate) fn from_document(mut document: Value) -> Option<Self> {
+        if let Ok(options) = Self::deserialize(&document) {
+            return Some(options);
+        }
+        let directory = std::path::PathBuf::from(document.get("preferences_directory")?.as_str()?);
+        // load() 会创建传入的目录；从没在那里写过偏好的宿主没有可替代的内容。
+        if !directory.is_absolute() || !directory.join("preferences.json").is_file() {
+            return None;
+        }
+        let snapshot = PreferencesStore::new(&directory).load().ok()?;
+        document["preferences"] = serde_json::to_value(snapshot.preferences).ok()?;
+        Self::deserialize(&document).ok()
+    }
+
     fn into_engine_options(self) -> EngineOptions {
-        let dictionaries = self
-            .language_dictionaries
-            .as_deref()
-            .map(|directory| LanguageDictionaries::in_directory(std::path::Path::new(directory)))
-            .unwrap_or_default();
+        // 每个平台都这样查找；只有 macOS 会下载资源包，别处的状态目录里从来没有它们。
+        let state_root = absolute_state_root(self.preferences_directory.as_deref());
+        let dictionaries = LanguageDictionaries::resolve(
+            state_root.as_deref(),
+            self.language_dictionaries.as_deref().map(Path::new),
+        );
+        let japanese = japanese_dictionary(state_root.as_deref());
         // Session creation has no diagnostic to carry the reason; the fallback itself is what matters here.
         let (scheme, _) =
             effective_scheme(&self.preferences, compiled_input_schemes(), &dictionaries);
-        let path_text = |path: Option<std::path::PathBuf>| {
-            path.and_then(|path| path.to_str().map(str::to_owned))
-                .unwrap_or_default()
-        };
         let helpcode = helpcode_for_scheme(&self.preferences, scheme);
         let mut options = EngineOptions {
             resources: self.resources,
@@ -824,6 +909,7 @@ impl HostOptions {
             vietnamese_tone_style: vietnamese_tone_style_code(self.preferences.vietnamese),
             cantonese_dictionary: path_text(dictionaries.cantonese),
             zhuyin_dictionary: path_text(dictionaries.zhuyin),
+            japanese_dictionary: path_text(japanese),
             helpcode: helpcode.enabled,
             show_helpcode: helpcode.show_in_candidate_window,
             helpcode_schema: helpcode.schema.as_str().into(),
@@ -972,11 +1058,30 @@ fn reject_symlinked_state_root(path: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+/// 当前平台发布包不内置、改为按需下载的资源文件：macOS 是日文词典与它的 Mozc 许可说明，其余平台照旧全部内置。
+pub(crate) const ON_DEMAND_ARTIFACTS: &[&str] = if cfg!(target_os = "macos") {
+    &msime_client_core::resources::MACOS_ON_DEMAND_ARTIFACTS
+} else {
+    &[]
+};
+
+/// `resources` 实际按哪一份清单发货：`on_demand` 里的文件全部缺席时去掉它们，否则是完整的锁文件。见 [`ResourceSet::as_shipped_in`]。
+pub(crate) fn shipped_specification(
+    specification: &ResourceSet,
+    resources: &Path,
+    on_demand: &[&str],
+) -> ResourceSet {
+    specification.as_shipped_in(resources, on_demand)
+}
+
 fn verify_resources_once(
     resources: &std::path::Path,
     specification: &ResourceSet,
     state_root: &std::path::Path,
+    on_demand: &[&str],
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // 从内置日文词典的旧版本升级后，第一次启动时校验标记描述的清单变了，会重新哈希一次，这是有意的。
+    let shipped = shipped_specification(specification, resources, on_demand);
     reject_symlinked_state_root(state_root)?;
     match std::fs::symlink_metadata(state_root) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -998,13 +1103,13 @@ fn verify_resources_once(
         Err(error) => return Err(error.into()),
     }
     let marker_path = state_root.join("verified-resources.json");
-    let current = VerifiedMarker::describe(resources, specification)?;
+    let current = VerifiedMarker::describe(resources, &shipped)?;
     if let (Some(current), Some(recorded)) = (&current, VerifiedMarker::read(&marker_path)) {
         if *current == recorded {
             return Ok(());
         }
     }
-    ResourceStore::new(resources).verify(resources, specification)?;
+    ResourceStore::new(resources).verify(resources, &shipped)?;
     if let Some(current) = current {
         let _ = current.write(&marker_path);
     }
@@ -1015,12 +1120,22 @@ pub fn prepare_host_configuration(
     resources: &std::path::Path,
     state_root: &std::path::Path,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let resources = without_verbatim_prefix(std::fs::canonicalize(resources)?);
     let specification: ResourceSet = serde_json::from_str(include_str!(
         "../../../resources/desktop-dictionary.lock.json"
     ))?;
+    prepare_shipped_host_configuration(resources, state_root, &specification, ON_DEMAND_ARTIFACTS)
+}
+
+/// [`prepare_host_configuration`] 按给定的锁文件和按需下载清单准备；测试借它在各平台上检查 macOS 的发货规则。
+fn prepare_shipped_host_configuration(
+    resources: &std::path::Path,
+    state_root: &std::path::Path,
+    specification: &ResourceSet,
+    on_demand: &[&str],
+) -> Result<String, Box<dyn std::error::Error>> {
+    let resources = without_verbatim_prefix(std::fs::canonicalize(resources)?);
     let state_root = std::path::absolute(state_root)?;
-    verify_resources_once(&resources, &specification, &state_root)?;
+    verify_resources_once(&resources, specification, &state_root, on_demand)?;
     let prepared = msime_engine::host::prepare_options(
         resources.to_str().ok_or("non-UTF-8 resource path")?,
         state_root
@@ -1031,6 +1146,7 @@ pub fn prepare_host_configuration(
             .join("cache")
             .to_str()
             .ok_or("non-UTF-8 cache path")?,
+        // 代次按完整锁文件计算，不随发布包是否内置日文词典而变：user/dictionaries/<generation> 和 refreshed_host_options 都保持原样，升级后不会重新准备，仍在运行的旧版输入法也不会。
         &specification.generation()?,
     )?;
     let preferences = PreferencesStore::new(&state_root).load()?.preferences;
@@ -1181,6 +1297,7 @@ fn refresh_options_file(
         &document,
         &specification.generation()?,
         bundled,
+        Path::is_dir,
         |resources, state| {
             Ok(serde_json::from_str(
                 &prepare_host_configuration(resources, state).map_err(outdated_resources)?,
@@ -1258,11 +1375,16 @@ fn refreshed_host_options(
     document: &Value,
     generation: &str,
     bundled: Option<&Path>,
+    exists: impl Fn(&Path) -> bool,
     mut prepare: impl FnMut(&Path, &Path) -> Result<Value, Box<dyn std::error::Error>>,
 ) -> Result<Option<Value>, Box<dyn std::error::Error>> {
     let Some((resources, dictionaries, state)) = prepared_layout(document) else {
         return Ok(None);
     };
+    // 记录的资源目录已经不存在，最常见的是用户把设置应用挪了位置（例如从 /Applications 挪到 ~/Applications）：代次没变，只看代次就会让 `resources` 一直指向不存在的旧路径，下一次开会话就找不到词库。带着 bundle 刷新时改从 bundle 准备，不论代次是否变化。
+    if let Some(bundled) = bundled.filter(|bundled| *bundled != resources && !exists(resources)) {
+        return refreshed_layout(document, prepare(bundled, state)?).map(Some);
+    }
     if dictionaries.file_name().and_then(|name| name.to_str()) == Some(generation) {
         return Ok(None);
     }
@@ -1272,6 +1394,14 @@ fn refreshed_host_options(
         }
         (prepared, _) => prepared?,
     };
+    refreshed_layout(document, prepared).map(Some)
+}
+
+/// `document` with `resources` and `dictionaries` taken from what `prepare_host_configuration` returned.
+fn refreshed_layout(
+    document: &Value,
+    prepared: Value,
+) -> Result<Value, Box<dyn std::error::Error>> {
     let mut refreshed = document.clone();
     for key in ["resources", "dictionaries"] {
         refreshed[key] = prepared
@@ -1280,12 +1410,12 @@ fn refreshed_host_options(
             .cloned()
             .ok_or("prepared options are incomplete")?;
     }
-    Ok(Some(refreshed))
+    Ok(refreshed)
 }
 
 /// `document` with `language_dictionaries` naming what is installed beside its resources, or `None` when it already does or is not in the prepared layout.
 ///
-/// The Cantonese and Zhuyin dictionaries arrive with a package, not with a dictionary generation, so options published by an older package are brought up to what is installed even when the generation is current, and lose the key once the dictionaries are gone. Only the directory `prepare_host_configuration` records is kept in step; a document naming another one keeps it.
+/// The Cantonese and Zhuyin dictionaries arrive with a package, not with a dictionary generation, so options published by an older package are brought up to what is installed even when the generation is current, and lose the key once the dictionaries are gone. Only the directory `prepare_host_configuration` records is kept in step; a document naming another directory that still exists keeps it.
 fn with_installed_language_dictionaries(
     document: &Value,
 ) -> Result<Option<Value>, Box<dyn std::error::Error>> {
@@ -1297,7 +1427,10 @@ fn with_installed_language_dictionaries(
     let recorded = document
         .get("language_dictionaries")
         .and_then(Value::as_str);
-    if recorded.is_some() && recorded != beside.as_deref() {
+    // 指向别处、而且那个目录还在的记录是有意为之，原样保留；已经不存在的记录（应用挪了位置后留下的旧路径）换成资源目录旁实际安装的那份。
+    if recorded
+        .is_some_and(|recorded| Some(recorded) != beside.as_deref() && Path::new(recorded).is_dir())
+    {
         return Ok(None);
     }
     let installed = installed_language_dictionaries(resources);

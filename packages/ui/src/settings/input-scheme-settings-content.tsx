@@ -1,6 +1,10 @@
 import type { InputScheme, Preferences } from "../index";
 import { GroupList } from "../core/platform-controls";
 import { InputModeSection } from "./input-mode-section";
+import {
+  MacosInputModeEntriesSection,
+  type MacosInputModesClient,
+} from "./macos-input-mode-entries-section";
 import { InputSchemeDetailsSection, type ShuangpinProfile } from "./input-scheme-details-section";
 import { baseInputSchemes, isChineseScheme } from "./input-scheme-options";
 import {
@@ -13,6 +17,7 @@ import {
 } from "./touch-keyboard-scheme-helpers";
 import { TouchKeyboardSchemesSection } from "./touch-keyboard-schemes-section";
 import { WubiSection } from "./wubi-section";
+import { ResourcePackRow, resourcePackForScheme, type ResourcePacks } from "./resource-packs";
 
 export interface InputSchemeSettingsContentProps {
   preferences: Preferences;
@@ -24,11 +29,16 @@ export interface InputSchemeSettingsContentProps {
   inputSchemes?: readonly InputScheme[];
   macosShuangpinKeymap?: boolean;
   macosWubiAutoCommitUnique?: boolean;
+  /** macOS 的输入法列表；有它时在方案组末尾显示「菜单栏入口」。 */
+  macosInputModes?: MacosInputModesClient;
+  onError?: (message: string) => void;
   onPreferencesChange: (patch: Partial<Preferences>) => void;
   onSelectTouchKeyboardScheme: (scheme: TouchKeyboardScheme) => void;
   onToggleTouchKeyboardScheme: (scheme: TouchKeyboardScheme, enabled: boolean) => void;
   onMacosShuangpinKeymapChange: (enabled: boolean) => void;
   onMacosWubiAutoCommitUniqueChange: (enabled: boolean) => void;
+  /** 宿主提供按需资源包时传入（目前只有 macOS）：选用日文、粤拼或注音会照常保存方案并开始下载对应词库，下载完成前运行时按缺少词库回退。 */
+  resourcePacks?: ResourcePacks;
 }
 
 /** Shared input mode, scheme selector, scheme details, and Wubi composition for settings hosts. */
@@ -41,12 +51,22 @@ export function InputSchemeSettingsContent({
   inputSchemes = baseInputSchemes,
   macosShuangpinKeymap,
   macosWubiAutoCommitUnique,
+  macosInputModes,
+  onError = () => {},
   onPreferencesChange,
   onSelectTouchKeyboardScheme,
   onToggleTouchKeyboardScheme,
   onMacosShuangpinKeymapChange,
   onMacosWubiAutoCommitUniqueChange,
+  resourcePacks,
 }: InputSchemeSettingsContentProps) {
+  // 方案改动立即写入草稿（随自动保存生效），需要词库的方案再在后台下载，不等下载完成。
+  const onSchemeChange = (patch: Partial<Preferences>) => {
+    onPreferencesChange(patch);
+    const pack = resourcePackForScheme(patch.scheme);
+    if (pack) resourcePacks?.ensure(pack);
+  };
+  const schemePack = resourcePackForScheme(preferences.scheme);
   const chineseSchemes = isChineseScheme(preferences.scheme);
   // The Cantonese, Zhuyin and Vietnamese touch keyboards type their own input scheme, so they are offered only where the host offers that scheme (Cantonese and Zhuyin also need their installed dictionary).
   const touchOptions = touchKeyboardSchemeOptions.filter(
@@ -61,7 +81,7 @@ export function InputSchemeSettingsContent({
         lastChineseScheme={preferences.last_chinese_scheme}
         supportedSchemes={inputSchemes}
         hidden={hasTouchKeyboardSchemes}
-        onChange={onPreferencesChange}
+        onChange={onSchemeChange}
       />
       {hasTouchKeyboardSchemes && (
         <TouchKeyboardSchemesSection
@@ -80,7 +100,7 @@ export function InputSchemeSettingsContent({
         supportedSchemes={inputSchemes}
         lastChineseScheme={preferences.last_chinese_scheme}
         onChange={(scheme: InputSchemeSelectorValue) =>
-          onPreferencesChange({ scheme, last_chinese_scheme: scheme })
+          onSchemeChange({ scheme, last_chinese_scheme: scheme })
         }
       />
       <InputSchemeDetailsSection
@@ -96,6 +116,7 @@ export function InputSchemeSettingsContent({
         vietnamese={preferences.vietnamese}
         onVietnameseChange={(vietnamese) => onPreferencesChange({ vietnamese })}
       />
+      {resourcePacks && schemePack && <ResourcePackRow packs={resourcePacks} id={schemePack} />}
       {((hasTouchKeyboardSchemes && touchKeyboardSchemes.enabled.includes("wubi")) ||
         preferences.scheme === "wubi") && (
         <WubiSection
@@ -103,6 +124,14 @@ export function InputSchemeSettingsContent({
           autoCommitUnique={macos ? macosWubiAutoCommitUnique : undefined}
           onChange={onPreferencesChange}
           onAutoCommitUniqueChange={onMacosWubiAutoCommitUniqueChange}
+        />
+      )}
+      {macos && (
+        <MacosInputModeEntriesSection
+          client={macosInputModes}
+          scheme={preferences.scheme}
+          inputSchemes={inputSchemes}
+          onError={onError}
         />
       )}
     </GroupList>

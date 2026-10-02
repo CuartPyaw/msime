@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as settings from "../settings/settings-style";
 import { rowTitle } from "../core/platform-controls-style";
+import { ActionButton } from "../core/action-button";
 import {
   formatModelBytes,
   localModelErrorMessage,
@@ -233,15 +234,11 @@ export function LocalModelManager({
               <p className="text-xs opacity-70">
                 许可：{model.license_spdx}。{model.license_notice} 来源：
                 {openExternalUrl ? (
-                  <button
-                    type="button"
+                  <ActionButton
+                    action={() => void openExternalUrl(model.license_source).catch(() => undefined)}
                     className="link"
-                    onClick={() =>
-                      void openExternalUrl(model.license_source).catch(() => undefined)
-                    }
-                  >
-                    {model.license_source}
-                  </button>
+                    label={model.license_source}
+                  />
                 ) : (
                   <span>{model.license_source}</span>
                 )}
@@ -262,35 +259,32 @@ export function LocalModelManager({
               )}
               <div className="flex flex-wrap gap-2">
                 {running ? (
-                  <button
-                    type="button"
+                  <ActionButton
+                    action={() => void client.cancel(model.id).catch(() => undefined)}
                     className="secondary"
-                    onClick={() => void client.cancel(model.id).catch(() => undefined)}
-                  >
-                    取消下载
-                  </button>
+                    label="取消下载"
+                  />
                 ) : model.installed ? (
                   <>
-                    <button
-                      type="button"
+                    <ActionButton
+                      action={() => onUse(model.path)}
+                      className=""
                       disabled={inUse || removing[model.id] === true}
-                      onClick={() => onUse(model.path)}
-                    >
-                      {inUse ? "使用中" : "使用"}
-                    </button>
-                    <button
-                      type="button"
+                      label={inUse ? "使用中" : "使用"}
+                    />
+                    <ActionButton
+                      action={() => void remove(model)}
                       className="secondary"
                       disabled={removing[model.id] === true}
-                      onClick={() => void remove(model)}
-                    >
-                      删除
-                    </button>
+                      label="删除"
+                    />
                   </>
                 ) : (
-                  <button type="button" onClick={() => void install(model)}>
-                    下载（{formatModelBytes(model.archive_size)}）
-                  </button>
+                  <ActionButton
+                    action={() => void install(model)}
+                    className=""
+                    label={`下载（${formatModelBytes(model.archive_size)}）`}
+                  />
                 )}
               </div>
             </li>

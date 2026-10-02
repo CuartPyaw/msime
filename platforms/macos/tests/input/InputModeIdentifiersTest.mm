@@ -276,10 +276,56 @@ int main() {
                 "An unavailable scheme did not fall back the way host-api does.");
         [NSFileManager.defaultManager removeItemAtPath:directory error:nil];
 
-        // An opt-in mode is enabled when the scheme moves to it, not when a process starts on it, not for an unchanged scheme, and not for a scheme that cannot run.
+        // 设置应用按需下载的语言词典包（<preferences_directory>/resource-packs/language-dictionaries）同样让方案可用：只认带 msime-model.json 的真实目录里的普通文件，preferences_directory 必须是绝对路径。
+        NSFileManager *files = NSFileManager.defaultManager;
+        NSString *stateRoot = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+        NSString *pack = [stateRoot stringByAppendingPathComponent:@"resource-packs/language-dictionaries"];
+        [files createDirectoryAtPath:pack withIntermediateDirectories:YES attributes:nil error:nil];
+        [NSData.data writeToFile:[pack stringByAppendingPathComponent:@"cantonese.db"] atomically:YES];
+        NSDictionary *packOptions = @{@"preferences_directory": stateRoot};
+        require(!MSIMEInputSchemeAvailable(@"cantonese", packOptions),
+                "A language dictionary pack without msime-model.json made Cantonese available.");
+        [@"{}" writeToFile:[pack stringByAppendingPathComponent:@"msime-model.json"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        require(MSIMEInputSchemeAvailable(@"cantonese", packOptions) && !MSIMEInputSchemeAvailable(@"zhuyin", packOptions),
+                "A downloaded language dictionary pack did not make exactly Cantonese available.");
+        require([MSIMEEffectiveInputScheme(@"cantonese", @"wubi", packOptions) isEqualToString:@"cantonese"] &&
+                    [MSIMEEffectiveInputScheme(@"cantonese", @"wubi", @{@"preferences_directory": stateRoot, @"language_dictionaries": @""}) isEqualToString:@"cantonese"],
+                "The effective scheme ignored Cantonese from the downloaded pack.");
+        // 相对路径即使能从当前目录解析到这个资源包也不认。
+        NSString *previousDirectory = files.currentDirectoryPath;
+        [files changeCurrentDirectoryPath:[stateRoot stringByDeletingLastPathComponent]];
+        BOOL relativeAccepted = MSIMEInputSchemeAvailable(@"cantonese", @{@"preferences_directory": [stateRoot lastPathComponent]});
+        [files changeCurrentDirectoryPath:previousDirectory];
+        require(!relativeAccepted && !MSIMEInputSchemeAvailable(@"cantonese", @{@"preferences_directory": @""}) &&
+                    !MSIMEInputSchemeAvailable(@"cantonese", @{@"preferences_directory": @42}),
+                "A relative, empty or non-string preferences_directory was used to find a pack.");
+        NSString *target = [stateRoot stringByAppendingPathComponent:@"cantonese-target.db"];
+        [files moveItemAtPath:[pack stringByAppendingPathComponent:@"cantonese.db"] toPath:target error:nil];
+        [files createSymbolicLinkAtPath:[pack stringByAppendingPathComponent:@"cantonese.db"] withDestinationPath:target error:nil];
+        require(!MSIMEInputSchemeAvailable(@"cantonese", packOptions),
+                "A symlinked cantonese.db in the downloaded pack made Cantonese available.");
+        [files removeItemAtPath:stateRoot error:nil];
+
+        // 资源包父目录是符号链接时也不能把外部词库当作已安装资源。
+        NSString *linkedStateRoot = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+        NSString *linkedOutside = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+        NSString *linkedOutsidePack = [linkedOutside stringByAppendingPathComponent:@"resource-packs/language-dictionaries"];
+        [files createDirectoryAtPath:linkedOutsidePack withIntermediateDirectories:YES attributes:nil error:nil];
+        [NSData.data writeToFile:[linkedOutsidePack stringByAppendingPathComponent:@"cantonese.db"] atomically:YES];
+        [@"{}" writeToFile:[linkedOutsidePack stringByAppendingPathComponent:@"msime-model.json"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [files createDirectoryAtPath:linkedStateRoot withIntermediateDirectories:YES attributes:nil error:nil];
+        [files createSymbolicLinkAtPath:[linkedStateRoot stringByAppendingPathComponent:@"resource-packs"]
+                    withDestinationPath:[linkedOutside stringByAppendingPathComponent:@"resource-packs"] error:nil];
+        require(!MSIMEInputSchemeAvailable(@"cantonese", @{ @"preferences_directory": linkedStateRoot }),
+                "A symlinked resource-packs parent made Cantonese available.");
+        [files removeItemAtPath:linkedStateRoot error:nil];
+        [files removeItemAtPath:linkedOutside error:nil];
+
+        // 方案切到粤、注、越时启用对应模式，第一次同步就落在这类方案上也启用；方案没变、方案跑不起来、或方案没有按需模式时都不启用。
         require([MSIMEOptInInputModeToEnable(@"quanpin", @"cantonese", YES) isEqualToString:MSIMECantoneseInputModeID] &&
                     [MSIMEOptInInputModeToEnable(@"korean", @"vietnamese", YES) isEqualToString:MSIMEVietnameseInputModeID] &&
-                    !MSIMEOptInInputModeToEnable(nil, @"zhuyin", YES) && !MSIMEOptInInputModeToEnable(@"zhuyin", @"zhuyin", YES) &&
+                    [MSIMEOptInInputModeToEnable(nil, @"zhuyin", YES) isEqualToString:MSIMEZhuyinInputModeID] &&
+                    !MSIMEOptInInputModeToEnable(nil, @"quanpin", YES) && !MSIMEOptInInputModeToEnable(@"zhuyin", @"zhuyin", YES) &&
                     !MSIMEOptInInputModeToEnable(@"quanpin", @"zhuyin", NO) && !MSIMEOptInInputModeToEnable(@"quanpin", @"wubi", YES),
                 "An opt-in mode was enabled at the wrong time.");
 

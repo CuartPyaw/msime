@@ -2004,6 +2004,22 @@ fn helpcode_parser_reserves_its_bounded_entry_capacity() {
     assert_eq!(entries.capacity(), helpcode_pack::MAX_ENTRIES);
 }
 
+#[test]
+fn data_file_capacity_matches_the_only_file_backed_plugin_kinds() {
+    assert_eq!(data_file_capacity(PluginKind::Helpcode), 1);
+    assert_eq!(data_file_capacity(PluginKind::Wordbook), 1);
+    for kind in [
+        PluginKind::Sound,
+        PluginKind::Music,
+        PluginKind::CommandTable,
+        PluginKind::Effect,
+        PluginKind::PhraseTable,
+        PluginKind::SymbolSet,
+    ] {
+        assert_eq!(data_file_capacity(kind), 0, "{kind:?}");
+    }
+}
+
 fn installed_wordbook(root: &Path, id: &str, words: &[u8]) {
     let pack = kind_directory(root, PluginKind::Wordbook).join(id);
     fs::create_dir_all(&pack).unwrap();

@@ -83,6 +83,7 @@ impl LanguageDictionary {
 
     /// The entries stored under exactly `key`, heaviest first and by text within a weight, at most `limit`.
     pub fn lookup(&self, key: &str, limit: usize) -> Result<Vec<LanguageEntry>> {
+        let requested_limit = limit;
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let mut statement = self.connection.prepare_cached(
             "SELECT text, weight FROM entries WHERE key = ?1 ORDER BY weight DESC, text ASC LIMIT ?2",
@@ -93,7 +94,11 @@ impl LanguageDictionary {
                 weight: row.get(1)?,
             })
         })?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        let mut result = query_capacity(requested_limit).map_or_else(Vec::new, Vec::with_capacity);
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
     }
 
     /// Whether `syllable` is in the scheme's syllable inventory.
@@ -123,6 +128,7 @@ impl LanguageDictionary {
         let Some(upper) = completion_upper_bound(prefix) else {
             return Ok(Vec::new());
         };
+        let requested_limit = limit;
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let mut statement = self.connection.prepare_cached(
             "SELECT key, text, weight FROM entries WHERE key >= ?1 AND key < ?2 AND instr(substr(key, length(?1) + 1), ' ') = 0 ORDER BY weight DESC, text ASC LIMIT ?3",
@@ -136,7 +142,11 @@ impl LanguageDictionary {
                 },
             ))
         })?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        let mut result = query_capacity(requested_limit).map_or_else(Vec::new, Vec::with_capacity);
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
     }
 }
 
@@ -148,6 +158,10 @@ fn completion_upper_bound(prefix: &str) -> Option<String> {
     upper.push_str(head);
     upper.push(next);
     Some(upper)
+}
+
+fn query_capacity(limit: usize) -> Option<usize> {
+    (limit < i32::MAX as usize).then_some(limit)
 }
 
 #[cfg(test)]
@@ -210,8 +224,10 @@ mod tests {
             text: text.to_owned(),
             weight,
         };
+        let entries = dictionary.lookup("nei hou", 10).unwrap();
+        assert_eq!(entries.capacity(), 10);
         assert_eq!(
-            dictionary.lookup("nei hou", 10).unwrap(),
+            entries,
             vec![entry("你好", 900), entry("你號", 40), entry("妳好", 40)]
         );
         assert_eq!(
@@ -253,27 +269,30 @@ mod tests {
         syllables.sort();
         assert_eq!(syllables, ["hou", "nei"]);
         let completions = |prefix: &str, limit| {
-            dictionary
-                .lookup_completions(prefix, limit)
-                .unwrap()
-                .into_iter()
-                .map(|(key, entry)| (key, entry.text))
-                .collect::<Vec<_>>()
+            let rows = dictionary.lookup_completions(prefix, limit).unwrap();
+            (
+                rows.capacity(),
+                rows.into_iter()
+                    .map(|(key, entry)| (key, entry.text))
+                    .collect::<Vec<_>>(),
+            )
         };
         let pair = |key: &str, text: &str| (key.to_owned(), text.to_owned());
+        let (capacity, rows) = completions("nei h", 10);
+        assert_eq!(capacity, 10);
         assert_eq!(
-            completions("nei h", 10),
+            rows,
             [
                 pair("nei hou", "你好"),
                 pair("nei hou", "你號"),
                 pair("nei hou", "妳好")
             ]
         );
-        assert_eq!(completions("nei h", 1), [pair("nei hou", "你好")]);
-        assert_eq!(completions("ne", 10), [pair("nei", "你")]);
-        assert!(completions("nei ho", 0).is_empty());
-        assert!(completions("ngo", 10).is_empty());
-        assert!(completions("", 10).is_empty());
+        assert_eq!(completions("nei h", 1).1, [pair("nei hou", "你好")]);
+        assert_eq!(completions("ne", 10).1, [pair("nei", "你")]);
+        assert!(completions("nei ho", 0).1.is_empty());
+        assert!(completions("ngo", 10).1.is_empty());
+        assert!(completions("", 10).1.is_empty());
     }
 
     #[cfg(unix)]

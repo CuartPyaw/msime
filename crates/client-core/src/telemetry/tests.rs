@@ -419,6 +419,19 @@ fn a_concurrent_flush_does_not_clear_another_flush_retry_deadline() {
 }
 
 #[test]
+fn telemetry_queue_capacity_is_bounded_by_the_queue_limit() {
+    assert_eq!(super::telemetry_queue_capacity(0), 0);
+    assert_eq!(
+        super::telemetry_queue_capacity(MAX_QUEUED_EVENTS),
+        MAX_QUEUED_EVENTS
+    );
+    assert_eq!(
+        super::telemetry_queue_capacity(MAX_QUEUED_EVENTS + 10),
+        MAX_QUEUED_EVENTS
+    );
+}
+
+#[test]
 fn the_queue_keeps_the_newest_sixty_four() {
     let (_directory, store) = store();
     let start = noon();

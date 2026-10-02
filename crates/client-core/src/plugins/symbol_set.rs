@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use toml::Value;
 
-use super::{only_keys, PluginContent, PluginKind};
+use super::{only_keys, PluginContent, PluginKind, PluginSummary};
 
 pub(crate) const MANIFEST_KEYS: [&str; 1] = ["groups"];
 
@@ -173,11 +173,20 @@ pub struct PluginSymbolGroup {
     pub items: Vec<String>,
 }
 
+fn group_capacity(packages: &[PluginSummary]) -> usize {
+    packages.iter().fold(0, |capacity, package| {
+        capacity.saturating_add(match &package.content {
+            PluginContent::SymbolSet(set) => set.groups.len(),
+            _ => 0,
+        })
+    })
+}
+
 /// `root` 下每个能载入的符号集的全部组，包按名字和 id 排序，组按清单顺序。载入失败的包不贡献任何组，插件页会报告它。
 pub fn plugin_symbol_groups(root: &Path) -> Vec<PluginSymbolGroup> {
     let mut packages = super::scan_kind_packages(root, PluginKind::SymbolSet);
     packages.sort_by(|a, b| (&a.name, &a.id).cmp(&(&b.name, &b.id)));
-    let mut groups = Vec::new();
+    let mut groups = Vec::with_capacity(group_capacity(&packages));
     for package in packages {
         let PluginContent::SymbolSet(set) = package.content else {
             continue;
@@ -192,4 +201,38 @@ pub fn plugin_symbol_groups(root: &Path) -> Vec<PluginSymbolGroup> {
         }));
     }
     groups
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn summary(group_count: usize) -> PluginSummary {
+        PluginSummary {
+            id: "synthetic".into(),
+            name: "Synthetic".into(),
+            version: "1".into(),
+            license: "CC0-1.0".into(),
+            author: None,
+            description: None,
+            builtin: false,
+            directory: Path::new("/synthetic").to_owned(),
+            content: PluginContent::SymbolSet(SymbolSet {
+                groups: (0..group_count)
+                    .map(|index| SymbolGroup {
+                        tab: SymbolTab::Symbols,
+                        title: format!("group-{index}"),
+                        keywords: String::new(),
+                        items: vec!["x".into()],
+                    })
+                    .collect(),
+            }),
+        }
+    }
+
+    #[test]
+    fn group_capacity_counts_groups_across_packages() {
+        let packages = [summary(2), summary(3)];
+        assert_eq!(group_capacity(&packages), 5);
+    }
 }

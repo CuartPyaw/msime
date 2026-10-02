@@ -104,9 +104,15 @@ file(GLOB_RECURSE MSIME_BACKEND_SWIFT CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/backend/storage/*.swift"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/backend-ui/*.swift"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/backend/*.swift")
+# bundle 里每个 Mach-O 都要包含的架构：发布包传 CMAKE_OSX_ARCHITECTURES="arm64;x86_64" 出 universal，未设置时只编宿主架构。CMake 自己编的目标直接跟随 CMAKE_OSX_ARCHITECTURES；Swift 后端和预编译的 sherpa-onnx 不经过 CMake 的编译器，所以在下面显式按这份列表处理。
+set(MSIME_BUNDLE_ARCHITECTURES ${CMAKE_OSX_ARCHITECTURES})
+if(NOT MSIME_BUNDLE_ARCHITECTURES)
+  set(MSIME_BUNDLE_ARCHITECTURES ${CMAKE_HOST_SYSTEM_PROCESSOR})
+endif()
+string(REPLACE ";" " " MSIME_SWIFT_ARCHS "${MSIME_BUNDLE_ARCHITECTURES}")
 set(MSIME_SWIFT_BACKEND_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/MSIMEBackend.dylib")
 add_custom_command(OUTPUT "${MSIME_SWIFT_BACKEND_OUTPUT}"
-  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_backend_swift.sh" "${MSIME_SWIFT_BACKEND_OUTPUT}"
+  COMMAND "${CMAKE_COMMAND}" -E env "MSIME_SWIFT_ARCHS=${MSIME_SWIFT_ARCHS}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_backend_swift.sh" "${MSIME_SWIFT_BACKEND_OUTPUT}"
   DEPENDS ${MSIME_BACKEND_SWIFT} "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_backend_swift.sh")
 add_custom_target(macos-swift-backend DEPENDS "${MSIME_SWIFT_BACKEND_OUTPUT}")
 add_dependencies(MSIMEClientInputMethod macos-swift-backend)
@@ -114,23 +120,12 @@ target_link_libraries(MSIMEClientInputMethod PRIVATE "${MSIME_SWIFT_BACKEND_OUTP
 target_include_directories(MSIMEClientInputMethod PRIVATE src)
 target_compile_options(MSIMEClientInputMethod PRIVATE -fobjc-arc -Wall -Wextra -Werror)
 target_link_libraries(MSIMEClientInputMethod PRIVATE apple-client msime-voice-providers "-framework AppKit" "-framework InputMethodKit" "-framework Carbon" "-framework AVFoundation" "-framework Speech")
-# Sparkle orders releases by CFBundleVersion, not by the marketing version, so a build that ships a
-# fixed number can never present itself as newer than the one already installed. Derive it from the
-# commit count: monotonic, reproducible from the source alone, and needing no release bookkeeping. A
-# source tree without git history (an archive export) falls back to 1, which only means such a build
-# cannot be offered as an update - it still installs and runs.
-find_package(Git QUIET)
-if(GIT_FOUND)
-  execute_process(
-    COMMAND "${GIT_EXECUTABLE}" rev-list --count HEAD
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    OUTPUT_VARIABLE MSIME_BUILD_NUMBER
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-    RESULT_VARIABLE MSIME_BUILD_NUMBER_RESULT)
-endif()
-if(NOT MSIME_BUILD_NUMBER MATCHES "^[0-9]+$")
-  set(MSIME_BUILD_NUMBER 1)
+# 同一版本内的构建号，与 version.txt 放在一起、随它手工设定：每个新版本从 1 重新开始，同一版本需要和上一次区分的重新构建再往上加。Sparkle 只按 CFBundleVersion 排序，所以配置 SUFeedURL 之后，构建号重新从 1 开始的版本得经由一个先比较短版本号的 feed 提供；在那之前只有「关于」窗口和设置应用读它，设置应用先比短版本号再比构建号。
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/build-number.txt")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/build-number.txt" MSIME_BUILD_NUMBER LIMIT_COUNT 1)
+string(STRIP "${MSIME_BUILD_NUMBER}" MSIME_BUILD_NUMBER)
+if(NOT MSIME_BUILD_NUMBER MATCHES "^[1-9][0-9]*$")
+  message(FATAL_ERROR "platforms/macos/build-number.txt must hold a positive integer, not '${MSIME_BUILD_NUMBER}'")
 endif()
 set(MACOSX_BUNDLE_BUNDLE_VERSION "${MSIME_BUILD_NUMBER}")
 message(STATUS "Bundle build number: ${MACOSX_BUNDLE_BUNDLE_VERSION}")
@@ -228,10 +223,15 @@ add_custom_command(OUTPUT "${MSIME_VOICE_RUNTIME_STAMP}"
   VERBATIM)
 add_custom_target(macos-voice-runtime DEPENDS "${MSIME_VOICE_RUNTIME_STAMP}")
 add_dependencies(MSIMEClientInputMethod macos-voice-runtime msime-voice-local)
+# 上游的 sherpa-onnx 运行库是 x86_64 + arm64 的通用二进制（约 55 MB）。拷进 bundle 时只抽出 MSIME_BUNDLE_ARCHITECTURES 里的架构：universal 包两种都留，开发构建只编宿主架构时省下另一半。lipo 会破坏上游签名，install.sh 和 package-release.sh 之后都会用 --deep 重新签名整个 bundle。
+set(MSIME_VOICE_RUNTIME_EXTRACT)
+foreach(MSIME_BUNDLE_ARCHITECTURE IN LISTS MSIME_BUNDLE_ARCHITECTURES)
+  list(APPEND MSIME_VOICE_RUNTIME_EXTRACT -extract "${MSIME_BUNDLE_ARCHITECTURE}")
+endforeach()
 add_custom_command(TARGET MSIMEClientInputMethod POST_BUILD
   COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_BUNDLE_DIR:MSIMEClientInputMethod>/Contents/Frameworks"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MSIME_SWIFT_BACKEND_OUTPUT}" "$<TARGET_BUNDLE_DIR:MSIMEClientInputMethod>/Contents/Frameworks/MSIMEBackend.dylib"
-  COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MSIME_VOICE_RUNTIME_LIBRARY}" "$<TARGET_BUNDLE_DIR:MSIMEClientInputMethod>/Contents/Frameworks/libsherpa-onnx-c-api.dylib"
+  COMMAND lipo "${MSIME_VOICE_RUNTIME_LIBRARY}" ${MSIME_VOICE_RUNTIME_EXTRACT} -output "$<TARGET_BUNDLE_DIR:MSIMEClientInputMethod>/Contents/Frameworks/libsherpa-onnx-c-api.dylib"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:msime-voice-local>" "$<TARGET_BUNDLE_DIR:MSIMEClientInputMethod>/Contents/MacOS/msime-voice-local")
 set(MSIME_OPTIONS_FILE "" CACHE FILEPATH "Optional development runtime configuration; never distribute this file")
 if(MSIME_OPTIONS_FILE)

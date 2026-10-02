@@ -60,6 +60,8 @@ int main(int argc, const char *argv[]) {
         MSIMEConfigureMovableState();
         NSString *swiftBackend = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"MSIMEBackend.dylib"];
         if (swiftBackend.length > 0 && dlopen(swiftBackend.fileSystemRepresentation, RTLD_NOW | RTLD_GLOBAL) == nullptr) return 1;
+        // 独立设置窗口也要检查模式是否已加入输入法列表，所以在进入该分支前初始化探针。
+        MSIMEInputModeEnabledProbe = MSIMEInputSourceIsEnabled;
         if (MSIMEShouldShowPreferences(argc, argv)) {
             [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
             id closeObserver = [[NSNotificationCenter defaultCenter]
@@ -82,7 +84,10 @@ int main(int argc, const char *argv[]) {
         // Recover a prior crashed capture before accepting new IMK sessions.
         // A running owner holds the journal lock, so this cannot undo its mute.
         [[[MSIMEVoiceAudioMuter alloc] init] restore];
-        __attribute__((objc_precise_lifetime)) IMKServer *server = [[IMKServer alloc] initWithName:@"MSIMEClientPreviewConnection" bundleIdentifier:NSBundle.mainBundle.bundleIdentifier];
+        // imklaunchagent 用这个名字找到本 bundle；名字为什么必须是这种形式，见 Info.plist.in。
+        NSString *connectionName = NSBundle.mainBundle.infoDictionary[@"InputMethodConnectionName"];
+        if (![connectionName isKindOfClass:NSString.class] || connectionName.length == 0) return 1;
+        __attribute__((objc_precise_lifetime)) IMKServer *server = [[IMKServer alloc] initWithName:connectionName bundleIdentifier:NSBundle.mainBundle.bundleIdentifier];
         if (!server) return 1;
         // Turn on, once each, the input modes this version added and the install that brought it did not register. The opt-in modes are only recorded, and turned off once if the system turned them on.
         NSString *const offeredModesKey = @"MSIMEOfferedInputModes";

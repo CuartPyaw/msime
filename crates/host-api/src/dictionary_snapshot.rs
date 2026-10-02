@@ -507,8 +507,10 @@ fn parse_options(bytes: &[u8]) -> Result<EngineOptions, &'static str> {
     if bytes.len() > REQUEST_LIMIT {
         return Err("invalid snapshot options");
     }
-    let options: HostOptions =
-        serde_json::from_slice(bytes).map_err(|_| "invalid snapshot options")?;
+    let options = serde_json::from_slice(bytes)
+        .ok()
+        .and_then(HostOptions::from_document)
+        .ok_or("invalid snapshot options")?;
     validate_options(options)
 }
 fn validate_options(options: HostOptions) -> Result<EngineOptions, &'static str> {
@@ -597,6 +599,7 @@ fn write_activation_receipt_at(
 fn prepare(
     request: PrepareRequest,
     specification: &ResourceSet,
+    on_demand: &[&str],
     stream: impl Iterator<Item = Result<msime_engine::host::DictionaryStateRecord, SnapshotReadError>>
         + 'static,
 ) -> Result<Prepared, &'static str> {
@@ -635,8 +638,11 @@ fn prepare(
             return Err("snapshot staging overlaps active paths");
         }
     }
+    // 与 `prepare_host_configuration` 相同的发货规则；内容标识仍按完整清单计算。
+    let shipped =
+        crate::shipped_specification(specification, Path::new(&options.resources), on_demand);
     ResourceStore::new(&options.resources)
-        .verify(Path::new(&options.resources), specification)
+        .verify(Path::new(&options.resources), &shipped)
         .map_err(|_| "snapshot resources rejected")?;
     let content_id = specification
         .generation()
@@ -1087,6 +1093,7 @@ fn snapshot_queue_process(
             activation_id: Some(request.id.to_string()),
         },
         &specification,
+        crate::ON_DEMAND_ARTIFACTS,
         stream,
     );
     let prepared = match prepared {
@@ -1305,7 +1312,7 @@ pub unsafe extern "C" fn msime_client_snapshot_prepare(
             }
             Some(record::decode(&buffer[..length as usize]))
         });
-        let prepared = prepare(request, &specification, stream)?;
+        let prepared = prepare(request, &specification, crate::ON_DEMAND_ARTIFACTS, stream)?;
         register(prepared).map_err(Into::into)
     })
 }

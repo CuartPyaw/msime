@@ -248,14 +248,14 @@ export function VocabularyReviewPage({
             : "在这里管理词书；复习在背单词面板里进行。进度保存在本机，不会上传。"}
         </p>
         {managing && openPanel && (
-          <button
+          <ActionButton
+            action={() => void openPanel()}
+            ariaBusy={busy}
+            ariaLabel="打开背单词面板"
             className="secondary"
             disabled={busy || !selected}
-            onClick={() => void openPanel()}
-            aria-label="打开背单词面板"
-          >
-            开始复习
-          </button>
+            label="开始复习"
+          />
         )}
       </div>
 
@@ -312,14 +312,14 @@ export function VocabularyReviewPage({
                   if (file) void chooseFile(file);
                 }}
               />
-              <button
+              <ActionButton
+                action={() => fileRef.current?.click()}
+                ariaBusy={busy}
+                ariaLabel="导入词表文件"
                 className="secondary"
                 disabled={busy}
-                onClick={() => fileRef.current?.click()}
-                aria-label="导入词表文件"
-              >
-                导入词表（CSV / TXT）
-              </button>
+                label="导入词表（CSV / TXT）"
+              />
               <p className={note}>
                 每行一个词，用逗号或制表符分隔：<code>单词,音标,释义</code> 或{" "}
                 <code>单词,释义</code>
@@ -332,10 +332,8 @@ export function VocabularyReviewPage({
             <p className={note}>这本书来自插件，在「插件」页卸载；卸载后复习进度仍会保留。</p>
           )}
           {client.removeWordbook && selectedBook && !selectedBook.builtin && !selectedBook.pack && (
-            <button
-              className="secondary"
-              disabled={busy}
-              onClick={async () => {
+            <ActionButton
+              action={async () => {
                 if (
                   !(await confirm({
                     title: "删除词表",
@@ -347,9 +345,11 @@ export function VocabularyReviewPage({
                   return;
                 await update(() => client.removeWordbook!(selectedBook.id));
               }}
-            >
-              删除这个词表
-            </button>
+              ariaBusy={busy}
+              className="secondary"
+              disabled={busy}
+              label="删除这个词表"
+            />
           )}
         </div>
       )}
@@ -362,38 +362,38 @@ export function VocabularyReviewPage({
             <p className={empty}>今天的复习已经完成。</p>
           ) : (
             <>
-              <button
-                type="button"
+              <ActionButton
+                action={() => setRevealed(true)}
+                ariaLabel={revealed ? `${card.word} 的释义` : `显示 ${card.word} 的释义`}
+                ariaPressed={revealed}
                 className={cardFace(mobile)}
-                aria-label={revealed ? `${card.word} 的释义` : `显示 ${card.word} 的释义`}
-                aria-pressed={revealed}
-                onClick={() => setRevealed(true)}
-              >
-                <p className={cardWord(mobile)}>{card.word}</p>
-                {card.phonetic && <p className={cardPhonetic}>{card.phonetic}</p>}
-                {revealed ? (
-                  <p className={cardMeaning}>{card.meaning}</p>
-                ) : (
-                  <p className={cardHint}>点击查看释义</p>
-                )}
-              </button>
+                label={
+                  <>
+                    <p className={cardWord(mobile)}>{card.word}</p>
+                    {card.phonetic && <p className={cardPhonetic}>{card.phonetic}</p>}
+                    {revealed ? (
+                      <p className={cardMeaning}>{card.meaning}</p>
+                    ) : (
+                      <p className={cardHint}>点击查看释义</p>
+                    )}
+                  </>
+                }
+              />
               <div className={answerRow}>
-                <button
-                  type="button"
+                <ActionButton
+                  action={() => void answer(false)}
+                  ariaBusy={busy}
                   className={answerButton}
                   disabled={busy}
-                  onClick={() => void answer(false)}
-                >
-                  不认识
-                </button>
-                <button
-                  type="button"
+                  label="不认识"
+                />
+                <ActionButton
+                  action={() => void answer(true)}
+                  ariaBusy={busy}
                   className={answerKnown}
                   disabled={busy}
-                  onClick={() => void answer(true)}
-                >
-                  认识
-                </button>
+                  label="认识"
+                />
               </div>
               <p className={note}>
                 答「不认识」的词会在本次复习里再次出现；答「认识」的词按间隔安排到以后的某一天。
@@ -405,10 +405,8 @@ export function VocabularyReviewPage({
 
       {managing && (
         <div className="section">
-          <button
-            className="secondary"
-            disabled={busy}
-            onClick={async () => {
+          <ActionButton
+            action={async () => {
               if (
                 !(await confirm({
                   title: "清空进度",
@@ -420,9 +418,11 @@ export function VocabularyReviewPage({
                 return;
               await update(() => client.reset());
             }}
-          >
-            清空复习进度
-          </button>
+            ariaBusy={busy}
+            className="secondary"
+            disabled={busy}
+            label="清空复习进度"
+          />
         </div>
       )}
 
