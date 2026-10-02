@@ -5,6 +5,42 @@
 use crate::*;
 use msime_client_core::is_bounded_text;
 
+fn traditional_retry_inputs(
+    candidates: &[(String, u8)],
+    glosses: &[String],
+) -> (Vec<(String, u8)>, Vec<usize>) {
+    let mut retry = Vec::with_capacity(candidates.len());
+    let mut retry_index = Vec::with_capacity(candidates.len());
+    for (index, ((text, source), gloss)) in candidates.iter().zip(glosses).enumerate() {
+        if !gloss.is_empty() {
+            continue;
+        }
+        let simplified =
+            msime_client_core::chinese_conversion::traditional_to_simplified_characters(text);
+        if simplified != *text {
+            retry.push((simplified, *source));
+            retry_index.push(index);
+        }
+    }
+    (retry, retry_index)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn traditional_retry_inputs_reserve_candidate_capacity() {
+        let candidates = vec![("學".to_owned(), 1), ("你好".to_owned(), 2)];
+        let glosses = vec![String::new(), String::new()];
+        let (retry, indexes) = traditional_retry_inputs(&candidates, &glosses);
+        assert_eq!(retry.len(), 1);
+        assert_eq!(indexes, [0]);
+        assert!(retry.capacity() >= candidates.len());
+        assert!(indexes.capacity() >= candidates.len());
+    }
+}
+
 /// Plan eligible visible candidates using shared script filters. No I/O.
 /// # Safety
 /// `request` must reference `length` readable bytes for this call.
@@ -596,21 +632,7 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
         let mut glosses = lookup(&candidates)?;
         // The gloss tables are keyed by Simplified text, so a Traditional candidate - a Korean Hanja such as 韓, or any candidate under Traditional output - finds nothing under its own spelling. Ask again under the Simplified characters for the ones that missed; the reply still names the candidate as shown.
         if glosses.len() == candidates.len() {
-            let mut retry = Vec::new();
-            let mut retry_index = Vec::new();
-            for (index, ((text, source), gloss)) in candidates.iter().zip(&glosses).enumerate() {
-                if !gloss.is_empty() {
-                    continue;
-                }
-                let simplified =
-                    msime_client_core::chinese_conversion::traditional_to_simplified_characters(
-                        text,
-                    );
-                if simplified != *text {
-                    retry.push((simplified, *source));
-                    retry_index.push(index);
-                }
-            }
+            let (retry, retry_index) = traditional_retry_inputs(&candidates, &glosses);
             if !retry.is_empty() {
                 let found = lookup(&retry)?;
                 if found.len() == retry.len() {
