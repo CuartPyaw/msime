@@ -797,6 +797,59 @@ fn a_symlinked_skin_root_deletes_nothing_once_packages_are_remembered() {
 
 #[cfg(unix)]
 #[test]
+fn a_symlinked_sync_state_does_not_delete_a_local_skin() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    let packed = pack_as(&fixture.root, "sakura", CandidateSkinVisibility::Private).unwrap();
+    let local_digest = content_digest(&packed.manifest, &packed.files).unwrap();
+    let external = tempfile::tempdir().unwrap();
+    let external_state = external.path().join("state.json");
+    let state = SyncState {
+        user_id: "user-1".to_owned(),
+        packages: BTreeMap::from([(
+            "sakura".to_owned(),
+            SyncedPackage {
+                cloud_id: Uuid::new_v4(),
+                cloud_digest: "a".repeat(64),
+                local_digest,
+            },
+        )]),
+        installed: BTreeMap::new(),
+    };
+    let bytes = serde_json::to_vec(&state).unwrap();
+    fs::write(&external_state, &bytes).unwrap();
+    symlink(&external_state, &fixture.state).unwrap();
+
+    // 外部同步状态不能让同步删除本地皮肤，且外部文件不能被改写。
+    let report = fixture.sync();
+    assert_eq!(report.uploaded, ids(&["sakura"]));
+    assert!(fixture.installed("sakura"));
+    assert_eq!(fs::read(&external_state).unwrap(), bytes);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_sync_state_parent_does_not_write_outside() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    let outside = tempfile::tempdir().unwrap();
+    let linked_parent = fixture._directory.path().join("linked-state");
+    symlink(outside.path(), &linked_parent).unwrap();
+    let state_path = linked_parent.join(STATE_FILE);
+
+    // 状态文件父目录是外部链接时，保存不能在外部目录留下同步状态。
+    let report = sync_candidate_skins(&fixture.root, &state_path, &fixture.library).unwrap();
+    assert_eq!(report.uploaded, ids(&["sakura"]));
+    assert!(!outside.path().join(STATE_FILE).exists());
+    assert!(fixture.installed("sakura"));
+}
+
+#[cfg(unix)]
+#[test]
 fn an_unreadable_skin_root_deletes_nothing() {
     use std::os::unix::fs::PermissionsExt;
     let fixture = Fixture::new();
