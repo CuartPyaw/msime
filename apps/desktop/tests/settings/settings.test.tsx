@@ -5595,8 +5595,15 @@ test("macOS shortcut page owns the full-width chord and the input page the mode 
   await settingsReady();
   fireEvent.click(screen.getByRole("button", { name: "快捷键" }));
   // The chords are named for the keys a Mac keyboard actually has.
-  expect(await screen.findByText("单击 Control 切换中英文")).toBeDefined();
-  expect(screen.getByText("Control+Option+Space 切换中英文")).toBeDefined();
+  const languageSwitch = (await screen.findByRole("combobox", {
+    name: "切换中英文",
+  })) as HTMLSelectElement;
+  expect(Array.from(languageSwitch.options).map((option) => option.text)).toEqual([
+    "Shift",
+    "单击 Control",
+    "Control+Option+Space",
+    "不使用",
+  ]);
   // 中英文切换提示不在快捷键页重复出现。
   expect(screen.queryByRole("switch", { name: "切换中英文时显示提示" })).toBeNull();
   const fullWidth = screen.getByRole("switch", { name: "Option+Shift+H 切换全半角" });
@@ -5674,7 +5681,7 @@ test("the full-width chord row is macOS only", async () => {
   );
   await settingsReady();
   fireEvent.click(screen.getByRole("button", { name: "快捷键" }));
-  expect(await screen.findByText("单击 Ctrl 切换中英文")).toBeDefined();
+  expect(await screen.findByRole("option", { name: "单击 Ctrl" })).toBeDefined();
   expect(screen.queryByRole("switch", { name: "Option+Shift+H 切换全半角" })).toBeNull();
 });
 
