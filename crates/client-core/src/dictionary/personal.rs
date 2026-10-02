@@ -30,6 +30,8 @@ pub enum PersonalWordKind {
     QuickPhrase,
     #[serde(rename = "english")]
     English,
+    #[serde(rename = "wubi98")]
+    Wubi98,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -49,6 +51,7 @@ impl PersonalWord {
             match self.kind {
                 PersonalWordKind::Pinyin => "pinyin",
                 PersonalWordKind::Wubi => "wubi",
+                PersonalWordKind::Wubi98 => "wubi98",
                 PersonalWordKind::QuickPhrase => "quickPhrase",
                 PersonalWordKind::English => "english",
             },
@@ -63,13 +66,15 @@ impl PersonalWord {
     pub fn validate(&self) -> Result<(), &'static str> {
         let key_limit = match self.kind {
             PersonalWordKind::Pinyin => 512,
-            PersonalWordKind::Wubi => 4,
+            PersonalWordKind::Wubi | PersonalWordKind::Wubi98 => 4,
             PersonalWordKind::QuickPhrase => 32,
             PersonalWordKind::English => 64,
         };
         let key_valid = match self.kind {
             PersonalWordKind::Pinyin => super::pinyin_code_is_well_formed(&self.key, true),
-            PersonalWordKind::Wubi => super::wubi_code_is_well_formed(&self.key),
+            PersonalWordKind::Wubi | PersonalWordKind::Wubi98 => {
+                super::wubi_code_is_well_formed(&self.key)
+            }
             PersonalWordKind::QuickPhrase => {
                 super::quick_phrase_transport_code_is_well_formed(&self.key)
             }

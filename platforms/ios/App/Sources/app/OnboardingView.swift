@@ -60,6 +60,8 @@ struct InputSettingsView: View {
   @State private var defaultModeSaveFailed = false
   @State private var schemeSaveFailed = false
   @State private var outputSaveFailed = false
+  @State private var wubiProfile = WubiProfilePreference.profile
+  @State private var wubiProfileSaveFailed = false
   @State private var remembersImeMode = false
   /// The shared document as last read, for the candidate preview at the top (dc.html: 输入 leads with the same card as 主题 and 候选栏).
   @State private var document: [String: Any]?
@@ -125,6 +127,19 @@ struct InputSettingsView: View {
 
         if enabledSchemes.contains(.wubi) {
           Section("五笔") {
+            Picker("码表", selection: Binding(get: { wubiProfile }, set: { profile in
+              wubiProfile = profile
+              wubiProfileSaveFailed = !WubiProfilePreference.save(profile)
+              reloadPreferences()
+            })) {
+              ForEach(WubiProfilePreference.profiles, id: \.self) { Text(WubiProfilePreference.title($0)).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("wubiProfilePicker")
+            Text(wubiProfileSaveFailed
+              ? "设置没有保存，键盘可能正在写入同一份设置，请再试一次。"
+              : "86 版与 98 版的字根和编码不同，各用各的词库；个人词条和调频记录也分开保存，切换版本不会互相影响。")
+              .font(.footnote).foregroundStyle(.secondary)
             Toggle("编码打不出时用拼音候选", isOn: $wubiMixedPinyin)
               .accessibilityIdentifier("wubiMixedPinyin")
             Text("五笔词库答不上当前编码时，用同一串字母查全拼。词库答得上的编码不受影响。")
@@ -251,6 +266,8 @@ struct InputSettingsView: View {
     enabledSchemes = InputSchemePreference.enabledSchemes
     usesTraditionalOutput = ChineseOutputPreference.usesTraditional
     document = MetasequoiaInputSessionBridge.loadSharedPreferences()
+    if let document { WubiProfilePreference.mirror(document) }
+    wubiProfile = WubiProfilePreference.profile
     startsInEnglish = document?["default_ime_mode"] as? String == "english"
     remembersImeMode = ImeModeMemoryPreference.isEnabled()
   }

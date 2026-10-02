@@ -151,3 +151,54 @@ test("Vietnamese controls show the document's options", () => {
   expect((screen.getByRole("radio", { name: "VNI" }) as HTMLInputElement).checked).toBe(true);
   expect((screen.getByRole("radio", { name: "旧式 hòa" }) as HTMLInputElement).checked).toBe(true);
 });
+
+test("changes the Wubi profile between 86 and 98 under Wubi", () => {
+  const onWubiProfileChange = vi.fn();
+  render(
+    <InputSchemeDetailsSection
+      scheme="wubi"
+      shuangpinProfile="xiaohe"
+      wubiProfile="wubi86"
+      macos={false}
+      hasTouchKeyboardSchemes={false}
+      onShuangpinProfileChange={vi.fn()}
+      onWubiProfileChange={onWubiProfileChange}
+    />,
+  );
+  const profile = screen.getByRole("combobox", { name: "五笔方案" }) as HTMLSelectElement;
+  expect(profile.value).toBe("wubi86");
+  expect(Array.from(profile.options).map((option) => option.textContent)).toEqual([
+    "86 五笔",
+    "98 五笔",
+  ]);
+  fireEvent.change(profile, { target: { value: "wubi98" } });
+  expect(onWubiProfileChange).toHaveBeenCalledWith("wubi98");
+});
+
+test("touch hosts show the Wubi profile only while the Wubi keyboard is enabled", () => {
+  const { rerender } = render(
+    <InputSchemeDetailsSection
+      scheme="quanpin"
+      shuangpinProfile="xiaohe"
+      wubiProfile="wubi98"
+      macos={false}
+      hasTouchKeyboardSchemes
+      touchKeyboardHasWubi
+      onShuangpinProfileChange={vi.fn()}
+    />,
+  );
+  expect((screen.getByRole("combobox", { name: "五笔方案" }) as HTMLSelectElement).value).toBe(
+    "wubi98",
+  );
+  expect(screen.queryByRole("combobox", { name: "双拼方案" })).toBeNull();
+  rerender(
+    <InputSchemeDetailsSection
+      scheme="wubi"
+      shuangpinProfile="xiaohe"
+      macos={false}
+      hasTouchKeyboardSchemes
+      onShuangpinProfileChange={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole("combobox", { name: "五笔方案" })).toBeNull();
+});

@@ -633,6 +633,9 @@ pub struct Preferences {
     /// Answer an unmatched Wubi code with candidates from the same Pinyin spelling.
     #[serde(default)]
     pub wubi_mixed_pinyin: bool,
+    /// 五笔用 86 还是 98 码表；个人词条和学习记录也按它分开存。
+    #[serde(default)]
+    pub wubi_profile: WubiProfile,
     #[serde(default)]
     pub touch_keyboard_layout: TouchKeyboardLayout,
     /// Touch-only picker visibility and optional host selection. Desktop hosts preserve but ignore it.
@@ -1500,6 +1503,9 @@ pub struct KeybindingPreferences {
     pub switch_language_shift: bool,
     #[serde(default)]
     pub switch_language_ctrl: bool,
+    /// Linux 已默认处理这个组合键；关闭时交还应用，不改输入法框架的全局绑定。
+    #[serde(default = "enabled_by_default")]
+    pub switch_language_ctrl_space: bool,
     #[serde(default = "enabled_by_default")]
     pub switch_language_ctrl_alt_space: bool,
     #[serde(default = "enabled_by_default")]
@@ -1516,6 +1522,7 @@ impl Default for KeybindingPreferences {
         Self {
             switch_language_shift: true,
             switch_language_ctrl: false,
+            switch_language_ctrl_space: true,
             switch_language_ctrl_alt_space: true,
             toggle_character_set_ctrl_shift_f: true,
             toggle_fullwidth_option_shift_h: true,
@@ -1681,6 +1688,7 @@ impl Default for Preferences {
             scheme: InputScheme::default(),
             wubi_code_hint: true,
             wubi_mixed_pinyin: false,
+            wubi_profile: WubiProfile::default(),
             touch_keyboard_layout: TouchKeyboardLayout::default(),
             touch_keyboard_schemes: TouchKeyboardSchemePreferences::default(),
             touch_key_spacing_tenths: default_touch_key_spacing_tenths(),
@@ -1835,6 +1843,16 @@ pub enum ShuangpinProfile {
     Ziranma,
     Shoudao,
     Microsoft,
+}
+
+/// 五笔码表版本。Engine 的编码是声明顺序（`wubi_profile`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum WubiProfile {
+    #[default]
+    #[serde(rename = "wubi86")]
+    Wubi86,
+    #[serde(rename = "wubi98")]
+    Wubi98,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

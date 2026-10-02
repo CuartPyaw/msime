@@ -2723,6 +2723,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     if let codeHint = preferences["wubi_code_hint"] as? Bool {
       WubiCodeHintPreference.isEnabled = codeHint
     }
+    // 五笔版本由会话直接从文档读取；这里只更新方案名和方案卡片角标读的 App Group 镜像。
+    WubiProfilePreference.mirror(preferences)
     if let traditional = preferences["traditional_chinese_output"] as? Bool,
        traditional != ChineseOutputPreference.usesTraditional {
       ChineseOutputPreference.usesTraditional = traditional

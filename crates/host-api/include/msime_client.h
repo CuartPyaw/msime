@@ -79,8 +79,8 @@ char *msime_client_community_moderation(const uint8_t *request, size_t length);
 /* options is a readable UTF-8 buffer of length bytes; maximum 1 MiB.
  * Object: api_version=1, resources/user_data/cache/dictionaries (absolute paths),
  * preferences={scheme, candidate_page_size, learning, chinese_punctuation,
- *              shuangpin_profile?}. Missing profile defaults to xiaohe; allowed
- * profiles: xiaohe, ziranma, shoudao, microsoft. Unknown values are rejected.
+ *              shuangpin_profile?, wubi_profile?}. Missing profile defaults to xiaohe; allowed
+ * profiles: xiaohe, ziranma, shoudao, microsoft. 缺省 wubi_profile 为 wubi86，可选 wubi86、wubi98。 Unknown values are rejected.
  * Optional preferences_directory is bootstrap metadata for host file monitoring;
  * session creation itself does not monitor or load it.
  * Optional phrase_preedit=true asks for a half-composed phrase to stay in the
@@ -110,7 +110,7 @@ char *msime_client_create(const uint8_t *options, size_t length);
  * {options: <same HostOptions as create>, action: {operation:"list",offset:0,limit:100}}
  * List takes optional kind and query (a code prefix). Without them it lists the user's own words; with a kind and a nonblank query (quick_phrase needs none) it also finds the bundled words of that dictionary, user words first. user_only:true keeps any list to the user's own words, filtered by the kind and code prefix across the whole store.
  * or action:{operation:"edit",previous:null|Entry,replacement:null|Entry,request_id:"..."}.
- * Batch import: action:{operation:"import",kind:"pinyin"|"wubi"|"quick_phrase"|"english",
+ * Batch import: action:{operation:"import",kind:"pinyin"|"wubi"|"wubi98"|"quick_phrase"|"english",
  * format:"standard"|"windows"|"rime"|"hans",text:"word<TAB>code<TAB>weight\\n",request_id:"..."}.
  * Standard rows are word, code, weight; Windows rows are code, word, weight. Rime rows are
  * word, code, optional weight and may include YAML front matter between --- and ...; Rime's
@@ -121,7 +121,7 @@ char *msime_client_create(const uint8_t *options, size_t length);
  * with deterministic receipt IDs derived from request_id so retries are safe.
  * Export: action:{operation:"export",kind,format:"standard"|"windows",offset,limit} returns
  * {text,has_more}; use pages of at most 1000 rows. Standard output is word, code, weight.
- * Entry:{kind:"pinyin"|"wubi"|"quick_phrase"|"english",key,value,weight,source?:"user"|"bundled"}.
+ * Entry:{kind:"pinyin"|"wubi"|"wubi98"|"quick_phrase"|"english",key,value,weight,source?:"user"|"bundled"}.
  * List returns {entries,has_more} and sets source on every entry; edit returns {applied:true}. Errors are redacted.
  * A bundled entry passed back as previous can only be re-weighted (replacement with the same kind, key and value) or deleted (replacement null); anything else fails with "bundled dictionary entry is read-only". Export of pinyin also carries the weights set or learned for bundled words and omits single characters; the other kinds export user words only.
  * Native host owns/authorizes paths; never accept arbitrary webview paths or log payloads.

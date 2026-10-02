@@ -119,6 +119,7 @@ pub(crate) fn dictionary_kind(value: &str) -> Result<DictionaryKind, crate::Comm
     match value {
         "pinyin" => Ok(DictionaryKind::Pinyin),
         "wubi" => Ok(DictionaryKind::Wubi),
+        "wubi98" => Ok(DictionaryKind::Wubi98),
         "quick" => Ok(DictionaryKind::Quick),
         "english" => Ok(DictionaryKind::English),
         _ => Err(crate::CommandError {

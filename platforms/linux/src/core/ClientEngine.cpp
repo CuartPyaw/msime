@@ -40,6 +40,7 @@
 #include "../candidates/CandidateTranslationPolicy.h"
 #include "../candidates/PairedPunctuation.h"
 #include "../candidates/ShuangpinProfileNames.h"
+#include "../candidates/WubiProfileNames.h"
 #include "ClientInputModeMemory.h"
 #include "../system/DiagnosticLog.h"
 #include "../system/KeySound.h"
@@ -412,6 +413,7 @@ struct State {
   }
   bool mode_shift_enabled = true;
   bool mode_ctrl_enabled = false;
+  bool mode_ctrl_space_enabled = true;
   bool mode_ctrl_alt_space_enabled = true;
   bool character_set_shortcut_enabled = true;
   bool number_row_selection = true;
@@ -752,6 +754,7 @@ struct State {
         voice_preferences.value("hotkey_hold_space_lock", true);
     voice_hotkey_ctrl_f9 = voice_preferences.value("hotkey_ctrl_f9", true);
     const auto keybindings = preferences.value("keybindings", Json::object());
+    mode_ctrl_space_enabled = keybindings.value("switch_language_ctrl_space", true);
     mode_shift_enabled = keybindings.value("switch_language_shift", true);
     mode_ctrl_enabled = keybindings.value("switch_language_ctrl", false);
     mode_ctrl_alt_space_enabled =
@@ -1004,6 +1007,7 @@ struct State {
     voice_hotkey_hold_space_lock = voice.value("hotkey_hold_space_lock", true);
     voice_hotkey_ctrl_f9 = voice.value("hotkey_ctrl_f9", true);
     const auto keybindings = preferences.value("keybindings", Json::object());
+    mode_ctrl_space_enabled = keybindings.value("switch_language_ctrl_space", true);
     mode_shift_enabled = keybindings.value("switch_language_shift", true);
     mode_ctrl_enabled = keybindings.value("switch_language_ctrl", false);
     mode_ctrl_alt_space_enabled =
@@ -3255,9 +3259,12 @@ void publish_mode(IBusEngine *engine, bool registration) {
   // The input languages and the Chinese schemes are two radio groups; without the rule ibus-ui-gtk3 joins them and marks only one of the two checked entries.
   ibus_prop_list_append(scheme_menu, menu_separator("Scheme/Separator"));
   // Cantonese and Zhuyin are offered only when their dictionary is installed: host-api would fall back from either without it.
+  // 五笔一项跟随存储的码表版本显示「86 五笔」或「98 五笔」。
+  const char *wubi_label = msime::linux_host::wubi_scheme_label(
+      configured.at("preferences").value("wubi_profile", std::string("wubi86")));
   for (const auto &[value, name, label] : {std::tuple{"quanpin", "Scheme/Quanpin", "全拼"},
                                            std::tuple{"shuangpin", "Scheme/Shuangpin", "双拼"},
-                                           std::tuple{"wubi", "Scheme/Wubi", "五笔"},
+                                           std::tuple{"wubi", "Scheme/Wubi", wubi_label},
                                            std::tuple{"cantonese", "Scheme/Cantonese", "粤拼"},
                                            std::tuple{"zhuyin", "Scheme/Zhuyin", "注音"}}) {
     if (!msime::linux_host::input_scheme_available(value, configured_dictionaries)) continue;
@@ -6079,12 +6086,11 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
   const bool ctrl_alt_space =
       key == IBUS_space &&
       modifiers == (IBUS_CONTROL_MASK | IBUS_MOD1_MASK);
-  if (ctrl_alt_space && !s.mode_ctrl_alt_space_enabled)
+  const bool ctrl_space = key == IBUS_space && modifiers == IBUS_CONTROL_MASK;
+  if ((ctrl_space && !s.mode_ctrl_space_enabled) ||
+      (ctrl_alt_space && !s.mode_ctrl_alt_space_enabled))
     return FALSE;
-  const bool mode_toggle =
-      (key == IBUS_space &&
-       (modifiers == IBUS_CONTROL_MASK ||
-        ctrl_alt_space));
+  const bool mode_toggle = ctrl_space || ctrl_alt_space;
   const bool fullwidth_toggle = key == IBUS_space &&
                                 modifiers == (IBUS_CONTROL_MASK | IBUS_SHIFT_MASK);
   const bool punctuation_toggle = modifiers == IBUS_CONTROL_MASK && key == IBUS_period;

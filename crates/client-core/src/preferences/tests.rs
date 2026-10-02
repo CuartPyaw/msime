@@ -35,6 +35,32 @@ fn preference_store_rejects_a_symlinked_document() {
 }
 
 #[test]
+fn ctrl_space_defaults_on_and_persists_an_explicit_disable() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(directory.path());
+    let snapshot = store.load().unwrap();
+    let mut value = serde_json::to_value(&snapshot.preferences).unwrap();
+    assert_eq!(value["keybindings"]["switch_language_ctrl_space"], true);
+    value["keybindings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("switch_language_ctrl_space");
+    let legacy: Preferences = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(legacy).unwrap()["keybindings"]["switch_language_ctrl_space"],
+        true
+    );
+    value["keybindings"]["switch_language_ctrl_space"] = false.into();
+    let disabled: Preferences = serde_json::from_value(value).unwrap();
+    store.save(snapshot.revision, disabled).unwrap();
+    assert_eq!(
+        serde_json::to_value(store.load().unwrap().preferences).unwrap()["keybindings"]
+            ["switch_language_ctrl_space"],
+        false
+    );
+}
+
+#[test]
 fn voice_commit_mode_defaults_for_legacy_documents() {
     let mut value = serde_json::to_value(Preferences::default()).unwrap();
     value["voice_input"]
@@ -2075,6 +2101,33 @@ fn shuangpin_profiles_preserve_legacy_files_and_reject_unknown_values() {
     assert!(store.load().is_err());
     assert!(store.save(revision, Preferences::default()).is_err());
     assert_eq!(fs::read_to_string(store.path()).unwrap(), unknown);
+}
+
+#[test]
+fn wubi_profile_defaults_to_86_and_rejects_unknown_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let legacy = r#"{"format_version":1,"revision":3,"preferences":{"scheme":"wubi","candidate_page_size":5,"learning":false,"chinese_punctuation":true}}"#;
+    fs::write(store.path(), legacy).unwrap();
+    assert_eq!(
+        store.load().unwrap().preferences.wubi_profile,
+        WubiProfile::Wubi86
+    );
+    let saved = store
+        .save(
+            3,
+            Preferences {
+                scheme: InputScheme::Wubi,
+                wubi_profile: WubiProfile::Wubi98,
+                ..Preferences::default()
+            },
+        )
+        .unwrap();
+    let text = fs::read_to_string(store.path()).unwrap();
+    assert!(text.contains(r#""wubi_profile": "wubi98""#), "{text}");
+    assert_eq!(store.load().unwrap(), saved);
+    fs::write(store.path(), text.replace("wubi98", "wubi06")).unwrap();
+    assert!(store.load().is_err());
 }
 
 #[test]

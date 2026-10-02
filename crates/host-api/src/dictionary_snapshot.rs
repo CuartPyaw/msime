@@ -185,7 +185,9 @@ fn inspect_snapshot_record(
             let dictionary_kind = data
                 .get("kind")
                 .and_then(Value::as_str)
-                .filter(|value| matches!(*value, "pinyin" | "wubi" | "english" | "quick"))
+                .filter(|value| {
+                    matches!(*value, "pinyin" | "wubi" | "wubi98" | "english" | "quick")
+                })
                 .ok_or("invalid snapshot document")?
                 .to_owned();
             let id = data

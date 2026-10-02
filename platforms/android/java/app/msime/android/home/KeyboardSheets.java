@@ -261,12 +261,24 @@ public final class KeyboardSheets {
         TextView status = sheet.addStatus();
         // Cantonese and Zhuyin are offered only once their dictionary is installed: without it host-api falls back from them, so picking one would change nothing.
         String languageDictionaries = HostStore.languageDictionaries(context);
+        String currentWubi = KeyboardScheme.normalizedWubiProfile(
+            preferences.optString("wubi_profile", KeyboardScheme.WUBI_86));
         for (KeyboardScheme scheme : KeyboardScheme.values()) {
             if (scheme == KeyboardScheme.THOUGHTFUL_REPLY) continue;
             if (!scheme.installed(languageDictionaries)) continue;
+            if (scheme == KeyboardScheme.WUBI) {
+                // 五笔只有一个方案，86 与 98 是它的两个版本：各列一行，选中哪行就同时写 `scheme` 和 `wubi_profile`。
+                for (String profile : List.of(KeyboardScheme.WUBI_86, KeyboardScheme.WUBI_98)) {
+                    sheet.add(choice(context, scheme.title(profile),
+                        scheme.glyph() + " · " + scheme.badge(profile),
+                        scheme == current && profile.equals(currentWubi),
+                        () -> applyScheme(fragment, snapshot, scheme, profile, status, sheet, changed)));
+                }
+                continue;
+            }
             sheet.add(choice(context, scheme.title(), scheme.glyph() + " · " + scheme.badge(),
                 scheme == current,
-                () -> applyScheme(fragment, snapshot, scheme, status, sheet, changed)));
+                () -> applyScheme(fragment, snapshot, scheme, null, status, sheet, changed)));
         }
         sheet.addNote("高情商回复是键盘上的一个入口，不是一种输入方案，所以不在这个列表里。");
         sheet.show();
@@ -454,6 +466,16 @@ public final class KeyboardSheets {
      * @return the edited copy, or null when the snapshot has no preferences object
      */
     @Nullable static JSONObject withScheme(JSONObject snapshot, KeyboardScheme scheme) {
+        return withScheme(snapshot, scheme, null);
+    }
+
+    /**
+     * 同上，另外把 `wubi_profile` 写成 `wubiProfile`；传 null 保留现有版本，切到五笔时沿用用户上次选的 86 或 98。
+     *
+     * @return 改好的副本；快照里没有 preferences 对象时为 null
+     */
+    @Nullable static JSONObject withScheme(JSONObject snapshot, KeyboardScheme scheme,
+            @Nullable String wubiProfile) {
         JSONObject preferences = preferences(snapshot);
         if (preferences == null) return null;
         KeyboardScheme.PreferenceMapping mapping = scheme.mapping(
@@ -466,6 +488,9 @@ public final class KeyboardSheets {
             values.put("last_chinese_scheme", mapping.lastChineseScheme());
             values.put("shuangpin_profile", mapping.shuangpinProfile());
             values.put("touch_keyboard_layout", mapping.touchKeyboardLayout());
+            if (wubiProfile != null) {
+                values.put("wubi_profile", KeyboardScheme.normalizedWubiProfile(wubiProfile));
+            }
             // Once the keyboard's own picker has written its scheme list, its `selected` outranks `scheme` when the keyboard resolves what to show (KeyboardScheme.resolveEnabledSelection), so a switch made here has to move it too, and enable the scheme if the list left it out. Without the list the keyboard follows `scheme` alone; do not create one.
             JSONObject schemes = values.optJSONObject("touch_keyboard_schemes");
             if (schemes != null) {
@@ -491,9 +516,9 @@ public final class KeyboardSheets {
     }
 
     private static void applyScheme(Fragment fragment, JSONObject snapshot, KeyboardScheme scheme,
-            TextView status, SettingsSheet sheet, Runnable changed) {
+            @Nullable String wubiProfile, TextView status, SettingsSheet sheet, Runnable changed) {
         if (preferences(snapshot) == null) return;
-        JSONObject pending = withScheme(snapshot, scheme);
+        JSONObject pending = withScheme(snapshot, scheme, wubiProfile);
         if (pending == null) {
             status.setText("切换失败，保留当前方案");
             return;

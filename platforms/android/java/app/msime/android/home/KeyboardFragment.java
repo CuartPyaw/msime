@@ -166,12 +166,13 @@ public final class KeyboardFragment extends HomeTabFragment {
             KeyboardScheme selected = KeyboardScheme.fromPreferences(
                 preferences.optString("scheme", "quanpin"),
                 preferences.optString("shuangpin_profile", "xiaohe"), layout);
+            String wubiProfile = preferences.optString("wubi_profile", KeyboardScheme.WUBI_86);
             skin = resolved.title();
-            scheme = selected.title();
+            scheme = selected.title(wubiProfile);
             // The picture is of this keyboard, not of a keyboard: a fixed nine-key grid in fixed
             // colours under a caption naming the user's own 26-key layout contradicted itself.
             ((KeyboardPreview) view.findViewById(R.id.keyboard_preview)).setKeyboard(
-                resolved, "nine_key".equals(layout), selected.glyph() + selected.badge());
+                resolved, "nine_key".equals(layout), selected.glyph() + selected.badge(wubiProfile));
         }
         ((TextView) view.findViewById(R.id.keyboard_summary)).setText(skin + " · " + scheme);
         schemeTitle = preferences == null ? null : scheme;
@@ -263,6 +264,8 @@ public final class KeyboardFragment extends HomeTabFragment {
         for (KeyboardScheme candidate : KeyboardScheme.values()) {
             if (candidate != KeyboardScheme.THOUGHTFUL_REPLY) terms.append(' ').append(candidate.title());
         }
+        // 「98 五笔」在输入方案里同样可选，搜得到它才找得到这一行。
+        terms.append(' ').append(KeyboardScheme.WUBI.title(KeyboardScheme.WUBI_98));
         return terms.toString();
     }
 

@@ -36,6 +36,7 @@
 #include "../src/candidates/CandidateWheelPaging.h"
 #include "../src/candidates/PanelRestoreRecord.h"
 #include "../src/candidates/ShuangpinProfileNames.h"
+#include "../src/candidates/WubiProfileNames.h"
 #include "../src/candidates/CandidateTranslationPolicy.h"
 #include "../src/candidates/PairedPunctuation.h"
 #include "../src/core/CandidateSkinCatalog.h"
@@ -1511,6 +1512,7 @@ public:
     const auto keybindings = preferences_.value("keybindings", Json::object());
     mode_shift_enabled_ = keybindings.value("switch_language_shift", true);
     mode_ctrl_enabled_ = keybindings.value("switch_language_ctrl", false);
+    mode_ctrl_space_enabled_ = keybindings.value("switch_language_ctrl_space", true);
     mode_ctrl_alt_space_enabled_ =
         keybindings.value("switch_language_ctrl_alt_space", true);
     character_set_shortcut_enabled_ =
@@ -1690,6 +1692,7 @@ public:
             const auto reloaded = preferences_.value("keybindings", Json::object());
             mode_shift_enabled_ = reloaded.value("switch_language_shift", mode_shift_enabled_);
             mode_ctrl_enabled_ = reloaded.value("switch_language_ctrl", mode_ctrl_enabled_);
+            mode_ctrl_space_enabled_ = reloaded.value("switch_language_ctrl_space", true);
             mode_ctrl_alt_space_enabled_ = reloaded.value(
                 "switch_language_ctrl_alt_space", mode_ctrl_alt_space_enabled_);
             character_set_shortcut_enabled_ = reloaded.value(
@@ -3421,6 +3424,7 @@ public:
   bool input_enabled_ = true;
   bool mode_shift_enabled_ = true;
   bool mode_ctrl_enabled_ = false;
+  bool mode_ctrl_space_enabled_ = true;
   bool mode_ctrl_alt_space_enabled_ = true;
   bool character_set_shortcut_enabled_ = true;
   // A bare modifier switches on release, and only if nothing else was typed
@@ -3711,10 +3715,15 @@ public:
   explicit FcitxSchemeAction(fcitx::FactoryFor<FcitxState> *factory) : factory_(factory) {}
   std::string shortText(fcitx::InputContext *ic) const override {
     if (!ic) return "输入方案";
-    const auto scheme = ic->propertyFor(factory_)->view_.value("scheme", 0u);
+    const auto *state = ic->propertyFor(factory_);
+    const auto scheme = state->view_.value("scheme", 0u);
     switch (scheme) {
     case 1: return "输入方案：双拼";
-    case 2: return "输入方案：五笔";
+    // 五笔标出当前码表版本（86 或 98），与设置页和托盘一致。
+    case 2:
+      return std::string("输入方案：") +
+             msime::linux_host::wubi_scheme_label(
+                 state->preferences_.value("wubi_profile", std::string("wubi86")));
     case 3: return "输入方案：日文";
     case 4: return "输入方案：韩文";
     case 5: return "输入方案：粤拼";
@@ -3747,7 +3756,13 @@ public:
       : factory_(factory), index_(index), label_(label) {
     setCheckable(true);
   }
-  std::string shortText(fcitx::InputContext *) const override { return label_; }
+  std::string shortText(fcitx::InputContext *ic) const override {
+    // 五笔一项跟随存储的码表版本显示「86 五笔」或「98 五笔」。
+    if (ic && std::string_view(FcitxState::kSchemes[index_]) == "wubi")
+      return msime::linux_host::wubi_scheme_label(
+          ic->propertyFor(factory_)->preferences_.value("wubi_profile", std::string("wubi86")));
+    return label_;
+  }
   std::string icon(fcitx::InputContext *) const override { return ""; }
   bool isChecked(fcitx::InputContext *ic) const override {
     if (!ic) return false;
@@ -6466,6 +6481,7 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
   pure_ctrl_candidate_ = false;
   if (sym == FcitxKey_space && ctrl && !shift &&
       (alt ? mode_ctrl_alt_space_enabled_ : true)) {
+    if (!alt && !mode_ctrl_space_enabled_) return false;
     if (composing) command(MSIME_COMMIT_RAW);
     if (!toggleInputMode()) return false;
     toggle_chord_held_ = sym;

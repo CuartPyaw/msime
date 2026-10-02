@@ -78,7 +78,7 @@ enum ChineseInputScheme: String, CaseIterable {
     case .ziranma: "自然码双拼"
     case .microsoft: "微软双拼"
     case .shoudao: "首道双拼"
-    case .wubi: "86 五笔"
+    case .wubi: WubiProfilePreference.title(WubiProfilePreference.profile)
     case .japanese: "日语 26 键"
     case .japaneseNineKey: "日语 9 键"
     case .korean: "韩语 26 键"
@@ -88,6 +88,50 @@ enum ChineseInputScheme: String, CaseIterable {
     case .zhuyin: "大千注音"
     case .vietnamese: "越南语 26 键"
     }
+  }
+}
+
+/// 五笔用 86 还是 98 码表。方案仍只有一个 `wubi`，版本是共享偏好文档里与它并列的 `wubi_profile`，就像双拼方案旁边的 `shuangpin_profile`；Engine 按它读写 `wubi86` 或 `wubi98` 词库。
+///
+/// 文档是唯一的权威来源。App Group 里的这份只是镜像，给方案名、键盘方案卡片这类不读文档的同步取值用，由读到文档的一方（设置页、键盘重载文档时）写入。
+enum WubiProfilePreference {
+  static let profiles = ["wubi86", "wubi98"]
+  static let documentKey = "wubi_profile"
+  static let profileKey = "wubi.profile"
+  private static var defaults: UserDefaults { UserDefaults(suiteName: InputSchemePreference.appGroupIdentifier) ?? .standard }
+
+  static var profile: String {
+    get { known(defaults.string(forKey: profileKey)) }
+    set { defaults.set(profiles.contains(newValue) ? newValue : "wubi86", forKey: profileKey) }
+  }
+
+  /// 文档里记的版本；没有记过或值不认识时按 86 处理，与 client-core 的缺省一致。
+  static func profile(in document: [String: Any]?) -> String {
+    known(document?[documentKey] as? String)
+  }
+
+  private static func known(_ value: String?) -> String {
+    value.flatMap { profiles.contains($0) ? $0 : nil } ?? "wubi86"
+  }
+
+  /// 方案名：86 五笔或 98 五笔。
+  static func title(_ profile: String) -> String { profile == "wubi98" ? "98 五笔" : "86 五笔" }
+
+  /// 键盘方案卡片的角标：86 或 98。
+  static func badge(_ profile: String) -> String { profile == "wubi98" ? "98" : "86" }
+
+  /// 把文档里的版本抄进 App Group 镜像。
+  static func mirror(_ document: [String: Any]) {
+    if profile(in: document) != profile { profile = profile(in: document) }
+  }
+
+  /// 先写共享文档，写成功了再更新镜像；文档没写进去时返回 false，镜像保持原值。
+  @discardableResult
+  static func save(_ value: String, stateRoot: URL? = nil) -> Bool {
+    guard profiles.contains(value),
+          MetasequoiaInputSessionBridge.updateSharedPreferences(stateRoot: stateRoot, { $0[documentKey] = value }) else { return false }
+    profile = value
+    return true
   }
 }
 

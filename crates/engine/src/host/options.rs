@@ -14,7 +14,7 @@ use crate::types::{
     autocorrect_type, fuzzy_rule, CommandTableEntry, EnglishInputOptions, FrequencyAdjustmentMode,
     FrequencyAdjustmentOptions, FuzzyPinyinOptions, LocalModeOptions, MentionEntry,
     MixedExpressiveOptions, QuickPhraseEntry, SchemeType, SentenceAssociationOptions,
-    ShuangpinProfileKind, WubiInputOptions,
+    ShuangpinProfileKind, WubiInputOptions, WubiProfileKind,
 };
 use crate::user_dictionary::generation::prepare_runtime_paths;
 use crate::vietnamese::{InputMethod as VietnameseInputMethod, ToneStyle as VietnameseToneStyle};
@@ -39,6 +39,8 @@ pub struct EngineOptions {
     /// Masked with `fuzzy_rule::ALL`.
     pub fuzzy_pinyin_rules: u32,
     pub wubi_mixed_pinyin: bool,
+    /// 0 是 86 五笔，1 是 98 五笔（`WubiProfileKind`）。
+    pub wubi_profile: u8,
     pub helpcode: bool,
     /// Display only: filtering stays on while annotations are hidden.
     pub show_helpcode: bool,
@@ -119,6 +121,7 @@ pub fn prepare_options(
         autocorrect_neighbor: false,
         fuzzy_pinyin_rules: 0,
         wubi_mixed_pinyin: false,
+        wubi_profile: WubiProfileKind::Wubi86 as u8,
         helpcode: true,
         show_helpcode: true,
         helpcode_schema: "ziranma".to_owned(),
@@ -158,12 +161,14 @@ pub fn prepare_options(
     })
 }
 
-/// `options_for`: map and validate (`UNSUPPORTED_INPUT_SCHEME`, `UNSUPPORTED_SHUANGPIN_PROFILE`, `UNSUPPORTED_FREQUENCY_MODE`, `UNSUPPORTED_VIETNAMESE_METHOD`, `UNSUPPORTED_VIETNAMESE_TONE_STYLE`), and refresh the translations sidecar in the generation directory.
+/// `options_for`: map and validate (`UNSUPPORTED_INPUT_SCHEME`, `UNSUPPORTED_SHUANGPIN_PROFILE`, `UNSUPPORTED_WUBI_PROFILE`, `UNSUPPORTED_FREQUENCY_MODE`, `UNSUPPORTED_VIETNAMESE_METHOD`, `UNSUPPORTED_VIETNAMESE_TONE_STYLE`), and refresh the translations sidecar in the generation directory.
 pub fn session_options(options: &EngineOptions) -> Result<SessionOptions> {
     prepare_translation_sidecar(options)?;
     let scheme = SchemeType::from_u8(options.scheme)
         .ok_or_else(|| EngineError::invalid(diagnostics::UNSUPPORTED_INPUT_SCHEME))?;
     let shuangpin_profile = shuangpin_profile(options)?;
+    let wubi_profile = WubiProfileKind::from_u8(options.wubi_profile)
+        .ok_or_else(|| EngineError::invalid(diagnostics::UNSUPPORTED_WUBI_PROFILE))?;
     let mode = FrequencyAdjustmentMode::from_name(&options.frequency_mode)
         .ok_or_else(|| EngineError::invalid(diagnostics::UNSUPPORTED_FREQUENCY_MODE))?;
     let vietnamese_input_method =
@@ -197,6 +202,7 @@ pub fn session_options(options: &EngineOptions) -> Result<SessionOptions> {
     };
     session.wubi = WubiInputOptions {
         mixed_pinyin: options.wubi_mixed_pinyin,
+        profile: wubi_profile,
     };
     session.chinese_punctuation = options.chinese_punctuation;
     session.paired_punctuation = options.paired_punctuation;

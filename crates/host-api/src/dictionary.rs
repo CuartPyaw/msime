@@ -23,6 +23,7 @@ enum Kind {
     Wubi,
     QuickPhrase,
     English,
+    Wubi98,
 }
 
 /// Where a listed row comes from. A bundled row shipped with the dictionary (or was learned from typing rather than added): its code and word are fixed, so it can only be given another weight or deleted.
@@ -102,6 +103,7 @@ impl From<Entry> for DictionaryEntry {
                 Kind::Wubi => DictionaryKind::Wubi,
                 Kind::QuickPhrase => DictionaryKind::QuickPhrase,
                 Kind::English => DictionaryKind::English,
+                Kind::Wubi98 => DictionaryKind::Wubi98,
             },
             key: entry.key,
             value: entry.value,
@@ -117,6 +119,7 @@ impl From<Kind> for msime_engine::host::DictionaryKind {
             Kind::Wubi => Self::Wubi,
             Kind::QuickPhrase => Self::QuickPhrase,
             Kind::English => Self::English,
+            Kind::Wubi98 => Self::Wubi98,
         }
     }
 }
@@ -130,6 +133,7 @@ impl TryFrom<DictionaryEntry> for Entry {
             DictionaryKind::Wubi => Kind::Wubi,
             DictionaryKind::QuickPhrase => Kind::QuickPhrase,
             DictionaryKind::English => Kind::English,
+            DictionaryKind::Wubi98 => Kind::Wubi98,
             _ => return Err("unsupported dictionary kind"),
         };
         Ok(Self {
@@ -1155,6 +1159,7 @@ fn personal_engine_entry(word: &PersonalWord) -> msime_engine::host::DictionaryE
             PersonalWordKind::Wubi => DictionaryKind::Wubi,
             PersonalWordKind::QuickPhrase => DictionaryKind::QuickPhrase,
             PersonalWordKind::English => DictionaryKind::English,
+            PersonalWordKind::Wubi98 => DictionaryKind::Wubi98,
         },
         key: word.key.clone(),
         value: word.value.clone(),
@@ -1223,6 +1228,7 @@ fn personal_kind(kind: DictionaryKind) -> PersonalWordKind {
         DictionaryKind::Wubi => PersonalWordKind::Wubi,
         DictionaryKind::QuickPhrase => PersonalWordKind::QuickPhrase,
         DictionaryKind::English => PersonalWordKind::English,
+        DictionaryKind::Wubi98 => PersonalWordKind::Wubi98,
         _ => unreachable!("unsupported personal dictionary kind"),
     }
 }
@@ -1231,6 +1237,7 @@ fn personal_to_kind(kind: PersonalWordKind) -> Kind {
     match kind {
         PersonalWordKind::Pinyin => Kind::Pinyin,
         PersonalWordKind::Wubi => Kind::Wubi,
+        PersonalWordKind::Wubi98 => Kind::Wubi98,
         PersonalWordKind::QuickPhrase => Kind::QuickPhrase,
         PersonalWordKind::English => Kind::English,
     }
@@ -1264,13 +1271,15 @@ fn validate_previous_entry(entry: &Entry) -> Result<(), String> {
 fn validate_entry_up_to(entry: &Entry, max_weight: i64) -> Result<(), String> {
     let key_limit = match entry.kind {
         Kind::Pinyin => 512,
-        Kind::Wubi => 4,
+        Kind::Wubi | Kind::Wubi98 => 4,
         Kind::QuickPhrase => 32,
         Kind::English => 64,
     };
     let key_valid = match entry.kind {
         Kind::Pinyin => msime_client_core::dictionary::pinyin_code_is_well_formed(&entry.key, true),
-        Kind::Wubi => msime_client_core::dictionary::wubi_code_is_well_formed(&entry.key),
+        Kind::Wubi | Kind::Wubi98 => {
+            msime_client_core::dictionary::wubi_code_is_well_formed(&entry.key)
+        }
         Kind::QuickPhrase => {
             msime_client_core::dictionary::quick_phrase_transport_code_is_well_formed(&entry.key)
         }
@@ -1323,6 +1332,7 @@ impl From<&Kind> for msime_client_core::dictionary::import::ImportKind {
             Kind::Wubi => ImportKind::Wubi,
             Kind::QuickPhrase => ImportKind::QuickPhrase,
             Kind::English => ImportKind::English,
+            Kind::Wubi98 => ImportKind::Wubi98,
         }
     }
 }
@@ -1618,6 +1628,8 @@ pub enum WordKind {
     Pinyin,
     Wubi,
     English,
+    /// 98 五笔码表。
+    Wubi98,
 }
 
 impl From<WordKind> for Kind {
@@ -1626,6 +1638,7 @@ impl From<WordKind> for Kind {
             WordKind::Pinyin => Kind::Pinyin,
             WordKind::Wubi => Kind::Wubi,
             WordKind::English => Kind::English,
+            WordKind::Wubi98 => Kind::Wubi98,
         }
     }
 }
@@ -1736,7 +1749,7 @@ fn comparable_code(kind: WordKind, code: &str) -> String {
     let code = code.trim().to_ascii_lowercase();
     match kind {
         WordKind::Pinyin => code.chars().filter(|c| !matches!(c, '\'' | ' ')).collect(),
-        WordKind::Wubi | WordKind::English => code,
+        WordKind::Wubi | WordKind::Wubi98 | WordKind::English => code,
     }
 }
 
@@ -2016,7 +2029,9 @@ pub fn lookup_candidates(
             .map_err(|error| error.to_string())?;
     }
     // The Engine reports a user's word as a dictionary one, so each is looked up as the row it came from.
-    let word_kind = if options.scheme == 2 {
+    let word_kind = if options.scheme == 2 && options.wubi_profile == 1 {
+        WordKind::Wubi98
+    } else if options.scheme == 2 {
         WordKind::Wubi
     } else {
         WordKind::Pinyin

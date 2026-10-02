@@ -3,6 +3,8 @@ import Foundation
 /// Validated values only; the platform applies this plan through its existing setters.
 struct IOSPreferencePlan {
   let scheme: String?
+  /// `input.wubi_schema`：`wubi86` 或 `wubi98`，只在 `input.schema` 是 `wubi` 时读取。云端没有这一项时为 nil：那份设置来自还不认识 98 五笔的设备，本机的五笔版本保持不变。
+  let wubiProfile: String?
   let traditional: Bool?
   let sound: Bool?
   let haptics: Bool?
@@ -28,6 +30,7 @@ struct IOSPreferencePlan {
       return value
     }
     let nineKey = try bool("platform.ios.nine_key")
+    var wubiProfile: String?
     if let value = try string("input.schema") {
       switch value {
       case "quanpin": scheme = nineKey == true ? "nineKey" : "quanpin"
@@ -36,7 +39,8 @@ struct IOSPreferencePlan {
         guard ["xiaohe", "ziranma", "microsoft", "shoudao"].contains(profile) else { throw BackendAccountClient.Failure(status: 400) }
         scheme = profile == "xiaohe" ? "shuangpin" : profile
       case "wubi":
-        guard try string("input.wubi_schema") ?? "wubi86" == "wubi86" else { throw BackendAccountClient.Failure(status: 400) }
+        wubiProfile = try string("input.wubi_schema")
+        guard wubiProfile == nil || ["wubi86", "wubi98"].contains(wubiProfile!) else { throw BackendAccountClient.Failure(status: 400) }
         scheme = "wubi"
       case "japanese":
         guard try string("input.japanese_schema") ?? "romaji" == "romaji" else { throw BackendAccountClient.Failure(status: 400) }
@@ -45,6 +49,7 @@ struct IOSPreferencePlan {
       default: throw BackendAccountClient.Failure(status: 400)
       }
     } else { scheme = nil }
+    self.wubiProfile = wubiProfile
     if let charset = try string("input.character_set") {
       guard ["simplified", "traditional"].contains(charset) else { throw BackendAccountClient.Failure(status: 400) }
       traditional = charset == "traditional"

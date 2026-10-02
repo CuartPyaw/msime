@@ -238,7 +238,7 @@ function AiSkinGeneration({
           action={() => generate()}
           className="primary"
           disabled={busy}
-          aria-label="抽三张皮肤"
+          ariaLabel="抽三张皮肤"
           label={proposals.length ? "再抽三张" : "抽三张皮肤"}
         />
         <p className={doc.generationNote}>
@@ -613,22 +613,18 @@ export function TouchKeyboardSkinEditor({
             />
           </label>
           <div>
-            <button
-              type="button"
+            <ActionButton
+              action={() => submitName()}
               className="primary"
               disabled={libraryBusy || !skinName.trim()}
-              onClick={() => void submitName()}
-            >
-              {nameEditor.operation === "create" ? "确认保存" : "确认重命名"}
-            </button>
-            <button
-              type="button"
+              label={nameEditor.operation === "create" ? "确认保存" : "确认重命名"}
+            />
+            <ActionButton
+              action={() => setNameEditor(null)}
               className="secondary"
               disabled={libraryBusy}
-              onClick={() => setNameEditor(null)}
-            >
-              取消
-            </button>
+              label="取消"
+            />
           </div>
         </div>
       )}
@@ -646,22 +642,18 @@ export function TouchKeyboardSkinEditor({
               : `删除“${confirmation.item.name}”？`}
           </p>
           <div>
-            <button
-              type="button"
+            <ActionButton
+              action={() => confirmLibraryMutation()}
               className={confirmation.operation === "delete" ? "danger" : "primary"}
               disabled={libraryBusy}
-              onClick={() => void confirmLibraryMutation()}
-            >
-              {confirmation.operation === "update" ? "确认更新" : "确认删除"}
-            </button>
-            <button
-              type="button"
+              label={confirmation.operation === "update" ? "确认更新" : "确认删除"}
+            />
+            <ActionButton
+              action={() => setConfirmation(null)}
               className="secondary"
               disabled={libraryBusy}
-              onClick={() => setConfirmation(null)}
-            >
-              取消
-            </button>
+              label="取消"
+            />
           </div>
         </div>
       )}
@@ -1014,9 +1006,7 @@ export function TouchKeyboardSkinEditor({
             {!hasReadableSkinText(design) && (
               <p className={skin.warning}>部分文字与背景对比度偏低，建议调整配色。</p>
             )}
-            <button type="button" className="secondary" onClick={optimizeContrast}>
-              优化文字对比度
-            </button>
+            <ActionButton action={optimizeContrast} className="secondary" label="优化文字对比度" />
           </div>
         )}
 
@@ -1044,13 +1034,11 @@ export function TouchKeyboardSkinEditor({
                 </button>
               ))}
             </div>
-            <button
-              type="button"
+            <ActionButton
+              action={() => apply(defaultTouchKeyboardSkinDesign)}
               className="danger-text"
-              onClick={() => apply(defaultTouchKeyboardSkinDesign)}
-            >
-              重置我的皮肤
-            </button>
+              label="重置我的皮肤"
+            />
           </>
         )}
         {category === "我的" && library && (
@@ -1118,25 +1106,24 @@ export function TouchKeyboardSkinEditor({
 
       <div className={skin.editorPreview}>
         <div className={skin.editorActions}>
-          <button
-            type="button"
+          <ActionButton
+            action={stepBack}
             className="secondary"
             disabled={!undo.length || disabled}
-            onClick={stepBack}
-          >
-            撤销设计
-          </button>
-          <button
-            type="button"
+            label="撤销设计"
+          />
+          <ActionButton
+            action={stepForward}
             className="secondary"
             disabled={!redo.length || disabled}
-            onClick={stepForward}
-          >
-            重做
-          </button>
-          <button type="button" className="primary" disabled={disabled || selected} onClick={onUse}>
-            {selected ? "正在使用" : "使用皮肤"}
-          </button>
+            label="重做"
+          />
+          <ActionButton
+            action={onUse}
+            className="primary"
+            disabled={disabled || selected}
+            label={selected ? "正在使用" : "使用皮肤"}
+          />
         </div>
         <ScreenKeyboardPreview theme={theme} skin="custom" customDesign={design} />
       </div>
