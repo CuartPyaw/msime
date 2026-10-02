@@ -120,17 +120,23 @@ pub fn entry_with_flags(base: &Value, flags: &[McpFlag]) -> Value {
     entry
 }
 
-/// `existing` 是 `base` 加上若干权限参数时，返回这些参数（去重、按固定顺序）；命令、运行时选项或其它参数不同的条目不是这里写的，返回 `None`。
-pub fn entry_flags(existing: &Value, base: &Value) -> Option<Vec<McpFlag>> {
-    let args = existing.get("args")?.as_array()?;
-    let mut flags = Vec::new();
+fn split_entry_args(args: &[Value]) -> (Vec<McpFlag>, Vec<Value>) {
+    let mut flags = Vec::with_capacity(canonical_capacity(args.len()));
     let mut rest = Vec::with_capacity(args.len());
     for arg in args {
         match arg.as_str().and_then(McpFlag::parse) {
-            Some(flag) => flags.push(flag),
+            Some(flag) if !flags.contains(&flag) => flags.push(flag),
+            Some(_) => {}
             None => rest.push(arg.clone()),
         }
     }
+    (flags, rest)
+}
+
+/// `existing` 是 `base` 加上若干权限参数时，返回这些参数（去重、按固定顺序）；命令、运行时选项或其它参数不同的条目不是这里写的，返回 `None`。
+pub fn entry_flags(existing: &Value, base: &Value) -> Option<Vec<McpFlag>> {
+    let args = existing.get("args")?.as_array()?;
+    let (flags, rest) = split_entry_args(args);
     let mut stripped = existing.as_object()?.clone();
     stripped.insert("args".to_owned(), Value::Array(rest));
     (Value::Object(stripped) == *base).then(|| canonical(&flags))
@@ -454,6 +460,18 @@ mod tests {
             Ok(InstallOutcome::Updated)
         );
         assert_eq!(configured_flags(&path, &entry()), Some(vec![]));
+    }
+
+    #[test]
+    fn splitting_entry_args_keeps_known_flags_bounded() {
+        let args = vec![json!("--options"), json!("/state/runtime-options.json")];
+        let mut args = args;
+        args.extend((0..128).map(|_| json!("--allow-write")));
+
+        let (flags, rest) = split_entry_args(&args);
+        assert_eq!(flags, vec![McpFlag::AllowWrite]);
+        assert!(flags.len() <= McpFlag::ALL.len());
+        assert_eq!(rest, args[..2]);
     }
 
     #[test]
