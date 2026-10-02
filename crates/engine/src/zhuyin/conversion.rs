@@ -67,44 +67,20 @@ pub fn convert(
         };
         let score = *score;
         let pin = pins.iter().find(|pin| pin.start == start);
-        let mut arrivals = Vec::with_capacity(arrival_capacity(count, start, pin.is_some()));
         if let Some(pin) = pin {
-            arrivals.push((score.add(pin.len(), 0), pin.clone()));
+            consider_span(&mut paths, score, pin.clone(), 0);
         } else {
             for end in start + 1..=count {
                 if pins.iter().any(|pin| pin.overlaps(start, end)) {
                     break;
                 }
                 let key = build_dictionary_key(&syllables[start..end]);
-                let span = match best(&key)? {
-                    Some(entry) => (
-                        score.add(end - start, entry.weight),
-                        Span {
-                            start,
-                            end,
-                            text: entry.text,
-                        },
-                    ),
-                    None if end == start + 1 => (
-                        score.add(1, 0),
-                        Span {
-                            start,
-                            end,
-                            text: syllables[start].to_owned(),
-                        },
-                    ),
+                let (text, weight) = match best(&key)? {
+                    Some(entry) => (entry.text, entry.weight),
+                    None if end == start + 1 => (syllables[start].to_owned(), 0),
                     None => continue,
                 };
-                arrivals.push(span);
-            }
-        }
-        for (arrival, span) in arrivals {
-            let end = span.end;
-            if paths[end]
-                .as_ref()
-                .is_none_or(|(current, _)| arrival > *current)
-            {
-                paths[end] = Some((arrival, Some(span)));
+                consider_span(&mut paths, score, Span { start, end, text }, weight);
             }
         }
     }
@@ -122,11 +98,19 @@ pub fn convert(
     Ok(spans)
 }
 
-fn arrival_capacity(count: usize, start: usize, pinned: bool) -> usize {
-    if pinned {
-        1
-    } else {
-        count.saturating_sub(start)
+fn consider_span(
+    paths: &mut [Option<(Score, Option<Span>)>],
+    score: Score,
+    span: Span,
+    weight: i64,
+) {
+    let arrival = score.add(span.len(), weight);
+    let end = span.end;
+    if paths[end]
+        .as_ref()
+        .is_none_or(|(current, _)| arrival > *current)
+    {
+        paths[end] = Some((arrival, Some(span)));
     }
 }
 
@@ -184,10 +168,43 @@ mod tests {
     }
 
     #[test]
-    fn arrivals_capacity_matches_possible_dictionary_ends() {
-        assert_eq!(arrival_capacity(4, 0, false), 4);
-        assert_eq!(arrival_capacity(4, 2, false), 2);
-        assert_eq!(arrival_capacity(4, 2, true), 1);
+    fn direct_arrival_updates_keep_the_best_path() {
+        let mut paths = vec![None; 2];
+        let score = Score {
+            length: 0,
+            weight: 0,
+        };
+        consider_span(
+            &mut paths,
+            score,
+            Span {
+                start: 0,
+                end: 1,
+                text: "低".to_owned(),
+            },
+            1,
+        );
+        consider_span(
+            &mut paths,
+            score,
+            Span {
+                start: 0,
+                end: 1,
+                text: "高".to_owned(),
+            },
+            2,
+        );
+        assert_eq!(
+            paths[1].as_ref().map(|(score, _)| *score),
+            Some(score.add(1, 2))
+        );
+        assert_eq!(
+            paths[1]
+                .as_ref()
+                .and_then(|(_, span)| span.as_ref())
+                .map(|span| span.text.as_str()),
+            Some("高")
+        );
     }
 
     const ENTRIES: [(&str, &str, i64); 7] = [
