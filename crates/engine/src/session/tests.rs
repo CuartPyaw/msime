@@ -2667,7 +2667,9 @@ fn a_mark_on_a_bare_prefix_types_punctuation_instead_of_a_row() {
     let mut session = generated_modes_session(&fixture);
     session.character(b'/', false);
     let result = session.punctuation(b'/');
-    assert_eq!(result.commit.as_deref(), Some("//"));
+    let commit = result.commit.expect("bare slash commits");
+    assert_eq!(commit, "//");
+    assert_eq!(commit.capacity(), commit.len());
     assert_eq!(session.snapshot().local_mode, LocalInputMode::None);
     session.character(b'/', false);
     assert_eq!(session.punctuation(b',').commit.as_deref(), Some("/，"));
