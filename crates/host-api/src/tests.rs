@@ -7585,6 +7585,15 @@ fn mcp_status_and_install_check_their_requests_before_touching_a_file() {
         install(br#"{"options":null,"client":"other"}"#)["error"],
         "invalid mcp request"
     );
+    // 权限参数只认两个已知的；认识的参数照常往下走到选项检查。
+    assert_eq!(
+        install(br#"{"options":null,"client":"cursor","flags":["--allow-write"]}"#)["error"],
+        "mcp_options_missing"
+    );
+    assert_eq!(
+        install(br#"{"options":null,"client":"cursor","flags":["--verbose"]}"#)["error"],
+        "invalid mcp request"
+    );
 }
 
 /// A session whose preferences directory is `<root>/state`, so its plugins root is `<root>/state/plugins`, with the repository's built-in sound packs.

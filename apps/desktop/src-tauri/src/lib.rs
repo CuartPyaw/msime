@@ -692,12 +692,13 @@ async fn mcp_server_status(
     .map_err(|_| CommandError { code: "storage" })?
 }
 
-/// Write the entry into `client`'s configuration file. A different `msime` entry there fails with `mcp_entry_exists` unless `replace` is set, so the page asks before overwriting it.
+/// 把条目（`args` 末尾加上 `flags`）写进 `client` 的配置文件。已有条目只差权限参数时直接更新；其它不同的 `msime` 条目在未设 `replace` 时以 `mcp_entry_exists` 失败，由设置页先问再覆盖。
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 #[tauri::command]
 async fn install_mcp_client(
     runtime: tauri::State<'_, RuntimeOptionsState>,
     client: mcp_clients::McpClient,
+    flags: Vec<mcp_clients::McpFlag>,
     replace: bool,
 ) -> Result<mcp_clients::InstallOutcome, CommandError> {
     let options = runtime.path.clone();
@@ -705,9 +706,14 @@ async fn install_mcp_client(
         let executable = std::env::current_exe().map_err(|_| CommandError {
             code: "mcp_server_missing",
         })?;
-        mcp_clients::install_client(&executable, options.as_deref(), client, replace, |name| {
-            std::env::var_os(name)
-        })
+        mcp_clients::install_client(
+            &executable,
+            options.as_deref(),
+            client,
+            &flags,
+            replace,
+            |name| std::env::var_os(name),
+        )
         .map_err(|code| CommandError { code })
     })
     .await
