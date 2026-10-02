@@ -181,7 +181,8 @@ private:
         break;
       }
       if (descriptors[0].revents & POLLIN) break;
-      if (!(descriptors[1].revents & (POLLIN | POLLHUP | POLLERR))) continue;
+      // macOS 的 poll() 不支持 /dev/null 这类设备文件，只回 POLLNVAL；不认它的话这里会立刻再 poll、空转到空闲退出（CI 里 `msime-voice-local < /dev/null` 因此每次卡满 600 秒）。交给下面的 read() 判断：/dev/null 读到 0 即 EOF，真正失效的描述符读出错，两种都结束循环。
+      if (!(descriptors[1].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL))) continue;
       const auto count = ::read(STDIN_FILENO, buffer.data(), buffer.size());
       if (count == 0) break;
       if (count < 0) {
