@@ -10,12 +10,17 @@ import { ActionButton } from "./action-button";
 /** The assistants the host can write the entry for. */
 export type McpClientId = "claude_desktop" | "cursor";
 
+/** 放宽助手权限的 `msime-mcp` 参数。 */
+export type McpFlag = "--allow-write" | "--allow-dictionary-read";
+
 export type McpClientStatus = {
   id: McpClientId;
   /** The assistant's configuration file. */
   path: string;
-  /** The file already holds exactly this entry. */
+  /** 文件里的 `msime` 条目就是这里的服务器，可能带了 `flags` 里的权限参数。 */
   configured: boolean;
+  /** 已写入条目带的权限参数，按固定顺序；未连接时为空。 */
+  flags: McpFlag[];
 };
 
 export type McpServerStatus = {
@@ -30,7 +35,7 @@ export type McpServerStatus = {
   clients: McpClientStatus[];
 };
 
-export type McpInstallOutcome = "added" | "replaced" | "unchanged";
+export type McpInstallOutcome = "added" | "updated" | "replaced" | "unchanged";
 
 const clientNames: Record<McpClientId, string> = {
   claude_desktop: "Claude Desktop",
@@ -42,7 +47,7 @@ const code =
 const command =
   "m-0 overflow-x-auto rounded-lg border border-edge bg-raised p-3 text-xs leading-relaxed whitespace-pre-wrap break-all";
 
-/** The flags that widen what the assistant may do; both are off in the host's own entry. */
+/** 放宽助手权限的两个开关，按写进 `args` 的固定顺序排列。`msime-mcp` 不带参数时两项都是关的；设置页默认替用户打开。 */
 const permissionFlags = [
   {
     flag: "--allow-write",
@@ -56,7 +61,44 @@ const permissionFlags = [
   },
 ] as const;
 
-type McpFlag = (typeof permissionFlags)[number]["flag"];
+const allFlags: McpFlag[] = permissionFlags.map((permission) => permission.flag);
+
+/** 用户上次选的开关，跨次打开设置页保留。 */
+const flagsStorageKey = "msime.mcp.flags";
+
+function savedFlags(): McpFlag[] {
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(flagsStorageKey) ?? "null");
+    if (Array.isArray(value)) return allFlags.filter((flag) => value.includes(flag));
+  } catch {
+    /* 受限的 webview 可能拒绝访问存储，这时按默认值 */
+  }
+  return allFlags;
+}
+
+function saveFlags(flags: readonly McpFlag[]) {
+  try {
+    window.localStorage.setItem(flagsStorageKey, JSON.stringify(flags));
+  } catch {
+    /* 记不住只影响下次打开时的默认值 */
+  }
+}
+
+function sameFlags(a: readonly McpFlag[], b: readonly McpFlag[]): boolean {
+  return a.length === b.length && a.every((flag) => b.includes(flag));
+}
+
+/** 一键写入带权限的条目前，用大白话说清楚助手将能做什么。 */
+function grantMessage(name: string, flags: readonly McpFlag[]): string {
+  const write = flags.includes("--allow-write");
+  const read = flags.includes("--allow-dictionary-read");
+  const abilities = [
+    write ? "修改设置和快捷短语、制作候选窗口皮肤" : undefined,
+    read ? "读取你的用户词库、查看编码的候选" : undefined,
+    write && read ? "增删、调整和导入词" : undefined,
+  ].filter((ability) => ability !== undefined);
+  return `写入后，${name} 里的 AI 助手可以${abilities.join("；")}。只在你信任它时允许；之后关掉开关再更新即可收回。`;
+}
 
 /** The tabs: two command-line assistants, running the tools straight from a terminal, the clients the host writes into, and the JSON for anything else. */
 type McpTab = "claude_code" | "codex" | "terminal" | McpClientId | "json";
@@ -170,7 +212,11 @@ export function McpConnectSection({
   copyText,
 }: {
   status: () => Promise<McpServerStatus>;
-  install?: (client: McpClientId, replace: boolean) => Promise<McpInstallOutcome>;
+  install?: (
+    client: McpClientId,
+    replace: boolean,
+    flags: readonly McpFlag[],
+  ) => Promise<McpInstallOutcome>;
   copyText?: (text: string) => Promise<void>;
 }) {
   const { confirm, confirmation } = useConfirm();
@@ -180,7 +226,10 @@ export function McpConnectSection({
   const [result, setResult] = useState<string>();
   const [copied, setCopied] = useState<string>();
   const [tab, setTab] = useState<McpTab>("claude_code");
-  const [flags, setFlags] = useState<McpFlag[]>([]);
+  // 用户想要的权限，复制的命令和配置、未连接的助手都按它来。
+  const [preferred, setPreferred] = useState<McpFlag[]>(savedFlags);
+  // 已连接的助手页上，开关先显示它现有条目的权限；用户改过之后记在这里，直到写入。
+  const [drafts, setDrafts] = useState<Partial<Record<McpClientId, McpFlag[]>>>({});
   const mounted = useRef(true);
   const refreshGeneration = useRef(0);
   const clientGeneration = useRef(0);
@@ -217,7 +266,7 @@ export function McpConnectSection({
     void refresh();
   }, [refresh]);
 
-  async function write(id: McpClientId) {
+  async function write(id: McpClientId, flags: readonly McpFlag[]) {
     if (!install || busy !== undefined || actionRunning.current) return;
     const generation = clientGeneration.current;
     const name = clientNames[id];
@@ -225,9 +274,18 @@ export function McpConnectSection({
     setBusy(id);
     setResult(undefined);
     try {
+      if (flags.length > 0) {
+        const granted = await confirm({
+          title: `允许 ${name} 中的助手使用这些权限？`,
+          message: grantMessage(name, flags),
+          confirmLabel: "允许并写入",
+        });
+        if (!granted) return;
+        if (!mounted.current || generation !== clientGeneration.current) return;
+      }
       let outcome: McpInstallOutcome;
       try {
-        outcome = await install(id, false);
+        outcome = await install(id, false, flags);
       } catch (error) {
         if (errorCode(error) !== "mcp_entry_exists") throw error;
         const replace = await confirm({
@@ -237,13 +295,20 @@ export function McpConnectSection({
         });
         if (!replace) return;
         if (!mounted.current || generation !== clientGeneration.current) return;
-        outcome = await install(id, true);
+        outcome = await install(id, true, flags);
       }
       if (mounted.current && generation === clientGeneration.current) {
+        setDrafts((current) => {
+          const next = { ...current };
+          delete next[id];
+          return next;
+        });
         setResult(
           outcome === "unchanged"
             ? `${name} 已经连接，无需改动。`
-            : `已写入 ${name} 的配置。重新启动 ${name} 后生效。`,
+            : outcome === "updated"
+              ? `已更新 ${name} 的配置。重新启动 ${name} 后生效。`
+              : `已写入 ${name} 的配置。重新启动 ${name} 后生效。`,
         );
       }
       if (!mounted.current || generation !== clientGeneration.current) return;
@@ -282,6 +347,18 @@ export function McpConnectSection({
   ];
   const shownTab = tabs.some((option) => option.value === tab) ? tab : "claude_code";
   const client = writableClients.find((candidate) => candidate.id === shownTab);
+  // 已连接的助手页显示它真实的权限（或用户刚改的），其它页显示用户想要的权限。
+  const flags = client?.configured ? (drafts[client.id] ?? client.flags) : preferred;
+  const outdated = client?.configured === true && !sameFlags(flags, client.flags);
+
+  function setFlag(flag: McpFlag, on: boolean) {
+    const toggled = (current: readonly McpFlag[]) =>
+      allFlags.filter((candidate) => (candidate === flag ? on : current.includes(candidate)));
+    if (client?.configured) setDrafts((current) => ({ ...current, [client.id]: toggled(flags) }));
+    const next = toggled(preferred);
+    setPreferred(next);
+    saveFlags(next);
+  }
 
   function copyButton(key: string, label: string, tokens: readonly SyntaxToken[]) {
     if (!copyText) return null;
@@ -300,7 +377,7 @@ export function McpConnectSection({
           连接后，把输入法的问题（卡顿、候选窗口不见了）直接告诉 AI
           助手：它会打开诊断日志、请你重做一遍出问题的操作，再读日志找原因；也能读取快捷短语、设置、打字统计和已安装的候选窗口皮肤。通过
           MCP
-          在本机运行，不联网；默认只读，除了开关诊断日志不改动任何设置，开启下面的权限后才能修改。
+          在本机运行，不联网。助手还能做什么由下面两个开关决定，默认都开；复制的命令、配置和一键写入都带上开着的权限。两个都关时只读，除了开关诊断日志不改动任何设置。
         </p>
         {loadFailed && <p role="alert">无法读取 MCP 服务器的状态。</p>}
         {server &&
@@ -362,20 +439,23 @@ export function McpConnectSection({
                     {client.configured ? "（已连接）" : ""}，重新启动 {clientNames[client.id]}{" "}
                     后生效。
                   </p>
-                  {flags.length > 0 && (
+                  {outdated && (
                     <p className="notice">
-                      一键写入的配置不含下面开启的权限；需要这些权限时，请到「其他」复制配置并手动粘贴。
+                      下面的权限和 {clientNames[client.id]} 现在的配置不同，点「更新{" "}
+                      {clientNames[client.id]}」写入。
                     </p>
                   )}
                   <div className={settings.managerActions}>
                     <button
                       type="button"
                       className="secondary"
-                      disabled={busy !== undefined || client.configured}
+                      disabled={busy !== undefined || (client.configured && !outdated)}
                       aria-busy={busy === client.id}
-                      onClick={() => void write(client.id)}
+                      onClick={() => void write(client.id, flags)}
                     >
-                      {busy === client.id ? "正在写入…" : `写入 ${clientNames[client.id]}`}
+                      {busy === client.id
+                        ? "正在写入…"
+                        : `${outdated ? "更新" : "写入"} ${clientNames[client.id]}`}
                     </button>
                   </div>
                 </>
@@ -403,19 +483,13 @@ export function McpConnectSection({
                   <Switch
                     aria-label={permission.title}
                     checked={flags.includes(permission.flag)}
-                    onChange={(on) =>
-                      setFlags((current) =>
-                        permissionFlags
-                          .map((candidate) => candidate.flag)
-                          .filter((flag) =>
-                            flag === permission.flag ? on : current.includes(flag),
-                          ),
-                      )
-                    }
+                    onChange={(on) => setFlag(permission.flag, on)}
                   />
                 </div>
               ))}
-              <p className={settings.managerNote}>只在你信任该助手时开启这两项权限。</p>
+              <p className={settings.managerNote}>
+                只在你信任该助手时保留这两项权限，用不上就关掉。
+              </p>
               <p className={settings.managerNote}>
                 服务器程序 <code>{server.command}</code>
                 {server.installed ? "" : "（未找到，请重新安装输入法）"}

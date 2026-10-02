@@ -70,6 +70,7 @@ import {
   type LinuxSetupLine,
   type LinuxSetupStatus,
   type McpClientId,
+  type McpFlag,
   type McpInstallOutcome,
   type McpServerStatus,
   type LocalVoiceModelList,
@@ -688,8 +689,11 @@ function DesktopSettings() {
             host.platform === "windows"
               ? {
                   mcpServerStatus: () => invoke<McpServerStatus>("mcp_server_status"),
-                  installMcpClient: (client: McpClientId, replace: boolean) =>
-                    invoke<McpInstallOutcome>("install_mcp_client", { client, replace }),
+                  installMcpClient: (
+                    client: McpClientId,
+                    replace: boolean,
+                    flags: readonly McpFlag[],
+                  ) => invoke<McpInstallOutcome>("install_mcp_client", { client, replace, flags }),
                 }
               : {}),
             ...(host.fuzzy_pinyin ? { fuzzyPinyin: true } : {}),
