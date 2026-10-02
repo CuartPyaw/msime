@@ -342,7 +342,7 @@ impl<R: Seek> Seek for ReadBudget<R> {
 
 /// A member path as plain components, or `None` if it has anything but.
 fn plain_components(path: &Path) -> Option<Vec<String>> {
-    let mut parts = Vec::new();
+    let mut parts = Vec::with_capacity(plain_component_capacity(path));
     for component in path.components() {
         match component {
             Component::Normal(part) => parts.push(part.to_str()?.to_owned()),
@@ -351,6 +351,26 @@ fn plain_components(path: &Path) -> Option<Vec<String>> {
         }
     }
     (!parts.is_empty()).then_some(parts)
+}
+
+fn plain_component_capacity(path: &Path) -> usize {
+    path.components().count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_component_capacity_matches_path_components() {
+        for path in [Path::new("file.txt"), Path::new("folder/file.txt")] {
+            assert_eq!(plain_component_capacity(path), path.components().count());
+            assert_eq!(
+                plain_components(path).unwrap().len(),
+                path.components().count()
+            );
+        }
+    }
 }
 
 /// Write one file of the pack into staging, refusing a name the pack may not use or a second file of the same name, and stopping at the declared size even if the reader has more: a zip's recorded size is the archive's claim, not a bound.
