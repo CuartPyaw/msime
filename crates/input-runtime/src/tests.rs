@@ -2956,6 +2956,7 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine::host::EngineOpti
         autocorrect_neighbor: true,
         fuzzy_pinyin_rules: 0,
         wubi_mixed_pinyin: false,
+        wubi_profile: 0,
         helpcode: false,
         show_helpcode: true,
         helpcode_schema: "ziranma".into(),

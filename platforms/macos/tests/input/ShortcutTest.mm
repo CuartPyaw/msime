@@ -833,6 +833,31 @@ static void TestIndependentAssistancePreferences() {
     MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
 
+// 五笔版本和双拼键位一样随共享文档往返：`wubi_profile` 读进来驱动弹出菜单，菜单选择写回去，未知值不改变当前版本。
+static void TestSharedWubiProfile() {
+    NSString *suite = [@"msime.shared-wubi-profile." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    assert([prefs.wubiProfile isEqual:@"wubi86"] && [[prefs sharedPreferencesByMerging:@{}][@"wubi_profile"] isEqual:@"wubi86"]);
+    ModeController *controller = [ModeController alloc];
+    [controller setValue:prefs forKey:@"appearance"];
+    [controller applySharedToolbarPreferences:@{@"scheme": @"wubi", @"wubi_profile": @"wubi98"}];
+    NSPopUpButton *profile = (id)PreferenceControl(prefs, @selector(wubiProfileChanged:));
+    assert([prefs.wubiProfile isEqual:@"wubi98"] && profile.numberOfItems == 2 && profile.indexOfSelectedItem == 1);
+    assert([[profile itemAtIndex:0].title isEqual:@"86 五笔"] && [[profile itemAtIndex:1].title isEqual:@"98 五笔"]);
+    assert([[prefs sharedPreferencesByMerging:@{@"wubi_profile": @"wubi86"}][@"wubi_profile"] isEqual:@"wubi98"]);
+    [controller applySharedToolbarPreferences:@{@"wubi_profile": @"wubi06"}];
+    [controller applySharedToolbarPreferences:@{@"wubi_profile": @98}];
+    assert([prefs.wubiProfile isEqual:@"wubi98"]);
+    [profile selectItemAtIndex:0];
+    [NSApp sendAction:profile.action to:profile.target from:profile];
+    assert([prefs.wubiProfile isEqual:@"wubi86"] && [[defaults stringForKey:@"MSIMEClientWubiProfile"] isEqual:@"wubi86"]);
+    assert([[prefs sharedPreferencesByMerging:@{@"wubi_profile": @"wubi98"}][@"wubi_profile"] isEqual:@"wubi86"]);
+    prefs.wubiProfile = @"wubi06";
+    assert([prefs.wubiProfile isEqual:@"wubi86"]);
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+}
+
 static void TestSharedInputPreferences() {
     NSString *suite = [@"msime.shared-input." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
@@ -4572,6 +4597,13 @@ static void TestInputMode(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     assert([appearance.inputScheme isEqual:@"wubi"]);
     schemeItem = [controller.menu itemAtIndex:9];
     assert([schemeItem.title isEqual:@"输入方案（五笔 86）"]);
+    // 98 五笔时菜单项和上一级标题都写出版本。
+    NSString *wubiProfile = appearance.wubiProfile;
+    appearance.wubiProfile = @"wubi98";
+    schemeItem = [controller.menu itemAtIndex:9];
+    assert([schemeItem.title isEqual:@"输入方案（五笔 98）"] && [[schemeItem.submenu itemAtIndex:2].title isEqual:@"五笔 98"]);
+    appearance.wubiProfile = wubiProfile;
+    schemeItem = [controller.menu itemAtIndex:9];
     assert([schemeItem.submenu itemAtIndex:2].state == NSControlStateValueOn && [schemeItem.submenu itemAtIndex:0].state == NSControlStateValueOff);
     [NSApp sendAction:@selector(selectInputScheme:) to:controller from:[schemeItem.submenu itemAtIndex:4]];
     assert([appearance.inputScheme isEqual:@"korean"] && [appearance.lastChineseScheme isEqual:@"wubi"]);
@@ -7524,6 +7556,7 @@ int main(int argc, char **argv) {
         @autoreleasepool { TestCandidateTranslationPreference(); }
         @autoreleasepool { TestGlossModePolicy(); }
         @autoreleasepool { TestSharedInputPreferences(); }
+        @autoreleasepool { TestSharedWubiProfile(); }
         @autoreleasepool { TestIndependentAssistancePreferences(); }
         @autoreleasepool { TestSharedPunctuation(); }
         @autoreleasepool { TestSharedTraditionalOutput(); }

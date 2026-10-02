@@ -183,11 +183,14 @@ public final class OnboardingActivity extends AppCompatActivity {
         // 双拼 keeps whichever double-pinyin profile is already chosen; only a first pick lands on 小鹤, as the design's 默认小鹤 says.
         KeyboardScheme shuangpin = current != null && current.shuangpinProfile() != null
             ? current : KeyboardScheme.XIAOHE;
+        // 五笔同理沿用已选的版本（选五笔不改 `wubi_profile`），说明文字照实写出当前是 86 还是 98。
+        boolean wubi98 = preferences != null && KeyboardScheme.WUBI_98.equals(
+            KeyboardScheme.normalizedWubiProfile(preferences.optString("wubi_profile", KeyboardScheme.WUBI_86)));
         SchemeCard[] cards = {
             new SchemeCard("全拼 26 键", "最常用，完整拼音", KeyboardScheme.QUANPIN),
             new SchemeCard("全拼 9 键", "单手更顺手", KeyboardScheme.QUANPIN_NINE_KEY),
             new SchemeCard("双拼", "每字两键 · 默认小鹤", shuangpin),
-            new SchemeCard("五笔", "形码 · 默认 86 版", KeyboardScheme.WUBI),
+            new SchemeCard("五笔", wubi98 ? "形码 · 当前 98 版" : "形码 · 默认 86 版", KeyboardScheme.WUBI),
         };
         for (int index = 0; index < cards.length; index++) {
             schemeCard(column, cards[index], cards[index].scheme() == current, index == 0 ? 6 : 10);

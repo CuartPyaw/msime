@@ -187,7 +187,7 @@ impl InputSession {
             trigger_count: options.trigger_count,
             force_top,
             kind: if wubi_row {
-                PersonalDictionaryKind::Wubi
+                self.engine.wubi_input_options().profile.dictionary_kind()
             } else {
                 PersonalDictionaryKind::Pinyin
             },

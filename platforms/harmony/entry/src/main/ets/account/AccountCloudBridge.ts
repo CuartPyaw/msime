@@ -233,7 +233,7 @@ function validResourceContent(kind: unknown, value: unknown): boolean {
     const word = entry.word;
     if (
       typeof entryKind !== "string" ||
-      !["pinyin", "wubi", "quick", "english"].includes(entryKind) ||
+      !["pinyin", "wubi", "wubi98", "quick", "english"].includes(entryKind) ||
       !validCommunityText(code, 1, 256) ||
       !validCommunityText(word, 1, 1024) ||
       typeof entry.weight !== "number" ||
@@ -1576,7 +1576,9 @@ export class AccountCloudBridge {
   }
 
   private kind(value: unknown): string | null {
-    return typeof value === "string" && ["pinyin", "wubi", "quick", "english"].includes(value)
+    // 与共享 `DictionaryKind` 一致：98 五笔的云端词库是独立种类 `wubi98`。
+    return typeof value === "string" &&
+      ["pinyin", "wubi", "wubi98", "quick", "english"].includes(value)
       ? value
       : null;
   }

@@ -692,6 +692,8 @@ interface PreparedPreferences {
   /** Read-only English word completions while typing directly in English. Defaults to on. */
   english_suggestions?: boolean;
   shuangpin_profile: string;
+  /** `wubi86` 或 `wubi98`；旧文档里没有这个键，按 86 版。引擎自己从转交的整份文档里读它选表，这里只用来给五笔方案起名。 */
+  wubi_profile?: string;
   touch_keyboard_layout: string;
   /** The shared global theme id; the ids and their palettes come from the theme catalog. */
   global_theme: string;
@@ -861,6 +863,8 @@ export interface KeyboardPreferences {
   readonly appMode: string;
   readonly scheme: string;
   readonly shuangpinProfile: string;
+  /** 归一后的五笔版本，决定五笔方案显示「86 五笔」还是「98 五笔」。 */
+  readonly wubiProfile: string;
   readonly layout: string;
   /** Shared touch-scheme ids enabled in the native picker, in shared declaration order. */
   readonly enabledSchemes: string[];
@@ -1097,6 +1101,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     selectedScheme: null,
     scheme: 'quanpin',
     shuangpinProfile: 'xiaohe',
+    wubiProfile: KeyboardScheme.WUBI_86,
     layout: 'twenty_six_key',
     candidateFollowCursor: true,
     // The shared default (`number_row_selection` in client-core preferences.rs): 1 through 9 pick a candidate.
@@ -1343,6 +1348,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       appMode: preferences.theme,
       scheme: preferences.scheme,
       shuangpinProfile: preferences.shuangpin_profile,
+      wubiProfile: KeyboardScheme.normalizedWubiProfile(preferences.wubi_profile),
       layout: preferences.touch_keyboard_layout,
       selectedScheme: preferences.touch_keyboard_schemes?.selected ?? null,
       // A Cantonese or Zhuyin card whose dictionary this package did not stage stays hidden even when enabled: the Engine would type 全拼 under it.

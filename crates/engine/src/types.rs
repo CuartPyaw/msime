@@ -454,6 +454,53 @@ impl ShuangpinProfileKind {
     }
 }
 
+/// 五笔码表版本。序号即宿主 ABI 值（`EngineOptions::wubi_profile`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[repr(u8)]
+pub enum WubiProfileKind {
+    #[default]
+    Wubi86 = 0,
+    Wubi98 = 1,
+}
+
+impl WubiProfileKind {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        Some(match value {
+            0 => Self::Wubi86,
+            1 => Self::Wubi98,
+            _ => return None,
+        })
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "wubi86" => Self::Wubi86,
+            "wubi98" => Self::Wubi98,
+            _ => return None,
+        })
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Wubi86 => "wubi86",
+            Self::Wubi98 => "wubi98",
+        }
+    }
+
+    /// `msime.db` 里这一版的码表，表名与 `name` 相同。
+    pub fn table(self) -> &'static str {
+        self.name()
+    }
+
+    /// 这一版的个人词条和学习记录归入的词库种类。
+    pub fn dictionary_kind(self) -> PersonalDictionaryKind {
+        match self {
+            Self::Wubi86 => PersonalDictionaryKind::Wubi,
+            Self::Wubi98 => PersonalDictionaryKind::Wubi98,
+        }
+    }
+}
+
 /// One candidate row. Every field the goldens record is here from the start, including the ones the overlays added.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WordItem {
@@ -938,6 +985,8 @@ pub struct MixedExpressiveOptions {
 pub struct WubiInputOptions {
     /// Answer an unmatched wubi code with quanpin candidates for the same letters.
     pub mixed_pinyin: bool,
+    /// 查询、学习和删除所用的码表版本。
+    pub profile: WubiProfileKind,
 }
 
 /// The request a host sends to its cloud or AI provider, and must hand back unchanged with the answer. The engine revalidates every field against the live composition before inserting anything.
@@ -973,6 +1022,8 @@ pub enum PersonalDictionaryKind {
     Wubi = 1,
     QuickPhrase = 2,
     English = 3,
+    /// 98 五笔，写入 `wubi98` 表。序号追加在末尾，已有的值不变。
+    Wubi98 = 4,
 }
 
 impl PersonalDictionaryKind {
@@ -982,8 +1033,23 @@ impl PersonalDictionaryKind {
             1 => Self::Wubi,
             2 => Self::QuickPhrase,
             3 => Self::English,
+            4 => Self::Wubi98,
             _ => return None,
         })
+    }
+
+    /// 两版五笔共用编码规则（1..=4 个 a..=y 字母）与按码排序的写法，只是表不同。
+    pub fn is_wubi(self) -> bool {
+        matches!(self, Self::Wubi | Self::Wubi98)
+    }
+
+    /// 五笔种类对应的 `msime.db` 码表。
+    pub fn wubi_table(self) -> Option<&'static str> {
+        match self {
+            Self::Wubi => Some(WubiProfileKind::Wubi86.table()),
+            Self::Wubi98 => Some(WubiProfileKind::Wubi98.table()),
+            Self::Pinyin | Self::QuickPhrase | Self::English => None,
+        }
     }
 
     /// The `dictionary` column value in `user_dictionary_operations`. Quick phrases are stored as `quick`.
@@ -993,6 +1059,7 @@ impl PersonalDictionaryKind {
             Self::Wubi => "wubi",
             Self::QuickPhrase => "quick",
             Self::English => "english",
+            Self::Wubi98 => "wubi98",
         }
     }
 
@@ -1002,6 +1069,7 @@ impl PersonalDictionaryKind {
             "wubi" => Self::Wubi,
             "quick" => Self::QuickPhrase,
             "english" => Self::English,
+            "wubi98" => Self::Wubi98,
             _ => return None,
         })
     }

@@ -184,7 +184,7 @@ const sources = [
   ["ziranma", "自然码双拼"],
   ["microsoft", "微软双拼"],
   ["shoudao", "首道双拼"],
-  ["wubi", "86 五笔"],
+  ["wubi", "五笔"],
   ["japanese", "日语"],
   ["korean", "韩语"],
   ["cantonese", "粤拼"],

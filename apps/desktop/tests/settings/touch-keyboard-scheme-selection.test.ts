@@ -10,6 +10,7 @@ import {
   type Preferences,
   useTouchKeyboardSchemeSelection,
 } from "@msime/ui";
+import { touchKeyboardSchemeTitle } from "../../../../packages/ui/src/settings/touch-keyboard-scheme-helpers";
 
 const preferences: Preferences = {
   scheme: "quanpin",
@@ -229,3 +230,16 @@ test.each(["cantonese", "zhuyin", "vietnamese"] as const)(
     ).toBe(scheme);
   },
 );
+
+test("the single Wubi touch scheme is titled by the Wubi profile and keeps it when selected", () => {
+  expect(
+    touchKeyboardSchemeTitle({ ...preferences, scheme: "wubi", touch_keyboard_schemes: undefined }),
+  ).toBe("86 五笔");
+  const wubi98: Preferences = { ...preferences, wubi_profile: "wubi98" };
+  const next = selectHomeTouchKeyboardScheme(wubi98, "wubi");
+  expect(next.wubi_profile).toBe("wubi98");
+  expect(touchKeyboardSchemeTitle(next)).toBe("98 五笔");
+  expect(
+    touchKeyboardSchemeTitle({ ...wubi98, scheme: "wubi", touch_keyboard_schemes: undefined }),
+  ).toBe("98 五笔");
+});

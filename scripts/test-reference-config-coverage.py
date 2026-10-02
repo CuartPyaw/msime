@@ -154,7 +154,7 @@ MAPPING: dict[str, str] = {
     "input.smart_punctuation_space_convert": "smart_punctuation_space_convert",
     "input.word_to_character": "word_character.enabled",
     "input.word_to_character_keys": "word_character.keys",
-    "input.wubi_schema": "scheme",
+    "input.wubi_schema": "wubi_profile",
     "keybindings.switch_language_ctrl": "keybindings.switch_language_ctrl",
     "keybindings.switch_language_ctrl_alt_space": "keybindings.switch_language_ctrl_alt_space",
     "keybindings.switch_language_shift": "keybindings.switch_language_shift",

@@ -1,4 +1,4 @@
-//! The `wubi86` provider (`R/providers/wubi_candidate_provider.cpp`, with the wubi_prefix_learning overlay): exact code first, then weight, no value dedup, at most 50 rows. The provider only reads: learning and removal of a wubi row go through `session`, which journals them with the wubi kind and then resets this cache.
+//! 五笔码表的 provider（`R/providers/wubi_candidate_provider.cpp`，含 wubi_prefix_learning overlay）：按 `WubiProfileKind` 读 `wubi86` 或 `wubi98`。Exact code first, then weight, no value dedup, at most 50 rows. The provider only reads: learning and removal of a wubi row go through `session`, which journals them with the wubi kind and then resets this cache.
 
 use std::path::{Path, PathBuf};
 
@@ -6,15 +6,25 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 
 use crate::dictionary::pinyin::BUSY_TIMEOUT;
-use crate::types::{CandidateSource, QueryRequest, SchemeType, WordItem};
+use crate::types::{CandidateSource, QueryRequest, SchemeType, WordItem, WubiProfileKind};
 
 const QUERY_LIMIT: i64 = 50;
 
 /// A prefix query: the typed code's own rows lead, then every longer code it prefixes by weight. The same word reached through several codes (工 at a, aaa and aaaa) is kept once per code, because ranking and removal act on the code the row arrived with.
-const QUERY_SQL: &str = "SELECT \"key\", \"value\", \"weight\" FROM wubi86 WHERE \"key\" >= ?1 AND \"key\" < ?2 ORDER BY (\"key\" = ?1) DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT ?3";
+const QUERY_SQL_86: &str = "SELECT \"key\", \"value\", \"weight\" FROM wubi86 WHERE \"key\" >= ?1 AND \"key\" < ?2 ORDER BY (\"key\" = ?1) DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT ?3";
+/// 与 `QUERY_SQL_86` 相同，只是读 `wubi98`。
+const QUERY_SQL_98: &str = "SELECT \"key\", \"value\", \"weight\" FROM wubi98 WHERE \"key\" >= ?1 AND \"key\" < ?2 ORDER BY (\"key\" = ?1) DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT ?3";
+
+fn query_sql(profile: WubiProfileKind) -> &'static str {
+    match profile {
+        WubiProfileKind::Wubi86 => QUERY_SQL_86,
+        WubiProfileKind::Wubi98 => QUERY_SQL_98,
+    }
+}
 
 pub struct WubiProvider {
     main_db: PathBuf,
+    profile: WubiProfileKind,
     connection: Option<Connection>,
 }
 
@@ -23,8 +33,14 @@ impl WubiProvider {
     pub fn new(main_db: &Path) -> Self {
         Self {
             main_db: main_db.to_path_buf(),
+            profile: WubiProfileKind::Wubi86,
             connection: None,
         }
+    }
+
+    /// 切换码表版本；下一次查询起读新表。
+    pub fn set_profile(&mut self, profile: WubiProfileKind) {
+        self.profile = profile;
     }
 
     /// `SELECT "key","value","weight" FROM wubi86 WHERE "key" >= ?1 AND "key" < ?2 ORDER BY ("key" = ?1) DESC, "weight" DESC, "key" ASC, rowid ASC LIMIT ?3`, `?2` = the code with its last letter incremented and `?3` = 50. Rows carry `scheme = Wubi`. Any SQLite failure is an empty answer, as in the reference.
@@ -35,10 +51,11 @@ impl WubiProvider {
         {
             return Vec::new();
         }
+        let profile = self.profile;
         let Some(connection) = self.connection() else {
             return Vec::new();
         };
-        match query_rows(connection, &request.normalized_input) {
+        match query_rows(connection, profile, &request.normalized_input) {
             Ok(rows) => rows,
             Err(_) => {
                 // The reference dropped a statement that failed and prepared it again on the next key; closing gives the same retry.
@@ -85,8 +102,12 @@ fn prefix_upper_bound(code: &str) -> String {
     upper
 }
 
-fn query_rows(connection: &Connection, code: &str) -> rusqlite::Result<Vec<WordItem>> {
-    let mut statement = connection.prepare_cached(QUERY_SQL)?;
+fn query_rows(
+    connection: &Connection,
+    profile: WubiProfileKind,
+    code: &str,
+) -> rusqlite::Result<Vec<WordItem>> {
+    let mut statement = connection.prepare_cached(query_sql(profile))?;
     let upper = prefix_upper_bound(code);
     let mut rows = statement.query((code, upper.as_str(), QUERY_LIMIT))?;
     let mut candidates = Vec::with_capacity(QUERY_LIMIT as usize);
@@ -163,6 +184,22 @@ mod tests {
         INSERT INTO wubi86 VALUES('wqb','爷',20);\
         INSERT INTO wubi86 VALUES('wqi','你',10);\
         INSERT INTO wubi86 VALUES('wqbb','父子',30);";
+
+    #[test]
+    fn the_profile_picks_the_table() {
+        let mut fixture = fixture(
+            "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);\
+             INSERT INTO wubi86 VALUES('kl','号',10);\
+             CREATE TABLE wubi98(key TEXT,value TEXT,weight INTEGER);\
+             INSERT INTO wubi98 VALUES('kg','号',10);",
+        );
+        let provider = &mut fixture.provider;
+        assert_eq!(rows(provider, "kl"), vec![row("kl", "号", 10)]);
+        assert!(rows(provider, "kg").is_empty());
+        provider.set_profile(WubiProfileKind::Wubi98);
+        assert_eq!(rows(provider, "kg"), vec![row("kg", "号", 10)]);
+        assert!(rows(provider, "kl").is_empty());
+    }
 
     #[test]
     fn exact_code_leads_then_weight_without_word_dedup() {

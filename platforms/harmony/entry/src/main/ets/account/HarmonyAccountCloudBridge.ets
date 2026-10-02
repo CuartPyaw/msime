@@ -313,7 +313,8 @@ export class HarmonyAccountCloudBridge {
   private async exportDictionary(action: AccountOperation): Promise<string> {
     const kind: string = typeof action.kind === 'string' ? action.kind : '';
     const format: string = typeof action.format === 'string' ? action.format : '';
-    if (!['pinyin', 'wubi', 'quick', 'english'].includes(kind)
+    // `wubi98` 是 98 五笔的云端词库，路径与种类同名。
+    if (!['pinyin', 'wubi', 'wubi98', 'quick', 'english'].includes(kind)
       || !['standard', 'windows'].includes(format)) {
       return this.failure('account_invalid');
     }

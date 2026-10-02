@@ -2425,10 +2425,12 @@ export function CloudDictionaryFilesPanel({ client }: { client: CloudDictionaryP
       kind === "pinyin"
         ? "拼音"
         : kind === "wubi"
-          ? "五笔"
-          : kind === "quick"
-            ? "快捷短语"
-            : "英文";
+          ? "86 五笔"
+          : kind === "wubi98"
+            ? "98 五笔"
+            : kind === "quick"
+              ? "快捷短语"
+              : "英文";
     const confirmed = await confirm({
       title: "导入词库",
       message: `按“${formatName}”导入${kindName}词库。`,

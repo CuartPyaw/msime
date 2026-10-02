@@ -985,6 +985,7 @@ impl InputSession {
     pub fn set_wubi_mixed_pinyin(&mut self, enabled: bool) {
         self.set_wubi_input_options(WubiInputOptions {
             mixed_pinyin: enabled,
+            ..self.engine.wubi_input_options()
         });
     }
 

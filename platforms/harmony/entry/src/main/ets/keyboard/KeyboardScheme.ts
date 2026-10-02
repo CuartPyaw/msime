@@ -214,6 +214,37 @@ export class KeyboardScheme {
     VIETNAMESE,
   ];
 
+  /** 偏好 `wubi_profile` 的两个取值：方案仍是 `wubi`，版本是旁边的独立字段，就像 `shuangpin_profile` 之于 `shuangpin`。 */
+  static readonly WUBI_86: string = "wubi86";
+  static readonly WUBI_98: string = "wubi98";
+
+  /** 只认 `wubi98`，缺省、未知值和非字符串一律按 86 版，与共享 `Preferences` 的缺省一致。 */
+  static normalizedWubiProfile(value: string | null | undefined): string {
+    return value === KeyboardScheme.WUBI_98 ? KeyboardScheme.WUBI_98 : KeyboardScheme.WUBI_86;
+  }
+
+  /** 方案名：五笔只有一个方案入口，标题跟随 `wubi_profile` 显示「86 五笔」或「98 五笔」；其它方案就是 `title`。 */
+  static title(scheme: SchemeDefinition, wubiProfile: string | null | undefined): string {
+    if (
+      scheme === WUBI &&
+      KeyboardScheme.normalizedWubiProfile(wubiProfile) === KeyboardScheme.WUBI_98
+    ) {
+      return "98 五笔";
+    }
+    return scheme.title;
+  }
+
+  /** 角标：五笔跟随 `wubi_profile` 显示「86」或「98」；其它方案就是 `badge`。 */
+  static badge(scheme: SchemeDefinition, wubiProfile: string | null | undefined): string {
+    if (
+      scheme === WUBI &&
+      KeyboardScheme.normalizedWubiProfile(wubiProfile) === KeyboardScheme.WUBI_98
+    ) {
+      return "98";
+    }
+    return scheme.badge;
+  }
+
   /** What a keyboard shows before the user picks any, as the shared `TouchKeyboardScheme::DEFAULT_ENABLED` has it: Cantonese, Zhuyin and Vietnamese are turned on by the user, so a device without a stored list keeps the keyboard it always had. */
   static readonly DEFAULT_ENABLED: SchemeDefinition[] = KeyboardScheme.SCHEMES.filter(
     (candidate: SchemeDefinition): boolean =>

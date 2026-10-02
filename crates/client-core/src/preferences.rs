@@ -633,6 +633,9 @@ pub struct Preferences {
     /// Answer an unmatched Wubi code with candidates from the same Pinyin spelling.
     #[serde(default)]
     pub wubi_mixed_pinyin: bool,
+    /// 五笔用 86 还是 98 码表；个人词条和学习记录也按它分开存。
+    #[serde(default)]
+    pub wubi_profile: WubiProfile,
     #[serde(default)]
     pub touch_keyboard_layout: TouchKeyboardLayout,
     /// Touch-only picker visibility and optional host selection. Desktop hosts preserve but ignore it.
@@ -1685,6 +1688,7 @@ impl Default for Preferences {
             scheme: InputScheme::default(),
             wubi_code_hint: true,
             wubi_mixed_pinyin: false,
+            wubi_profile: WubiProfile::default(),
             touch_keyboard_layout: TouchKeyboardLayout::default(),
             touch_keyboard_schemes: TouchKeyboardSchemePreferences::default(),
             touch_key_spacing_tenths: default_touch_key_spacing_tenths(),
@@ -1839,6 +1843,16 @@ pub enum ShuangpinProfile {
     Ziranma,
     Shoudao,
     Microsoft,
+}
+
+/// 五笔码表版本。Engine 的编码是声明顺序（`wubi_profile`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum WubiProfile {
+    #[default]
+    #[serde(rename = "wubi86")]
+    Wubi86,
+    #[serde(rename = "wubi98")]
+    Wubi98,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

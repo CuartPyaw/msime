@@ -406,8 +406,13 @@ impl ImeSession {
         self.refresh_candidates();
     }
 
+    pub fn wubi_input_options(&self) -> WubiInputOptions {
+        self.wubi_options
+    }
+
     pub fn set_wubi_input_options(&mut self, options: WubiInputOptions) {
         self.wubi_options = options;
+        self.registry.set_wubi_profile(options.profile);
         self.pinyin_tail &= options.mixed_pinyin;
         self.bind_wubi_scheme();
     }

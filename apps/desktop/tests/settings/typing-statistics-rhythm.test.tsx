@@ -221,7 +221,7 @@ test("desktop shares are donuts beside their legend and schemes are a ranking", 
   // Largest first, and only schemes that were used: the ranking is the legend.
   expect(Array.from(ranking.children).map((row) => row.getAttribute("aria-label"))).toEqual([
     "全拼 26 键 60 字符，60.0%",
-    "86 五笔 30 字符，30.0%",
+    "五笔 30 字符，30.0%",
     "英文键盘 10 字符，10.0%",
   ]);
   expect(screen.getAllByLabelText(/^全拼 26 键 /)).toHaveLength(1);

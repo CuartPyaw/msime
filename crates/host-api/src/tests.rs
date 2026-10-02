@@ -148,6 +148,7 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         autocorrect_neighbor: false,
         fuzzy_pinyin_rules: 0,
         wubi_mixed_pinyin: false,
+        wubi_profile: 0,
         helpcode: false,
         show_helpcode: false,
         helpcode_schema: "ziranma".into(),
@@ -846,6 +847,28 @@ fn wubi_mixed_pinyin_reaches_engine_and_applies_after_composition() {
     assert_eq!(disabled["value"]["deferred"], false);
     SESSIONS.with(|sessions| {
         assert!(!sessions.borrow()[&handle].options.wubi_mixed_pinyin);
+    });
+    read(msime_client_destroy(handle));
+}
+
+#[test]
+fn wubi_profile_reaches_engine_options() {
+    use msime_client_core::preferences::WubiProfile;
+    let dir = tempfile::tempdir().unwrap();
+    let handle = test_host(dir.path());
+    SESSIONS.with(|sessions| {
+        assert_eq!(sessions.borrow()[&handle].options.wubi_profile, 0);
+    });
+    let preferences = Preferences {
+        scheme: InputScheme::Wubi,
+        wubi_profile: WubiProfile::Wubi98,
+        ..Preferences::default()
+    };
+    update(handle, 1, &preferences);
+    SESSIONS.with(|sessions| {
+        let session = &sessions.borrow()[&handle];
+        assert_eq!(session.options.wubi_profile, 1);
+        assert_eq!(session.applied.wubi_profile, WubiProfile::Wubi98);
     });
     read(msime_client_destroy(handle));
 }

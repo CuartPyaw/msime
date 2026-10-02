@@ -172,6 +172,8 @@ public final class MSIMEInputService extends InputMethodService {
     private CandidateTranslationStore candidateTranslationStore;
     private boolean wubiCodeHint = true;
     private boolean wubiMixedPinyin;
+    // 五笔版本只决定方案卡片和工具栏上的「86」「98」字样；选表由引擎按同一份偏好里的 `wubi_profile` 决定。
+    private String wubiProfile = KeyboardScheme.WUBI_86;
     private String candidateGlossResources = "";
     private String onlineSignature = "";
     /** Read from the online worker as an early-out, so it must not tear across threads. */
@@ -532,6 +534,8 @@ public final class MSIMEInputService extends InputMethodService {
         applyWubiCodeHintPreference(preferences);
         wubiMixedPinyin = preferences != null
             && preferences.optBoolean("wubi_mixed_pinyin", false);
+        wubiProfile = KeyboardScheme.normalizedWubiProfile(
+            preferences == null ? null : preferences.optString("wubi_profile", KeyboardScheme.WUBI_86));
     }
 
     /**
@@ -1035,6 +1039,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (candidateTranslationStore != null) candidateTranslationStore.clear();
         wubiCodeHint = true;
         wubiMixedPinyin = false;
+        wubiProfile = KeyboardScheme.WUBI_86;
         preferencesSnapshot = null;
         schemeSaving = false;
         touchGeometrySaving = false;
@@ -1394,6 +1399,7 @@ public final class MSIMEInputService extends InputMethodService {
         java.util.List<String> previousTranslationTargets = candidateTranslationTargets;
         boolean previousWubiCodeHint = wubiCodeHint;
         boolean previousWubiMixedPinyin = wubiMixedPinyin;
+        String previousWubiProfile = wubiProfile;
         KeyboardScheme previousScheme = selectedScheme;
         try {
             if (response == null) throw new JSONException("Preferences unavailable");
@@ -1418,6 +1424,7 @@ public final class MSIMEInputService extends InputMethodService {
                 || !previousTranslationTargets.equals(candidateTranslationTargets)
                 || previousWubiCodeHint != wubiCodeHint
                 || previousWubiMixedPinyin != wubiMixedPinyin
+                || !previousWubiProfile.equals(wubiProfile)
                 || previousScheme != selectedScheme
                 || !previousView.equals(view == null ? "" : view.toString())) render();
     }
@@ -1455,6 +1462,8 @@ public final class MSIMEInputService extends InputMethodService {
         java.util.List<String> nextTranslationTargets = translationTargetsFrom(preferences);
         boolean nextWubiCodeHint = preferences.optBoolean("wubi_code_hint", true);
         boolean nextWubiMixedPinyin = preferences.optBoolean("wubi_mixed_pinyin", false);
+        String nextWubiProfile = KeyboardScheme.normalizedWubiProfile(
+            preferences.optString("wubi_profile", KeyboardScheme.WUBI_86));
         JSONObject nextKeybindings = preferences.optJSONObject("keybindings");
         boolean nextLanguageShift = nextKeybindings == null
             || nextKeybindings.optBoolean("switch_language_shift", true);
@@ -1521,6 +1530,7 @@ public final class MSIMEInputService extends InputMethodService {
         candidateTranslationTargets = nextTranslationTargets;
         wubiCodeHint = nextWubiCodeHint;
         wubiMixedPinyin = nextWubiMixedPinyin;
+        wubiProfile = nextWubiProfile;
         hardwareLanguageShift = nextLanguageShift;
         hardwareLanguageCtrlAltSpace = nextLanguageCtrlAltSpace;
         hardwareCharacterSet = nextCharacterSet;
@@ -5403,14 +5413,14 @@ public final class MSIMEInputService extends InputMethodService {
                 // Apple renders scheme cards with the same press-feedback surface as keys. Keep
                 // the Android-specific scheme persistence and selection guards in the callback.
                 KeyboardSchemeCard card = new KeyboardSchemeCard(
-                    this, scheme.glyph(), scheme.badge(), scheme.title());
+                    this, scheme.glyph(), scheme.badge(wubiProfile), scheme.title(wubiProfile));
                 card.setOnClickListener(ignored -> {
                     playFeedback(card);
                     selectKeyboardScheme(scheme);
                 });
                 row.addView(card, new LinearLayout.LayoutParams(0, pixels(72), 1));
                 card.setEnabled(!schemeSaving);
-                card.setContentDescription("输入方案卡片 " + scheme.title());
+                card.setContentDescription("输入方案卡片 " + scheme.title(wubiProfile));
                 if (Build.VERSION.SDK_INT >= 30)
                     card.setStateDescription(scheme == selectedScheme ? "已选中" : "未选中");
                 schemeCards.add(card);
@@ -8360,8 +8370,8 @@ public final class MSIMEInputService extends InputMethodService {
             }
         }
         if (schemeButton != null) {
-            schemeButton.setText(selectedScheme.glyph() + selectedScheme.badge());
-            schemeButton.setContentDescription("输入方案：" + selectedScheme.title());
+            schemeButton.setText(selectedScheme.glyph() + selectedScheme.badge(wubiProfile));
+            schemeButton.setContentDescription("输入方案：" + selectedScheme.title(wubiProfile));
             boolean schemeReady = session != 0 && preferencesSnapshot != null
                 && !schemeSaving && !touchGeometrySaving && !traditionalOutputSaving;
             schemeButton.setEnabled(schemeReady);

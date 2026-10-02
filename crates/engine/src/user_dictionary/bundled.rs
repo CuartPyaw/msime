@@ -113,7 +113,9 @@ pub fn dictionary_table_entries(
             "lower(key)=?1".to_owned(),
         ),
         // Wubi and English codes are stored lower-case, so the prefix is a range the primary index answers.
-        PersonalDictionaryKind::Wubi | PersonalDictionaryKind::English => (
+        PersonalDictionaryKind::Wubi
+        | PersonalDictionaryKind::Wubi98
+        | PersonalDictionaryKind::English => (
             format!("{key_column}>=?1 AND {key_column}<?3"),
             format!("{key_column}=?1"),
         ),
@@ -326,7 +328,9 @@ pub fn edit_bundled_dictionary_entry(
 fn bundled_table(kind: PersonalDictionaryKind, key: &str) -> Option<String> {
     match kind {
         PersonalDictionaryKind::Pinyin => pinyin_table(key),
-        PersonalDictionaryKind::Wubi => Some("wubi86".to_owned()),
+        PersonalDictionaryKind::Wubi | PersonalDictionaryKind::Wubi98 => {
+            kind.wubi_table().map(str::to_owned)
+        }
         PersonalDictionaryKind::QuickPhrase => Some("quick_parases".to_owned()),
         PersonalDictionaryKind::English => Some("english_words".to_owned()),
     }
@@ -338,6 +342,7 @@ fn lookup_tables(kind: PersonalDictionaryKind, code: &str) -> Vec<String> {
     let capacity = match kind {
         PersonalDictionaryKind::Pinyin => format::MAXIMUM_NUMBERED_SYLLABLES + 1,
         PersonalDictionaryKind::Wubi
+        | PersonalDictionaryKind::Wubi98
         | PersonalDictionaryKind::QuickPhrase
         | PersonalDictionaryKind::English => 1,
     };
@@ -351,7 +356,9 @@ fn lookup_tables(kind: PersonalDictionaryKind, code: &str) -> Vec<String> {
                 }
             }
         }
-        PersonalDictionaryKind::Wubi => tables.push("wubi86".to_owned()),
+        PersonalDictionaryKind::Wubi | PersonalDictionaryKind::Wubi98 => {
+            tables.extend(kind.wubi_table().map(str::to_owned))
+        }
         PersonalDictionaryKind::QuickPhrase => tables.push("quick_parases".to_owned()),
         PersonalDictionaryKind::English => tables.push("english_words".to_owned()),
     }

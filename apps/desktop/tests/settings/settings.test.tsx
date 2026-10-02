@@ -630,6 +630,37 @@ test("Android touch schemes display the first enabled fallback for a valid selec
   ).toBe(true);
 });
 
+test("the touch Wubi keyboard is titled by the Wubi profile, which stays selectable", async () => {
+  const snapshot = {
+    ...initial,
+    preferences: {
+      ...initial.preferences,
+      wubi_profile: "wubi98" as const,
+      touch_keyboard_schemes: { enabled: ["quanpin" as const, "wubi" as const] },
+    },
+  };
+  const onSave = vi.fn(async (revision: number, preferences: Snapshot["preferences"]) => ({
+    ...snapshot,
+    revision: revision + 1,
+    preferences,
+  }));
+  render(
+    <SettingsPage
+      client={{ load: async () => snapshot, save: onSave, touchKeyboardSchemes: true }}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "输入" }));
+  expect(screen.getByRole("button", { name: "设为当前输入方案 98 五笔" })).toBeDefined();
+  expect(screen.queryByRole("button", { name: "设为当前输入方案 86 五笔" })).toBeNull();
+  fireEvent.change(screen.getByRole("combobox", { name: "五笔方案" }), {
+    target: { value: "wubi86" },
+  });
+  expect(screen.getByRole("button", { name: "设为当前输入方案 86 五笔" })).toBeDefined();
+  saveSettingsNow();
+  await screen.findByText("已保存");
+  expect(onSave).toHaveBeenCalledWith(7, expect.objectContaining({ wubi_profile: "wubi86" }));
+});
+
 test("window SVGs follow host state and retain accessible controls", async () => {
   let publish: (maximized: boolean) => void = () => {};
   const windowControl = vi.fn().mockResolvedValue(undefined);
@@ -6632,7 +6663,7 @@ test.each(optionHosts)(
       "输入模式",
       "输入方案",
       "双拼方案",
-      // 五笔、日语只有一个方案，只在对应方案下显示，但仍在页面里。
+      // 五笔方案只在五笔下显示，日语只有一个方案、只在日语下显示，但都仍在页面里。
       "五笔方案",
       "日语方案",
       "默认中英文",
@@ -7609,7 +7640,7 @@ test("cloud dictionary exposes visible kind tabs for mobile layouts", async () =
   await screen.findByText("暂无词条");
   const tabs = screen.getByRole("tablist", { name: "云词库类型" });
   expect(tabs.querySelector("button[aria-selected='true']")?.textContent).toBe("拼音");
-  fireEvent.click(screen.getByRole("tab", { name: "五笔" }));
+  fireEvent.click(screen.getByRole("tab", { name: "86 五笔" }));
   await waitFor(() =>
     expect(request).toHaveBeenLastCalledWith({
       operation: "list",
@@ -7618,7 +7649,16 @@ test("cloud dictionary exposes visible kind tabs for mobile layouts", async () =
       search: "",
     }),
   );
-  expect(tabs.querySelector("button[aria-selected='true']")?.textContent).toBe("五笔");
+  expect(tabs.querySelector("button[aria-selected='true']")?.textContent).toBe("86 五笔");
+  fireEvent.click(screen.getByRole("tab", { name: "98 五笔" }));
+  await waitFor(() =>
+    expect(request).toHaveBeenLastCalledWith({
+      operation: "list",
+      kind: "wubi98",
+      offset: 0,
+      search: "",
+    }),
+  );
 });
 
 test("cloud dictionary panel supports paging and CRUD actions", async () => {
@@ -8045,6 +8085,35 @@ test("saves a shuangpin profile and retains it when switching schemes", async ()
   fireEvent.click(screen.getByRole("radio", { name: "全拼" }));
   expect(screen.getByRole("combobox", { name: "双拼方案" })).toBeDefined();
   expect(profile.textContent).toContain("微软双拼");
+});
+
+test("saves the 98 Wubi profile chosen under Wubi", async () => {
+  const client: SettingsClient = {
+    load: vi.fn().mockResolvedValue(initial),
+    save: vi.fn().mockImplementation(async (_revision, preferences) => ({
+      ...initial,
+      revision: 8,
+      preferences,
+    })),
+  };
+  render(<SettingsPage client={client} />);
+  await settingsReady();
+  fireEvent.click(screen.getByRole("button", { name: "输入" }));
+  await screen.findByRole("radio", { name: "全拼" });
+  expect(screen.queryByRole("combobox", { name: "五笔方案" })).toBeNull();
+  fireEvent.click(screen.getByRole("radio", { name: "五笔" }));
+  const profile = screen.getByRole("combobox", { name: "五笔方案" }) as HTMLSelectElement;
+  expect(profile.value).toBe("wubi86");
+  fireEvent.change(profile, { target: { value: "wubi98" } });
+  saveSettingsNow();
+  await screen.findByText("已保存");
+  expect(client.save).toHaveBeenCalledWith(7, {
+    ...initial.preferences,
+    scheme: "wubi",
+    last_chinese_scheme: "wubi",
+    wubi_profile: "wubi98",
+  });
+  expect(profile.value).toBe("wubi98");
 });
 
 test.each([

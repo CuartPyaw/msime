@@ -11,7 +11,8 @@ enum TypingSource: String, CaseIterable {
     case .ziranma: "自然码双拼"
     case .microsoft: "微软双拼"
     case .shoudao: "首道双拼"
-    case .wubi: "86 五笔"
+    // 86 与 98 五笔共用一个统计来源，这里只写「五笔」。
+    case .wubi: "五笔"
     case .japanese: "日语"
     case .korean: "韩语"
     case .cantonese: "粤语"

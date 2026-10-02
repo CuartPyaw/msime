@@ -69,6 +69,10 @@ assert 'msime-shuangpin-preedit' in source
 assert 'msime-wubi-code-hint' in source
 assert 'msime-shuangpin-profile' in source
 assert 'cycleShuangpinProfile' in source
+# 五笔在输入方案菜单和状态文字里都按共享偏好 `wubi_profile` 标出 86 或 98。
+assert source.count('wubi_scheme_label(') >= 2
+assert source.count('value("wubi_profile", std::string("wubi86"))') >= 2
+assert '"输入方案：五笔"' not in source
 assert 'cycleFrequencyMode' in source
 assert 'msime-frequency' in source
 assert 'msime-frequency-trigger' in source

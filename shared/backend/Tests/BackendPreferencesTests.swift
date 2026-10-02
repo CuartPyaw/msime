@@ -65,7 +65,7 @@ final class BackendPreferencesTests: XCTestCase {
   func testUnsupportedCloudValuesFailBeforeAnApplicationPlanExists() throws {
     for settings: [String: BackendPreferenceValue] in [
       ["input.schema": .string("shuangpin"), "input.shuangpin_schema": .string("unsupported")],
-      ["input.schema": .string("wubi"), "input.wubi_schema": .string("wubi98")],
+      ["input.schema": .string("wubi"), "input.wubi_schema": .string("wubi06")],
       ["platform.ios.sound_enabled": .string("true")],
       ["platform.ios.haptic_strength": .string("unsafe")]
     ] { XCTAssertThrowsError(try IOSPreferencePlan(settings, themes: themes)) }
@@ -81,6 +81,15 @@ final class BackendPreferencesTests: XCTestCase {
     let shuangpin = try IOSPreferencePlan(["input.schema": .string("shuangpin"), "input.shuangpin_schema": .string("ziranma"), "input.character_set": .string("traditional")], themes: themes)
     XCTAssertEqual(shuangpin.scheme, "ziranma")
     XCTAssertEqual(shuangpin.traditional, true)
+    XCTAssertNil(shuangpin.wubiProfile)
+    let wubi98 = try IOSPreferencePlan(["input.schema": .string("wubi"), "input.wubi_schema": .string("wubi98")], themes: themes)
+    XCTAssertEqual(wubi98.scheme, "wubi")
+    XCTAssertEqual(wubi98.wubiProfile, "wubi98")
+    XCTAssertEqual(try IOSPreferencePlan(["input.schema": .string("wubi"), "input.wubi_schema": .string("wubi86")], themes: themes).wubiProfile, "wubi86")
+    // 不认识 98 五笔的设备上传的设置没有版本，应用时保留本机的版本。
+    let older = try IOSPreferencePlan(["input.schema": .string("wubi")], themes: themes)
+    XCTAssertEqual(older.scheme, "wubi")
+    XCTAssertNil(older.wubiProfile)
   }
 
   func testThemeValuesAreCheckedAgainstTheCatalog() throws {
