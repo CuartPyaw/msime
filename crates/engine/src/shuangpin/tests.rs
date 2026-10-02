@@ -199,6 +199,18 @@ fn single_and_double_helpcodes_filter_the_base() {
 }
 
 #[test]
+fn single_helpcode_capacity_includes_whole_and_unmatched_rows() {
+    let fixture = Fixture::new(&format!(
+        "CREATE TABLE tbl_1_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_n VALUES('ni','n','前缀',50);{HELPCODE_FILTER}"
+    ));
+    let codes = helpcode_filter_keymap();
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+
+    let candidates = engine.query(&request("nihcc", true), Some(&codes));
+    assert!(candidates.capacity() >= 11);
+}
+
+#[test]
 fn profiles_decode_their_own_codes() {
     let fixture = Fixture::new(
         "BEGIN;CREATE TABLE tbl_2_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_2_n VALUES('ni''hao', 'nh', '你好', 100);INSERT INTO tbl_2_n VALUES('ni''hao', 'nh', '拟好', 50);COMMIT;",
