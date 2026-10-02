@@ -43,7 +43,7 @@ jobs:
           mkdir -p target/resources
           resource_dir="$(cargo run --quiet --locked -p msime-client-core --example install_resources -- target/resources)"
           bash platforms/harmony/stage-resources.sh "$resource_dir"
-      # 只解压构建用得到的部分：预览器、codelinter 不需要；hvigor 在本项目里不编 C++（entry 没有 externalNativeOptions），原生库由 build-native.sh 用 openharmony/native 编，所以 hms/native 也不需要。解压量约 3.7 GB，压缩包解完即删。
+      # SDK 目录必须整份解压：hvigor 在 runtimeOS 为 HarmonyOS 时会逐个检查 SDK 组件，少了 previewer 或 hms/native 就报 `SDK component missing`，构建一开始就失败。只跳过 SDK 之外的 codelinter。压缩包解完即删。
       - name: Install the HarmonyOS command-line tools
         env: {GH_TOKEN: "${{ secrets.HARMONY_TOOLCHAIN_TOKEN }}"}
         run: |
@@ -53,7 +53,7 @@ jobs:
           gh release download "$HARMONY_TOOLCHAIN_TAG" --repo metasequoiaime/harmony-toolchain --pattern "$HARMONY_TOOLCHAIN_ZIP" --dir "$RUNNER_TEMP"
           printf '%s  %s\n' "$HARMONY_TOOLCHAIN_SHA256" "$RUNNER_TEMP/$HARMONY_TOOLCHAIN_ZIP" | sha256sum --check
           unzip -q "$RUNNER_TEMP/$HARMONY_TOOLCHAIN_ZIP" -d "$tools" \
-            -x 'command-line-tools/sdk/default/*/previewer/*' 'command-line-tools/codelinter/*' 'command-line-tools/sdk/default/hms/native/*'
+            -x 'command-line-tools/codelinter/*'
           rm "$RUNNER_TEMP/$HARMONY_TOOLCHAIN_ZIP"
           root="$tools/command-line-tools"
           test -x "$root/bin/hvigorw" && test -x "$root/bin/ohpm"

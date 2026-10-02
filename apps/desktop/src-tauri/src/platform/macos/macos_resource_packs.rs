@@ -90,7 +90,7 @@ fn needed_packs(
     scheme: InputScheme,
     last_chinese_scheme: Option<ChineseScheme>,
 ) -> Vec<ResourcePack> {
-    let mut needed = Vec::new();
+    let mut needed = Vec::with_capacity(2);
     if scheme == InputScheme::Japanese {
         needed.push(ResourcePack::Japanese);
     }
@@ -166,10 +166,12 @@ mod tests {
             [ResourcePack::LanguageDictionaries]
         );
         // 当前是日文、上次的中文方案是粤拼：切回中文时也要用到语言词库，两个都要。
+        let both = needed_packs(Scheme::Japanese, Some(Last::Cantonese));
         assert_eq!(
-            needed_packs(Scheme::Japanese, Some(Last::Cantonese)),
+            both,
             [ResourcePack::Japanese, ResourcePack::LanguageDictionaries]
         );
+        assert_eq!(both.capacity(), 2);
         assert_eq!(
             needed_packs(Scheme::Quanpin, Some(Last::Zhuyin)),
             [ResourcePack::LanguageDictionaries]
