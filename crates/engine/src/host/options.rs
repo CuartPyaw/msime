@@ -87,6 +87,8 @@ pub struct EngineOptions {
     pub cantonese_dictionary: String,
     /// Absolute path of `zhuyin.db`, empty when the host has none; the Zhuyin scheme is unavailable without it.
     pub zhuyin_dictionary: String,
+    /// `dict_japanese.dat` 的绝对路径；为空时从资源目录读取。
+    pub japanese_dictionary: String,
 }
 
 /// Stage the generation (`prepare_runtime_paths`) and fill the product defaults: quanpin, xiaohe, Telex with modern tone placement and no language dictionaries, learning off, autocorrect and fuzzy off, helpcode on with `ziranma`, frequency `promote` 1/1, mixed English from 5 letters, every Shift+letter local mode of the reference on and the expression, command and mention modes off with empty tables, and explicit values for the fields the C++ left default-initialised (`shuangpin_preedit_uses_raw = true`, `wubi_mixed_pinyin = false`, `sentence_association` default, `sentence_alternatives = false`).
@@ -152,6 +154,7 @@ pub fn prepare_options(
         vietnamese_tone_style: VietnameseToneStyle::Modern as u8,
         cantonese_dictionary: String::new(),
         zhuyin_dictionary: String::new(),
+        japanese_dictionary: String::new(),
     })
 }
 
@@ -186,6 +189,7 @@ pub fn session_options(options: &EngineOptions) -> Result<SessionOptions> {
     session.vietnamese_tone_style = vietnamese_tone_style;
     session.cantonese_dictionary = PathBuf::from(&options.cantonese_dictionary);
     session.zhuyin_dictionary = PathBuf::from(&options.zhuyin_dictionary);
+    session.japanese_dictionary = PathBuf::from(&options.japanese_dictionary);
     session.learning = options.learning;
     session.autocorrect_types = autocorrect_types;
     session.fuzzy_pinyin = FuzzyPinyinOptions {

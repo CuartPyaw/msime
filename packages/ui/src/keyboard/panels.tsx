@@ -70,6 +70,13 @@ import {
   cloudResponseText,
 } from "./cloud-response";
 import type { TouchKeyboardSkinDesign } from "./touch-keyboard-skin-design";
+import {
+  resourcePackStatus,
+  useResourcePacks,
+  type ResourcePackClient,
+  type ResourcePacks,
+} from "../settings/resource-packs";
+import { formatModelBytes, localModelProgressPercent } from "../voice/local-model-helpers";
 
 export interface KeyboardInputRequest {
   virtual_key: number;
@@ -105,6 +112,8 @@ export interface PanelClient {
   ): Promise<HandwritingRecognitionResult>;
   submitHandwritingCandidate?(candidate: string): Promise<void>;
   copyHandwritingCandidate?(candidate: string): Promise<void>;
+  /** macOS 发布包不再内置手写模型：手写面板第一次打开时用它下载。 */
+  resourcePacks?: ResourcePackClient;
 }
 
 export interface VoicePanelClient extends PanelClient {
@@ -822,6 +831,20 @@ export function HandwritingPanel({
   platform?: string;
 }) {
   const maxStrokes = platform === "windows" ? WINDOWS_HANDWRITING_STROKES : MAX_HANDWRITING_STROKES;
+  // macOS 的手写模型按需下载：第一次打开面板时开始下载，下载完成前不调用识别器，笔画保留，装好后自动识别当前笔画。
+  const packs = useResourcePacks(platform === "macos" ? client.resourcePacks : undefined);
+  const handwritingPack = resourcePackStatus(packs, "handwriting");
+  // 只有确定缺少模型时才暂停识别；读不到列表时照常识别，已过期的旧模型也仍然可用。
+  const modelMissing = handwritingPack?.state === "missing";
+  const modelMissingRef = useRef(modelMissing);
+  modelMissingRef.current = modelMissing;
+  const waitingForModel = useRef(false);
+  const ensuredModel = useRef(false);
+  useEffect(() => {
+    if (ensuredModel.current || !handwritingPack) return;
+    ensuredModel.current = true;
+    packs.ensure("handwriting");
+  }, [handwritingPack, packs]);
   const [activationMode, setActivationMode] = useState<"copy" | "input">(() => {
     try {
       return window.localStorage.getItem("msime.handwriting.activation") === "input"
@@ -933,6 +956,11 @@ export function HandwritingPanel({
       setNotice("识别结果需由宿主提供");
       return;
     }
+    if (modelMissingRef.current) {
+      waitingForModel.current = true;
+      setNotice("手写模型下载完成后自动识别");
+      return;
+    }
     const queue = recognitionQueue.current;
     queue.pending = { revision, strokes: nextStrokes };
     setRecognizing(true);
@@ -980,6 +1008,12 @@ export function HandwritingPanel({
       return;
     recognize(strokes);
   }
+  // 模型装好后，对等待中的当前笔画补一次识别；正在书写时交给笔画结束时的识别。
+  useEffect(() => {
+    if (modelMissing || !waitingForModel.current) return;
+    waitingForModel.current = false;
+    if (strokes.length && !activeStroke.current) recognize(strokes);
+  }, [modelMissing]);
   function start(event: PointerEvent<SVGSVGElement>) {
     if (
       !recognitionQueue.current.active ||
@@ -1325,11 +1359,53 @@ export function HandwritingPanel({
               </div>
             ))}
           </div>
+          {handwritingPack && <HandwritingModelNotice packs={packs} />}
           <p role="status">{notice}</p>
         </section>
       </div>
     </main>
   );
+}
+
+/** 手写模型下载中的进度与取消、下载失败的原因与重试，或取消后仍缺模型时的下载入口；模型已在、也没有下载时不渲染。 */
+function HandwritingModelNotice({ packs }: { packs: ResourcePacks }) {
+  const status = resourcePackStatus(packs, "handwriting");
+  const progress = packs.progress.handwriting;
+  const error = packs.errors.handwriting;
+  if (progress) {
+    return (
+      <p className={surface.handwritingActions} aria-live="polite">
+        <span>
+          正在下载手写模型（约 {formatModelBytes(status?.size ?? progress.total)}）…{" "}
+          {localModelProgressPercent(progress)}%
+        </span>
+        <button type="button" onClick={() => packs.cancel("handwriting")}>
+          取消
+        </button>
+      </p>
+    );
+  }
+  if (error) {
+    return (
+      <p className={surface.handwritingActions} aria-live="polite">
+        <span>{error}</span>
+        <button type="button" onClick={() => packs.install("handwriting")}>
+          重试
+        </button>
+      </p>
+    );
+  }
+  if (status?.state === "missing") {
+    return (
+      <p className={surface.handwritingActions} aria-live="polite">
+        <span>手写识别需要先下载手写模型（约 {formatModelBytes(status.size)}）</span>
+        <button type="button" onClick={() => packs.install("handwriting")}>
+          下载
+        </button>
+      </p>
+    );
+  }
+  return null;
 }
 
 export function VoicePanel({

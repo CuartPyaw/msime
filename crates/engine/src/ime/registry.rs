@@ -35,18 +35,24 @@ pub struct ProviderRegistry {
 }
 
 impl ProviderRegistry {
-    /// Wubi reads the generation's `msime.db`; the Japanese model is the immutable resource (provider_registry.cpp:4-10).
+    /// Wubi reads the generation's `msime.db`; the Japanese model is the immutable resource (provider_registry.cpp:4-10). `japanese_path` 非空时改读这个位置（例如按需下载的那份），为空时读资源目录里的 `dict_japanese.dat`。
     pub fn new(
         profile_kind: ShuangpinProfileKind,
         paths: &RuntimePaths,
         cantonese_path: PathBuf,
         zhuyin_path: PathBuf,
+        japanese_path: PathBuf,
     ) -> Self {
+        let japanese_model = if japanese_path.as_os_str().is_empty() {
+            paths.resource(assets::JAPANESE_MODEL)
+        } else {
+            japanese_path
+        };
         Self {
             quanpin: QuanpinEngine::new(paths),
             shuangpin: ShuangpinEngine::new(profile(profile_kind), paths),
             wubi: WubiProvider::new(&paths.dictionary(assets::MAIN_DICTIONARY)),
-            japanese: JapaneseProvider::new(&paths.resource(assets::JAPANESE_MODEL)),
+            japanese: JapaneseProvider::new(&japanese_model),
             keymap: None,
             cantonese_path,
             cantonese: None,

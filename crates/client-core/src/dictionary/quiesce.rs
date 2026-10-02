@@ -128,7 +128,8 @@ impl Lease {
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            file.mode(0o600).custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+            file.mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
         }
         let mut output = file.open(&staged)?;
         if let Err(error) = output
@@ -340,7 +341,9 @@ mod tests {
     fn publish_does_not_overwrite_an_existing_staged_file() {
         let directory = tempfile::tempdir().unwrap();
         let serial = 9_999_999;
-        let staged = directory.path().join(format!("{LEASE_NAME}.{}-{serial}", std::process::id()));
+        let staged = directory
+            .path()
+            .join(format!("{LEASE_NAME}.{}-{serial}", std::process::id()));
         std::fs::write(&staged, b"keep").unwrap();
         let mut lease = Lease {
             path: directory.path().join(LEASE_NAME),

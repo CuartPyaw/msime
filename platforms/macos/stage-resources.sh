@@ -8,15 +8,19 @@ source_dir=${1:?usage: stage-resources.sh <verified-resource-directory> [settled
 source_dir=$(cd "$source_dir" && pwd)
 destination="$repo_root/target/macos/EngineResources"
 
-# Use the shared verifier as the source of truth. The staged directory is ignored
-# build output and is rebuilt as one unit, so a failed copy cannot look complete.
-artifacts=$(cargo run --quiet -p msime-client-core --example verify_resources --locked -- "$source_dir")
+# Use the shared verifier as the source of truth. The staged directory is ignored build output and is rebuilt as one unit, so a failed copy cannot look complete.
+# MSIME_MACOS_OMIT_ON_DEMAND=1 按发布包的规则只暂存核心词库：日文词典那一对文件（resources.rs 的 MACOS_ON_DEMAND_ARTIFACTS）不进包，由 App 在用户选日文方案时下载到 resource-packs/japanese。默认的开发流程仍暂存全部文件，作为下载之外的内置兜底。
+verify_flags=()
+if [ "${MSIME_MACOS_OMIT_ON_DEMAND:-0}" = 1 ]; then
+  verify_flags=(--omit-on-demand)
+fi
+artifacts=$(cargo run --quiet -p msime-client-core --example verify_resources --locked -- ${verify_flags[@]+"${verify_flags[@]}"} "$source_dir")
 rm -rf "$destination"
 mkdir -p "$destination"
 while IFS= read -r artifact; do
   cp "$source_dir/$artifact" "$destination/$artifact"
 done <<< "$artifacts"
-cargo run --quiet -p msime-client-core --example verify_resources --locked -- "$destination" >/dev/null
+cargo run --quiet -p msime-client-core --example verify_resources --locked -- ${verify_flags[@]+"${verify_flags[@]}"} "$destination" >/dev/null
 # Helpcode tables are not part of the dictionary release; the repository carries them in resources/helpcodes, and the Engine reads them from helpcodes/ under the resource directory (crates/engine/src/assets.rs names the six files). Without them the Engine has nothing to match: Shift letters are taken as helpcode and narrow nothing. The shared verifier lets a real helpcodes/ directory through.
 helpcodes="$repo_root/resources/helpcodes"
 mkdir -p "$destination/helpcodes"
@@ -65,6 +69,7 @@ else
 fi
 
 # Optional: the Cantonese and Zhuyin dictionaries fetched by scripts/fetch_language_dictionaries.py (or built by `msime-dict-build languages`). prepare_host_configuration finds them beside the resource directory and names them in the runtime options; a scheme whose dictionary is missing is shown as unavailable and falls back. Each dictionary is staged only with its licence text, which must travel with the data.
+# 这里暂存的是开发构建用的内置兜底。macOS 发布包（package-release.sh）不带它们，App 在用户选粤拼或注音时把 resources/language-dictionaries.lock.json 固定的文件下载到 resource-packs/language-dictionaries，查找时下载的优先、这里的次之。
 languages_source=${4:-$repo_root/target/language-dictionaries}
 languages_destination="$repo_root/target/macos/language-dictionaries"
 rm -rf "$languages_destination"

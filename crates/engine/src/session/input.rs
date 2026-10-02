@@ -107,6 +107,7 @@ impl InputSession {
             &paths,
             options.cantonese_dictionary.clone(),
             options.zhuyin_dictionary.clone(),
+            options.japanese_dictionary.clone(),
         )?;
         engine.set_autocorrect_types(0);
         engine.set_quanpin_helpcode_enabled(true);

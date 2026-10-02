@@ -1,5 +1,17 @@
-//! The engine owns handwriting recognition; macOS only locates packaged data.
+//! 手写识别由引擎负责，macOS 这边只负责找到模型文件。
+//!
+//! 发布包不再内置手写模型，第一次打开手写面板时下载到 `<state_root>/resource-packs/handwriting/`，查找时优先用这份已下载的模型（[`downloaded_model`]）；从内置模型的旧版本升级上来、还没下载时，退回 app 里的 `Contents/Resources/handwriting/`（[`bundled_model`]）。
+use msime_client_core::resource_packs::{self, ResourcePack};
 use std::path::{Path, PathBuf};
+
+/// `state_root` 下已完整安装的手写资源包里的模型；没有安装、缺少 `msime-model.json` 或模型是符号链接时为 `None`。
+pub(crate) fn downloaded_model(state_root: &Path) -> Option<PathBuf> {
+    resource_packs::installed_file(
+        state_root,
+        ResourcePack::Handwriting,
+        "handwriting-zh_CN.model",
+    )
+}
 
 pub(crate) fn bundled_model(executable: &Path) -> Option<PathBuf> {
     if !executable.is_absolute() {
@@ -86,6 +98,42 @@ mod tests {
     }
 
     #[test]
+    fn downloaded_handwriting_model_needs_a_published_pack() {
+        let state = tempfile::tempdir().unwrap();
+        assert_eq!(downloaded_model(state.path()), None);
+        let pack = resource_packs::root(state.path()).join(ResourcePack::Handwriting.id());
+        std::fs::create_dir_all(&pack).unwrap();
+        let model = pack.join("handwriting-zh_CN.model");
+        std::fs::write(&model, b"placeholder").unwrap();
+        // 没有 msime-model.json 的目录可能是中断的安装，不算数。
+        assert_eq!(downloaded_model(state.path()), None);
+        std::fs::write(
+            pack.join(msime_client_core::voice::local_models::MANIFEST_FILE),
+            serde_json::to_vec(&ResourcePack::Handwriting.manifest()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(downloaded_model(state.path()), Some(model));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_downloaded_handwriting_model_is_ignored() {
+        let state = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let pack = resource_packs::root(state.path()).join(ResourcePack::Handwriting.id());
+        std::fs::create_dir_all(&pack).unwrap();
+        std::fs::write(
+            pack.join(msime_client_core::voice::local_models::MANIFEST_FILE),
+            serde_json::to_vec(&ResourcePack::Handwriting.manifest()).unwrap(),
+        )
+        .unwrap();
+        let target = outside.path().join("handwriting-zh_CN.model");
+        std::fs::write(&target, b"placeholder").unwrap();
+        std::os::unix::fs::symlink(&target, pack.join("handwriting-zh_CN.model")).unwrap();
+        assert_eq!(downloaded_model(state.path()), None);
+    }
+
+    #[test]
     fn the_packaged_model_recognizes_a_single_character() {
         let Some(resolved) = engine_model() else {
             return;
@@ -119,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn macos_package_ships_the_model_with_its_licenses() {
+    fn macos_package_downloads_the_model_on_demand() {
         let configuration: serde_json::Value =
             serde_json::from_str(include_str!("../../../tauri.macos.conf.json")).unwrap();
         let resources = configuration["bundle"]["resources"].as_object().unwrap();
@@ -127,11 +175,12 @@ mod tests {
             .values()
             .any(|path| path == "handwriting/Zinnia-LICENSE.txt"));
         assert_eq!(configuration["bundle"]["active"], true);
-        // The model and its licence are copied into the app by the release script rather than declared here, so a development build does not need the download; the script must still put both where bundled_model looks.
+        // 发布包不再带手写模型：首次打开手写面板时由 App 下载到 resource-packs/handwriting。打包脚本要在编译前用同一个安装器确认资源包可下载，并断言包里没有模型。
         let package = include_str!("../../../../../../platforms/macos/package-release.sh");
-        assert!(package.contains("scripts/fetch_handwriting_model.py"));
-        assert!(package.contains(
-            r#""$handwriting_model/handwriting-zh_CN.model" "$handwriting_model/HandwritingModel-LICENSE.txt" "$app/Contents/Resources/handwriting/""#
-        ));
+        assert!(package.contains("install_resource_pack"));
+        assert!(
+            package.contains(r#"test ! -e "$resources_dir/handwriting/handwriting-zh_CN.model""#)
+        );
+        assert!(!package.contains("fetch_handwriting_model.py"));
     }
 }

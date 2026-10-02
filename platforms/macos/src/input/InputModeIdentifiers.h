@@ -26,10 +26,23 @@ static inline NSArray<NSString *> *MSIMEInputSchemeNames(void) {
     return @[ @"quanpin", @"shuangpin", @"wubi", @"japanese", @"korean", @"cantonese", @"zhuyin", @"vietnamese" ];
 }
 
-// Whether a scheme can actually run here. Cantonese and Zhuyin need their dictionary in the `language_dictionaries` directory the HostOptions document names; host-api falls back from either when it is missing, so offering it would select a scheme that never takes effect. Every other scheme needs no data beyond the resource set.
+// 路径上是否是指定类型的真实条目：attributesOfItemAtPath: 不跟随符号链接，符号链接本身的类型是 NSFileTypeSymbolicLink，因此会被拒绝，与 host-api 的 resource_packs::installed_file 一致。
+static inline BOOL MSIMEItemHasFileType(NSString *path, NSFileAttributeType type) {
+    return [[NSFileManager.defaultManager attributesOfItemAtPath:path error:nil][NSFileType] isEqualToString:type];
+}
+
+// 某个方案此处能否真正运行。粤拼和注音需要各自的词典：按 host-api 的顺序，先找设置应用按需下载到 `<preferences_directory>/resource-packs/language-dictionaries/` 的副本（preferences_directory 须为绝对路径，资源包目录须是真实目录且带 msime-model.json，词典须是普通文件，符号链接一律不认），再找 HostOptions 的 `language_dictionaries` 目录；两处都没有时 host-api 会回退，此时提供该方案只会选中一个永远不生效的方案。其余方案（包括缺少日文词典时退化为纯假名的日文）不需要资源集之外的数据。输入法自身从不下载，下载只在设置应用里进行。
 static inline BOOL MSIMEInputSchemeAvailable(NSString *scheme, NSDictionary *hostOptions) {
     NSString *file = [scheme isEqualToString:@"cantonese"] ? @"cantonese.db" : ([scheme isEqualToString:@"zhuyin"] ? @"zhuyin.db" : nil);
     if (!file) return [MSIMEInputSchemeNames() containsObject:scheme];
+    id stateRoot = hostOptions[@"preferences_directory"];
+    if ([stateRoot isKindOfClass:NSString.class] && [stateRoot length] && [stateRoot isAbsolutePath]) {
+        NSString *pack = [[stateRoot stringByAppendingPathComponent:@"resource-packs"] stringByAppendingPathComponent:@"language-dictionaries"];
+        if (MSIMEItemHasFileType(pack, NSFileTypeDirectory) &&
+            MSIMEItemHasFileType([pack stringByAppendingPathComponent:@"msime-model.json"], NSFileTypeRegular) &&
+            MSIMEItemHasFileType([pack stringByAppendingPathComponent:file], NSFileTypeRegular))
+            return YES;
+    }
     id directory = hostOptions[@"language_dictionaries"];
     if (![directory isKindOfClass:NSString.class] || ![directory length]) return NO;
     BOOL isDirectory = NO;
