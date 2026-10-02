@@ -354,6 +354,7 @@ impl ShuangpinDictionary {
             .map(|item| listed.insert(item.word.as_str()))
             .collect::<Vec<_>>();
         drop(listed);
+        result.reserve(rows.len());
         result.extend(
             rows.into_iter()
                 .zip(unique)
