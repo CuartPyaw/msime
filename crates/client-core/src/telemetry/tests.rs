@@ -208,6 +208,18 @@ fn a_crash_record_turns_the_leftover_session_into_session_crash_and_a_crash() {
 }
 
 #[test]
+fn crash_file_read_reserves_capped_file_size() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("synthetic.crash");
+    let contents = vec![b'x'; 128];
+    std::fs::write(&path, &contents).unwrap();
+
+    let bytes = read_crash_file(&path).unwrap();
+    assert_eq!(bytes, contents);
+    assert_eq!(bytes.capacity(), 128);
+}
+
+#[test]
 fn a_record_a_signal_handler_wrote_raw_is_read_too() {
     let (_directory, store) = store();
     let start = store.begin_session(&app(), noon()).unwrap();
