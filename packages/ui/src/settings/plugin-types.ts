@@ -65,7 +65,7 @@ export type PluginPackage = {
   particles?: number | null;
 };
 
-/** 插件详情可以链接过去的设置页：辅助码和实用功能都在「输入」页。 */
+/** 插件详情可以链接过去的设置页：辅助码和快捷模式都在「输入」页。 */
 export type PluginSettingsPage = "input" | "vocabulary";
 
 /** A folder under the plugins directory that is not a loadable pack, and why. */

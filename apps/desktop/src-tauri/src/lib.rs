@@ -195,28 +195,51 @@ fn host_capabilities(app: tauri::AppHandle) -> HostCapabilities {
     let host_options = app
         .try_state::<DictionaryHostOptions>()
         .and_then(|options| options.snapshot().ok());
-    drop_uninstalled_language_schemes(&mut capabilities, host_options.as_ref());
+    drop_uninstalled_language_schemes(
+        &mut capabilities,
+        host_options.as_ref(),
+        cfg!(target_os = "windows"),
+    );
     capabilities
 }
 
 /// Cantonese and Zhuyin each read a dictionary the package installs beside the Engine resources, which the HostOptions document names in `language_dictionaries` only when one is there. Without its dictionary host-api falls back from the scheme, so the page shows it unavailable instead of offering a choice that never takes effect. Every other scheme needs nothing beyond the resources.
+///
+/// `beside_resources` is for Windows, whose `runtime-options.json` is written once at first run and never refreshed: the Server and the TIP each find the dictionaries beside the resources in memory, so a document without the key still means the `language-dictionaries` directory next to its absolute `resources`.
 fn drop_uninstalled_language_schemes(
     capabilities: &mut HostCapabilities,
     host_options: Option<&Value>,
+    beside_resources: bool,
 ) {
     use msime_client_core::preferences::InputScheme;
-    let directory = host_options
+    let named = host_options
         .and_then(|document| document.get("language_dictionaries"))
         .and_then(Value::as_str)
-        .map(std::path::Path::new)
-        .filter(|directory| directory.is_absolute());
+        .map(PathBuf::from);
+    let beside = || {
+        host_options
+            .and_then(|document| document.get("resources"))
+            .and_then(Value::as_str)
+            .map(std::path::Path::new)
+            .filter(|resources| resources.is_absolute())
+            .and_then(std::path::Path::parent)
+            .map(|parent| parent.join("language-dictionaries"))
+    };
+    let directory = match named {
+        Some(directory) => Some(directory),
+        None if beside_resources => beside(),
+        None => None,
+    }
+    .filter(|directory| directory.is_absolute());
     capabilities.input_schemes.retain(|scheme| {
         let dictionary = match scheme {
             InputScheme::Cantonese => "cantonese.db",
             InputScheme::Zhuyin => "zhuyin.db",
             _ => return true,
         };
-        directory.is_some_and(|directory| directory.join(dictionary).is_file())
+        directory
+            .as_deref()
+            .is_some_and(|directory| directory.join(dictionary).is_file())
     });
 }
 
@@ -4414,10 +4437,17 @@ fn ios_host_options_document(
     match contents {
         Some(contents) => serde_json::from_str(contents)
             .map_err(|_| "Cannot parse prepared HostOptions JSON".to_owned()),
-        None => Ok(serde_json::json!({
-            "resources": resources.to_string_lossy(),
-            "state_root": state_root.to_string_lossy(),
-        })),
+        None => {
+            let mut document = serde_json::json!({
+                "resources": resources.to_string_lossy(),
+                "state_root": state_root.to_string_lossy(),
+            });
+            // The Cantonese and Zhuyin dictionaries are bundled beside EngineResources; naming them here is what lets host-api run those schemes and the page offer them.
+            if let Some(directory) = msime_host_api::installed_language_dictionaries(resources) {
+                document["language_dictionaries"] = Value::String(directory);
+            }
+            Ok(document)
+        }
     }
 }
 

@@ -470,7 +470,7 @@ function PackActions({
             />
           </Row>
           {!quickPhraseMode && (
-            <ActionBlock note="快捷短语（K 模式）已关闭。在「输入 → 实用功能」打开后，按 Shift+K 再输入编码即可用到短语表。">
+            <ActionBlock note="快捷短语（K 模式）已关闭。在「输入 → 快捷模式」打开后，按 Shift+K 再输入编码即可用到短语表。">
               {onOpenPage && (
                 <button type="button" className="secondary" onClick={() => onOpenPage("input")}>
                   前往输入设置

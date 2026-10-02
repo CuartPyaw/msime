@@ -34,7 +34,7 @@ export interface MixedInputSectionProps {
   onChange: (preferences: MixedInputPreferences) => void;
 }
 
-/** Shared mixed Chinese and English candidate controls: the leading rows of the 多语言候选 group on the 表达 page. */
+/** 共享的中英混输候选控件：「标点与翻译」页「多语言与释义」组开头的几行。 */
 export function MixedInputSection({ preferences, onChange }: MixedInputSectionProps) {
   return (
     <>
