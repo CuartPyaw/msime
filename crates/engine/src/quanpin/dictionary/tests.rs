@@ -950,6 +950,21 @@ fn warm_fuzzy_queries_reuse_the_fuzzy_slot() {
     assert!(contains(&warm, "哨兵"), "{:?}", words(&warm));
 }
 
+#[test]
+fn fuzzy_candidates_do_not_allocate_the_full_path_budget_up_front() {
+    let fixture = fuzzy_fixture();
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    let candidates = dictionary.fuzzy_candidates(
+        "zong'guo",
+        FuzzyPinyinOptions {
+            rules: fuzzy_rule::ALL,
+        },
+    );
+
+    assert_eq!(candidates.len(), 1);
+    assert!(candidates.capacity() < FUZZY_PATH_BUDGET * FUZZY_ROW_LIMIT);
+}
+
 /// test_fuzzy_pinyin.cpp:265-270: two hundred warm fuzzy queries stay well inside the reference's five-second budget.
 #[test]
 fn two_hundred_warm_fuzzy_queries_stay_under_budget() {
