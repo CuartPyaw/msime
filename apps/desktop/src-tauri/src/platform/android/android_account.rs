@@ -34,7 +34,7 @@ use msime_client_core::cloud::snapshot_validation::{
 };
 use msime_client_core::preferences::{
     FrequencyMode, InputScheme, Preferences, PreferencesSnapshot, PreferencesStore,
-    ShuangpinProfile, ThemeMode, TouchKeyboardLayout,
+    ShuangpinProfile, ThemeMode, TouchKeyboardLayout, WubiProfile,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1102,6 +1102,14 @@ fn account_input_schema(scheme: InputScheme) -> Option<&'static str> {
     }
 }
 
+/// 五笔版本在账号里的取值，即 `input.wubi_schema`。
+fn account_wubi_schema(profile: WubiProfile) -> &'static str {
+    match profile {
+        WubiProfile::Wubi86 => "wubi86",
+        WubiProfile::Wubi98 => "wubi98",
+    }
+}
+
 fn local_account_preferences(
     snapshot: &PreferencesSnapshot,
     feedback: &PluginHandle<Wry>,
@@ -1129,6 +1137,11 @@ fn local_account_preferences(
             ShuangpinProfile::Shoudao => "shoudao",
             ShuangpinProfile::Microsoft => "microsoft",
         },
+    );
+    insert_string(
+        &mut settings,
+        "input.wubi_schema",
+        account_wubi_schema(preferences.wubi_profile),
     );
     insert_bool(&mut settings, "input.learning", preferences.learning);
     settings.extend(frequency_account_preferences(&preferences.frequency));
@@ -1324,6 +1337,24 @@ fn apply_input_scheme(
     Ok(())
 }
 
+/// 按账号里的 `input.wubi_schema` 设置五笔版本；不认识的取值拒绝整份文档，与双拼方案的处理一致。
+fn apply_wubi_profile(
+    preferences: &mut Preferences,
+    values: &BTreeMap<String, AccountPreferenceValue>,
+    schema: &AccountPreferenceSchema,
+) -> Result<(), AccountError> {
+    if let Some(value) = string_setting(values, "input.wubi_schema")? {
+        if supports_schema_field(schema, "input.wubi_schema", "string")? {
+            preferences.wubi_profile = match value.as_str() {
+                "wubi86" => WubiProfile::Wubi86,
+                "wubi98" => WubiProfile::Wubi98,
+                _ => return Err(AccountError::Invalid),
+            };
+        }
+    }
+    Ok(())
+}
+
 fn apply_local_account_preferences(
     snapshot: &PreferencesSnapshot,
     cloud: &AccountPreferences,
@@ -1363,6 +1394,7 @@ fn apply_local_account_preferences(
             };
         }
     }
+    apply_wubi_profile(&mut preferences, values, schema)?;
     if let Some(value) = bool_setting(values, "input.learning")? {
         if supports_schema_field(schema, "input.learning", "boolean")? {
             preferences.learning = value;
@@ -1656,9 +1688,9 @@ pub async fn mobile_keyboard_feedback_preview(
 #[cfg(test)]
 mod tests {
     use super::{
-        account_input_schema, apply_frequency_preferences, apply_input_scheme,
-        frequency_account_preferences, AccountPreferenceSchema, AccountPreferenceValue,
-        FrequencyMode, InputScheme, Preferences,
+        account_input_schema, account_wubi_schema, apply_frequency_preferences, apply_input_scheme,
+        apply_wubi_profile, frequency_account_preferences, AccountPreferenceSchema,
+        AccountPreferenceValue, FrequencyMode, InputScheme, Preferences, WubiProfile,
     };
     use msime_client_core::account::AccountPreferenceField;
     use msime_client_core::preferences::FrequencyPreferences;
@@ -1794,5 +1826,46 @@ mod tests {
         let mut preferences = Preferences::default();
         apply_input_scheme(&mut preferences, &values, &schema).unwrap();
         assert_eq!(preferences.scheme, InputScheme::Korean);
+    }
+
+    #[test]
+    fn the_wubi_profile_round_trips_through_the_account_wubi_schema() {
+        let mut schema = frequency_schema();
+        schema.fields.insert(
+            "input.wubi_schema".into(),
+            AccountPreferenceField {
+                value_type: "string".into(),
+            },
+        );
+        for profile in [WubiProfile::Wubi86, WubiProfile::Wubi98] {
+            let values = BTreeMap::from([(
+                "input.wubi_schema".into(),
+                AccountPreferenceValue::String(account_wubi_schema(profile).into()),
+            )]);
+            let mut preferences = Preferences {
+                wubi_profile: if profile == WubiProfile::Wubi86 {
+                    WubiProfile::Wubi98
+                } else {
+                    WubiProfile::Wubi86
+                },
+                ..Preferences::default()
+            };
+            apply_wubi_profile(&mut preferences, &values, &schema).unwrap();
+            assert_eq!(preferences.wubi_profile, profile);
+        }
+
+        // 账号的字段表里没有它时不动本地设置，不认识的取值拒绝。
+        let values = BTreeMap::from([(
+            "input.wubi_schema".into(),
+            AccountPreferenceValue::String("wubi98".into()),
+        )]);
+        let mut preferences = Preferences::default();
+        apply_wubi_profile(&mut preferences, &values, &frequency_schema()).unwrap();
+        assert_eq!(preferences.wubi_profile, WubiProfile::Wubi86);
+        let invalid = BTreeMap::from([(
+            "input.wubi_schema".into(),
+            AccountPreferenceValue::String("wubi06".into()),
+        )]);
+        assert!(apply_wubi_profile(&mut preferences, &invalid, &schema).is_err());
     }
 }

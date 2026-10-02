@@ -22,8 +22,14 @@ export type TouchKeyboardSchemePreferences = {
   selected?: TouchKeyboardScheme;
 };
 
+/** 五笔触屏方案的标题：只有一个五笔键盘，标题跟随 `wubi_profile`。 */
+export function wubiProfileTitle(profile: Preferences["wubi_profile"]): string {
+  return profile === "wubi98" ? "98 五笔" : "86 五笔";
+}
+
 export function touchKeyboardSchemeTitle(preferences: Preferences): string {
   const selected = preferences.touch_keyboard_schemes?.selected;
+  if (selected === "wubi") return wubiProfileTitle(preferences.wubi_profile);
   if (selected) {
     return {
       quanpin: "全拼 26 键",
@@ -52,7 +58,7 @@ export function touchKeyboardSchemeTitle(preferences: Preferences): string {
   if (preferences.touch_keyboard_layout === "nine_key")
     return preferences.scheme === "japanese" ? "日语 9 键" : "全拼 9 键";
   if (preferences.scheme === "japanese") return "日语 26 键";
-  if (preferences.scheme === "wubi") return "86 五笔";
+  if (preferences.scheme === "wubi") return wubiProfileTitle(preferences.wubi_profile);
   if (preferences.scheme === "shuangpin") return `${preferences.shuangpin_profile} 双拼`;
   return "全拼 26 键";
 }

@@ -829,6 +829,7 @@ export {
   type InputSchemeDetailsSectionProps,
   type InputSchemeDetailsScheme,
   type ShuangpinProfile,
+  type WubiProfile,
 } from "./settings/input-scheme-details-section";
 export {
   TranslationProviderSettingsSection,
@@ -1572,6 +1573,8 @@ export type Preferences = {
   ime_mode_scope?: "app" | "global";
   last_chinese_scheme?: ChineseScheme | null;
   shuangpin_profile: "xiaohe" | "ziranma" | "shoudao" | "microsoft";
+  /** 五笔用 86 还是 98 码表，只在方案为五笔时起作用；缺省为 86。 */
+  wubi_profile?: "wubi86" | "wubi98";
   /** macOS exposes the native shuangpin preedit presentation in the appearance page. */
   shuangpin_preedit_uses_raw?: boolean;
   vietnamese?: VietnamesePreferences;

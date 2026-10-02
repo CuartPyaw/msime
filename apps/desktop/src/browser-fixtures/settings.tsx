@@ -22,6 +22,7 @@ export function mount() {
     preferences: {
       scheme: "quanpin",
       shuangpin_profile: "xiaohe",
+      wubi_profile: "wubi86",
       candidate_page_size: 6,
       learning: true,
       chinese_punctuation: true,

@@ -6,7 +6,7 @@ use msime_client_core::account::{
 };
 use msime_client_core::preferences::{
     ChineseScheme, FrequencyMode, InputScheme, Preferences, ShuangpinProfile, TouchKeyboardLayout,
-    TouchKeyboardScheme, TouchKeyboardSkinDesign,
+    TouchKeyboardScheme, TouchKeyboardSkinDesign, WubiProfile,
 };
 use msime_client_core::skin::theme::GlobalTheme;
 use msime_tauri_mobile_platform::IosKeyboardPreferences;
@@ -50,6 +50,17 @@ pub(crate) fn local_account_preferences(
         insert_string(&mut settings, "input.schema", schema);
         if let Some(profile) = profile {
             insert_string(&mut settings, "input.shuangpin_schema", profile);
+        }
+        // 键盘偏好只记五笔这个方案，86 还是 98 记在共享偏好里。
+        if schema == "wubi" {
+            insert_string(
+                &mut settings,
+                "input.wubi_schema",
+                match shared.wubi_profile {
+                    WubiProfile::Wubi86 => "wubi86",
+                    WubiProfile::Wubi98 => "wubi98",
+                },
+            );
         }
     }
     insert_string(
@@ -146,6 +157,7 @@ fn integer_setting(
 #[derive(Debug, PartialEq)]
 pub(crate) struct IosPreferencePlan {
     input_scheme: Option<String>,
+    wubi_profile: Option<WubiProfile>,
     traditional_chinese_output: Option<bool>,
     sound_enabled: Option<bool>,
     haptics_enabled: Option<bool>,
@@ -164,6 +176,7 @@ impl IosPreferencePlan {
         validate_account_preferences(cloud)?;
         let values = &cloud.settings;
         let nine_key = bool_setting(values, "platform.ios.nine_key")? == Some(true);
+        let mut wubi_profile = None;
         let input_scheme = match string_setting(values, "input.schema")?.as_deref() {
             None => None,
             Some("quanpin") => Some(if nine_key { "nineKey" } else { "quanpin" }.into()),
@@ -177,13 +190,14 @@ impl IosPreferencePlan {
                 }
             }
             Some("wubi") => {
-                if string_setting(values, "input.wubi_schema")?
-                    .as_deref()
-                    .unwrap_or("wubi86")
-                    != "wubi86"
-                {
-                    return Err(AccountError::Invalid);
-                }
+                // 没有 `input.wubi_schema` 的文档来自还不认识 98 五笔的设备，保留本机的五笔版本。
+                wubi_profile = string_setting(values, "input.wubi_schema")?
+                    .map(|value| match value.as_str() {
+                        "wubi86" => Ok(WubiProfile::Wubi86),
+                        "wubi98" => Ok(WubiProfile::Wubi98),
+                        _ => Err(AccountError::Invalid),
+                    })
+                    .transpose()?;
                 Some("wubi".into())
             }
             Some("japanese") => {
@@ -260,6 +274,7 @@ impl IosPreferencePlan {
             .transpose()?;
         Ok(Self {
             input_scheme,
+            wubi_profile,
             traditional_chinese_output,
             sound_enabled: bool_setting(values, "platform.ios.sound_enabled")?,
             haptics_enabled: bool_setting(values, "platform.ios.haptics_enabled")?,
@@ -323,6 +338,9 @@ impl IosPreferencePlan {
         }
         if self.input_scheme.is_some() {
             select_touch_scheme(preferences, touch_scheme(&native.input_scheme)?);
+        }
+        if let Some(value) = self.wubi_profile {
+            preferences.wubi_profile = value;
         }
         if self.traditional_chinese_output.is_some() {
             preferences.traditional_chinese_output = native.traditional_chinese_output;
@@ -473,6 +491,7 @@ mod tests {
     use msime_client_core::account::{AccountError, AccountPreferenceValue, AccountPreferences};
     use msime_client_core::preferences::{
         InputScheme, Preferences, ShuangpinProfile, TouchKeyboardLayout, TouchKeyboardScheme,
+        WubiProfile,
     };
     use msime_client_core::skin::theme::GlobalTheme;
     use msime_tauri_mobile_platform::IosKeyboardPreferences;
@@ -844,5 +863,78 @@ mod tests {
                 Err(AccountError::Invalid)
             );
         }
+    }
+
+    #[test]
+    fn the_wubi_profile_travels_as_the_account_wubi_schema() {
+        let mut native = native();
+        native.input_scheme = "wubi".into();
+        let shared = Preferences {
+            wubi_profile: WubiProfile::Wubi98,
+            ..Preferences::default()
+        };
+        let settings = local_account_preferences(&native, &shared, None).unwrap();
+        assert_eq!(
+            settings["input.wubi_schema"],
+            AccountPreferenceValue::String("wubi98".into())
+        );
+        // 不是五笔时不写这个键。
+        native.input_scheme = "quanpin".into();
+        let settings = local_account_preferences(&native, &shared, None).unwrap();
+        assert!(!settings.contains_key("input.wubi_schema"));
+
+        native.input_scheme = "wubi".into();
+        for (value, expected) in [
+            (Some("wubi98"), WubiProfile::Wubi98),
+            (Some("wubi86"), WubiProfile::Wubi86),
+            (None, WubiProfile::Wubi98),
+        ] {
+            let mut settings = BTreeMap::from([(
+                "input.schema".into(),
+                AccountPreferenceValue::String("wubi".into()),
+            )]);
+            if let Some(value) = value {
+                settings.insert(
+                    "input.wubi_schema".into(),
+                    AccountPreferenceValue::String(value.into()),
+                );
+            }
+            let plan = IosPreferencePlan::from_cloud(&AccountPreferences {
+                revision: 12,
+                settings,
+            })
+            .unwrap();
+            let requested = plan.requested_native(&native).unwrap();
+            assert_eq!(requested.input_scheme, "wubi", "{value:?}");
+            let mut preferences = Preferences {
+                wubi_profile: WubiProfile::Wubi98,
+                ..Preferences::default()
+            };
+            preferences
+                .touch_keyboard_schemes
+                .enabled
+                .insert(TouchKeyboardScheme::Wubi);
+            plan.apply_shared(&requested, &mut preferences).unwrap();
+            assert_eq!(preferences.scheme, InputScheme::Wubi, "{value:?}");
+            assert_eq!(preferences.wubi_profile, expected, "{value:?}");
+        }
+
+        let invalid = AccountPreferences {
+            revision: 13,
+            settings: BTreeMap::from([
+                (
+                    "input.schema".into(),
+                    AccountPreferenceValue::String("wubi".into()),
+                ),
+                (
+                    "input.wubi_schema".into(),
+                    AccountPreferenceValue::String("wubi06".into()),
+                ),
+            ]),
+        };
+        assert_eq!(
+            IosPreferencePlan::from_cloud(&invalid),
+            Err(AccountError::Invalid)
+        );
     }
 }

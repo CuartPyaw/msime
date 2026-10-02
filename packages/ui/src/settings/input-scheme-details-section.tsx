@@ -14,6 +14,7 @@ import { SegmentedRow } from "./segmented-row";
 
 export type InputSchemeDetailsScheme = InputScheme;
 export type ShuangpinProfile = "xiaohe" | "ziranma" | "shoudao" | "microsoft";
+export type WubiProfile = "wubi86" | "wubi98";
 
 function ShuangpinProfileOptions() {
   return (
@@ -26,17 +27,27 @@ function ShuangpinProfileOptions() {
   );
 }
 
-function WubiSchemeOption() {
-  return <option value="wubi86">86 五笔</option>;
+function WubiProfileOptions() {
+  return (
+    <>
+      <option value="wubi86">86 五笔</option>
+      <option value="wubi98">98 五笔</option>
+    </>
+  );
 }
 
 export interface InputSchemeDetailsSectionProps {
   scheme: InputSchemeDetailsScheme;
   shuangpinProfile: ShuangpinProfile;
+  /** 缺省为 86 五笔。 */
+  wubiProfile?: WubiProfile;
   macos: boolean;
   hasTouchKeyboardSchemes: boolean;
+  /** 触屏宿主启用了五笔键盘：触屏只有一个五笔键盘，86 还是 98 仍在这里选。 */
+  touchKeyboardHasWubi?: boolean;
   macosShuangpinKeymap?: boolean;
   onShuangpinProfileChange: (profile: ShuangpinProfile) => void;
+  onWubiProfileChange?: (profile: WubiProfile) => void;
   onMacosShuangpinKeymapChange?: (enabled: boolean) => void;
   /** The document's Vietnamese options; absent means the defaults, Telex with modern tone placement. */
   vietnamese?: VietnamesePreferences;
@@ -53,10 +64,13 @@ const toneStyleDescription = "新式把声调标在主元音上（hoà），旧�
 export function InputSchemeDetailsSection({
   scheme,
   shuangpinProfile,
+  wubiProfile = "wubi86",
   macos,
   hasTouchKeyboardSchemes,
+  touchKeyboardHasWubi = false,
   macosShuangpinKeymap,
   onShuangpinProfileChange,
+  onWubiProfileChange,
   onMacosShuangpinKeymapChange,
   vietnamese,
   onVietnameseChange,
@@ -94,15 +108,16 @@ export function InputSchemeDetailsSection({
           onChange={onMacosShuangpinKeymapChange ?? (() => {})}
         />
       )}
-      {/* 五笔、日语、韩语各只有一个方案，选择器改不了任何东西，只在对应方案下作为说明出现。 */}
+      {/* 五笔方案在 86 与 98 码表之间切换，个人词条和学习记录按版本分开存；触屏宿主没有方案选择器，启用了五笔键盘时也在这里选。 */}
       <SelectRow
         title="五笔方案"
-        hidden={hasTouchKeyboardSchemes || scheme !== "wubi"}
-        value="wubi86"
-        onChange={() => {}}
+        hidden={hasTouchKeyboardSchemes ? !touchKeyboardHasWubi : scheme !== "wubi"}
+        value={wubiProfile}
+        onChange={(event) => onWubiProfileChange?.(event.target.value as WubiProfile)}
       >
-        <WubiSchemeOption />
+        <WubiProfileOptions />
       </SelectRow>
+      {/* 日语、韩语各只有一个方案，选择器改不了任何东西，只在对应方案下作为说明出现。 */}
       <SegmentedRow
         title="日语方案"
         description="直接输入罗马音，提供平假名、片假名及日语词库候选"

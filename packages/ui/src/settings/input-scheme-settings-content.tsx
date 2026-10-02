@@ -5,7 +5,11 @@ import {
   MacosInputModeEntriesSection,
   type MacosInputModesClient,
 } from "./macos-input-mode-entries-section";
-import { InputSchemeDetailsSection, type ShuangpinProfile } from "./input-scheme-details-section";
+import {
+  InputSchemeDetailsSection,
+  type ShuangpinProfile,
+  type WubiProfile,
+} from "./input-scheme-details-section";
 import { baseInputSchemes, isChineseScheme } from "./input-scheme-options";
 import {
   InputSchemeSelectorSection,
@@ -13,6 +17,7 @@ import {
 } from "./input-scheme-selector-section";
 import {
   touchKeyboardSchemeOptions,
+  wubiProfileTitle,
   type TouchKeyboardScheme,
 } from "./touch-keyboard-scheme-helpers";
 import { TouchKeyboardSchemesSection } from "./touch-keyboard-schemes-section";
@@ -69,11 +74,17 @@ export function InputSchemeSettingsContent({
   const schemePack = resourcePackForScheme(preferences.scheme);
   const chineseSchemes = isChineseScheme(preferences.scheme);
   // The Cantonese, Zhuyin and Vietnamese touch keyboards type their own input scheme, so they are offered only where the host offers that scheme (Cantonese and Zhuyin also need their installed dictionary).
-  const touchOptions = touchKeyboardSchemeOptions.filter(
-    ([scheme]) =>
-      (scheme !== "cantonese" && scheme !== "zhuyin" && scheme !== "vietnamese") ||
-      inputSchemes.includes(scheme),
-  );
+  // 五笔键盘只有一个，标题跟随当前的五笔版本。
+  const touchOptions = touchKeyboardSchemeOptions
+    .filter(
+      ([scheme]) =>
+        (scheme !== "cantonese" && scheme !== "zhuyin" && scheme !== "vietnamese") ||
+        inputSchemes.includes(scheme),
+    )
+    .map(([scheme, title]): [TouchKeyboardScheme, string] => [
+      scheme,
+      scheme === "wubi" ? wubiProfileTitle(preferences.wubi_profile) : title,
+    ]);
   return (
     <GroupList title="方案">
       <InputModeSection
@@ -106,12 +117,15 @@ export function InputSchemeSettingsContent({
       <InputSchemeDetailsSection
         scheme={preferences.scheme}
         shuangpinProfile={preferences.shuangpin_profile}
+        wubiProfile={preferences.wubi_profile}
         macos={macos}
         hasTouchKeyboardSchemes={hasTouchKeyboardSchemes}
+        touchKeyboardHasWubi={touchKeyboardSchemes.enabled.includes("wubi")}
         macosShuangpinKeymap={macosShuangpinKeymap}
         onShuangpinProfileChange={(shuangpin_profile: ShuangpinProfile) =>
           onPreferencesChange({ shuangpin_profile })
         }
+        onWubiProfileChange={(wubi_profile: WubiProfile) => onPreferencesChange({ wubi_profile })}
         onMacosShuangpinKeymapChange={onMacosShuangpinKeymapChange}
         vietnamese={preferences.vietnamese}
         onVietnameseChange={(vietnamese) => onPreferencesChange({ vietnamese })}
