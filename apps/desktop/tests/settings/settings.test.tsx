@@ -1717,14 +1717,14 @@ test("shortcut page reflects enabled navigation shortcuts", async () => {
   expect(screen.getByText("Home / End")).toBeDefined();
   // Home/End move across the whole candidate list, as on Windows, not within the current page.
   expect(screen.getByText("移动到候选列表首项 / 末项（页码随之切换）")).toBeDefined();
-  expect(screen.getByText("Ctrl+Shift+Alt+C")).toBeDefined();
+  expect(screen.queryByText("Ctrl+Shift+Alt+C")).toBeNull();
 });
 
 function candidateThemeNote() {
   return screen.getByText(/^预览跟随颜色模式/).textContent;
 }
 
-test("Linux appearance and maintenance copy names both hosts and the Fcitx5 reload", async () => {
+test("Linux appearance and service copy names both hosts and the Fcitx5 reload", async () => {
   render(
     <SettingsPage
       client={{
@@ -1741,17 +1741,7 @@ test("Linux appearance and maintenance copy names both hosts and the Fcitx5 relo
   expect(candidateThemeNote()).toBe(
     "预览跟随颜色模式；IBus 候选窗口与 Fcitx5 经典界面按此明暗着色",
   );
-  fireEvent.click(screen.getByRole("button", { name: "快捷键" }));
-  expect(
-    await screen.findByText("在当前 IBus 或 Fcitx5 输入上下文中维护候选与重启服务"),
-  ).toBeDefined();
-  // Fcitx5 hosts MSIME in process, so the Fcitx5 half must read as a plugin reset that spares other input methods, not a restart.
-  // The chord sits in the row's control slot; the row itself carries the title that explains it.
-  const restartRow =
-    screen.getByText("Ctrl+Shift+Alt+R").parentElement?.parentElement?.textContent ?? "";
-  expect(restartRow).toContain("IBus 执行 ibus restart");
-  expect(restartRow).toContain("Fcitx5 重置水杉插件，不影响其他输入法");
-  // 重启输入法服务在「维护与诊断」页。
+  // 重启输入法服务在「维护与诊断」页；Fcitx5 hosts MSIME in process, so its half reads as a plugin reload rather than a restart.
   fireEvent.click(screen.getByRole("button", { name: "维护与诊断" }));
   const service = screen.getByRole("region", { name: "输入法服务" }).textContent ?? "";
   expect(service).toContain("重启 IBus 输入法服务");
@@ -1777,7 +1767,7 @@ test.each(["windows", "macos"] as const)(
   },
 );
 
-test("macOS maintenance shortcuts use the current input context and Option", async () => {
+test("the macOS shortcuts page omits the maintenance chords and 维护与诊断 still restarts", async () => {
   const restartInputMethod = vi.fn().mockResolvedValue(undefined);
   render(
     <SettingsPage
@@ -1796,15 +1786,10 @@ test("macOS maintenance shortcuts use the current input context and Option", asy
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "快捷键" }));
-  expect(await screen.findByText("输入上下文维护快捷键")).toBeDefined();
-  expect(
-    screen.getByText("仅在水杉输入法当前输入上下文生效；Option 对应 Windows 基线中的 Alt。"),
-  ).toBeDefined();
-  for (const key of ["1–8", "C", "R", "T"])
-    expect(screen.getByText(`Ctrl+Shift+Option+${key}`)).toBeDefined();
-  expect(screen.queryByText("Ctrl+Shift+Alt+C")).toBeNull();
-  expect(screen.getByText("重新注册并重启当前输入法")).toBeDefined();
-  expect(screen.getByText("立即退出当前输入法进程")).toBeDefined();
+  // The maintenance chords are not listed on the shortcuts page.
+  expect(await screen.findByRole("group", { name: "快捷键" })).toBeDefined();
+  expect(screen.queryByText("输入上下文维护快捷键")).toBeNull();
+  expect(screen.queryByText("Ctrl+Shift+Option+T")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "维护与诊断" }));
   fireEvent.click(screen.getByRole("button", { name: "重新注册" }));
   await waitFor(() => expect(restartInputMethod).toHaveBeenCalledOnce());

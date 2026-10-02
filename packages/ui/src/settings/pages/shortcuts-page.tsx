@@ -6,7 +6,6 @@ import { createShortcutsSettingsActions } from "../shortcuts-settings-actions";
 /** The 快捷键 page of the settings form. */
 export function ShortcutSettingsPage() {
   const {
-    linuxPlatform,
     harmonyPlatform,
     mobilePlatform,
     windowsPlatform,
@@ -15,10 +14,8 @@ export function ShortcutSettingsPage() {
     showModeSwitchShortcuts,
     showPanelShortcuts,
     showNumberRowSelection,
-    showDesktopMaintenanceShortcuts,
     showFullwidthChord,
     fullwidthChord,
-    maintenanceChord,
     draft,
     setDraft,
     busy,
@@ -50,9 +47,6 @@ export function ShortcutSettingsPage() {
       onNumberRowSelectionChange={onNumberRowSelectionChange}
       showPanelShortcuts={showPanelShortcuts}
       harmony={harmonyPlatform}
-      showDesktopMaintenanceShortcuts={showDesktopMaintenanceShortcuts}
-      linux={linuxPlatform}
-      maintenanceChord={maintenanceChord}
     />
   );
 }

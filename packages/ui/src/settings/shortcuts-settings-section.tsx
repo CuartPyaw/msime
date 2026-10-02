@@ -1,7 +1,6 @@
 import type { InputModeShortcutPreferences } from "./input-mode-shortcuts-section";
 import { InputModeShortcutsSection } from "./input-mode-shortcuts-section";
 import { CandidateShortcutsSection } from "./candidate-shortcuts-section";
-import { MaintenanceShortcutsSection } from "./maintenance-shortcuts-section";
 import { PanelShortcutsSection } from "./panel-shortcuts-section";
 import { ShortcutsIntroSection } from "./shortcuts-intro-section";
 import * as settings from "./settings-style";
@@ -26,12 +25,9 @@ export interface ShortcutsSettingsSectionProps {
   onNumberRowSelectionChange: (value: boolean) => void;
   showPanelShortcuts: boolean;
   harmony: boolean;
-  showDesktopMaintenanceShortcuts: boolean;
-  linux: boolean;
-  maintenanceChord: string;
 }
 
-/** 桌面和触屏宿主共用的快捷键页：输入模式切换、候选操作速查、面板与维护快捷键。中英文切换提示在输入页，重启与重新注册输入法在「维护与诊断」页。 */
+/** 桌面和触屏宿主共用的快捷键页：输入模式切换、候选操作速查、面板快捷键。中英文切换提示在输入页，重启与重新注册输入法在「维护与诊断」页。 */
 export function ShortcutsSettingsSection({
   disabled,
   hidden,
@@ -50,9 +46,6 @@ export function ShortcutsSettingsSection({
   onNumberRowSelectionChange,
   showPanelShortcuts,
   harmony,
-  showDesktopMaintenanceShortcuts,
-  linux,
-  maintenanceChord,
 }: ShortcutsSettingsSectionProps) {
   return (
     <fieldset disabled={disabled} hidden={hidden} aria-label="快捷键">
@@ -76,12 +69,6 @@ export function ShortcutsSettingsSection({
           onNumberRowSelectionChange={onNumberRowSelectionChange}
         />
         <PanelShortcutsSection visible={showPanelShortcuts} macos={macos} harmony={harmony} />
-        <MaintenanceShortcutsSection
-          visible={showDesktopMaintenanceShortcuts}
-          macos={macos}
-          linux={linux}
-          maintenanceChord={maintenanceChord}
-        />
       </div>
     </fieldset>
   );
