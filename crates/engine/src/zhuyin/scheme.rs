@@ -284,20 +284,19 @@ impl ZhuyinScheme {
     /// Lists every suffix span of the syllables, longest first, each span's entries by weight. Every entry is listed, since the list is the only way to choose a character; common syllables such as ㄧˋ have over 200. The list stays closed when it would be empty.
     fn open_list(&mut self) -> Result<()> {
         let count = self.syllables.len();
-        let mut list = Vec::new();
+        self.list.clear();
         for start in 0..count {
             let key = self.key(start, count);
             let entries = self.dictionary.lookup(&key, usize::MAX)?;
-            list.reserve(entries.len());
+            self.list.reserve(entries.len());
             for entry in entries {
-                list.push(ListCandidate {
+                self.list.push(ListCandidate {
                     text: entry.text,
                     start,
                 });
             }
         }
-        self.list_open = !list.is_empty();
-        self.list = list;
+        self.list_open = !self.list.is_empty();
         Ok(())
     }
 
@@ -622,6 +621,32 @@ mod tests {
         assert_eq!(scheme.candidates().len(), 215);
         assert_eq!(scheme.list.capacity(), scheme.list.len());
         assert_eq!(scheme.candidates()[214].text, texts[214]);
+    }
+
+    #[test]
+    fn reopening_the_list_reuses_its_row_storage() {
+        let texts: Vec<String> = (0..215u32)
+            .map(|index| char::from_u32(0x4E00 + index).unwrap().to_string())
+            .collect();
+        let mut entries: Vec<(&str, &str, i64)> = texts
+            .iter()
+            .zip((1..=215i64).rev())
+            .map(|(text, weight)| ("ㄧˋ", text.as_str(), weight))
+            .collect();
+        entries.push(("ㄋㄧˇ", "你", 1));
+        let (_dir, mut scheme) = scheme_with(&entries);
+
+        type_keys(&mut scheme, "u4");
+        assert!(scheme.handle_key(ZhuyinKey::OpenList).unwrap());
+        let capacity = scheme.list.capacity();
+        assert_eq!(scheme.list.len(), 215);
+        assert!(scheme.handle_key(ZhuyinKey::OpenList).unwrap());
+
+        scheme.reset();
+        type_keys(&mut scheme, "su3");
+        assert!(scheme.handle_key(ZhuyinKey::OpenList).unwrap());
+        assert_eq!(scheme.list.len(), 1);
+        assert!(scheme.list.capacity() >= capacity);
     }
 
     #[test]
