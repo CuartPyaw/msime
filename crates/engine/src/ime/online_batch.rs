@@ -62,6 +62,11 @@ pub fn replace_online_candidate_batch(
     }
 
     list.retain(|item| item.source != source);
+    let additional = unique
+        .iter()
+        .filter(|word| list.iter().all(|item| item.word.as_str() != **word))
+        .count();
+    list.reserve(additional);
     let mut index = list.len().min(if source == CandidateSource::AiSuggestion {
         2
     } else {
@@ -349,5 +354,21 @@ mod tests {
                 ("智二", CandidateSource::AiSuggestion),
             ]
         );
+    }
+
+    #[test]
+    fn batch_insertion_reserves_new_rows() {
+        let mut list = Vec::with_capacity(1);
+        list.push(row("你", CandidateSource::Database));
+        let batch: Vec<String> = (0..10).map(|index| format!("词{index}")).collect();
+
+        assert!(replace_online_candidate_batch(
+            &mut list,
+            "ni",
+            &batch,
+            CandidateSource::AiSuggestion
+        ));
+        assert_eq!(list.len(), 11);
+        assert_eq!(list.capacity(), 11);
     }
 }
