@@ -364,8 +364,7 @@ impl PinyinDatabase {
         }
         let sql = batch_sql(table, keys.len());
         let bound = sql_limit(limit);
-        let mut params: Vec<&dyn ToSql> = keys.iter().map(|key| key as &dyn ToSql).collect();
-        params.push(&bound);
+        let params = batch_params(keys, &bound);
         self.rows(&sql, params.as_slice(), query_capacity(limit))
     }
 
@@ -394,6 +393,13 @@ impl PinyinDatabase {
         }
         result
     }
+}
+
+fn batch_params<'a>(keys: &'a [String], bound: &'a i64) -> Vec<&'a dyn ToSql> {
+    let mut params: Vec<&dyn ToSql> = Vec::with_capacity(keys.len() + 1);
+    params.extend(keys.iter().map(|key| key as &dyn ToSql));
+    params.push(bound);
+    params
 }
 
 fn open_connection(path: &Path) -> Option<Connection> {
@@ -576,6 +582,15 @@ mod tests {
             batch_sql("tbl_2_n", 3),
             "SELECT \"key\", \"value\", \"weight\" FROM \"tbl_2_n\" WHERE \"key\" IN (?,?,?) ORDER BY \"weight\" DESC LIMIT ?"
         );
+    }
+
+    #[test]
+    fn batch_params_reserve_the_limit_slot() {
+        let keys = strings(&["ni'hao", "ni'men", "nan'hai"]);
+        let limit = 32_i64;
+        let params = batch_params(&keys, &limit);
+        assert_eq!(params.len(), keys.len() + 1);
+        assert_eq!(params.capacity(), keys.len() + 1);
     }
 
     #[test]
