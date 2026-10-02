@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::composition::resolve_shuangpin_composition_base;
 use super::input::InputSession;
-use crate::ime::online_batch::replace_online_candidate_batch;
+use crate::ime::online_batch::validate_online_candidate_batch;
 use crate::local::command::TEXT_UTF16_LIMIT;
 use crate::pinyin::active_helpcode::strip_active_helpcodes;
 use crate::pinyin::segment::{is_complete_pinyin_input, split_segments};
@@ -201,8 +201,8 @@ impl InputSession {
         words: &[String],
         source: CandidateSource,
     ) -> bool {
-        // The batch rule is checked on a scratch list first, so a batch the provider could never place is refused before anything reaches its cache.
-        if !replace_online_candidate_batch(&mut Vec::new(), &query.cache_key, words, source) {
+        // The batch rule is checked without constructing rows that would be discarded before anything reaches the provider cache.
+        if !validate_online_candidate_batch(words, source) {
             return false;
         }
         if !self.online_answer_accepted(query, source) {
