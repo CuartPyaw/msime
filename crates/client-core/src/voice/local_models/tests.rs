@@ -2,6 +2,17 @@ use super::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+#[test]
+fn relative_component_capacity_covers_each_valid_component() {
+    for (path, expected) in [("", 0), ("encoder.onnx", 1), ("tokenizer/merges.txt", 2)] {
+        assert_eq!(relative_component_capacity(path), expected);
+        assert!(
+            relative_components(path).unwrap().len() <= relative_component_capacity(path),
+            "{path}"
+        );
+    }
+}
+
 /// Serves fixed bytes per URL and records what was asked for.
 struct MapFetcher {
     files: HashMap<String, Vec<u8>>,

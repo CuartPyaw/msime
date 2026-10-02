@@ -622,7 +622,7 @@ fn url_file_name(url: &str) -> String {
 
 /// A path as plain, relative components: no root, prefix, `..`, empty or separator-bearing parts. `None` for anything else.
 fn relative_components(path: &str) -> Option<Vec<String>> {
-    let mut parts = Vec::new();
+    let mut parts = Vec::with_capacity(relative_component_capacity(path));
     for component in Path::new(path).components() {
         match component {
             Component::CurDir => {}
@@ -638,6 +638,16 @@ fn relative_components(path: &str) -> Option<Vec<String>> {
         }
     }
     Some(parts)
+}
+
+fn relative_component_capacity(path: &str) -> usize {
+    if path.is_empty() {
+        return 0;
+    }
+    path.bytes()
+        .filter(|byte| matches!(*byte, b'/' | b'\\'))
+        .count()
+        .saturating_add(1)
 }
 
 fn single_component(name: &str) -> Option<String> {
