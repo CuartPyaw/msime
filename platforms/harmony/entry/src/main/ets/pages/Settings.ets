@@ -1493,7 +1493,8 @@ class SettingsBridge {
       const code: string = entry.code;
       const word: string = entry.word;
       const weight: number = entry.weight;
-      if (typeof kind !== 'string' || !['pinyin', 'wubi', 'quick', 'english'].includes(kind)
+      // `wubi98` 落到本地同名的 98 五笔个人词库，与 `wubi` 分开。
+      if (typeof kind !== 'string' || !['pinyin', 'wubi', 'wubi98', 'quick', 'english'].includes(kind)
         || typeof code !== 'string' || code.length === 0 || code.length > 256
         || typeof word !== 'string' || word.length === 0 || word.length > 1024
         || typeof weight !== 'number' || !Number.isInteger(weight) || weight < 0) {

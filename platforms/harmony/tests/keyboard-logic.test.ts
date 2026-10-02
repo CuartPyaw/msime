@@ -1768,6 +1768,49 @@ group("mapping keeps the last Chinese scheme across a Japanese switch", () => {
   );
 });
 
+group("五笔只有一个方案，标题和角标跟随 wubi_profile", () => {
+  check(KeyboardScheme.normalizedWubiProfile("wubi98") === "wubi98", "wubi98 保持原样");
+  check(KeyboardScheme.normalizedWubiProfile("wubi86") === "wubi86", "wubi86 保持原样");
+  check(KeyboardScheme.normalizedWubiProfile(undefined) === "wubi86", "缺省按 86 版");
+  check(KeyboardScheme.normalizedWubiProfile("WUBI98") === "wubi86", "未知值按 86 版");
+  check(
+    KeyboardScheme.title(KeyboardScheme.WUBI, "wubi98") === "98 五笔" &&
+      KeyboardScheme.badge(KeyboardScheme.WUBI, "wubi98") === "98",
+    "98 版显示「98 五笔」和「98」",
+  );
+  check(
+    KeyboardScheme.title(KeyboardScheme.WUBI, "wubi86") === "86 五笔" &&
+      KeyboardScheme.badge(KeyboardScheme.WUBI, null) === "86",
+    "86 版和缺省显示「86 五笔」和「86」",
+  );
+  check(
+    KeyboardScheme.SCHEMES.filter((scheme) => scheme.engineScheme === "wubi").length === 1,
+    "方案列表里仍只有一个五笔入口",
+  );
+  check(
+    KeyboardScheme.SCHEMES.every(
+      (scheme) =>
+        scheme === KeyboardScheme.WUBI ||
+        (KeyboardScheme.title(scheme, "wubi98") === scheme.title &&
+          KeyboardScheme.badge(scheme, "wubi98") === scheme.badge),
+    ),
+    "其它方案不受五笔版本影响",
+  );
+  check(
+    KeyboardScheme.fromPreferences("wubi", "xiaohe", "twenty_six_key") === KeyboardScheme.WUBI,
+    "98 版仍解析为同一个五笔方案",
+  );
+  const mapping: PreferenceMapping = KeyboardScheme.mapping(
+    KeyboardScheme.WUBI,
+    "quanpin",
+    "xiaohe",
+  );
+  check(
+    !("wubiProfile" in mapping) && !("wubi_profile" in mapping),
+    "切到五笔只写方案四键，不碰 wubi_profile，所以沿用当前版本",
+  );
+});
+
 group("the engine scheme id names the scheme the policies compare against", () => {
   // The view is handed a number and the policies are written against the preference names. The two
   // used to be passed to each other directly, so CandidateManagementAction never saw 'japanese' and
@@ -11118,6 +11161,74 @@ group("account sync carries the Korean scheme", () => {
     syncFeedback,
   );
   check(applied.preferences.scheme === "korean", "and applied from another device");
+});
+
+group("账号同步用 input.wubi_schema 携带五笔版本", () => {
+  const schema = fullPreferenceSchema();
+  schema.fields["input.wubi_schema"] = { type: "string" };
+  const wubi98 = localAccountPreferences({ scheme: "wubi", wubi_profile: "wubi98" }, syncFeedback);
+  check(wubi98["input.schema"] === "wubi", "方案仍上传为 wubi");
+  check(wubi98["input.wubi_schema"] === "wubi98", "版本作为 input.wubi_schema 上传");
+  const sparse = localAccountPreferences({ scheme: "wubi" }, syncFeedback);
+  check(sparse["input.wubi_schema"] === "wubi86", "旧文档没有 wubi_profile 时按 86 上传");
+  const odd = localAccountPreferences({ scheme: "wubi", wubi_profile: "wubi06" }, syncFeedback);
+  check(odd["input.wubi_schema"] === "wubi86", "本地的未知版本不上传原值");
+  const quanpin = localAccountPreferences(
+    { scheme: "quanpin", wubi_profile: "wubi98" },
+    syncFeedback,
+  );
+  check(!("input.wubi_schema" in quanpin), "不在五笔上时不上传版本，免得盖掉账号里别的设备选的");
+
+  const applied = applyAccountPreferences(
+    { scheme: "quanpin", wubi_profile: "wubi86" },
+    { revision: 2, settings: { "input.schema": "wubi", "input.wubi_schema": "wubi98" } },
+    schema,
+    syncFeedback,
+  );
+  check(applied.preferences.scheme === "wubi", "云端五笔写回 scheme");
+  check(applied.preferences.wubi_profile === "wubi98", "云端版本写回 wubi_profile");
+  const back = applyAccountPreferences(
+    { scheme: "wubi", wubi_profile: "wubi98" },
+    { revision: 2, settings: { "input.schema": "wubi", "input.wubi_schema": "wubi86" } },
+    schema,
+    syncFeedback,
+  );
+  check(back.preferences.wubi_profile === "wubi86", "86 同样写回");
+  const older = applyAccountPreferences(
+    { scheme: "quanpin", wubi_profile: "wubi98" },
+    { revision: 2, settings: { "input.schema": "wubi" } },
+    schema,
+    syncFeedback,
+  );
+  check(older.preferences.wubi_profile === "wubi98", "不认识 98 的设备写的文档保留本机版本");
+  const elsewhere = applyAccountPreferences(
+    { scheme: "wubi", wubi_profile: "wubi98" },
+    { revision: 2, settings: { "input.schema": "quanpin", "input.wubi_schema": "wubi86" } },
+    schema,
+    syncFeedback,
+  );
+  check(elsewhere.preferences.wubi_profile === "wubi98", "云端方案不是五笔时版本不写回");
+  const undeclared = applyAccountPreferences(
+    { scheme: "quanpin", wubi_profile: "wubi98" },
+    { revision: 2, settings: { "input.schema": "wubi", "input.wubi_schema": "wubi86" } },
+    fullPreferenceSchema(),
+    syncFeedback,
+  );
+  check(undeclared.preferences.wubi_profile === "wubi98", "服务端没声明这个键时不读它");
+  for (const cloudScheme of ["wubi", "quanpin"]) {
+    let refused = false;
+    try {
+      applyAccountPreferences(
+        {},
+        { revision: 1, settings: { "input.schema": cloudScheme, "input.wubi_schema": "wubi06" } },
+        schema,
+        syncFeedback,
+      );
+    } catch (error) {
+      refused = error instanceof AccountPreferenceError && error.message === "account_invalid";
+    }
+    check(refused, `未知的 input.wubi_schema 被拒绝（input.schema = ${cloudScheme}）`);
+  }
 });
 
 group("account sync leaves the scheme out for Cantonese, Zhuyin and Vietnamese", () => {

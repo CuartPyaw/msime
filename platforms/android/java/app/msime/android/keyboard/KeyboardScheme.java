@@ -56,6 +56,27 @@ public enum KeyboardScheme {
     public String glyph() { return glyph; }
     public String badge() { return badge; }
 
+    /** 偏好 `wubi_profile` 的两个取值；方案仍是 `wubi`，版本是它旁边的独立字段，与 `shuangpin_profile` 之于 `shuangpin` 一样。 */
+    public static final String WUBI_86 = "wubi86";
+    public static final String WUBI_98 = "wubi98";
+
+    /** 只认 `wubi98`，其它（缺省、未知值）一律按 86 版，与共享 `Preferences` 的缺省一致。 */
+    public static String normalizedWubiProfile(String value) {
+        return WUBI_98.equals(value) ? WUBI_98 : WUBI_86;
+    }
+
+    /** 方案名：五笔只有一个方案入口，标题跟随 `wubi_profile` 显示「86 五笔」或「98 五笔」；其它方案与 `title()` 相同。 */
+    public String title(String wubiProfile) {
+        if (this == WUBI && WUBI_98.equals(normalizedWubiProfile(wubiProfile))) return "98 五笔";
+        return title;
+    }
+
+    /** 角标：五笔跟随 `wubi_profile` 显示「86」或「98」；其它方案与 `badge()` 相同。 */
+    public String badge(String wubiProfile) {
+        if (this == WUBI && WUBI_98.equals(normalizedWubiProfile(wubiProfile))) return "98";
+        return badge;
+    }
+
     /** Cantonese, Zhuyin and Vietnamese start hidden and appear once the user turns them on, as the shared `TouchKeyboardScheme::DEFAULT_ENABLED` keeps them out of a document that never stored a list. */
     public boolean optIn() {
         return this == CANTONESE || this == ZHUYIN || this == VIETNAMESE;

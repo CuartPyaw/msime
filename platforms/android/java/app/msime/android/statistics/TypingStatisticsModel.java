@@ -295,7 +295,8 @@ public final class TypingStatisticsModel {
         titles.put("ziranma", "自然码双拼");
         titles.put("microsoft", "微软双拼");
         titles.put("shoudao", "首道双拼");
-        titles.put("wubi", "86 五笔");
+        // 86 与 98 共用一个 `wubi` 来源，不按版本拆分，所以不带版本号。
+        titles.put("wubi", "五笔");
         titles.put("japanese", "日语");
         titles.put("korean", "韩语");
         titles.put("cantonese", "粤拼");

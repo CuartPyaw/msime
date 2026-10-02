@@ -73,6 +73,8 @@ const SCHEMES = ["quanpin", "shuangpin", "wubi", "japanese", "korean"];
 // Schemes this host types in that the cloud `input.schema` cannot carry (an older device would refuse the whole document), so uploading leaves the field out and the account keeps the scheme it holds.
 const LOCAL_ONLY_SCHEMES = ["cantonese", "zhuyin", "vietnamese"];
 const SHUANGPIN_PROFILES = ["xiaohe", "ziranma", "shoudao", "microsoft"];
+// `input.wubi_schema` 是本地 `wubi_profile` 在云端的名字，只在 `input.schema` 为 `wubi` 时有意义；其它值一律拒绝。
+const WUBI_PROFILES = ["wubi86", "wubi98"];
 const FREQUENCY_MODES = ["disabled", "pin", "halve", "linear", "promote"];
 const LAYOUTS = ["twenty_six_key", "nine_key", "handwriting"];
 // The seven global theme ids the shared layer accepts; any other id, a retired skin id included, is refused rather than mapped.
@@ -284,6 +286,14 @@ export function localAccountPreferences(
   if (!(typeof scheme === "string" && LOCAL_ONLY_SCHEMES.includes(scheme))) {
     settings["input.schema"] = enumerated(scheme, SCHEMES, "quanpin");
   }
+  // 五笔版本只随五笔方案上传：不在五笔上时本机的缺省 86 不该盖掉账号里别的设备选的 98。
+  if (scheme === "wubi") {
+    settings["input.wubi_schema"] = enumerated(
+      member(preferences, "wubi_profile"),
+      WUBI_PROFILES,
+      "wubi86",
+    );
+  }
   return settings;
 }
 
@@ -387,6 +397,12 @@ export function applyAccountPreferences(
   }
   const shuangpin = reader.text("input.shuangpin_schema");
   if (shuangpin !== null) preferences.shuangpin_profile = choose(shuangpin, SHUANGPIN_PROFILES);
+  // 未知版本照样拒绝整份文档；合法值只在云端方案是五笔时写入，缺这个键（还不认识 98 的设备写的）就保留本机版本。
+  const wubiProfile = reader.text("input.wubi_schema");
+  if (wubiProfile !== null) {
+    const chosen = choose(wubiProfile, WUBI_PROFILES);
+    if (scheme === "wubi") preferences.wubi_profile = chosen;
+  }
   const learning = reader.boolean("input.learning");
   if (learning !== null) preferences.learning = learning;
 

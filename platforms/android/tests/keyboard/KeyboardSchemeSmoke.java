@@ -30,6 +30,19 @@ public final class KeyboardSchemeSmoke {
         check(Arrays.stream(KeyboardScheme.values()).map(value -> value.glyph() + value.badge()).toList().equals(
             List.of("拼26", "拼9", "鹤双", "自双", "微双", "S双", "五86", "あ9", "あ26", "写手", "聊AI", "한26",
                 "粤26", "注大千", "越26")));
+        // 五笔只有一个方案入口，标题与角标跟随 `wubi_profile`；缺省和未知值按 86 版，其它方案不受影响。
+        check(KeyboardScheme.normalizedWubiProfile("wubi98").equals("wubi98"));
+        check(KeyboardScheme.normalizedWubiProfile("wubi86").equals("wubi86"));
+        check(KeyboardScheme.normalizedWubiProfile(null).equals("wubi86"));
+        check(KeyboardScheme.normalizedWubiProfile("WUBI98").equals("wubi86"));
+        check(KeyboardScheme.WUBI.title("wubi98").equals("98 五笔") && KeyboardScheme.WUBI.badge("wubi98").equals("98"));
+        check(KeyboardScheme.WUBI.title("wubi86").equals("86 五笔") && KeyboardScheme.WUBI.badge("wubi86").equals("86"));
+        check(KeyboardScheme.WUBI.title(null).equals("86 五笔") && KeyboardScheme.WUBI.badge("future").equals("86"));
+        check(KeyboardScheme.WUBI.glyph().equals("五"));
+        for (KeyboardScheme value : KeyboardScheme.values()) {
+            if (value == KeyboardScheme.WUBI) continue;
+            check(value.title("wubi98").equals(value.title()) && value.badge("wubi98").equals(value.badge()));
+        }
         check(KeyboardScheme.fromPreferenceId("japanese_nine_key") == KeyboardScheme.JAPANESE_NINE_KEY);
         check(KeyboardScheme.fromPreferenceId("korean") == KeyboardScheme.KOREAN);
         check(KeyboardScheme.fromPreferenceId("future") == null);
@@ -60,6 +73,9 @@ public final class KeyboardSchemeSmoke {
         check(KeyboardScheme.fromPreferences("shuangpin", "microsoft", "nine_key") == KeyboardScheme.MICROSOFT);
         check(KeyboardScheme.fromPreferences("shuangpin", "unknown", "twenty_six_key") == KeyboardScheme.XIAOHE);
         check(KeyboardScheme.fromPreferences("future", "xiaohe", "nine_key") == KeyboardScheme.QUANPIN);
+        // 98 五笔仍是 `scheme = wubi`，解析回同一个方案；映射只写四个键，切到五笔时 `wubi_profile` 原样保留。
+        check(KeyboardScheme.fromPreferences("wubi", "xiaohe", "twenty_six_key") == KeyboardScheme.WUBI);
+        check(KeyboardScheme.fromPreferences("wubi", "xiaohe", "nine_key") == KeyboardScheme.WUBI);
         mapping(KeyboardScheme.QUANPIN, "wubi", "microsoft", "quanpin", "quanpin", "microsoft");
         mapping(KeyboardScheme.QUANPIN_NINE_KEY, "wubi", "microsoft", "quanpin", "quanpin", "microsoft");
         mapping(KeyboardScheme.XIAOHE, "quanpin", "shoudao", "shuangpin", "shuangpin", "xiaohe");
@@ -121,6 +137,6 @@ public final class KeyboardSchemeSmoke {
             Files.deleteIfExists(directory.resolve("zhuyin.db"));
             Files.deleteIfExists(directory);
         }
-        System.out.println("Android keyboard schemes: fifteen labels, glyphs, opt-in defaults, installed dictionaries, host fallback and shared preference mappings passed");
+        System.out.println("Android keyboard schemes: fifteen labels, glyphs, wubi profile titles, opt-in defaults, installed dictionaries, host fallback and shared preference mappings passed");
     }
 }

@@ -436,6 +436,8 @@ struct KeyboardView {
   @State caseMode: LetterCaseMode = LetterCaseMode.LOWERCASE;
   @State skin: KeyboardSkin = KeyboardSkin.fromTheme('system', 'system', null, false);
   @State scheme: SchemeDefinition = KeyboardScheme.QUANPIN;
+  /** 五笔版本：方案仍是同一个五笔，只换卡片和工具栏上的「86」「98」字样；单独设成状态，只改版本时也会重绘。 */
+  @State wubiProfile: string = KeyboardScheme.WUBI_86;
   @State handwritingStrokes: HandwritingStroke[] = [];
   @State handwritingRedo: HandwritingStroke[] = [];
   @State handwritingCandidates: string[] = [];
@@ -1731,6 +1733,7 @@ struct KeyboardView {
     this.translations = KeyboardSession.shared.showsCandidateTranslations();
     this.fuzzyPinyin = KeyboardSession.shared.usesFuzzyPinyin();
     this.applySkins();
+    this.wubiProfile = this.settings.wubiProfile;
     this.scheme = this.settings.thoughtfulReply ? KeyboardScheme.THOUGHTFUL_REPLY
       : this.enabledScheme();
     this.nineKey = this.scheme.touchKeyboardLayout === 'nine_key';
@@ -1854,7 +1857,8 @@ struct KeyboardView {
     if (mode !== null) {
       return mode.title;
     }
-    return this.english ? ENGLISH_TITLES[this.nineKey ? 1 : 0] : this.scheme.title;
+    return this.english ? ENGLISH_TITLES[this.nineKey ? 1 : 0]
+      : KeyboardScheme.title(this.scheme, this.wubiProfile);
   }
 
   private faceKey(): string {
@@ -4355,7 +4359,8 @@ struct KeyboardView {
                 this.schemeCard(candidate);
               }
             }, (candidate: SchemeDefinition) =>
-              `${candidate.id}:${this.scheme.id}:${this.english}:${this.nineKey}`)
+              // 带上五笔版本：只改 86/98 时卡片也要重建，否则还显示旧的角标。
+              `${candidate.id}:${this.scheme.id}:${this.english}:${this.nineKey}:${this.wubiProfile}`)
           }
           .columnsTemplate('1fr 1fr 1fr 1fr')
           .width('100%')
@@ -4441,7 +4446,7 @@ struct KeyboardView {
           .borderColor(this.isCurrentScheme(candidate)
             ? this.skin.accent : this.skin.keyForeground)
           .borderRadius(5)
-        Text(candidate.badge)
+        Text(KeyboardScheme.badge(candidate, this.wubiProfile))
           .fontSize(SCHEME_BADGE_TEXT_SIZE)
           .fontColor(this.isCurrentScheme(candidate) ? this.skin.accent : this.skin.keyForeground)
           .padding({ left: 1 })
@@ -4449,7 +4454,7 @@ struct KeyboardView {
       .alignItems(VerticalAlign.Bottom)
       .height(SCHEME_BADGE_VP)
 
-      Text(candidate.title)
+      Text(KeyboardScheme.title(candidate, this.wubiProfile))
         .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
         .fontColor(this.isCurrentScheme(candidate) ? this.skin.accent : this.skin.keyForeground)
         .maxLines(1)
@@ -5049,7 +5054,7 @@ struct KeyboardView {
             Grid() {
               GridItem() {
                 this.toolTile({
-                  glyph: '拼', icon: null, title: this.scheme.title, label: KeyAccessibilityPolicy.scheme(),
+                  glyph: '拼', icon: null, title: KeyboardScheme.title(this.scheme, this.wubiProfile), label: KeyAccessibilityPolicy.scheme(),
                   on: false, toggles: false,
                   enabled: true, action: () => {
                     this.show(SURFACE_SCHEME);
