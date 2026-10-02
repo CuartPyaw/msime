@@ -335,17 +335,22 @@ impl PinyinDatabase {
 
         let jp_sql = jianpin_sql(&table);
         if needs_mixed_jianpin_query(segments, source) {
-            let scan_limit = sql_limit(build_mixed_jianpin_scan_limit(limit));
-            let rows: Vec<DictRow> = self
-                .rows(
+            let scan_limit_value = build_mixed_jianpin_scan_limit(limit);
+            let scan_limit = sql_limit(scan_limit_value);
+            // The scan has a minimum page of 128 rows; use it as a bounded
+            // initial buffer without turning an unbounded caller limit into
+            // an enormous allocation.
+            let mut rows = Vec::with_capacity(limit.min(128));
+            rows.extend(
+                self.rows(
                     &jp_sql,
                     (jp.as_str(), scan_limit),
-                    query_capacity(build_mixed_jianpin_scan_limit(limit)),
+                    query_capacity(scan_limit_value),
                 )
                 .into_iter()
                 .filter(|row| matches_mixed_segments(&row.key, segments, source))
-                .take(limit)
-                .collect();
+                .take(limit),
+            );
             if !rows.is_empty() {
                 return rows;
             }
@@ -799,6 +804,16 @@ mod tests {
         assert!(query(&[], usize::MAX).is_empty());
         // Duplicate shipped rows are tolerated.
         assert_eq!(values(&query(&["zha", "ba"], usize::MAX)), ["扎吧"]);
+    }
+
+    #[test]
+    fn mixed_jianpin_filter_reserves_the_requested_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = cascade_fixture(directory.path());
+        let rows =
+            database.query_single_cut_keyed(&strings(&["n", "hao"]), 1, QuerySource::Quanpin);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows.capacity(), 1);
     }
 
     #[test]
